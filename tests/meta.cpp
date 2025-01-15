@@ -1,37 +1,140 @@
-#include "../include/miniten/tuple.h"
+#include "../include/miniten/meta.h"
 
 using namespace miniten;
-using namespace miniten::meta;
 
 int main()
 {
-    using Foo1 = Vector<int, 1, 2, 3>;
+    show("* Foo1:       ");
+    using Foo1 = meta::Vector<int, 1, 2, 3>;
     show<Foo1>();
     newline();
-    show("- length: ");
-    show(Foo1::Length);
+    show("  - length:   ");
+    show(meta::Length<Foo1>::Value);
     newline();
-    show("- first:  ");
-    show(Foo1::First);
+    show("  - first:    ");
+    show(meta::GetFirst<Foo1>::Value);
     newline();
-    show("- last:   ");
-    show(Foo1::Last);
+    show("  - second:   ");
+    show(meta::GetIndex<Foo1,1>::Value);
+    newline();
+    show("  - last:     ");
+    show(meta::GetLast<Foo1>::Value);
     newline();
 
-    using Foo2 = Vector<int, 4, 5, 6>;
+    show("* DelFirst:   ");
+    show<meta::DelFirst<Foo1>>();
+    newline();
+    show("* DelLast:    ");
+    show<meta::DelLast<Foo1>>();
+    newline();
+    show("* DelIndex:   ");
+    show<meta::DelIndex<Foo1,1>>();
+    newline();
+    show("* Append:     ");
+    show<meta::AppendFrom<Foo1,meta::Vector<int, 4, 5, 6>>>();
+    newline();
+    show("* Prepend:    ");
+    show<meta::PrependFrom<Foo1,meta::Vector<int, 4, 5, 6>>>();
+    newline();
+    show("* Insert:     ");
+    show<meta::InsertIndexFrom<Foo1,1,meta::Vector<int, 4, 5, 6>>>();
+    newline();
+    show("* Set:        ");
+    show<meta::SetFrom< Foo1, meta::SimpleSlice<0,2>, meta::GetLast<meta::Vector<int, 4, 5, 6>,2> >>();
+    newline();
+    show("* SetFirst:   ");
+    show<meta::SetFirstFrom< Foo1, meta::GetLast<meta::Vector<int, 4, 5, 6>,2> >>();
+    newline();
+    show("* SetLast:    ");
+    show<meta::SetLastFrom< Foo1, meta::GetFirst<meta::Vector<int, 4, 5, 6>,2> >>();
+    newline();
+    show("* AsPack:     ");
+    show<meta::AsPack<Foo1>>();
+    newline();
+
+    show("* Foo2:       ");
+    using Foo2 = meta::Vector<int, 4, 5, 6>;
     show<Foo2>();
     newline();
-
-    using Foo12 = typename Cat<Foo1, Foo2>::Type;
+    show("* Cat:        ");
+    using Foo12 = meta::Cat<Foo1, Foo2>;
     show<Foo12>();
     newline();
 
-    using Bar = Tuple<int, long, float>;
+    auto foo1 = Foo1();
+    show("* length():        ");
+    show(foo1.length());
+    newline();
+    show("* getFirstValue(): ");
+    show(foo1.getFirstValue());
+    newline();
+    show("* getLastValue():  ");
+    show(foo1.getLastValue());
+    newline();
+    show("* getValue(1):     ");
+    show(foo1.getValue(meta::PtrDiff<1>()));
+    newline();
+    show("* getFirst():      ");
+    show(foo1.getFirst());
+    newline();
+    show("* getLast():       ");
+    show(foo1.getLast());
+    newline();
+    show("* get(1):          ");
+    show(foo1.get(meta::PtrDiff<1>()));
+    newline();
+
+    show("* Bar:        ");
+    using Bar = meta::Pack<int, long, float>;
     show<Bar>();
     newline();
 
-    using BarDel = typename DelItem<2, Bar>::Type;
-    show<BarDel>();
+    show("* DelFirst:   ");
+    show<meta::DelFirst<Bar>>();
+    newline();
+    show("* DelLast:    ");
+    show<meta::DelLast<Bar>>();
+    newline();
+    show("* DelIndex:   ");
+    show<meta::DelIndex<Bar,1>>();
     newline();
 
+    show("* Job:        ");
+    using Job = meta::Tuple<int, long, float>;
+    show<Job>();
+    newline();
+    show("  - length:   ");
+    show(meta::Length<Job>::Value);
+    newline();
+    show("  - first:    ");
+    show<meta::GetFirstValue<Job>>();
+    newline();
+    show("  - second:   ");
+    show<meta::GetIndexValue<Job,1>>();
+    newline();
+    show("  - last:     ");
+    show<meta::GetLastValue<Job>>();
+    newline();
+    auto job = Job(1, 2, 3.);
+    show("* job:        ");
+    show(job);
+    newline();
+    show("  - first:    ");
+    show(job.getFirstValue());
+    newline();
+    show("  - second:   ");
+    show(job.getValue(meta::Z1()));
+    newline();
+    show("  - last:     ");
+    show(job.getLastValue());
+    newline();
+    // show("  - first:    ");
+    // show(job.getFirst());
+    // newline();
+    // show("  - second:   ");
+    // show(job.get(meta::Z1()));
+    // newline();
+    // show("  - last:     ");
+    // show(job.getLast());
+    // newline();
 }

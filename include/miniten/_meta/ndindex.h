@@ -1,6 +1,6 @@
 #ifndef MINITEN_META_NDINDEX_H
 #define MINITEN_META_NDINDEX_H
-#include "meta/vector.h"
+#include "vector.h"
 
 namespace miniten {
 namespace meta {

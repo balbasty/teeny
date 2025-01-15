@@ -11,4 +11,11 @@
 #   define MINITEN_HOSTDEVICE
 #endif // defined(__CUDACC__)
 
+#define _CPP98 199711L
+#define _CPP11 201103L
+#define _CPP14 201402L
+#define _CPP17 201703L
+#define _CPP20 202002L
+#define _CPP23 202302L
+
 #endif // MINITEN_DEFINES_H
