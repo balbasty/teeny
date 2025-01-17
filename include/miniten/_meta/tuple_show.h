@@ -31,7 +31,10 @@ struct Show< meta::Tuple<X0, X...> > {
 
     MINITEN_HOSTDEVICE static inline
     void showValues(const Type & value) {
-        miniten::show(value.getFirstValue()); miniten::show(", ...");
+        using NextLength = meta::SizeT<Type::Length-1>;
+        Show<typename Type::ParentType>::showValues(value.head(NextLength()));
+        miniten::show(", ");
+        miniten::show(value.getLastValue());
     }
 };
 

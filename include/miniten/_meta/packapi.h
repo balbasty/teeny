@@ -24,8 +24,8 @@
  *
  * GetValue<P,I>        -> Get element at I
  * GetIndexValue<P,I>   -> Same as Get, but I is a concrete integral
- * GetFirst<P>          -> Get first element
- * GetLast<P>           -> Get last element
+ * GetFirstValue<P>     -> Get first element
+ * GetLastValue<P>      -> Get last element
  *
  * Del<P,I>             -> Delete elements at I
  * DelIndex<P,I>        -> Same as Del, but I is a concrete integral
@@ -48,8 +48,8 @@
  *
  * Insert<P,I,M...>     -> Insert elements at I, copied from Tuple<M...>
  * InsertIndex<P,I,M>   -> Same as Insert, but I is a concrete integral
- * InsertFirst<P,M...>  -> Same as Cat<EmptyLike<P>, M..., P>
- * InsertLast<P,M...>   -> Same as Cat<P, M...>
+ * Prepend<P,M...>      -> Same as Cat<EmptyLike<P>, M..., P>
+ * Append<P,M...>       -> Same as Cat<P, M...>
  *
  * Extend<P, M...>      -> Same as AppendFrom<P,M...>
  * Cat<P, M...>         -> Same as AppendFrom<P,M...>
@@ -220,6 +220,8 @@ template <class A>                          struct _ApplyRemoveCV    {};
 template <class A>                          using   ApplyRemoveCV    = typename _ApplyRemoveCV<A>::Type;
 template <class A>                          struct _ApplyDecay       {};
 template <class A>                          using   ApplyDecay       = typename _ApplyDecay<A>::Type;
+template <class A>                          struct _ApplySizeOf      {};
+template <class A>                          using   ApplySizeOf      = typename _ApplySizeOf<A>::Type;
 
 // ---------------------------------------------------------------------
 // Test
@@ -231,6 +233,14 @@ template <class A>                          struct _IsTuple         { using Type
 template <class A>                          using   IsTuple         = typename _IsTuple<A>::Type;
 template <class A>                          struct _IsPack          { using Type = False; };
 template <class A>                          using   IsPack          = typename _IsPack<A>::Type;
+
+// ---------------------------------------------------------------------
+// Conversion sugar
+// ---------------------------------------------------------------------
+
+template <class T> using AsBool     = AsVector<T, bool>;
+template <class T> using AsPtrDiff  = AsVector<T, ptrdiff_t>;
+template <class T> using AsSizeT    = AsVector<T, size_t>;
 
 } // namespace meta
 } // namespace miniten

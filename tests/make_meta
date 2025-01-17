@@ -1,0 +1,2 @@
+#!/bin/bash
+c++ -std=c++11 meta.cpp -o meta -ferror-limit=1 -ftemplate-backtrace-limit=0

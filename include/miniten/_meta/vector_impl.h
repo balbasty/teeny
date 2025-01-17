@@ -82,7 +82,7 @@ using Reversed = typename _Reversed<VECTOR>::Type;
 
 template <typename T, T N0, T... N>
 struct _Reversed<Vector<T, N0, N...> > {
-    using Type = Cat< _Reversed<Vector<T, N...>>, Vector<T, N0> >;
+    using Type = Cat< Reversed<Vector<T, N...>>, Vector<T, N0> >;
 };
 
 template <typename T, T N0>

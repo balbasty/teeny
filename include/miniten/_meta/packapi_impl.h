@@ -149,7 +149,7 @@ struct _SetFrom<A, I, M>
         (Length<M>::Value == 1),
         "Set requires indices and values to be broadcastable"
     );
-    using Type = SwitchCase<
+    using Type = IfElse<
         IsZero<Length<M>>,
             A,
         IsEqual<Length<M>, Length<I>>,

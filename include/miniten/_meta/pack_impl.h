@@ -46,12 +46,14 @@ struct _Cat2<Pack<X0,X...>, RIGHT> {
 
 namespace _pack {
     template <class PACK>                 struct _Reversed;
-    template <class PACK>                 using   Reversed  = typename _Reversed<PACK>::Type;
+    template <class PACK>                 using   Reversed      = typename _Reversed<PACK>::Type;
     template <class PACK, typename U>     struct _AsVector;
-    template <class PACK, typename U>     using   AsVector  = typename _AsVector<PACK,U>::Type;
+    template <class PACK, typename U>     using   AsVector      = typename _AsVector<PACK,U>::Type;
     template <long>                       struct  ApplyFn;
     template <class PACK, class APPLY>    struct _Apply;
-    template <class PACK, class APPLY>    using   Apply     = typename _Apply<PACK, APPLY>::Type;
+    template <class PACK, class APPLY>    using   Apply         = typename _Apply<PACK, APPLY>::Type;
+    template <class PACK>                 struct _ApplySizeOf;
+    template <class PACK>                 using   ApplySizeOf   = typename _ApplySizeOf<PACK>::Type;
 }
 
 template <class... X>               struct _Length<Pack<X...>>             { using Type = CountTypes<X...>; };
@@ -76,6 +78,7 @@ template <class... X>               struct _ApplyRemovePtr<Pack<X...>>     { usi
 template <class... X>               struct _ApplyRemoveRef<Pack<X...>>     { using Type = _pack::Apply<Pack<X...>, _pack::ApplyFn<8>>; };
 template <class... X>               struct _ApplyRemoveCV<Pack<X...>>      { using Type = _pack::Apply<Pack<X...>, _pack::ApplyFn<9>>; };
 template <class... X>               struct _ApplyDecay<Pack<X...>>         { using Type = _pack::Apply<Pack<X...>, _pack::ApplyFn<10>>; };
+template <class... X>               struct _ApplySizeOf<Pack<X...>>        { using Type = _pack::ApplySizeOf<Pack<X...>>; };
 
 /// ---------------------------------------------------------------- ///
 ///     Pack API Implementation                                      ///
@@ -90,7 +93,7 @@ struct _Reversed {};
 
 template <class X0, class... X>
 struct _Reversed<Pack<X0, X...>> {
-    using Type = Cat< _Reversed<Pack<X...>>, Pack<X0> >;
+    using Type = Cat< Reversed<Pack<X...>>, Pack<X0> >;
 };
 
 template <class X0>
@@ -166,6 +169,31 @@ template <class APPLY>
 struct _Apply<Pack<>, APPLY>
 {
     using Type = Pack<>;
+};
+
+template <class PACK>
+struct _ApplySizeOf
+{};
+
+template <class X0, class... X>
+struct _ApplySizeOf<Pack<X0, X...>>
+{
+    using Type = Cat<
+        ApplySizeOf<Pack<X0>>,
+        ApplySizeOf<Pack<X...>>
+    >;
+};
+
+template <class X0>
+struct _ApplySizeOf<Pack<X0>>
+{
+    using Type = SizeT<sizeof(X0)>;
+};
+
+template <>
+struct _ApplySizeOf<Pack<>>
+{
+    using Type = SizeT<>;
 };
 
 } // namespace _pack

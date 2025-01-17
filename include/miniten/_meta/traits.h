@@ -19,9 +19,8 @@
  * AddConstPtr<T>           = const RemoveRef<T> *;
  *
  * IsSame<A,B>              = check same type (True | False)
- * ConditionalB<C,A,B>      = C ? A : B
  * Conditional<C,A,B>       = C ? A : B
- * SwitchCase<C,A,...>      = C ? A : SwitchCase<...>
+ * IfElse<C,A,...>          = C ? A : IfElse<...>
  * IsFunction<A>            = check is function (True | False)
  * Decay<T>                 = is_function ? make ptr : remove cv
  * HaveEq<A,B>              = defined(A==B) ? True : False
@@ -93,18 +92,17 @@ template <class A>          struct _IsSame<A, A> { using Type = True;  };
 template <class A, class B> using IsSame = typename _IsSame<A,B>::Type;
 
 // Conditional type
-template <bool C, class A, class B>  struct _ConditionalB              { using Type = A; };
-template <class A, class B>          struct _ConditionalB<false, A, B> { using Type = B; };
-template <bool C, class A, class B>  using ConditionalB = typename _ConditionalB<C, A, B>::Type;
-template <class C, class A, class B> using Conditional  = typename _ConditionalB<C::Value, A, B>::Type;
+template <bool C, class A, class B>  struct _Conditional              { using Type = A; };
+template <class A, class B>          struct _Conditional<false, A, B> { using Type = B; };
+template <bool C, class A, class B>  using   Conditional              = typename _Conditional<C, A, B>::Type;
 
-template <class... T>                   struct _SwitchCase {};
-template <class... T>                   using   SwitchCase = typename _SwitchCase<T...>::Type;
-template <class T>                      struct _SwitchCase<T> { using Type = T; };
-template <class C, class A, class... T> struct _SwitchCase<C,A,T...> { using Type = Conditional<C, A, SwitchCase<T...>>; };
+template <class... T>                   struct _IfElse           {};
+template <class... T>                   using   IfElse           = typename _IfElse<T...>::Type;
+template <class T>                      struct _IfElse<T>        { using Type = T; };
+template <class C, class A, class... T> struct _IfElse<C,A,T...> { using Type = Conditional<C::Value, A, IfElse<T...>>; };
 
 // Is function
-template <class A> using IsFunction = ConditionalB<std::is_function<A>::value, True, False>;
+template <class A> using IsFunction = Conditional<std::is_function<A>::value, True, False>;
 
 // Most types:     Remove constness and reference annotation
 // Function types: Add pointer ot make it a function pointer type
@@ -115,7 +113,7 @@ struct _Decay
 private:
     using U = RemoveRef<T>;
 public:
-    using Type = Conditional<IsFunction<U>, AddPtr<U>, RemoveCV<U>>;
+    using Type = IfElse<IsFunction<U>, AddPtr<U>, RemoveCV<U>>;
 };
 template<class T> using Decay = typename _Decay<T>::Type;
 
@@ -137,7 +135,7 @@ struct _HaveEq<
 };
 
 template <class Left, class Right>
-using HaveEq = Conditional<_HaveEq<Left, Right>, True, False>;
+using HaveEq = IfElse<_HaveEq<Left, Right>, True, False>;
 
 
 // <=
@@ -155,10 +153,10 @@ struct _HaveLess<
 };
 
 template <class Left, class Right>
-using HaveLess = Conditional<_HaveLess<Left, Right>, True, False>;
+using HaveLess = IfElse<_HaveLess<Left, Right>, True, False>;
 
 template <class Left, class Right>
-using IsComparable = ConditionalB<
+using IsComparable = Conditional<
     HaveEq<Left, Right>::Value &&
     HaveLess<Left, Right>::Value,
     True,
@@ -177,7 +175,7 @@ struct _OtherThan {
     static constexpr bool Value = !IsSame<Decay<A>,  Decay<B>>::Value;
 };
 template <class A, class B>
-using OtherThan = ConditionalB<_OtherThan<A,B>::Value, True, False>;
+using OtherThan = Conditional<_OtherThan<A,B>::Value, True, False>;
 
 template <class T> using IsTrue  = IsSame<T, True>;
 template <class T> using IsFalse = IsSame<T, False>;

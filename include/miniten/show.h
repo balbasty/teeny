@@ -17,21 +17,6 @@ struct Show {
     void show(const Type & value) {}
 };
 
-
-/// Specialization for string
-template <>
-struct Show<const char *> {
-    MINITEN_HOSTDEVICE static inline
-    void show() {
-        printf("String");
-    }
-
-    MINITEN_HOSTDEVICE static inline
-    void show(const char * const value) {
-        printf("%s", value);
-    }
-};
-
 /// Print a new line
 void newline()
 {
@@ -65,6 +50,20 @@ void show(const T value)
 // {
 //     Show<const char *>::show(value);
 // }
+
+/// Specialization for string
+template <>
+struct Show<const char *> {
+    MINITEN_HOSTDEVICE static inline
+    void show() {
+        printf("String");
+    }
+
+    MINITEN_HOSTDEVICE static inline
+    void show(const char * const value) {
+        printf("%s", value);
+    }
+};
 
 } // namespace miniten
 

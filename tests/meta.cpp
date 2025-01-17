@@ -128,13 +128,24 @@ int main()
     show("  - last:     ");
     show(job.getLastValue());
     newline();
-    // show("  - first:    ");
-    // show(job.getFirst());
+    show("  - first:    ");
+    show(job.getFirst());
+    newline();
+    show("  - second:   ");
+    show(job.get(meta::Z1()));
+    newline();
+    show("  - last:     ");
+    show(job.getLast());
+    newline();
+    job.getLast() = 5.0;
+    show("  - last:     ");
+    show(job.getLast());
+    newline();
+
+    show(job.asRef().asConstRef().head());
+    newline();
+    // show(job.asRef().get(meta::Z1()));
     // newline();
-    // show("  - second:   ");
-    // show(job.get(meta::Z1()));
-    // newline();
-    // show("  - last:     ");
-    // show(job.getLast());
-    // newline();
+    show(job.asConstRef().tail());
+    newline();
 }

@@ -117,6 +117,24 @@ struct Show<float128_t>
     MINITEN_HOSTDEVICE static inline void show(const float128_t & value) { printf("%Lf", value); }
 };
 
+template <class T>
+struct Show<T*> {
+    MINITEN_HOSTDEVICE static inline void show()          { Show<T>::show(); show(" *"); }
+    MINITEN_HOSTDEVICE static inline void show(T * value) { show(static_cast<size_t>(value)); }
+};
+
+template <class T>
+struct Show<const T> {
+    MINITEN_HOSTDEVICE static inline void show()              {  show("const "); Show<T>::show(); }
+    MINITEN_HOSTDEVICE static inline void show(const T value) {  Show<T>::show(value); }
+};
+
+template <class T>
+struct Show<const T*> {
+    MINITEN_HOSTDEVICE static inline void show()                { show("const "); Show<T>::show(); show(" *"); }
+    MINITEN_HOSTDEVICE static inline void show(const T * value) { show(static_cast<size_t>(value)); }
+};
+
 } // namespace miniten
 
 #endif // MINITEN_SHOW_TYPES_H
