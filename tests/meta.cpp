@@ -5,7 +5,7 @@ using namespace miniten;
 int main()
 {
     show("* Foo1:       ");
-    using Foo1 = meta::Vector<int, 1, 2, 3>;
+    using Foo1 = meta::Vector<int32_t, 1, 2, 3>;
     show<Foo1>();
     newline();
     show("  - length:   ");
@@ -31,29 +31,29 @@ int main()
     show<meta::DelIndex<Foo1,1>>();
     newline();
     show("* Append:     ");
-    show<meta::AppendFrom<Foo1,meta::Vector<int, 4, 5, 6>>>();
+    show<meta::AppendFrom<Foo1,meta::Int32<4, 5, 6>>>();
     newline();
     show("* Prepend:    ");
-    show<meta::PrependFrom<Foo1,meta::Vector<int, 4, 5, 6>>>();
+    show<meta::PrependFrom<Foo1,meta::Int32<4, 5, 6>>>();
     newline();
     show("* Insert:     ");
-    show<meta::InsertIndexFrom<Foo1,1,meta::Vector<int, 4, 5, 6>>>();
+    show<meta::InsertIndexFrom<Foo1,1,meta::Int32<4, 5, 6>>>();
     newline();
     show("* Set:        ");
-    show<meta::SetFrom< Foo1, meta::SimpleSlice<0,2>, meta::GetLast<meta::Vector<int, 4, 5, 6>,2> >>();
+    show<meta::SetFrom< Foo1, meta::SimpleSlice<0,2>, meta::GetLast<meta::Int32<4, 5, 6>,2> >>();
     newline();
     show("* SetFirst:   ");
-    show<meta::SetFirstFrom< Foo1, meta::GetLast<meta::Vector<int, 4, 5, 6>,2> >>();
+    show<meta::SetFirstFrom< Foo1, meta::GetLast<meta::Int32<4, 5, 6>,2> >>();
     newline();
     show("* SetLast:    ");
-    show<meta::SetLastFrom< Foo1, meta::GetFirst<meta::Vector<int, 4, 5, 6>,2> >>();
+    show<meta::SetLastFrom< Foo1, meta::GetFirst<meta::Int32<4, 5, 6>,2> >>();
     newline();
     show("* AsPack:     ");
     show<meta::AsPack<Foo1>>();
     newline();
 
     show("* Foo2:       ");
-    using Foo2 = meta::Vector<int, 4, 5, 6>;
+    using Foo2 = meta::Int32<4, 5, 6>;
     show<Foo2>();
     newline();
     show("* Cat:        ");
@@ -72,7 +72,7 @@ int main()
     show(foo1.getLastValue());
     newline();
     show("* getValue(1):     ");
-    show(foo1.getValue(meta::PtrDiff<1>()));
+    show(foo1.getValue(meta::Z1()));
     newline();
     show("* getFirst():      ");
     show(foo1.getFirst());
@@ -81,11 +81,11 @@ int main()
     show(foo1.getLast());
     newline();
     show("* get(1):          ");
-    show(foo1.get(meta::PtrDiff<1>()));
+    show(foo1.get(meta::Z1()));
     newline();
 
     show("* Bar:        ");
-    using Bar = meta::Pack<int, long, float>;
+    using Bar = meta::Pack<int32_t, int64_t, float32_t>;
     show<Bar>();
     newline();
 
@@ -100,7 +100,7 @@ int main()
     newline();
 
     show("* Job:        ");
-    using Job = meta::Tuple<int, long, float>;
+    using Job = meta::Tuple<int32_t, int64_t, float32_t>;
     show<Job>();
     newline();
     show("  - length:   ");
@@ -115,7 +115,10 @@ int main()
     show("  - last:     ");
     show<meta::GetLastValue<Job>>();
     newline();
-    auto job = Job(1, 2, 3.);
+
+    long b = 2;
+
+    auto job = Job(1, b, 3.);
     show("* job:        ");
     show(job);
     newline();
@@ -142,10 +145,50 @@ int main()
     show(job.getLast());
     newline();
 
-    show(job.asRef().asConstRef().head());
-    newline();
+    show(&job.getFirstValue()); newline();
+    show(&job.getValue(meta::Z1())); newline();
+    show(&job.getLastValue()); newline();
+
+    auto jobref = job.asRef();
+
+    show(&jobref.getFirstValue()); newline();
+    show(&jobref.getValue(meta::Z1())); newline();
+    show(&jobref.getLastValue()); newline();
+
+    // show("  - first:    ");
+    // show(jobref.getFirstValue());
+    // newline();
+    // show("  - second:   ");
+    // show(jobref.getValue(meta::Z1()));
+    // newline();
+    // show("  - last:     ");
+    // show(jobref.getLastValue());
+    // newline();
+
+    // auto jobref2 = jobref.asRef();
+
+    show("Sizes\n");
+    show(sizeof(meta::Tuple<>)); newline();
+    show(sizeof(meta::Tuple<bool, bool>)); newline();
+    show(sizeof(meta::Tuple<int32_t, bool>)); newline();
+    show(sizeof(meta::Tuple<bool, bool, int32_t>)); newline();
+    show(sizeof(meta::Tuple<bool, bool, int64_t>)); newline();
+    // show(sizeof(jobref)); newline();
+
+    // show(&jobref2.getFirstValue()); newline();
+    // show(&jobref2.getValue(meta::UZ1())); newline();
+    // show(&jobref2.getLastValue()); newline();
+
+    // show(job.asRef().head());
+    // show(job.asConstRef().head());
+    // show(job.asRef().asRef().head());
+    // newline();
+
+    // show<decltype(job.asRef().get(meta::Z1()))>();
+    // newline();
     // show(job.asRef().get(meta::Z1()));
     // newline();
-    show(job.asConstRef().tail());
-    newline();
+    // show(job.asConstRef().tail());
+    // newline();
+
 }

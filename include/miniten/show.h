@@ -65,6 +65,35 @@ struct Show<const char *> {
     }
 };
 
+template <class T>
+struct Show<T&> {
+    using REF = T&;
+
+    MINITEN_HOSTDEVICE static inline
+    void show() { Show<T>::show(); miniten::show("&"); }
+
+    MINITEN_HOSTDEVICE static inline
+    void show(REF & value) { show(reinterpret_cast<uintptr_t>(&value)); }
+};
+
+template <class T>
+struct Show<T*> {
+    MINITEN_HOSTDEVICE static inline void show()          { Show<T>::show(); miniten::show(" *"); }
+    MINITEN_HOSTDEVICE static inline void show(T * value) { miniten::show(reinterpret_cast<uintptr_t>(value)); }
+};
+
+template <class T>
+struct Show<const T> {
+    MINITEN_HOSTDEVICE static inline void show()              {  miniten::show("const "); Show<T>::show(); }
+    MINITEN_HOSTDEVICE static inline void show(const T value) {  Show<T>::show(value); }
+};
+
+template <class T>
+struct Show<const T*> {
+    MINITEN_HOSTDEVICE static inline void show()                { miniten::show("const "); Show<T>::show(); miniten::show(" *"); }
+    MINITEN_HOSTDEVICE static inline void show(const T * value) { miniten::show(reinterpret_cast<uintptr_t>(value)); }
+};
+
 } // namespace miniten
 
 #include "show_types.h"

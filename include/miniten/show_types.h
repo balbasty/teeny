@@ -6,6 +6,73 @@
 
 namespace miniten {
 
+////////////////////////////////////////////////////////////////////////
+
+template <class T, size_t L = sizeof(T), int64_t MIN = static_cast<int64_t>(TypeInfo<T>::Min)>
+struct _ShowInt {};
+
+template <class T, int64_t MIN>
+struct _ShowInt<T, 1, MIN> {
+    MINITEN_HOSTDEVICE static inline void show()    { printf("int8"); }
+    MINITEN_HOSTDEVICE static inline void showCap() { printf("Int8"); }
+};
+
+template <class T>
+struct _ShowInt<T, 1, 0> {
+    MINITEN_HOSTDEVICE static inline void show()    { printf("uint8"); }
+    MINITEN_HOSTDEVICE static inline void showCap() { printf("UInt8"); }
+};
+
+template <class T, int64_t MIN>
+struct _ShowInt<T, 2, MIN> {
+    MINITEN_HOSTDEVICE static inline void show()    { printf("int16"); }
+    MINITEN_HOSTDEVICE static inline void showCap() { printf("Int16"); }
+};
+
+template <class T>
+struct _ShowInt<T, 2, 0> {
+    MINITEN_HOSTDEVICE static inline void show()    { printf("uint16"); }
+    MINITEN_HOSTDEVICE static inline void showCap() { printf("UInt16"); }
+};
+
+template <class T, int64_t MIN>
+struct _ShowInt<T, 4, MIN> {
+    MINITEN_HOSTDEVICE static inline void show()    { printf("int32"); }
+    MINITEN_HOSTDEVICE static inline void showCap() { printf("Int32"); }
+};
+
+template <class T>
+struct _ShowInt<T, 4, 0> {
+    MINITEN_HOSTDEVICE static inline void show()    { printf("uint32"); }
+    MINITEN_HOSTDEVICE static inline void showCap() { printf("UInt32"); }
+};
+
+template <class T, int64_t MIN>
+struct _ShowInt<T, 8, MIN> {
+    MINITEN_HOSTDEVICE static inline void show()    { printf("int64"); }
+    MINITEN_HOSTDEVICE static inline void showCap() { printf("Int64"); }
+};
+
+template <class T>
+struct _ShowInt<T, 8, 0> {
+    MINITEN_HOSTDEVICE static inline void show()    { printf("uint64"); }
+    MINITEN_HOSTDEVICE static inline void showCap() { printf("UInt64"); }
+};
+
+template <class T, int64_t MIN>
+struct _ShowInt<T, 16, MIN> {
+    MINITEN_HOSTDEVICE static inline void show()    { printf("int128"); }
+    MINITEN_HOSTDEVICE static inline void showCap() { printf("Int128"); }
+};
+
+template <class T>
+struct _ShowInt<T, 16, 0> {
+    MINITEN_HOSTDEVICE static inline void show()    { printf("uint128"); }
+    MINITEN_HOSTDEVICE static inline void showCap() { printf("UInt128"); }
+};
+
+////////////////////////////////////////////////////////////////////////
+
 template <>
 struct Show<bool> {
     MINITEN_HOSTDEVICE static inline void show()    { printf("bool"); }
@@ -13,85 +80,99 @@ struct Show<bool> {
     MINITEN_HOSTDEVICE static inline void show(bool value) { printf(value ? "true" :"false"); }
 };
 
+////////////////////////////////////////////////////////////////////////
+
 template <>
-struct Show<uint8_t>
+struct Show<unsigned char>
 {
-    MINITEN_HOSTDEVICE static inline void show()    { printf("uint8"); }
-    MINITEN_HOSTDEVICE static inline void showCap() { printf("UInt8"); }
-    MINITEN_HOSTDEVICE static inline void show(uint8_t value) { printf("%u", value); }
+    using T = unsigned char;
+    MINITEN_HOSTDEVICE static inline void show()        { _ShowInt<T>::show(); }
+    MINITEN_HOSTDEVICE static inline void showCap()     { _ShowInt<T>::showCap(); }
+    MINITEN_HOSTDEVICE static inline void show(T value) { printf("%u", value); }
 };
 
 template <>
-struct Show<int8_t>
+struct Show<signed char>
 {
-    MINITEN_HOSTDEVICE static inline void show()    { printf("int8"); }
-    MINITEN_HOSTDEVICE static inline void showCap() { printf("Int8"); }
-    MINITEN_HOSTDEVICE static inline void show(int8_t value) { printf("%d", value); }
+    using T = signed char;
+    MINITEN_HOSTDEVICE static inline void show()        { _ShowInt<T>::show(); }
+    MINITEN_HOSTDEVICE static inline void showCap()     { _ShowInt<T>::showCap(); }
+    MINITEN_HOSTDEVICE static inline void show(T value) { printf("%d", value); }
 };
 
 template <>
-struct Show<uint16_t>
+struct Show<unsigned short>
 {
-    MINITEN_HOSTDEVICE static inline void show()    { printf("uint16"); }
-    MINITEN_HOSTDEVICE static inline void showCap() { printf("UInt16"); }
-    MINITEN_HOSTDEVICE static inline void show(uint16_t value) { printf("%u", value); }
+    using T = unsigned short;
+    MINITEN_HOSTDEVICE static inline void show()        { _ShowInt<T>::show(); }
+    MINITEN_HOSTDEVICE static inline void showCap()     { _ShowInt<T>::showCap(); }
+    MINITEN_HOSTDEVICE static inline void show(T value) { printf("%u", value); }
 };
 
 template <>
-struct Show<int16_t>
+struct Show<short>
 {
-    MINITEN_HOSTDEVICE static inline void show()    { printf("int16"); }
-    MINITEN_HOSTDEVICE static inline void showCap() { printf("Int16"); }
-    MINITEN_HOSTDEVICE static inline void show(uint16_t value) { printf("%d", value); }
+    using T = short;
+    MINITEN_HOSTDEVICE static inline void show()        { _ShowInt<T>::show(); }
+    MINITEN_HOSTDEVICE static inline void showCap()     { _ShowInt<T>::showCap(); }
+    MINITEN_HOSTDEVICE static inline void show(T value) { printf("%d", value); }
 };
 
 template <>
-struct Show<uint32_t>
+struct Show<unsigned int>
 {
-    MINITEN_HOSTDEVICE static inline void show()    { printf("uint32"); }
-    MINITEN_HOSTDEVICE static inline void showCap() { printf("UInt32"); }
-    MINITEN_HOSTDEVICE static inline void show(uint32_t value) { printf("%u", value); }
+    using T = unsigned;
+    MINITEN_HOSTDEVICE static inline void show()        { _ShowInt<T>::show(); }
+    MINITEN_HOSTDEVICE static inline void showCap()     { _ShowInt<T>::showCap(); }
+    MINITEN_HOSTDEVICE static inline void show(T value) { printf("%u", value); }
 };
 
 template <>
-struct Show<int32_t>
+struct Show<int>
 {
-    MINITEN_HOSTDEVICE static inline void show()    { printf("int32"); }
-    MINITEN_HOSTDEVICE static inline void showCap() { printf("Int32"); }
-    MINITEN_HOSTDEVICE static inline void show(int32_t value) { printf("%d", value); }
+    using T = int;
+    MINITEN_HOSTDEVICE static inline void show()        { _ShowInt<T>::show(); }
+    MINITEN_HOSTDEVICE static inline void showCap()     { _ShowInt<T>::showCap(); }
+    MINITEN_HOSTDEVICE static inline void show(T value) { printf("%d", value); }
 };
 
 template <>
-struct Show<uint64_t>
+struct Show<unsigned long>
 {
-    MINITEN_HOSTDEVICE static inline void show()    { printf("uint64"); }
-    MINITEN_HOSTDEVICE static inline void showCap() { printf("UInt64"); }
-    MINITEN_HOSTDEVICE static inline void show(const uint64_t & value) { printf("%lu", value); }
+    using T = unsigned long;
+    MINITEN_HOSTDEVICE static inline void show()        { _ShowInt<T>::show(); }
+    MINITEN_HOSTDEVICE static inline void showCap()     { _ShowInt<T>::showCap(); }
+    MINITEN_HOSTDEVICE static inline void show(T value) { printf("%lu", value); }
 };
 
 template <>
-struct Show<int64_t>
+struct Show<long>
 {
-    MINITEN_HOSTDEVICE static inline void show()    { printf("int64"); }
-    MINITEN_HOSTDEVICE static inline void showCap() { printf("Int64"); }
-    MINITEN_HOSTDEVICE static inline void show(const int64_t & value) { printf("%ld", value); }
+    using T = long;
+    MINITEN_HOSTDEVICE static inline void show()        { _ShowInt<T>::show(); }
+    MINITEN_HOSTDEVICE static inline void showCap()     { _ShowInt<T>::showCap(); }
+    MINITEN_HOSTDEVICE static inline void show(T value) { printf("%ld", value); }
 };
 
 template <>
-struct Show<uint128_t>
+struct Show<unsigned long long>
 {
-    MINITEN_HOSTDEVICE static inline void show()    { printf("uint128"); }
-    MINITEN_HOSTDEVICE static inline void showCap() { printf("UInt128"); }
-    MINITEN_HOSTDEVICE static inline void show(const uint128_t & value) { printf("%llu", value); }
+    using T = unsigned long long;
+    MINITEN_HOSTDEVICE static inline void show()        { _ShowInt<T>::show(); }
+    MINITEN_HOSTDEVICE static inline void showCap()     { _ShowInt<T>::showCap(); }
+    MINITEN_HOSTDEVICE static inline void show(T value) { printf("%llu", value); }
 };
 
 template <>
-struct Show<int128_t>
+struct Show<long long>
 {
-    MINITEN_HOSTDEVICE static inline void show()    { printf("int128"); }
-    MINITEN_HOSTDEVICE static inline void showCap() { printf("Int128"); }
-    MINITEN_HOSTDEVICE static inline void show(const int128_t & value) { printf("%lld", value); }
+    using T = long long;
+    MINITEN_HOSTDEVICE static inline void show()        { _ShowInt<T>::show(); }
+    MINITEN_HOSTDEVICE static inline void showCap()     { _ShowInt<T>::showCap(); }
+    MINITEN_HOSTDEVICE static inline void show(T value) { printf("%lld", value); }
 };
+
+////////////////////////////////////////////////////////////////////////
 
 template <>
 struct Show<float32_t>
@@ -107,32 +188,6 @@ struct Show<float64_t>
     MINITEN_HOSTDEVICE static inline void show()    { printf("float64"); }
     MINITEN_HOSTDEVICE static inline void showCap() { printf("Float64"); }
     MINITEN_HOSTDEVICE static inline void show(const float64_t & value) { printf("%f", value); }
-};
-
-template <>
-struct Show<float128_t>
-{
-    MINITEN_HOSTDEVICE static inline void show()    { printf("float128"); }
-    MINITEN_HOSTDEVICE static inline void showCap() { printf("Float128"); }
-    MINITEN_HOSTDEVICE static inline void show(const float128_t & value) { printf("%Lf", value); }
-};
-
-template <class T>
-struct Show<T*> {
-    MINITEN_HOSTDEVICE static inline void show()          { Show<T>::show(); show(" *"); }
-    MINITEN_HOSTDEVICE static inline void show(T * value) { show(static_cast<size_t>(value)); }
-};
-
-template <class T>
-struct Show<const T> {
-    MINITEN_HOSTDEVICE static inline void show()              {  show("const "); Show<T>::show(); }
-    MINITEN_HOSTDEVICE static inline void show(const T value) {  Show<T>::show(value); }
-};
-
-template <class T>
-struct Show<const T*> {
-    MINITEN_HOSTDEVICE static inline void show()                { show("const "); Show<T>::show(); show(" *"); }
-    MINITEN_HOSTDEVICE static inline void show(const T * value) { show(static_cast<size_t>(value)); }
 };
 
 } // namespace miniten

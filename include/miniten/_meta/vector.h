@@ -65,7 +65,7 @@ using SignedChar = Vector<signed char, N...>;
 
 /// A compile-time signed char
 template <signed char... N>
-using C = SignedChar<N...>;
+using SC = SignedChar<N...>;
 
 /// A compile-time short integer
 template <short... N>
@@ -134,41 +134,57 @@ using ULL = UnsignedLongLong<N...>;
 template <int8_t... N>
 using Int8 = Vector<int8_t, N...>;
 
+template <int8_t... N>
+using I8 = Int8<N...>;
+
 /// A compile-time short integer
 template <int16_t... N>
 using Int16 = Vector<int16_t, N...>;
+
+template <int16_t... N>
+using I16 = Int16<N...>;
 
 /// A compile-time integer
 template <int32_t... N>
 using Int32 = Vector<int32_t, N...>;
 
+template <int32_t... N>
+using I32 = Int32<N...>;
+
 /// A compile-time long integer
 template <int64_t... N>
 using Int64 = Vector<int64_t, N...>;
 
-/// A compile-time long long integer
-template <int128_t... N>
-using Int128 = Vector<int128_t, N...>;
+template <int64_t... N>
+using I64 = Int64<N...>;
 
 /// A compile-time unsigned char
 template <uint8_t... N>
 using UInt8 = Vector<uint8_t, N...>;
 
+template <uint8_t... N>
+using U8 = UInt8<N...>;
+
 /// A compile-time unsigned short integer
 template <uint16_t... N>
 using UInt16 = Vector<uint16_t, N...>;
+
+template <uint16_t... N>
+using U16 = UInt16<N...>;
 
 /// A compile-time unsigned integer
 template <uint32_t... N>
 using UInt32 = Vector<uint32_t, N...>;
 
+template <uint32_t... N>
+using U32 = UInt32<N...>;
+
 /// A compile-time unsigned long integer
 template <uint64_t... N>
 using UInt64 = Vector<uint64_t, N...>;
 
-/// A compile-time unsigned long long integer
-template <uint128_t... N>
-using UInt128 = Vector<uint128_t, N...>;
+template <uint64_t... N>
+using U64 = UInt64<N...>;
 
 /// A compile-time size_t
 template <size_t... N>
@@ -184,12 +200,19 @@ using PtrDiff = Vector<ptrdiff_t, N...>;
 template <ptrdiff_t... N>
 using Z = PtrDiff<N...>;
 
+/// A compile-time uintptr_t
+template <uintptr_t... N>
+using UIntPtr = Vector<uintptr_t, N...>;
+
+template <uintptr_t... N>
+using UP = UIntPtr<N...>;
+
 using True  = Bool<true>;
 using False = Bool<false>;
 using Error = Empty<bool>;
 using None  = Empty<void>;
 
-using C0    = C<0>;
+using SC0   = SC<0>;
 using S0    = S<0>;
 using I0    = I<0>;
 using L0    = L<0>;
@@ -202,8 +225,19 @@ using UI0   = U<0>;
 using UL0   = UL<0>;
 using ULL0  = ULL<0>;
 using UZ0   = UZ<0>;
+using UP0   = UP<0>;
 
-using C1    = C<1>;
+using I8_0  = I8<0>;
+using I16_0 = I16<0>;
+using I32_0 = I32<0>;
+using I64_0 = I64<0>;
+
+using U8_0  = U8<0>;
+using U16_0 = U16<0>;
+using U32_0 = U32<0>;
+using U64_0 = U64<0>;
+
+using SC1   = SC<1>;
 using S1    = S<1>;
 using I1    = I<1>;
 using L1    = L<1>;
@@ -216,6 +250,17 @@ using UI1   = U<1>;
 using UL1   = UL<1>;
 using ULL1  = ULL<1>;
 using UZ1   = UZ<1>;
+using UP1   = UP<1>;
+
+using I8_1  = I8<1>;
+using I16_1 = I16<1>;
+using I32_1 = I32<1>;
+using I64_1 = I64<1>;
+
+using U8_1  = U8<1>;
+using U16_1 = U16<1>;
+using U32_1 = U32<1>;
+using U64_1 = U64<1>;
 
 /// ---------------------------------------------------------------- ///
 ///     Repeat                                                       ///

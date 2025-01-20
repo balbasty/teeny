@@ -46,14 +46,14 @@ struct _Cat2<Tuple<X0,X...>, RIGHT> {
 
 namespace _tuple {
     template <class TUPLE>                 struct _Reversed;
-    template <class TUPLE>                 using   Reversed = typename _Reversed<TUPLE>::Type;
+    template <class TUPLE>                 using   Reversed         = typename _Reversed<TUPLE>::Type;
     template <class TUPLE, typename U>     struct _AsVector;
-    template <class TUPLE, typename U>     using   AsVector = typename _AsVector<TUPLE,U>::Type;
-    template <long>                         struct  ApplyFn;
+    template <class TUPLE, typename U>     using   AsVector         = typename _AsVector<TUPLE,U>::Type;
+    template <long>                        struct  ApplyFn;
     template <class TUPLE, class APPLY>    struct _Apply;
-    template <class TUPLE, class APPLY>    using   Apply = typename _Apply<TUPLE, APPLY>::Type;
-    template <class PACK>                 struct _ApplySizeOf;
-    template <class PACK>                 using   ApplySizeOf   = typename _ApplySizeOf<PACK>::Type;
+    template <class TUPLE, class APPLY>    using   Apply            = typename _Apply<TUPLE, APPLY>::Type;
+    template <class TUPLE>                 struct _ApplySizeOf;
+    template <class TUPLE>                 using   ApplySizeOf      = typename _ApplySizeOf<TUPLE>::Type;
 }
 
 template <class... X>               struct _Length<Tuple<X...>>             { using Type = CountTypes<X...>; };
@@ -86,7 +86,7 @@ template <class... X>               struct _ApplySizeOf<Tuple<X...>>        { us
 
 namespace _tuple {
 
-    /// Revert /////////////////////////////////////////////////////////////
+    /// Revert /////////////////////////////////////////////////////////
 
     template <class TUPLE>
     struct _Reversed {};
@@ -109,7 +109,7 @@ namespace _tuple {
         using Type = Tuple<>;
     };
 
-    /// AsVector ///////////////////////////////////////////////////////////
+    /// AsVector ///////////////////////////////////////////////////////
 
     template <class TUPLE, typename U>
     struct _AsVector {};
@@ -135,7 +135,7 @@ namespace _tuple {
         using Type = Vector<U>;
     };
 
-    /// Apply //////////////////////////////////////////////////////////////
+    /// Apply //////////////////////////////////////////////////////////
 
     template <long>  struct ApplyFn {};
     template <>      struct ApplyFn<0>  { template <class T> using Type = AddConst<T>; };
@@ -202,103 +202,24 @@ namespace _tuple {
 } // namespace _tuple
 
 
-/// ---------------------------------------------------------------- ///
-///     Tuple object implementation                                  ///
-/// ---------------------------------------------------------------- ///
-
-namespace _tuple_obj {
-
-    /// Get ////////////////////////////////////////////////////////////
-
-    // __Get only accepts wrapped indices
-    template <class InputTuple, class InputIndex>
-    struct __Get {};
-
-    template <class InputTuple, ptrdiff_t I>
-    struct __Get<InputTuple, PtrDiff<I>>
-    {
-        using InputIndex   = PtrDiff<I>;
-        // using ReturnType   = meta::GetValue<InputTuple,InputIndex>;
-        using FirstTuple   = meta::GetFirst<InputTuple,I+1>;
-        using ReturnTuple  = meta::GetLast<FirstTuple>;
-        using ReturnType   = meta::GetLastValue<FirstTuple>;
-
-        _MHD_
-        static inline ReturnType getValue(const InputTuple & t) {
-            const FirstTuple * f = reinterpret_cast<const FirstTuple *>(&t);
-            return f->getLastValue();
-        }
-
-        _MHD_
-        static inline ReturnTuple get(const InputTuple & t) {
-            return tuple(getValue(t));
-        }
-    };
-
-    template <class InputTuple, ptrdiff_t I0, ptrdiff_t... I>
-    struct __Get<InputTuple, PtrDiff<I0, I...>>
-    {
-        using InputIndex   = PtrDiff<I0, I...>;
-        using ReturnTuple  = meta::Get<InputTuple,InputIndex>;
-        using WrappedIndex = WrapIndex<Length<InputTuple>, InputIndex>;
-
-        _MHD_
-        static inline ReturnTuple get(const InputTuple & t) {
-            auto first = Get<InputTuple,PtrDiff<I0>>::getValue(t);
-            auto other = Get<InputTuple,PtrDiff<I...>>::get(t);
-            return ReturnTuple(first, other);
-        }
-    };
-
-    // _Get Wraps indices and calls __Get
-    template <class InputTuple, class InputIndex>
-    struct _Get {
-        using WrappedIndex = WrapIndex<Length<InputTuple>, InputIndex>;
-        using WrappedGet   = Get<InputTuple,WrappedIndex>;
-        using Type         = __Get<InputTuple, WrappedIndex>;
-    };
-
-    // Get is a pretty alias for _Get::Type == __Get
-    template <class InputTuple, class InputIndex>
-    using Get = typename _Get<InputTuple, InputIndex>::Type;
-
-}
-
-/// ---------------------------------------------------------------- ///
-///     Tuple helpers                                                ///
-/// ---------------------------------------------------------------- ///
-
-template <class... X>
-_MHD_ inline
-Tuple<X...> tuple(const X &... x) {
-    return Tuple<X...>(x...);
-}
-
+// These are needed in the body of Tuple - def/spec later on
 namespace _tuple {
+    // Small tuple-like structure that holds a tuple's values
+    template <class... X> struct Values {};
 
-    // Specialized later on
-    template <class TUPLE> struct Helper {};
+    template <>
+    struct Values<> {
+        static constexpr size_t Length = 0;
+        using AsPack  = Pack<>;
+        using AsTuple = Tuple<>;
+        template <class I> using At = Values<>;
+    };
 
-    template <class T>
-    _MHD_ inline
-    const typename T::ParentType & asParentRef(const T & t)
-    {
-        return t.head(SizeT<T::Length-1>());
-    }
+    // Helper for smart indexing
+    template <class TUPLE, class Index> struct HelperGet;
 
-    template <class T>
-    _MHD_ inline
-    typename T::ParentType & asParentRef(T & t)
-    {
-        return t.head(SizeT<T::Length-1>());
-    }
-
-    template <class T>
-    _MHD_ inline
-    typename T::ParentType asParent(const T & t)
-    {
-        return ParentType(t.asParentRef());
-    }
+    // Helper for smart indexing
+    template <class... X> struct HelperCat;
 }
 
 /// ---------------------------------------------------------------- ///
@@ -307,69 +228,20 @@ namespace _tuple {
 
 struct TupleBase {};
 
-/// A compile-time tuple of types
-/// (default implementation is only used by empty tuples)
-template <class... X>
-struct Tuple: public TupleBase {};
-
-// Empty tuple
-template <>
-struct Tuple<>: TupleBase
-{
-    /// Static types and values ////////////////////////////////////////
-
-    using ParentType = TupleBase;
-    using ThisType   = Tuple<>;
-    static constexpr size_t Length = 0;
-
-    ////////////////////////////////////////////////////////////////////
-
-    using AsNoRef       = ThisType;
-    using AsNoConst     = ThisType;
-    using AsNoConstRef  = ThisType;
-    using AsRef         = ThisType;
-    using AsConstRef    = ThisType;
-    using AsRValueRef   = ThisType;
-
-    _MHD_ inline       ThisType & asRef()            { return *this; }
-    _MHD_ inline       ThisType & asRValueRef()      { return *this; }
-    _MHD_ inline const ThisType & asConstRef() const { return *this; }
-
-    /// Constexpr methods ///////////////////////////////////////////////
-
-    _MHD_ constexpr size_t     length()    const { return Length; }
-
-    // template <class I, class... M>  _MHD_ constexpr InsertFrom<ThisType,I,M...>    insertFrom(I, M...) const { return InsertFrom<ThisType,I,M...>(); }
-    // template <class... M>           _MHD_ constexpr PrependFrom<ThisType,M...>     prependFrom(M...)   const { return PrependFrom<ThisType,M...>(); }
-    // template <class... M>           _MHD_ constexpr AppendFrom<ThisType,M...>      appendFrom(M...)    const { return AppendFrom<ThisType,M...>(); }
-
-    // template <class I, class... M>  _MHD_ constexpr Insert<ThisType,I,M...>        insert(I, M...)     const { return Insert<ThisType,I,M...>(); }
-    // template <class... M>           _MHD_ constexpr Prepend<ThisType,M...>         prepend(M...)       const { return Prepend<ThisType,M...>(); }
-    // template <class... M>           _MHD_ constexpr Append<ThisType,M...>          append(M...)        const { return Append<ThisType,M...>(); }
-    // template <class... M>           _MHD_ constexpr Extend<ThisType,M...>          extend(M...)        const { return Extend<ThisType,M...>(); }
-
-    /// Constructors ///////////////////////////////////////////////////
-
-    constexpr Tuple():                  ParentType() {}
-    constexpr Tuple(const ThisType &):  ParentType() {}
-
-    template <class... Y> friend struct Tuple;
-};
-
 /// Non-empty tuple
-template <class X0, class... X>
-struct Tuple<X0, X...>: public DelLast<Tuple<X0, X...>>
+template <class... X>
+struct Tuple: TupleBase
 {
     /// Static types and values ////////////////////////////////////////
 
-    using ParentType    = DelLast<Tuple<X0, X...>>;
-    using ThisType      = Tuple<X0, X...>;
-    using NextType      = Tuple<X...>;
-    using FirstItem     = RemoveRef<GetFirstValue<ThisType>>;
-    using LastItem      = RemoveRef<GetLastValue<ThisType>>;
-    using Helper        = _tuple::Helper<ThisType>;
+    static constexpr size_t Length = CountTypes<X...>::Value;
 
-    static constexpr size_t Length = CountTypes<X0, X...>::Value;
+    using ParentType    = TupleBase;
+    using ThisType      = Tuple<X...>;
+    using ValueType     = _tuple::Values<X...>;
+    using NextType      = DelFirst<ThisType>;
+    using FirstItem     = GetFirstValue<ThisType>;
+    using LastItem      = GetLastValue<ThisType>;
 
     ////////////////////////////////////////////////////////////////////
 
@@ -380,46 +252,62 @@ struct Tuple<X0, X...>: public DelLast<Tuple<X0, X...>>
     using AsConstRef    = ApplyAddConstRef<AsNoRef>;
     using AsRValueRef   = ApplyAddRValueRef<AsNoRef>;
 
+protected:
+    template <class I>      using HelperGet     = _tuple::HelperGet<ThisType,I>;
+
+                            using GetFirstValue = RemoveRef<GetFirstValue<ThisType>>;
+                            using GetLastValue  = RemoveRef<GetLastValue<ThisType>>;
+    template <class I>      using GetValue      = meta::GetValue<AsNoRef,I>;
+    template <class I>      using Get           = typename HelperGet<I>::ReturnType;
+    template <class I>      using GetConst      = typename HelperGet<I>::ReturnConstType;
+    template <class N=UZ1>  using GetFirst      = meta::GetFirst<ThisType,N::Value>;
+    template <class N=UZ1>  using GetLast       = meta::GetLast<ThisType,N::Value>;
+
+    template <class N=UZ1>  using DelFirst      = meta::DelFirst<ThisType,N::Value>;
+    template <class N=UZ1>  using DelLast       = meta::DelLast<ThisType,N::Value>;
+
+public:
+    ////////////////////////////////////////////////////////////////////
+
     _MHD_ inline AsRef asRef()
     {
         using N = SizeT<Length-1>;
-        return AsRef(head(), tail(N()).asRef());
+        return AsRef(head(), tail(N()).asRef()._asValue());
     }
 
     _MHD_ inline AsConstRef asConstRef() const
     {
         using N = SizeT<Length-1>;
-        return AsConstRef(head(), tail(N()).asConstRef());
+        return AsConstRef(head(), tail(N()).asConstRef()._asValue());
     }
 
-    _MHD_ inline AsRValueRef asRValueRef() const
-    {
-        using N = SizeT<Length-1>;
-        return AsRValueRef(head(), tail(N()).asRValueRef());
-    }
+    /// Constexpr methods //////////////////////////////////////////////
 
-    /// Constexpr methods ///////////////////////////////////////////////
-
-    _MHD_ constexpr size_t     length()    const { return Length; }
+    _MHD_ constexpr size_t length() const { return Length; }
 
     /// Other methods //////////////////////////////////////////////////
 
-    template <class I>              _MHD_ inline const GetValue<AsNoRef,I>        &  getValue(I i)       const { return head(Add<I,PtrDiff<1>>()).tail(); }
-                                    _MHD_ inline const GetFirstValue<AsNoRef>     &  getFirstValue()     const { return head(); }
-                                    _MHD_ inline const GetLastValue<AsNoRef>      &  getLastValue()      const { return tail(); }
-    template <class I>              _MHD_ inline       GetValue<AsNoRef,I>        &  getValue(I i)             { return head(Add<I,PtrDiff<1>>()).tail(); }
-                                    _MHD_ inline       GetFirstValue<AsNoRef>     &  getFirstValue()           { return head(); }
-                                    _MHD_ inline       GetLastValue<AsNoRef>      &  getLastValue()            { return tail(); }
+public:
 
-    template <class I>              _MHD_ inline       Get<ThisType,I>                get(I)              const { return _tuple_obj::Get<ThisType,I>::get(*this); }
-    template <class N>              _MHD_ inline const GetFirst<ThisType,N::Value> &  getFirst(N)         const { return head(N()); }
-    template <class N>              _MHD_ inline const GetLast<ThisType,N::Value>  &  getLast(N)          const { return tail(N()); }
-                                    _MHD_ inline const GetFirst<ThisType>          &  getFirst()          const { return head(UZ1()); }
-                                    _MHD_ inline const GetLast<ThisType>           &  getLast()           const { return tail(UZ1()); }
-    template <class N>              _MHD_ inline       GetFirst<ThisType,N::Value> &  getFirst(N)               { return head(N()); }
-    template <class N>              _MHD_ inline       GetLast<ThisType,N::Value>  &  getLast(N)                { return tail(N()); }
-                                    _MHD_ inline       GetFirst<ThisType>          &  getFirst()                { return head(UZ1()); }
-                                    _MHD_ inline       GetLast<ThisType>           &  getLast()                 { return tail(UZ1()); }
+    template <class I>              _MHD_ inline const GetValue<I>      &  getValue(I i)       const { return head(Add<I,PtrDiff<1>>()).tail(); }
+                                    _MHD_ inline const GetFirstValue    &  getFirstValue()     const { return head(); }
+                                    _MHD_ inline const GetLastValue     &  getLastValue()      const { return tail(); }
+    template <class I>              _MHD_ inline       GetValue<I>      &  getValue(I i)             { return head(Add<I,PtrDiff<1>>()).tail(); }
+                                    _MHD_ inline       GetFirstValue    &  getFirstValue()           { return head(); }
+                                    _MHD_ inline       GetLastValue     &  getLastValue()            { return tail(); }
+
+    template <class I>              _MHD_ inline       GetConst<I>         get(I)              const { return HelperGet<I>::get(*this); }
+    template <class I>              _MHD_ inline       Get<I>              get(I)                    { return HelperGet<I>::get(*this); }
+
+    template <class N>              _MHD_ inline const GetFirst<N>      &  getFirst(N)         const { return head(N()); }
+    template <class N>              _MHD_ inline const GetLast<N>       &  getLast(N)          const { return tail(N()); }
+                                    _MHD_ inline const GetFirst<>       &  getFirst()          const { return head(UZ1()); }
+                                    _MHD_ inline const GetLast<>        &  getLast()           const { return tail(UZ1()); }
+
+    template <class N>              _MHD_ inline       GetFirst<N>      &  getFirst(N)               { return head(N()); }
+    template <class N>              _MHD_ inline       GetLast<N>       &  getLast(N)                { return tail(N()); }
+                                    _MHD_ inline       GetFirst<>       &  getFirst()                { return head(UZ1()); }
+                                    _MHD_ inline       GetLast<>        &  getLast()                 { return tail(UZ1()); }
 
     // template <class I>              _MHD_ inline Del<ThisType,I>                del(I)      const { return _tuple_obj::Del<ThisType,I>::del(); }
     // template <class N>              _MHD_ inline DelFirst<ThisType,N::Value>    delFirst(N) const { return del(SimpleSlice<0,N::Value>()); }
@@ -445,112 +333,209 @@ struct Tuple<X0, X...>: public DelLast<Tuple<X0, X...>>
     // template <class... M>           _MHD_ inline Extend<ThisType,M...>          extend(M...)        const { return Extend<ThisType,M...>(); }
 
     /// Self reference /////////////////////////////////////////////////
+public:
 
     template <class N>
     _MHD_ inline
-    const GetFirst<ThisType, N::Value> & head(N) const
+    const GetFirst<N> & head(N) const
     {
         static_assert(N::Value <= Length, "Too many elements requested");
-        return *reinterpret_cast<const GetFirst<ThisType, N::Value> *>(this);
-    }
-
-    template <class N>
-    _MHD_ inline
-    GetFirst<ThisType, N::Value> & head(N)
-    {
-        static_assert(N::Value <= Length, "Too many elements requested");
-        return *reinterpret_cast<GetFirst<ThisType, N::Value> *>(this);
-    }
-
-    _MHD_ inline
-    const FirstItem & head() const
-    {
-        return *reinterpret_cast<const FirstItem *>(this);
-    }
-
-    _MHD_ inline
-    FirstItem & head()
-    {
-        return *reinterpret_cast<FirstItem *>(this);
+        return *reinterpret_cast<const GetFirst<N> *>(this);
     }
 
     template <class N>
     _MHD_ inline
-    const GetLast<ThisType, N::Value> & tail(N) const
+    GetFirst<N> & head(N)
     {
         static_assert(N::Value <= Length, "Too many elements requested");
-        using ReturnType = GetLast<ThisType, N::Value>;
-        static constexpr size_t HeadLength = (
-            Length+1-N::Value > Length ? Length : Length+1-N::Value
-        );
-        return *reinterpret_cast<const ReturnType *>(
-            &(head(PtrDiff<HeadLength>()).tail())
+        return *reinterpret_cast<GetFirst<N> *>(this);
+    }
+
+    _MHD_ inline
+    const GetFirstValue & head() const
+    {
+        return _values.FirstValue;
+    }
+
+    _MHD_ inline
+    GetFirstValue & head()
+    {
+        return _values.FirstValue;
+    }
+
+    template <class N>
+    _MHD_ inline
+    const GetLast<N> & tail(N) const
+    {
+        static_assert(N::Value <= Length, "Too many elements requested");
+        static constexpr size_t Skip = Length - N::Value;
+        return *reinterpret_cast<const GetLast<N> *>(
+            &(_values.at(PtrDiff<Skip>()))
         );
     }
 
     template <class N>
     _MHD_ inline
-    GetLast<ThisType, N::Value> & tail(N)
+    GetLast<N> & tail(N)
     {
         static_assert(N::Value <= Length, "Too many elements requested");
-        using ReturnType = GetLast<ThisType, N::Value>;
-        static constexpr size_t HeadLength = (
-            Length+1-N::Value > Length ? Length : Length+1-N::Value
-        );
-        return *reinterpret_cast<ReturnType *>(
-            &(head(PtrDiff<HeadLength>()).tail())
+        static constexpr size_t Skip = Length - N::Value;
+        return *reinterpret_cast<GetLast<N> *>(
+            &(_values.at(PtrDiff<Skip>()))
         );
     }
 
     _MHD_ inline
-    const LastItem & tail() const
+    const GetLastValue & tail() const
     {
-        return Value;
+        return tail(UZ1()).head();
     }
 
     _MHD_ inline
-    LastItem & tail()
+    GetLastValue & tail()
     {
-        return Value;
+        return tail(UZ1()).head();
     }
 
     /// Constructors ///////////////////////////////////////////////////
 
-    // Default
-    constexpr Tuple(): ParentType(), Value() {}
+// protected:
+//     // Helper constructor to generate asRef/asConstRef
+//     template <class Y0>
+//     Tuple(Y0&& y0, NextType&& y): _values() {}
 
-    // Series of values || first value + tuple (for recursive construction)
-    template <class Y0, class... Y>
-    Tuple(Y0 y0, Y... y):       ParentType(Helper::getFirstValues(y0, y...)), Value(Helper::getLastValue(y0, y...)) {}
+//     template <class Y0>
+//     Tuple(Y0&& y0, const NextType&& y): _values(std::forward<Y0>(y0), y._values) {}
+
+public:
+    // Default
+    constexpr Tuple(): _values() {}
+
+    // From values
+    template <class... Y>
+    Tuple(Y&&... y): _values(std::forward<Y>(y)...) {}
 
     // Copy constructors
-    Tuple(      ThisType &   x): ParentType(_tuple::asParentRef(x)), Value(x.getLastValue()) {}
-    Tuple(      ThisType &&  x): ParentType(_tuple::asParentRef(x)), Value(x.getLastValue()) {}
-    Tuple(const ThisType &   x): ParentType(_tuple::asParentRef(x)), Value(x.getLastValue()) {}
-    Tuple(const ThisType &&  x): ParentType(_tuple::asParentRef(x)), Value(x.getLastValue()) {}
+    Tuple(      ThisType &   x): _values(x._values)            {}
+    Tuple(const ThisType &   x): _values(x._values)            {}
+    Tuple(const ThisType &&  x): _values(x._values)            {}
+    Tuple(      ThisType &&  x): _values(std::move(x)._values) {}
 
     // Copy operator
     _MHD_ inline ThisType & operator=(const ThisType & x)
     {
-        Value = x.getLastValue();
-        ParentType::operator=(_tuple::asParentRef(x));
+        _values = std::move(x._values);
         return *this;
     }
 
     // Move copy operator
     _MHD_ inline ThisType & operator=(ThisType && x)
     {
-        Value = std::move(x.getLastValue());
-        ParentType::operator=(std::move(_tuple::asParentRef(x)));
+        _values = std::move(x._values);
         return *this;
     }
 
 protected:
-    LastItem Value;
+    // Conversion
+    _MHD_ inline       ValueType & _asValue ()       { return _values; }
+    _MHD_ inline const ValueType & _asValue () const { return _values; }
+
+protected:
+    ValueType _values;
 
     template <class... Y>  friend struct Tuple;
-    template <class TUPLE> friend struct _tuple::Helper;
+    template <class... Y> friend struct _tuple::HelperCat;
 };
+
+
+// Empty tuple
+template <>
+struct Tuple<>: TupleBase
+{
+    /// Static types and values ////////////////////////////////////////
+
+    using ParentType = TupleBase;
+    using ThisType   = Tuple<>;
+    using ValueType  = _tuple::Values<>;
+    static constexpr size_t Length = 0;
+
+    ////////////////////////////////////////////////////////////////////
+
+    using AsNoRef       = ThisType;
+    using AsNoConst     = ThisType;
+    using AsNoConstRef  = ThisType;
+    using AsRef         = ThisType;
+    using AsConstRef    = ThisType;
+    using AsRValueRef   = ThisType;
+
+    _MHD_ inline       ThisType & asRef()            { return *this; }
+    _MHD_ inline const ThisType & asConstRef() const { return *this; }
+
+    /// Constexpr methods ///////////////////////////////////////////////
+
+    _MHD_ constexpr size_t     length()    const { return Length; }
+
+    // template <class I, class... M>  _MHD_ constexpr InsertFrom<ThisType,I,M...>    insertFrom(I, M...) const { return InsertFrom<ThisType,I,M...>(); }
+    // template <class... M>           _MHD_ constexpr PrependFrom<ThisType,M...>     prependFrom(M...)   const { return PrependFrom<ThisType,M...>(); }
+    // template <class... M>           _MHD_ constexpr AppendFrom<ThisType,M...>      appendFrom(M...)    const { return AppendFrom<ThisType,M...>(); }
+
+    // template <class I, class... M>  _MHD_ constexpr Insert<ThisType,I,M...>        insert(I, M...)     const { return Insert<ThisType,I,M...>(); }
+    // template <class... M>           _MHD_ constexpr Prepend<ThisType,M...>         prepend(M...)       const { return Prepend<ThisType,M...>(); }
+    // template <class... M>           _MHD_ constexpr Append<ThisType,M...>          append(M...)        const { return Append<ThisType,M...>(); }
+    // template <class... M>           _MHD_ constexpr Extend<ThisType,M...>          extend(M...)        const { return Extend<ThisType,M...>(); }
+
+    /// Constructors ///////////////////////////////////////////////////
+
+    constexpr Tuple():                  ParentType() {}
+    constexpr Tuple(const ThisType &):  ParentType() {}
+
+protected:
+    // Copy to value
+    _MHD_ constexpr ValueType _asValue () const { return ValueType(); }
+
+    /// Friends ////////////////////////////////////////////////////////
+    template <class... Y> friend struct Tuple;
+    template <class... Y> friend struct _tuple::HelperCat;
+};
+
+
+/// ---------------------------------------------------------------- ///
+///     Tuple helpers                                                ///
+/// ---------------------------------------------------------------- ///
+
+template <class... X>
+_MHD_ inline
+Tuple<X...> tuple(const X &... x) {
+    return Tuple<X...>(x...);
+}
+
+_MHD_ constexpr
+Tuple<> tuple()  {
+    return Tuple<>();
+}
+
+namespace tuple {
+
+template <class... X>
+_MHD_ inline
+Cat<X...> cat(X&&... x) {
+    return _tuple::HelperCat<X...>::cat(std::forward<X>(x)...);
+}
+
+template <class... X>
+_MHD_ inline
+typename Cat<X...>::AsRef view(X&... x) {
+    return _tuple::HelperCat<X...>::view(x...);
+}
+
+template <class... X>
+_MHD_ inline
+typename Cat<X...>::AsRefConst view(const X&... x) {
+    return _tuple::HelperCat<X...>::view(x...);
+}
+
+} // namespace tuple
+
 
 /// ---------------------------------------------------------------- ///
 ///     Helper for recurive tuple construction (impl)                ///
@@ -558,257 +543,452 @@ protected:
 
 namespace _tuple {
 
-    //// Tuple of Values ///////////////////////////////////////////////
+    /// Cat ////////////////////////////////////////////////////////////
 
-    template <class X0, class Y0, class... Y>
-    struct Helper<Tuple<X0, Y0, Y...>>
-    {
-        using ThisType   = Tuple<X0, Y0, Y...>;
-        using ParentType = DelLast<ThisType>;
-        using FirstItem  = GetFirstValue<ThisType>;
-        using LastItem   = GetLastValue <ThisType>;
+    template <class... X>
+    struct HelperCat {};
 
-        _MHD_ static inline
-        const LastItem & getLastValue(const X0 & x0, const Y0 & y0, const Y &... y)
+    template <>
+    struct HelperCat<> {
+        using ReturnType        = Tuple<>;
+        using ReturnView        = Tuple<>;
+        using ReturnViewConst   = Tuple<>;
+        _MHD_ static constexpr Tuple<> cat()     { return Tuple<>(); }
+        _MHD_ static constexpr Tuple<> catview() { return Tuple<>(); }
+    };
+
+    template <class X>
+    struct HelperCat<X> {
+        using ReturnType      = X;
+        using ReturnView      = X&;
+        using ReturnViewConst = const X&;
+
+        _MHD_ static inline       X &  view(      X&  x) { return x; }
+        _MHD_ static inline const X &  view(const X&  x) { return x; }
+        _MHD_ static inline       X    cat (const X&  x) { return x; }
+        _MHD_ static inline       X && cat (      X&& x) { return std::move(x); }
+    };
+
+    template <class X, class Y>
+    struct HelperCat<X, Y> {
+        using ReturnType      = Cat<X, Y>;
+        using ReturnView      = typename ReturnType::AsView;
+        using ReturnViewConst = typename ReturnType::AsViewConst;
+
+        template <class X0, class Y0>
+        _MHD_ static inline ReturnType cat(X0&& x, Y0&& y)
         {
-            using NextHelper = Helper<DelFirst<ThisType>>;
-            return NextHelper::getLastValue(y0, y...);
+            return tuple::cat(
+                std::forward<X0>(x).getFirst(),
+                tuple::cat(
+                    std::forward<X0>(x).getLast(SizeT<X::Length-1>()),
+                    std::forward<Y0>(y)
+                )
+            );
         }
 
-        _MHD_ static inline
-        LastItem && getLastValue(const X0 && x0, Y0 && y0, Y &&... y)
+        _MHD_ static inline ReturnView view(X& x, Y& y)
         {
-            using NextHelper = Helper<DelFirst<ThisType>>;
-            LastItem && last = NextHelper::getLastValue(std::move(y0), std::move(y)...);
-            return std::move(last);
+            return tuple::view(
+                x.getFirst(),
+                tuple::view(x.getLast(SizeT<X::Length-1>()), y)
+            );
         }
 
-        _MHD_ static inline
-        const LastItem & getLastValue(const X0 & x0, const Tuple<Y0, Y...> & y)
+        _MHD_ static inline ReturnViewConst view(const X& x, const Y& y)
         {
-            return y.getLastValue();
-        }
-
-        _MHD_ static inline
-        LastItem && getLastValue(const X0 && x0, Tuple<Y0, Y...> && y)
-        {
-            return std::move(y.getLastValue());
-        }
-
-        _MHD_ static inline
-        ParentType getFirstValues(const X0 & x0, const Y0 & y0, const Y &... y)
-        {
-            using NextType = DelFirst<ThisType>;
-            return ParentType(x0, _tuple::asParentRef(NextType(y0, y...)));
-        }
-
-        _MHD_ static inline
-        ParentType getFirstValues(X0 && x0, Y0 && y0, Y &&... y)
-        {
-            using NextType = DelFirst<ThisType>;
-            return ParentType(std::move(x0), std::move(_tuple::asParentRef(NextType(y0, y...))));
-        }
-
-        _MHD_ static inline
-        ParentType getFirstValues(const X0 & x0, const Tuple<Y0, Y...> & y)
-        {
-            return ParentType(x0, _tuple::asParentRef(y));
-        }
-
-        _MHD_ static inline
-        ParentType getFirstValues(X0 && x0, Tuple<Y0, Y...> && y)
-        {
-            return ParentType(std::move(x0), std::move(_tuple::asParentRef(y)));
+            return tuple::view(
+                x.getFirst(),
+                tuple::view(x.getLast(SizeT<X::Length-1>()), y)
+            );
         }
     };
 
-    template <class X0>
-    struct Helper<Tuple<X0>>
-    {
-        using ThisType   = Tuple<X0>;
-        using ParentType = Tuple<>;
-        using FirstItem  = X0;
-        using LastItem   = X0;
+    template <class X, class Y>
+    struct HelperCat<Tuple<X>, Y> {
+        using ReturnType      = Cat<Tuple<X>, Y>;
+        using ReturnView      = typename ReturnType::AsView;
+        using ReturnViewConst = typename ReturnType::AsViewConst;
 
-        _MHD_ static inline
-        const LastItem & getLastValue(const X0 & x0)
+        template <class X0, class Y0>
+        _MHD_ static inline ReturnType cat(Tuple<X0>&& x, Y0&& y)
         {
-            return x0;
+            return ReturnType(
+                std::forward<X0>(x).getFirstValue(),
+                std::forward<Y0>(y)._asValue()
+            );
         }
 
-        _MHD_ static inline
-        LastItem && getLastValue(X0 && x0)
+        _MHD_ static inline ReturnView view(Tuple<X>& x, Y& y)
         {
-            return std::move(x0);
+            return ReturnView(
+                x.getFirstValue(),
+                y.asRef()._asValue()
+            );
         }
 
-        _MHD_ static inline
-        const LastItem & getLastValue(const X0 & x0, const Tuple<> & y)
+        _MHD_ static inline ReturnViewConst view(const Tuple<X>& x, const Y& y)
         {
-            return x0;
-        }
-
-        _MHD_ static constexpr
-        ParentType getFirstValues(const X0 & x0)
-        {
-            return ParentType();
-        }
-
-        _MHD_ static constexpr
-        ParentType getFirstValues(const X0 && x0)
-        {
-            return ParentType();
-        }
-
-        _MHD_ static inline
-        LastItem && getLastValue(X0 && x0, const Tuple<> && y)
-        {
-            return std::move(x0);
-        }
-
-        _MHD_ static constexpr
-        ParentType getFirstValues(const X0 & x0, const Tuple<> & y)
-        {
-            return ParentType();
-        }
-
-        _MHD_ static constexpr
-        ParentType getFirstValues(const X0 && x0, const Tuple<> && y)
-        {
-            return ParentType();
+            return ReturnView(
+                x.getFirstValue(),
+                y.asConstRef()._asValue()
+            );
         }
     };
 
-    //// Tuple of References ///////////////////////////////////////////
 
-    template <class X0, class Y0, class... Y>
-    struct Helper<Tuple<X0&, Y0&, Y&...>>
-    {
-        using ThisType   = Tuple<X0&, Y0&, Y&...>;
-        using ParentType = DelLast<ThisType>;
-        using FirstItem  = RemovePtr<GetFirstValue<ThisType>>;
-        using LastItem   = RemovePtr<GetLastValue <ThisType>>;
+    template <class Y>
+    struct HelperCat<Tuple<>, Y> {
+        using ReturnType      = Y;
+        using ReturnView      = Y &;
+        using ReturnViewConst = const Y &;
 
-        _MHD_ static inline
-        const LastItem & getLastValue(X0 & x0, Y0 & y0, Y &... y)
+        template <class X0, class Y0>
+        _MHD_ static inline ReturnType cat(Tuple<X0>&& x, Y0&& y)
         {
-            using NextHelper = Helper<DelFirst<ThisType>>;
-            return NextHelper::getLastValue(y0, y...);
+            return y;
         }
 
-        _MHD_ static inline
-        LastItem && getLastValue(const X0 && x0, Y0 && y0, Y &&... y)
+        _MHD_ static inline ReturnView view(Tuple<> x, Y& y)
         {
-            using NextHelper = Helper<DelFirst<ThisType>>;
-            LastItem && last = NextHelper::getLastValue(std::move(y0), std::move(y)...);
-            return std::move(last);
+            return y;
         }
 
-        _MHD_ static inline
-        LastItem & getLastValue(const X0 & x0, Tuple<Y0&, Y&...> & y)
+        _MHD_ static inline ReturnViewConst view(Tuple<> x, const Y& y)
         {
-            return y.getLastValue();
-        }
-
-        _MHD_ static inline
-        const LastItem & getLastValue(const X0 & x0, const Tuple<Y0&, Y&...> & y)
-        {
-            return y.getLastValue();
-        }
-
-        _MHD_ static inline
-        LastItem && getLastValue(const X0 && x0, Tuple<Y0&, Y&...> && y)
-        {
-            return std::move(y.getLastValue());
-        }
-
-        _MHD_ static inline
-        ParentType getFirstValues(X0 & x0, Y0 & y0, Y &... y)
-        {
-            using NextType = DelFirst<ThisType>;
-            return ParentType(x0, _tuple::asParentRef(NextType(y0, y...)));
-        }
-
-        _MHD_ static inline
-        ParentType getFirstValues(X0 && x0, Y0 && y0, Y &&... y)
-        {
-            using NextType = DelFirst<ThisType>;
-            return ParentType(std::move(x0), std::move(_tuple::asParentRef(NextType(y0, y...))));
-        }
-
-        _MHD_ static inline
-        ParentType getFirstValues(X0 & x0, Tuple<Y0&, Y&...> & y)
-        {
-            return ParentType(x0, _tuple::asParentRef(y));
-        }
-
-        _MHD_ static inline
-        ParentType getFirstValues(X0 & x0, const Tuple<Y0&, Y&...> & y)
-        {
-            return ParentType(x0, _tuple::asParentRef(y));
-        }
-
-        _MHD_ static inline
-        ParentType getFirstValues(X0 && x0, Tuple<Y0&, Y&...> && y)
-        {
-            return ParentType(std::move(x0), std::move(_tuple::asParentRef(y)));
+            return y;
         }
     };
 
-    template <class X0>
-    struct Helper<Tuple<X0&>>
+    template <class X, class Y, class... Z>
+    struct HelperCat<X, Y, Z...> {
+        using ReturnType      = Cat<X, Y, Z...>;
+        using ReturnView      = typename ReturnType::AsView;
+        using ReturnViewConst = typename ReturnType::AsViewConst;
+
+        template <class X0, class Y0, class... Z0>
+        _MHD_ static inline ReturnType cat(X0&& x, Y0&& y, Z0&&... z)
+        {
+            return tuple::cat(
+                tuple::cat(std::forward<X0>(x), std::forward<Y0>(y)),
+                std::forward<Z0>(z)...
+            );
+        }
+
+        _MHD_ static inline ReturnView view(X& x, Y& y, Z&... z)
+        { return tuple::view(tuple::view(x, y), z...); }
+
+        _MHD_ static inline ReturnViewConst view(const X& x, const Y& y, const Z&... z)
+        { return tuple::view(tuple::view(x, y), z...); }
+    };
+
+    /// At /////////////////////////////////////////////////////////////
+
+    template <class VALUES, class I,
+              ptrdiff_t Idx = WrapIndex<SizeT<VALUES::Length>, I>::Value>
+    struct HelperAt {
+        using Index     = WrapIndex<SizeT<VALUES::Length>, I>;
+        using NextType  = LikeFrom<Values<>, DelFirst<typename VALUES::AsPack>>;
+        using ValueType = typename VALUES::template At<Index>;
+
+        _MHD_ static inline ValueType & at(VALUES & t)
+        {
+            using  NextIndex  = PtrDiff<Index::Value-1>;
+            using  NextHelper = HelperAt<NextType, NextIndex>;
+            return NextHelper::at(t.NextValues);
+        }
+
+        _MHD_ static inline const ValueType & at(const VALUES & t)
+        {
+            using  NextIndex  = PtrDiff<Index::Value-1>;
+            using  NextHelper = HelperAt<NextType, NextIndex>;
+            return NextHelper::at(t.NextValues);
+        }
+    };
+
+    template <class VALUES, class I>
+    struct HelperAt<VALUES,I,0> {
+        using NextType  = LikeFrom<Values<>, DelFirst<typename VALUES::AsPack>>;
+        using ValueType = typename VALUES::template At<I>;
+
+        _MHD_ static inline ValueType & at(VALUES & t)
+        {
+            return *reinterpret_cast<ValueType *>(&t);
+        }
+
+        _MHD_ static inline const ValueType & at(const VALUES & t)
+        {
+            return *reinterpret_cast<const ValueType *>(&t);
+        }
+    };
+
+    /// Values /////////////////////////////////////////////////////////
+
+} // namespace _tuple
+
+template <class Y, class... X>
+struct _LikeFrom<_tuple::Values<X...>, Y>
+{
+    using Type = LikeFrom<_tuple::Values<>, Y>;
+};
+
+template <class... X>
+struct _LikeFrom<_tuple::Values<>, Pack<X...>>
+{
+    using Type = _tuple::Values<X...>;
+};
+
+namespace _tuple {
+
+    template <class X>
+    struct Values<X> {
+        using ThisType = Values<X>;
+        using NextType = Values<>;
+        using AsPack   = Pack<X>;
+        using AsTuple  = Tuple<X>;
+        static constexpr size_t Length = 1;
+
+        template <class I>
+        using At = LikeFrom<Values<>, Get<Pack<X>, I>>;
+
+        // From values
+        template <class Y0, class...Y>
+        Values(Y0&& y0, Y&&... y):   FirstValue(std::forward<Y0>(y0))    {}
+
+        // Copy
+        Values(const ThisType &  x): FirstValue(x.FirstValue)            {}
+        Values(      ThisType &  x): FirstValue(x.FirstValue)            {}
+        Values(const ThisType && x): FirstValue(x.FirstValue)            {}
+        Values(      ThisType && x): FirstValue(std::move(x).FirstValue) {}
+
+        _MHD_ inline ThisType & operator=(const ThisType & x)
+        {
+            FirstValue = x.FirstValue;
+            return *this;
+        }
+
+        _MHD_ inline ThisType & operator=(ThisType && x)
+        {
+            FirstValue = std::move(x.FirstValue);
+            return *this;
+        }
+
+        template <class I>
+        _MHD_ At<I> & at(I) {
+            // NOTE that this function is sometimes called with I == 1
+            // (in which case, At<I> == Values<>). When this happens,
+            // we return a reference to ourselves, but disguise it
+            // as an empty Values<>. This is definitely not good practice
+            // but a hack that I keep for now to get things working.
+            //
+            // FIXME Tuple.tail(N) should use a helper so that
+            // a constexpr Tuple<> is returns when N == 0, and a reference
+            // is returned otherwise. In this case, only the case N > 1
+            // will call Values.at(I), and we won't have this issue anymore.
+            return *reinterpret_cast<At<I>*>(this);
+        }
+
+        template <class I>
+        _MHD_ const At<I> & at(I) const {
+            // Same comment as before.
+            return *reinterpret_cast<const At<I>*>(this);
+        }
+
+        X FirstValue;
+    };
+
+    template <class X0, class X1, class... X>
+    struct Values<X0, X1, X...> {
+        using ThisType = Values<X0, X1, X...>;
+        using NextType = Values<X1, X...>;
+        using AsPack   = Pack<X0, X1, X...>;
+        using AsTuple  = Tuple<X0, X1, X...>;
+        static constexpr size_t Length = Pack<X0, X1, X...>::Length;
+
+        template <class I>
+        using At = LikeFrom<Values<>, Get<Pack<X0, X1, X...>, I>>;
+
+        // From values
+        template <class Y0, class...Y>
+        Values(Y0&& y0, Y&&... y):   FirstValue(std::forward<Y0>(y0)),    NextValues(std::forward<Y>(y)...)   {}
+
+        // Copy
+        Values(const ThisType &  x): FirstValue(x.FirstValue),            NextValues(x.NextValues)            {}
+        Values(      ThisType &  x): FirstValue(x.FirstValue),            NextValues(x.NextValues)            {}
+        Values(const ThisType && x): FirstValue(x.FirstValue),            NextValues(x.NextValues)            {}
+        Values(      ThisType && x): FirstValue(std::move(x).FirstValue), NextValues(std::move(x).NextValues) {}
+
+        _MHD_ inline ThisType & operator=(const ThisType & x)
+        {
+            FirstValue = x.FirstValue;
+            NextValues = x.NextValues;
+            return *this;
+        }
+
+        _MHD_ inline ThisType & operator=(ThisType && x)
+        {
+            FirstValue = std::move(x.FirstValue);
+            NextValues = std::move(x.NextValues);
+            return *this;
+        }
+
+        template <class I>
+        _MHD_ At<I> & at(I) {
+            static_assert(WrapIndex<SizeT<Length>,I>::Value < Length, "");
+            using  Index = WrapIndex<SizeT<Length>,I>;
+            return HelperAt<ThisType,Index>::at(*this);
+        }
+
+        template <class I>
+        _MHD_ const At<I> & at(I) const {
+            static_assert(WrapIndex<SizeT<Length>,I>::Value < Length, "");
+            using  Index = WrapIndex<SizeT<Length>,I>;
+            return HelperAt<ThisType,Index>::at(*this);
+        }
+
+        X0       FirstValue;
+        NextType NextValues;
+    };
+
+    /// Get ////////////////////////////////////////////////////////////
+
+    // _HelperGet only accepts wrapped indices
+    template <class TUPLE, class InputIndex>
+    struct _HelperGet {};
+
+    // Many indices -> build tuple of references
+    template <class TUPLE, ptrdiff_t I0, ptrdiff_t I1, ptrdiff_t... I>
+    struct _HelperGet<TUPLE, PtrDiff<I0, I1, I...>>
     {
-        using ThisType   = Tuple<X0&>;
-        using ParentType = Tuple<>;
-        using FirstItem  = X0;
-        using LastItem   = X0;
+        using Index            = PtrDiff<I0, I1, I...>;
+        using ReturnType       = typename meta::Get<TUPLE,Index>::AsRef;
+        using ReturnTypeConst  = typename meta::Get<TUPLE,Index>::AsConstRef;
 
-        _MHD_ static inline
-        LastItem & getLastValue(X0 & x0)
-        {
-            return x0;
+        _MHD_ static inline ReturnType get(TUPLE & t) {
+            auto first = &t.getValue(PtrDiff<I0>());
+            auto other = Get<TUPLE,PtrDiff<I1, I...>>::getValueAsRef(t);
+            return ReturnType(*first, other);
         }
 
-        _MHD_ static inline
-        LastItem && getLastValue(X0 && x0)
-        {
-            return std::move(x0);
+        _MHD_ static inline ReturnTypeConst get(const TUPLE & t) {
+            auto first = &t.getValue(PtrDiff<I0>());
+            auto other = Get<TUPLE,PtrDiff<I1, I...>>::getValueAsRef(t);
+            return ReturnTypeConst(*first, other);
         }
 
-        _MHD_ static inline
-        LastItem & getLastValue(X0 & x0, const Tuple<> & y)
-        {
-            return x0;
+        // Aliases for recursive calls
+
+        _MHD_ static inline ReturnType getValueAsRef(TUPLE & t) {
+            return get(t);
         }
 
-        _MHD_ static inline
-        LastItem && getLastValue(X0 && x0, const Tuple<> && y)
+        _MHD_ static inline ReturnTypeConst getValueAsRef(const TUPLE & t) {
+            return get(t);
+        }
+    };
+
+    // Single index -> can point to the original tuple
+    template <class TUPLE, ptrdiff_t I>
+    struct _HelperGet<TUPLE, PtrDiff<I>>
+    {
+        using Index             = PtrDiff<I>;
+        using ReturnItem        = Get<TUPLE, Index>;
+        using ReturnType        = ReturnItem &;
+        using ReturnTypeConst   = const ReturnItem &;
+
+        _MHD_ static inline ReturnType get(TUPLE & t)
         {
-            return std::move(x0);
+            auto v = &t.getValue(Index());
+            return *reinterpret_cast<ReturnItem *>(v);
         }
 
-        _MHD_ static constexpr
-        ParentType getFirstValues(X0 & x0)
+        _MHD_ static inline ReturnTypeConst get(const TUPLE & t)
         {
-            return ParentType();
+            auto v = &t.getValue(Index());
+            return *reinterpret_cast<const ReturnItem *>(v);
         }
 
-        _MHD_ static constexpr
-        ParentType getFirstValues(X0 && x0)
-        {
-            return ParentType();
+        // Versions that return a tuple of pointers,
+        // used when recursively constucting a tuple of pointers.
+
+        using ReturnItemAsRef       = typename ReturnItem::AsRef;
+        using ReturnTypeAsRef       = ReturnItemAsRef &;
+        using ReturnTypeConstAsRef  = const ReturnItemAsRef &;
+
+        _MHD_ static inline ReturnTypeAsRef getAsRef(TUPLE & t) {
+            return ReturnTypeAsRef(t.getValue(PtrDiff<I>()));
         }
 
-        _MHD_ static constexpr
-        ParentType getFirstValues(X0 & x0, const Tuple<> & y)
-        {
-            return ParentType();
+        _MHD_ static inline ReturnTypeConstAsRef getasRef(const TUPLE & t) {
+            return ReturnTypeConstAsRef(t.getValue(PtrDiff<I>()));
         }
 
-        _MHD_ static constexpr
-        ParentType _getFirstValues(const X0 && x0, const Tuple<> && y)
+    };
+
+    // General case -> wrap indices and delegate to _HelperGet
+    template <class TUPLE, class I>
+    struct HelperGet
+    {
+        using Index           = I;
+        using WrappedIndex    = WrapIndex<Length<TUPLE>, Index>;
+        using Helper          = _HelperGet<TUPLE,WrappedIndex>;
+        using ReturnType      = typename Helper::ReturnType;
+        using ReturnTypeConst = typename Helper::ReturnTypeConst;
+
+        _MHD_ static inline ReturnType get(TUPLE & t)
         {
-            return ParentType();
+            return Helper::get(t);
+        }
+
+        _MHD_ static inline ReturnTypeConst get(const TUPLE & t)
+        {
+            return Helper::get(t);
+        }
+    };
+
+    // Slice -> can point to the original tuple
+    template <class TUPLE, ptrdiff_t Start, ptrdiff_t Stop>
+    struct HelperGet<TUPLE, SimpleSlice<Start, Stop>>
+    {
+        using Index             = SimpleSlice<Start, Stop>;
+        using ReturnItem        = Get<TUPLE, Index>;
+        using ReturnType        = ReturnItem &;
+        using ReturnTypeConst   = const ReturnItem &;
+        using FirstIndex        = GetFirst<WrapIndex<Length<TUPLE>, Index>>;
+
+        _MHD_ static inline ReturnType get(TUPLE & t)
+        {
+            auto v = &t.getValue(FirstIndex());
+            return *reinterpret_cast<ReturnItem *>(v);
+        }
+
+        _MHD_ static inline ReturnTypeConst get(const TUPLE & t)
+        {
+            auto v = &t.getValue(FirstIndex());
+            return *reinterpret_cast<const ReturnItem *>(v);
+        }
+    };
+
+    // Slice -> can point to the original tuple
+    template <class TUPLE, class Start, class Stop>
+    struct HelperGet<TUPLE, Slice<Start, Stop>>
+    {
+        using Index             = Slice<Start, Stop>;
+        using ReturnItem        = Get<TUPLE, Index>;
+        using ReturnType        = ReturnItem &;
+        using ReturnTypeConst   = const ReturnItem &;
+        using FirstIndex        = GetFirst<WrapIndex<Length<TUPLE>, Index>>;
+
+        _MHD_ static inline ReturnType get(TUPLE & t)
+        {
+            auto v = &t.getValue(FirstIndex());
+            return *reinterpret_cast<ReturnItem *>(v);
+        }
+
+        _MHD_ static inline ReturnTypeConst get(const TUPLE & t)
+        {
+            auto v = &t.getValue(FirstIndex());
+            return *reinterpret_cast<const ReturnItem *>(v);
         }
     };
 
