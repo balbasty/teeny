@@ -1,2 +1,3 @@
-# miniten
-A tiny static tensor library
+# teeny
+
+A teeny-tiny tensor library that works on host _and_ device.
