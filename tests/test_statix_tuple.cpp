@@ -5,10 +5,6 @@
 
 using namespace tny::statix;
 
-using cuda::std::tuple;
-// template <class... T>
-// using tuple = cuda::std::tuple<T...>;
-
 int main()
 {
     using X = tuple<int, float, bool>;
