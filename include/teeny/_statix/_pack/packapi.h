@@ -68,13 +68,6 @@ template <class... X>               struct _apply_remove_cvref          <pack<X.
 template <class... X>               struct _apply_decay                 <pack<X...>> { using type = _pack::apply<pack<X...>, _pack::apply_fn<12>>; };
 template <class... X>               struct _apply_sizeof                <pack<X...>> { using type = _pack::apply_sizeof<pack<X...>>; };
 
-// tuple
-template <class... X>               struct _is_tuple     <cuda::std::tuple<X...>>      { using type = ctrue; };
-template <class... X>               struct _as_pack      <cuda::std::tuple<X...>>      { using type = pack<X...>; };
-template <class... X>               struct _as_tuple     <pack<X...>>                  { using type = cuda::std::tuple<X...>; };
-template <class... X>               struct _empty_like   <cuda::std::tuple<X...>>      { using type = cuda::std::tuple<>; };
-template <class M, class... X>      struct _like_from    <cuda::std::tuple<X...>, M>   { using type = as_tuple<M>; };
-
 /* --- reversed ----------------------------------------------------- */
 
 template <class X0, class... X>

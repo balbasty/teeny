@@ -17,7 +17,7 @@
  ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** ** **/
 #ifndef TNY__STATIX__PACK_DECL
 #define TNY__STATIX__PACK_DECL
-#include <teeny/_core/defines.h>
+#include <teeny/core.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
 _TNY_NAMESPACE_BEGIN(statix)
@@ -44,7 +44,7 @@ template <class T> using type = pack<T>;
  *     Repeat                                                         *
  * ------------------------------------------------------------------ */
 
-template <long N, class T> struct _npack;
+template <size_t N, class T> struct _npack;
 
 /**
  * @brief Create a Pack of N times the same type.
@@ -54,7 +54,7 @@ template <long N, class T> struct _npack;
  * @tparam N    Number of repetitions
  * @tparam T... Type to repeat
  */
-template <long N, class T>
+template <size_t N, class T>
 using npack = typename _npack<N,T>::type;
 
 _TNY_NAMESPACE_END(statix)

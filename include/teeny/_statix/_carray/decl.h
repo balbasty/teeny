@@ -48,8 +48,7 @@ using crepeat = typename _crepeat<N, T, Val>::type;
  *     crange                                                         *
  * ------------------------------------------------------------------ */
 
-template <ptrdiff_t Stop, ptrdiff_t Start = 0, ptrdiff_t Step = 1,
-          bool IsEmpty = (Step > 0 ? Start >= Stop : Start <= Stop)>
+template <ptrdiff_t Stop, ptrdiff_t Start = 0, ptrdiff_t Step = 1>
 struct _crange;
 
 template <ptrdiff_t Stop, ptrdiff_t Start = 0, ptrdiff_t Step = 1>

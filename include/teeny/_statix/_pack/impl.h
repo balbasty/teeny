@@ -33,7 +33,7 @@ struct pack<X>: public pack_base {
  *     Repeat                                                         *
  * ------------------------------------------------------------------ */
 
-template <long N, class T>
+template <size_t N, class T>
 struct _npack {
     using type = append<npack<N-1, T>, T>;
 };

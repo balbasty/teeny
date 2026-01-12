@@ -1,140 +1,124 @@
-#ifndef MINITEN_XARRAY_H
-#define MINITEN_XARRAY_H
+#ifndef TNY__XARRAY_IMPL
+#define TNY__XARRAY_IMPL
 #include <cuda/std/tuple>
-#include <miniten/core.h>
+#include <cuda/std/type_traits>
+#include <teeny/core.h>
+#include <teeny/statix.h>
+#include <teeny/_xarray/decl.h>
 
-NAMESPACE_BEGIN(miniten)
+_TNY_NAMESPACE_BEGIN(tny)
 
 using cuda::std::tuple;
-using cuda::std::tuple_size_v;
+using cuda::std::tuple_size;
 using cuda::std::tuple_element;
+using cuda::std::conditional_t;
+using cuda::std::is_same;
 
 
-NAMESPACE_BEGIN(_xarray)
+template <size_t>
+struct xarray_numel: public statix::csize<size_t> {};
 
-template <
-    class XArray, class Index,
-    class StaticValue = typename tuple_element<Index::Value, typename XArray::static_values>::type
->
-struct access {
-    using typename XArray::base_type;
-    using typename XArray::value_type;
-    using const_return_type = value_type;
-    using return_type       = value_type;
 
-    static value_type at(const XArray & x, const Index & index) {
-        return static_cast<value_type>(StaticValue::value);
-    }
+template <class T, class values>
+struct _xarray_tuple;
 
-    static value_type bracket(const XArray & x, const Index & index) {
-        return static_cast<value_type>(StaticValue::value);
-    }
+template <class T, class values>
+using xarray_tuple = typename _xarray_tuple<T, values>::type;
+
+template <class T, class values>
+struct _xarray_tuple {
+    using type = xarray_tuple<T, statix::as_tuple<values>>;
 };
 
-template <class XArray, class Index, class StaticValue>
-struct access<XArray, Index, None> {
-    using typename XArray::base_type;
-    using typename XArray::const_reference;
-    using const_return_type = const_reference;
-    using return_type       = reference;
-
-    static const_reference at(const XArray & x, const Index & index) {
-        return x.base_type::at(index);
-    }
-
-    static reference at(XArray & x, const Index & index) {
-        return x.base_type::at(index);
-    }
-
-    static const_reference bracket(const XArray & x, const Index & index) {
-        return x.base_type::operator[](index);
-    }
-
-    static reference bracket(XArray & x, const Index & index) {
-        return x.base_type::operator[](index);
-    }
+template <class T, class X0, class... X>
+struct _xarray_tuple<T, tuple<X0, X...>> {
+    using type = statix::cat<
+        tuple<conditional_t<
+            is_same<X0, statix::cnone>::value,
+            T,
+            statix::as_carray<X0, T>
+        >>,
+        xarray_tuple<T, tuple<X...>>
+    >;
 };
 
-template <class XArray, class Index>
-using access_type = typename access<XArray, Index>::return_type;
+template <class T>
+struct _xarray_tuple<T, tuple<>> {
+    using type = tuple<>;
+};
 
-template <class XArray, class Index>
-using access_const_type = typename access<XArray, Index>::const_return_type;
+template <class T>
+struct xarray_base: public tuple<> {
+    using this_type  = xarray_base<T>;
+    using value_type = T;
+};
 
-NAMESPACE_END(_xarray)
-
-template <class ItemType, class StaticValues>
-struct xarray: public array<ItemType, tuple_size_v<StaticValues>> {
+template <class T, class values>
+struct xarray:
+    public xarray_tuple<T, values>,
+    public xarray_base<T>
+{
 public:
-    using this_type = xarray<ItemType, StaticValues>;
-    using base_type = array<ItemType, tuple_size_v<StaticValues>>;
-    using static_values = StaticValues;
-    using typename base_type::value_type;
-    using typename base_type::size_type;
-    using typename base_type::difference_type;
-    using typename base_type::reference;
-    using typename base_type::const_reference;
-    using typename base_type::pointer;
-    using typename base_type::const_pointer;
-    using static_front_type = typename tuple_element<0, StaticValues>::type;
-    using static_back_type  = typename tuple_element<
-        tuple_size_v<StaticValues>-1, StaticValues
-    >::type;
-    using front_type       = conditional_t<is_none_v<static_front_type>, value_type, reference>;
-    using front_type_const = conditional_t<is_none_v<static_front_type>, value_type, const_reference>;
-    >::type;
-    using back_type       = conditional_t<is_none_v<static_back_type>, value_type, reference>;
-    using back_type_const = conditional_t<is_none_v<static_back_type>, value_type, const_reference>;
+    using this_type  = xarray<T, values>;
+    using base_type  = xarray_base<T>;
+    using tuple_type = xarray_tuple<T, values>;
 
 private:
     template <class Index> access            = _xarray::access<this_type, Index>;
     template <class Index> access_type       = _xarray::access_type<this_type, Index>;
     template <class Index> access_const_type = _xarray::access_const_type<this_type, Index>;
 
+    using front_type       = statix::front<tuple_type>;
+    using front_type_const = statix::front<const tuple_type>;
+    using back_type        = statix::back<tuple_type>;
+    using back_type_const  = statix::back<const tuple_type>;
+
 public:
 
-    template <class Index> MINIDEF(H,D,I)
+    using tuple_type::size;
+
+    template <class Index> _TNYDEF(H,D,I)
     access_const_type<Index> at(const Index & index) const {
         return access<Index>::at(*this, index);
     }
 
-    template <class Index> MINIDEF(H,D,I)
+    template <class Index> _TNYDEF(H,D,I)
     access_type<Index> at(const Index & index) {
         return access<Index>::at(*this, index);
     }
 
-    template <class Index> MINIDEF(H,D,I)
+    template <class Index> _TNYDEF(H,D,I)
     access_const_type<Index> operator[](const Index & index) const {
         return access<Index>::bracket(*this, index);
     }
 
-    template <class Index> MINIDEF(H,D,I)
+    template <class Index> _TNYDEF(H,D,I)
     access_type<Index> operator[](const Index & index) {
         return access<Index>::bracket(*this, index);
     }
 
-    MINIDEF(H,D,I)
-    front_type_const front() const {
-        return at(SizeT<0>());
+    _TNYDEF(H,D,I)
+    auto front() const {
+        return at(csize<0>());
     }
 
-    MINIDEF(H,D,I)
-    front_type front() {
-        return at(SizeT<0>());
+    _TNYDEF(H,D,I)
+    auto front() {
+        return at(csize<0>());
     }
 
-    MINIDEF(H,D,I)
-    back_type_const back() const {
-        return at(SizeT<size()-1()>());
+    _TNYDEF(H,D,I)
+    auto back() const {
+        return at(csize<size()-1>());
     }
 
-    MINIDEF(H,D,I)
-    back_type back() {
-        return at(SizeT<size()-1()>());
+    _TNYDEF(H,D,I)
+    auto back() {
+        return at(csize<size()-1>());
     }
 
 };
 
-NAMESPACE_END(miniten)
+_TNY_NAMESPACE_END(tny)
 
-#endif // MINITEN_XARRAY_H
+#endif // TNY__XARRAY_IMPL
