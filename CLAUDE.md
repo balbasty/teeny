@@ -209,4 +209,12 @@ transforms, small SPD solves). Those kernels care about: arbitrary **batch**
 rank (shape `(*batch, *spatial, C)`, not a fixed number of batch dims), a small
 set of **spatial** ranks (1/2/3D) worth dispatching to specialized code, and
 configurable **boundary conditions** and **interpolation order**. Design teeny
-changes so those stay expressible and fast; see `examples/` for the idioms.
+changes so those stay expressible and fast.
+
+- **Idioms:** `examples/` — `pushpull_adjoint.cpp` is the flagship (pull+push).
+- **Reference numerics:** `examples/fastfields/{bounds,spline,pushpull}.hpp`
+  (the 8 boundary conditions + spline weight tables + separable gather/scatter,
+  transcribed from jitfields — domain code that lives outside teeny core).
+- **Full porting plan:** `docs/fastfields-port.md` — the dispatch architecture
+  (`(*batch,*spatial,C)` via `slices_front`/`dispatch_value`), the complete
+  boundary/order spec, kernel-by-kernel mechanics, and repo mapping.
