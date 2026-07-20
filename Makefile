@@ -33,24 +33,28 @@ test: verb.build.test \
 	test-statix \
 	test-xarray \
 	test-tensor \
+	test-md \
 	verb.build.test.done
 
 run-test: verb.run.test \
 	run-test-statix \
 	run-test-xarray \
 	run-test-tensor \
+	run-test-md \
 	verb.run.test.done
 
 clean-test: verb.clean.test \
 	clean-test-statix \
 	clean-test-xarray \
 	clean-test-tensor \
+	clean-test-md \
 	verb.clean.test.done
 
 .PHONY: all clean test run-test clean-test
 .PHONY: test-statix run-test-statix clean-test-statix
 .PHONY: test-xarray run-test-xarray clean-test-xarray
 .PHONY: test-tensor run-test-tensor clean-test-tensor
+.PHONY: test-md run-test-md clean-test-md
 
 ########################################################################
 # 	Test Targets
@@ -139,6 +143,29 @@ clean-test-tensor:
 	$(DEL) $(TESTS_TENSOR)
 
 ########################################################################
+
+TESTS_MD = \
+	$(BUILDDIR)/test_md_tensor \
+	$(BUILDDIR)/test_md_math
+
+test-md: verb.build.test.md \
+	$(TESTS_MD) \
+	verb.build.test.md.done
+
+run-test-md: verb.run.test.md \
+	run-test-md_tensor-run run-test-md_math-run \
+	verb.run.test.md.done
+
+run-test-md_tensor-run: $(BUILDDIR)/test_md_tensor
+	$(BUILDDIR)/test_md_tensor
+
+run-test-md_math-run: $(BUILDDIR)/test_md_math
+	$(BUILDDIR)/test_md_math
+
+clean-test-md:
+	$(DEL) $(TESTS_MD)
+
+########################################################################
 # 	Messages
 ########################################################################
 
@@ -189,6 +216,18 @@ verb.run.test.tensor:
 
 verb.run.test.tensor.done:
 	$(call verb, "Running tensor tests: Done.")
+
+verb.build.test.md:
+	$(call verb, "Building md tests...")
+
+verb.build.test.md.done:
+	$(call verb, "Building md tests: Done.")
+
+verb.run.test.md:
+	$(call verb, "Running md tests...")
+
+verb.run.test.md.done:
+	$(call verb, "Running md tests: Done.")
 
 verb.clean.test:
 	$(call verb, "Cleaning all tests...")

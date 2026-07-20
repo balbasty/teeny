@@ -96,6 +96,34 @@ with host runtime checks. `tests/test_tensor_distance_l1.cpp` ports the core of
 a real jitfields kernel and asserts bit-identical results against the original
 batching plumbing.
 
+## `tny::md` — the mdspan-based line (`teeny/md.h`)
+
+A second, lighter-weight take that builds on `cuda::std::mdspan` instead of the
+hand-rolled `statix` layer — mdspan already provides per-dimension static/dynamic
+extents, layouts, and sub-views on device, so this line only implements what it
+lacks. It is intended to eventually become all of teeny.
+
+```cpp
+using namespace tny::md; namespace cs = cuda::std;
+
+// one tensor class, ownership as a parameter (view / stack / heap):
+auto v = view(ptr, cs::extents<long,2,3,4>{});          // non-owning, kernel-passable
+auto m = local<double, cs::extents<long,3,3>>();        // stack-owned (static shape)
+auto h = owned<double, DynE>(DynE{2,3});                 // heap-owned (host, move-only)
+
+// valarray-like math:
+m.add_(other); m.mul_(2.0);                              // in-place, on any tensor/view
+auto c = a + b;   // out-of-place -- enabled ONLY when the result extent is static
+
+// the piece mdspan lacks: per-dimension compile-time (non-contiguous) strides
+auto s = view_strided<16,3,1>(ptr, cs::extents<long,cs::dynamic_extent,3,3>{n});
+```
+
+`view` / `stack` tensors are trivially copyable; a fully-static tensor is exactly
+the size of its data (the mapping sits in an empty base). Static-shape math folds
+to straight-line SIMD; per-dim static strides fold to immediates. Headers under
+`include/teeny/md/`; tests `tests/test_md_{tensor,math}.cpp`.
+
 ## Status
 
 `statix`, `xarray` (+ algebra + structural ops), and `tensor` are implemented
