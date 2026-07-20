@@ -43,7 +43,8 @@ EXAMPLES = \
 	$(BUILDDIR)/ex_pull_nd \
 	$(BUILDDIR)/ex_distance_transform \
 	$(BUILDDIR)/ex_cholesky_solve \
-	$(BUILDDIR)/ex_broadcast_affine
+	$(BUILDDIR)/ex_broadcast_affine \
+	$(BUILDDIR)/ex_pushpull_adjoint
 
 ########################################################################
 # 	Public Targets
