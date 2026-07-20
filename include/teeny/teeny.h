@@ -7,6 +7,7 @@
 // (from CCCL) does the extents, layouts, and offset mapping.
 
 #include <teeny/alias.h>
+#include <teeny/half.h>
 #include <teeny/storage.h>
 #include <teeny/layout.h>
 #include <teeny/tensor.h>

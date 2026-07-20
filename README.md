@@ -60,6 +60,7 @@ auto v3 = at.fixed<3>();  // dynamic-rank dispatch at the host boundary
 | Header | Contents |
 |---|---|
 | `teeny.h` | umbrella (everything except `cuda.h`) |
+| `half.h` | `half` (binary16) + `bfloat16` element types + `compute_type` |
 | `storage.h` | `own` modes + storage policies (`owning_storage<T,Alloc>`) |
 | `layout.h` | `layout_static_stride<S...>` — per-dim compile-time strides |
 | `tensor.h` | `tensor<T, Extents, Layout, own>` + `view`/`local`/`owned` + slicing / `take_along` / `permute` / `unsqueeze` |

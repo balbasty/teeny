@@ -5,6 +5,7 @@
 #include <cuda/std/limits>
 #include <cuda/std/cmath>
 #include <teeny/_core/defines.h>
+#include <teeny/half.h>
 #include <teeny/tensor.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
@@ -374,32 +375,39 @@ template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L
  *     Reductions                                                      *
  * ------------------------------------------------------------------ */
 
+// reductions accumulate in compute_type<T> (float for half types), then cast
+// back to T -- avoids catastrophic precision loss when summing many 16-bit values.
+
 /** @brief Sum of all elements (empty -> 0). */
 template <class T, class E, class L, own O>
 _TNY_API T sum(const tensor<T,E,L,O> & a) {
-    return _md::reduce_<T>(a, T(0), _md::r_add{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{});
+    using R = compute_type_t<T>;
+    return static_cast<T>(_md::reduce_<R>(a, R(0), _md::r_add{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
 }
 /** @brief Product of all elements (empty -> 1). */
 template <class T, class E, class L, own O>
 _TNY_API T prod(const tensor<T,E,L,O> & a) {
-    return _md::reduce_<T>(a, T(1), _md::r_mul{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{});
+    using R = compute_type_t<T>;
+    return static_cast<T>(_md::reduce_<R>(a, R(1), _md::r_mul{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
 }
 /** @brief Maximum element. Requires a non-empty tensor. */
 template <class T, class E, class L, own O>
 _TNY_API T max(const tensor<T,E,L,O> & a) {
-    return _md::reduce_<T>(a, cs::numeric_limits<T>::lowest(), _md::r_max{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{});
+    using R = compute_type_t<T>;
+    return static_cast<T>(_md::reduce_<R>(a, cs::numeric_limits<R>::lowest(), _md::r_max{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
 }
 /** @brief Minimum element. Requires a non-empty tensor. */
 template <class T, class E, class L, own O>
 _TNY_API T min(const tensor<T,E,L,O> & a) {
-    return _md::reduce_<T>(a, cs::numeric_limits<T>::max(), _md::r_min{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{});
+    using R = compute_type_t<T>;
+    return static_cast<T>(_md::reduce_<R>(a, cs::numeric_limits<R>::max(), _md::r_min{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
 }
 
-/** @brief Inner product over matching extents. */
+/** @brief Inner product over matching extents (accumulated in the compute type). */
 template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>
 _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
     static_assert(tensor<Ta,Ea,La,Oa>::rank() == tensor<Tb,Eb,Lb,Ob>::rank(), "dot: rank mismatch");
-    using R = cs::common_type_t<Ta,Tb>;
+    using R = compute_type_t<cs::common_type_t<Ta,Tb>>;
     return _md::zipreduce_<R>(a, b, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{});
 }
 

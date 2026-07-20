@@ -35,6 +35,7 @@ transforms, small linear algebra) compact and readable.
 include/teeny/
   _core/defines.h  macros: _TNY_API / _TNY_HOST, namespace open/close
   alias.h          pulls cs:: vocabulary into tny:: + Int<V>/Long<V>/... static ints + `all`
+  half.h           `half` (IEEE binary16) + `bfloat16` element types + compute_type
   storage.h        `own` enum + storage policies (owning_storage<T,Alloc>, cpp_alloc)
   layout.h         layout_static_stride<S...> — per-dim compile-time strides
   tensor.h         the tensor class + view/local/owned/view_t aliases + as_tensor
@@ -63,7 +64,9 @@ template <class T, class Extents, class Layout = layout_right, own O = own::view
 struct tensor;
 ```
 
-- **`T`** element type.
+- **`T`** element type. Any arithmetic type, plus teeny's `half` (IEEE binary16)
+  and `bfloat16` (`half.h`) — half-precision math computes/accumulates in `float`
+  (`compute_type<T>`) so reductions don't lose precision.
 - **`Extents`** = `cuda::std::extents<Idx, E0, E1, ...>`; each `Ei` is a compile-time
   size or `dynamic_extent`. Mix freely per dimension.
 - **`Layout`** = `layout_right` (default, C-order), `layout_left` (F-order),
