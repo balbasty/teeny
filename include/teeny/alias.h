@@ -9,6 +9,8 @@
 #include <cuda/std/array>
 #include <cuda/std/utility>
 #include <cuda/std/type_traits>
+#include <cuda/std/cstdint>
+#include <cuda/std/cstddef>
 #include <teeny/_core/defines.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
@@ -35,10 +37,26 @@ using cs::index_sequence;
 using cs::make_index_sequence;
 using cs::integral_constant;
 
-/** @brief A compile-time index value, e.g. `t(ic<1>, j, ic<3>)`. Converts
- *         implicitly to a runtime integral, and carries `::value`. */
-template <long V>
-using ic = cs::integral_constant<long, V>;
+/* ------------------------------------------------------------------ *
+ *     Static integral values (compile-time indices / extents)        *
+ *                                                                    *
+ *  cuda::std / std do not ship short names for integral_constant, so  *
+ *  teeny provides them. Each converts implicitly to a runtime         *
+ *  integral and carries `::value`, so it works as both a compile-time *
+ *  and a runtime value. Pass one where a tensor wants a static index   *
+ *  (e.g. `t(Int<1>(), j)`, `t.extent(Int<0>())`).                     *
+ * ------------------------------------------------------------------ */
+template <int            V> using Int    = cs::integral_constant<int, V>;
+template <long           V> using Long   = cs::integral_constant<long, V>;
+template <cs::size_t     V> using Size   = cs::integral_constant<cs::size_t, V>;
+template <unsigned       V> using Uint   = cs::integral_constant<unsigned, V>;
+template <cs::int32_t    V> using Int32  = cs::integral_constant<cs::int32_t, V>;
+template <cs::int64_t    V> using Int64  = cs::integral_constant<cs::int64_t, V>;
+template <cs::ptrdiff_t  V> using Diff   = cs::integral_constant<cs::ptrdiff_t, V>;
+template <bool           V> using Bool   = cs::integral_constant<bool, V>;
+
+/** @brief Alias of `Long`; a compile-time index value. */
+template <long V> using ic = cs::integral_constant<long, V>;
 
 /** @brief Keep-this-axis marker for slicing (an alias of `full_extent`). */
 constexpr cs::full_extent_t all{};

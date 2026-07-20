@@ -58,6 +58,17 @@ template <cs::size_t D, class L> struct _static_stride_at;
 template <cs::size_t D, cs::size_t... S>
 struct _static_stride_at<D, layout_static_stride<S...>> { static constexpr cs::size_t value = _nth_size<D, S...>::value; };
 
+// an "index" argument to operator() is a (static or runtime) integer; anything
+// else (all / rng, i.e. a slice specifier) turns operator() into a view.
+template <class T> struct _is_ic : cs::false_type {};
+template <class T, T V> struct _is_ic<cs::integral_constant<T,V>> : cs::true_type {};
+template <class A> struct _is_index
+    : cs::integral_constant<bool, cs::is_integral<A>::value || _is_ic<A>::value> {};
+
+/** @brief A half-open slice `[start, stop)` for `operator()` / `take_along`. */
+template <class A, class B>
+_TNY_API auto rng(A start, B stop) { return cs::tuple<long,long>{ static_cast<long>(start), static_cast<long>(stop) }; }
+
 /**
  * @brief One N-dimensional tensor, parameterised by ownership.
  *
@@ -115,26 +126,31 @@ struct tensor : private Layout::template mapping<Extents> {
     static constexpr cs::size_t rank() noexcept { return Extents::rank(); }
     _TNY_API constexpr const mapping_type & mapping() const noexcept { return *this; }
     _TNY_API constexpr const Extents & extents() const noexcept { return mapping_type::extents(); }
-    _TNY_API constexpr index_type extent(cs::size_t r) const noexcept { return mapping_type::extents().extent(r); }
-    _TNY_API constexpr index_type stride(cs::size_t r) const noexcept { return mapping_type::stride(r); }
-
     static constexpr bool has_static_strides   = _static_strides<Layout>::value;
     static constexpr bool is_contiguous_layout = _contiguous_layout<Layout>::value;
 
-    /** @brief Extent of axis `D`: a compile-time `integral_constant` when the
-     *         extent is static, otherwise a runtime `index_type`. */
-    template <cs::size_t D>
-    _TNY_API constexpr auto extent() const noexcept {
+    /** @brief Extent of an axis given by a STATIC index (`extent(Int<0>())`):
+     *         a compile-time `integral_constant` when that extent is static,
+     *         else a runtime `index_type`. */
+    template <class Idx, cs::enable_if_t<_is_ic<Idx>::value, int> = 0>
+    _TNY_API constexpr auto extent(Idx) const noexcept {
+        constexpr cs::size_t D = static_cast<cs::size_t>(Idx::value);
         if constexpr (Extents::static_extent(D) != cs::dynamic_extent)
             return cs::integral_constant<index_type, static_cast<index_type>(Extents::static_extent(D))>{};
         else
             return mapping_type::extents().extent(D);
     }
-    /** @brief Stride of axis `D`: a compile-time `integral_constant` when it is
-     *         known statically (static-stride layout, or a contiguous layout
-     *         over static extents), otherwise a runtime `index_type`. */
-    template <cs::size_t D>
-    _TNY_API constexpr auto stride() const noexcept {
+    /** @brief Extent of an axis given by a RUNTIME index (`extent(0)`). */
+    template <class Idx, cs::enable_if_t<!_is_ic<Idx>::value, int> = 0>
+    _TNY_API constexpr index_type extent(Idx d) const noexcept
+    { return mapping_type::extents().extent(static_cast<cs::size_t>(d)); }
+
+    /** @brief Stride of an axis given by a STATIC index (`stride(Int<0>())`):
+     *         a compile-time `integral_constant` when known statically (static-
+     *         stride layout, or a contiguous layout over static extents). */
+    template <class Idx, cs::enable_if_t<_is_ic<Idx>::value, int> = 0>
+    _TNY_API constexpr auto stride(Idx) const noexcept {
+        constexpr cs::size_t D = static_cast<cs::size_t>(Idx::value);
         if constexpr (has_static_strides)
             return cs::integral_constant<index_type, static_cast<index_type>(_static_stride_at<D, Layout>::value)>{};
         else if constexpr (is_static && is_contiguous_layout)
@@ -142,6 +158,10 @@ struct tensor : private Layout::template mapping<Extents> {
         else
             return mapping_type::stride(D);
     }
+    /** @brief Stride of an axis given by a RUNTIME index (`stride(0)`). */
+    template <class Idx, cs::enable_if_t<!_is_ic<Idx>::value, int> = 0>
+    _TNY_API constexpr index_type stride(Idx d) const noexcept
+    { return mapping_type::stride(static_cast<cs::size_t>(d)); }
     _TNY_API constexpr index_type numel() const noexcept {
         index_type n = 1;
         for (cs::size_t r = 0; r < rank(); ++r) n *= extent(r);
@@ -154,9 +174,46 @@ struct tensor : private Layout::template mapping<Extents> {
     _TNY_API view_type       view()       noexcept { return view_type(store_.data(), *this); }
     _TNY_API const_view_type view() const noexcept { return const_view_type(store_.data(), *this); }
 
-    /* --- element access ------------------------------------------ */
-    template <class... I> _TNY_API T &       operator()(I... i)       noexcept { return store_.data()[mapping_type::operator()(i...)]; }
-    template <class... I> _TNY_API const T & operator()(I... i) const noexcept { return store_.data()[mapping_type::operator()(i...)]; }
+    /* --- element access / slicing -------------------------------- */
+private:
+    // wrap a negative index python-style; fold when the index is static
+    template <cs::size_t Ax, class Arg>
+    _TNY_API constexpr index_type _wrap(Arg a) const {
+        index_type i = static_cast<index_type>(a);
+        return i < index_type(0)
+             ? static_cast<index_type>(i + extent(cs::integral_constant<cs::size_t, Ax>{}))
+             : i;
+    }
+    template <cs::size_t... Ax, class... Args>
+    _TNY_API constexpr index_type _offset(cs::index_sequence<Ax...>, Args... a) const {
+        return mapping_type::operator()(_wrap<Ax>(a)...);
+    }
+    // slice specifier for axis Ax: wrap an integer, pass a slice through
+    template <cs::size_t Ax, class Arg>
+    _TNY_API auto _spec(Arg a) const {
+        if constexpr (_is_index<Arg>::value) return _wrap<Ax>(a);
+        else                                 return a;
+    }
+    template <class V, cs::size_t... Ax, class... Args>
+    _TNY_API auto _slice(V v, cs::index_sequence<Ax...>, Args... a) const {
+        return as_tensor(cs::submdspan(v, _spec<Ax>(a)...));
+    }
+public:
+    /** @brief Element access when every argument is an integer (negatives wrap). */
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API T & operator()(Args... a) noexcept
+    { return store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]; }
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API const T & operator()(Args... a) const noexcept
+    { return store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]; }
+
+    /** @brief Sub-view when any argument is a slice (`all`, `rng(a,b)`). */
+    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API auto operator()(Args... a) noexcept
+    { return _slice(view(), cs::make_index_sequence<rank()>{}, a...); }
+    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API auto operator()(Args... a) const noexcept
+    { return _slice(view(), cs::make_index_sequence<rank()>{}, a...); }
 
     /* --- structural views (return md::tensor views) --------------- */
 

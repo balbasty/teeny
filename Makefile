@@ -29,6 +29,7 @@ TESTS = \
 	$(BUILDDIR)/test_iterate \
 	$(BUILDDIR)/test_subperm \
 	$(BUILDDIR)/test_static_extent \
+	$(BUILDDIR)/test_slice \
 	$(BUILDDIR)/test_dynamic \
 	$(BUILDDIR)/test_distance_l1 \
 	$(BUILDDIR)/test_pull \
