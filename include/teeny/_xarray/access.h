@@ -6,7 +6,8 @@
 
 _TNY_NAMESPACE_BEGIN(tny)
 
-
+template <class XArray, class Index>
+struct xarray_access;
 
 _TNY_NAMESPACE_END(tny)
 

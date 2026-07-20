@@ -18,7 +18,6 @@ using cuda::std::is_same;
 template <size_t>
 struct xarray_numel: public statix::csize<size_t> {};
 
-
 template <class T, class values>
 struct _xarray_tuple;
 

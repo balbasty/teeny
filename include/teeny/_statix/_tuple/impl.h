@@ -113,7 +113,6 @@ public:
     >
     _TNYDEF(H,D,CX) auto at(index) const noexcept
     {
-        constexpr auto index_value = statix::wrap_index<statix::size<this_type>, index()>::value;
         return statix::at<this_type, index>();
     }
 

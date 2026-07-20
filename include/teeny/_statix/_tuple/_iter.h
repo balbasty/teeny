@@ -1,6 +1,6 @@
 // !!! WORK IN PROGRESS
-#ifndef TNY__XARRAY_ITER
-#define TNY__XARRAY_ITER
+#ifndef TNY__STATIX__TUPLE_ITER
+#define TNY__STATIX__TUPLE_ITER
 #include <cuda/std/type_traits>
 #include <teeny/core.h>
 #include <teeny/statix.h>
@@ -99,4 +99,4 @@ protected:
 _TNY_NAMESPACE_END(statix)
 _TNY_NAMESPACE_END(tny)
 
-#endif
+#endif // TNY__STATIX__TUPLE_ITER

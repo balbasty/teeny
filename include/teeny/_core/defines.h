@@ -26,9 +26,10 @@
 #define _TNYDEF_S   static
 #define _TNYDEF_C   const
 #define _TNYDEF_CX  constexpr
+#define _TNYDEF_NX  noexcept
 #define _TNYDEF_
 
-#define _TNYDEF_ALL(A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,X,Y,Z,...) \
+#define _TNYDEF_ALL(A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,X,Y,Z,...)         \
         _TNYDEF_##A _TNYDEF_##B _TNYDEF_##C _TNYDEF_##D _TNYDEF_##E                  \
         _TNYDEF_##F _TNYDEF_##G _TNYDEF_##H _TNYDEF_##I _TNYDEF_##J                  \
         _TNYDEF_##K _TNYDEF_##L _TNYDEF_##M _TNYDEF_##N _TNYDEF_##O                  \
