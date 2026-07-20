@@ -12,6 +12,36 @@ _TNY_NAMESPACE_BEGIN(md)
 
 namespace cs = cuda::std;
 
+// Forward declarations so the tensor's structural members can name as_tensor
+// (its argument is a cuda::std::mdspan, so ADL would not find it).
+template <class T, class Extents, class Layout = cs::layout_right, own O = own::view>
+struct tensor;
+template <class MD>
+_TNY_API tensor<typename MD::element_type, typename MD::extents_type,
+                typename MD::layout_type, own::view>
+as_tensor(const MD & m);
+
+/* --- detail: single-axis bind and permutation on a raw mdspan ----- */
+namespace _detail {
+template <cs::size_t D, cs::size_t A, class I>
+_TNY_API auto sub_arg(I i) { if constexpr (A == D) return i; else { (void)i; return cs::full_extent; } }
+template <cs::size_t D, class MD, cs::size_t... A>
+_TNY_API auto sub_md(const MD & v, typename MD::index_type i, cs::index_sequence<A...>) {
+    return cs::submdspan(v, sub_arg<D, A>(i)...);
+}
+template <class MD, cs::size_t... P>
+_TNY_API auto perm_md(const MD & v, cs::index_sequence<P...>) {
+    using El  = typename MD::element_type;
+    using Idx = typename MD::index_type;
+    using E   = typename MD::extents_type;
+    using PE  = cs::extents<Idx, E::static_extent(P)...>;
+    cs::layout_stride::mapping<PE> m(
+        PE(static_cast<Idx>(v.extent(P))...),
+        cs::array<Idx, sizeof...(P)>{ static_cast<Idx>(v.stride(P))... });
+    return cs::mdspan<El, PE, cs::layout_stride>(v.data_handle(), m);
+}
+} // namespace _detail
+
 /**
  * @brief One N-dimensional tensor, parameterised by ownership.
  *
@@ -27,7 +57,7 @@ namespace cs = cuda::std;
  * @tparam Layout   mdspan layout policy (default `layout_right`).
  * @tparam O        Ownership kind (default `own::view`).
  */
-template <class T, class Extents, class Layout = cs::layout_right, own O = own::view>
+template <class T, class Extents, class Layout, own O>
 struct tensor : private Layout::template mapping<Extents> {
     using element_type = T;
     using extents_type = Extents;
@@ -77,6 +107,24 @@ struct tensor : private Layout::template mapping<Extents> {
     /* --- element access ------------------------------------------ */
     template <class... I> _TNY_API T &       operator()(I... i)       noexcept { return store_.data()[mapping_type::operator()(i...)]; }
     template <class... I> _TNY_API const T & operator()(I... i) const noexcept { return store_.data()[mapping_type::operator()(i...)]; }
+
+    /* --- structural views (return md::tensor views) --------------- */
+
+    /** @brief Bind axis `D` to index `i`, dropping it -> a rank-(N-1) view. */
+    template <cs::size_t D, class I>
+    _TNY_API auto sub(I i) noexcept
+    { return as_tensor(_detail::sub_md<D>(view(), static_cast<index_type>(i), cs::make_index_sequence<rank()>{})); }
+    template <cs::size_t D, class I>
+    _TNY_API auto sub(I i) const noexcept
+    { return as_tensor(_detail::sub_md<D>(view(), static_cast<index_type>(i), cs::make_index_sequence<rank()>{})); }
+
+    /** @brief Reorder the axes (a permutation of 0..N-1) -> a rank-N view. */
+    template <cs::size_t... Perm>
+    _TNY_API auto permute() noexcept
+    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor(_detail::perm_md(view(), cs::index_sequence<Perm...>{})); }
+    template <cs::size_t... Perm>
+    _TNY_API auto permute() const noexcept
+    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor(_detail::perm_md(view(), cs::index_sequence<Perm...>{})); }
 
     /* --- in-place elementwise math (declared here, defined in math.h) --- */
     template <class B> _TNY_API tensor & add_(const B & b);

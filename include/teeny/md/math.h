@@ -2,6 +2,7 @@
 #define TNY_MD_MATH
 #include <cuda/std/utility>
 #include <cuda/std/type_traits>
+#include <cuda/std/limits>
 #include <teeny/_core/defines.h>
 #include <teeny/md/tensor.h>
 
@@ -99,21 +100,27 @@ _TNY_API R zipreduce_(const A & a, const B & b, cs::index_sequence<D...>) {
     return acc;
 }
 
-// reduce a into a scalar with `+` (for sum).
-template <class R, class A, cs::size_t... D>
-_TNY_API R sumreduce_(const A & a, cs::index_sequence<D...>) {
+// reduce ops (acc = op(acc, x))
+struct r_add { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a + static_cast<A>(x); } };
+struct r_mul { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a * static_cast<A>(x); } };
+struct r_max { template <class A, class X> _TNY_API A operator()(A a, X x) const { A y = static_cast<A>(x); return y > a ? y : a; } };
+struct r_min { template <class A, class X> _TNY_API A operator()(A a, X x) const { A y = static_cast<A>(x); return y < a ? y : a; } };
+
+// fold a into a scalar with `op`, starting from `init`.
+template <class R, class A, class Op, cs::size_t... D>
+_TNY_API R reduce_(const A & a, R init, Op op, cs::index_sequence<D...>) {
     using I = typename A::index_type;
     const I e[]  = { a.extent(D)... };
     const I sa[] = { a.stride(D)... };
     I n = 1;
     for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
-    R acc = R(0);
+    R acc = init;
     for (I lin = 0; lin < n; ++lin) {
         I rem = lin, oa = 0;
         for (int d = static_cast<int>(sizeof...(D)) - 1; d >= 0; --d) {
             I k = rem % e[d]; rem /= e[d]; oa += k * sa[d];
         }
-        acc += static_cast<R>(a.data()[oa]);
+        acc = op(acc, a.data()[oa]);
     }
     return acc;
 }
@@ -172,10 +179,25 @@ _TNY_MD_BINOP(/, _md::div)
  *     Reductions                                                      *
  * ------------------------------------------------------------------ */
 
-/** @brief Sum of all elements. */
+/** @brief Sum of all elements (empty -> 0). */
 template <class T, class E, class L, own O>
 _TNY_API T sum(const tensor<T,E,L,O> & a) {
-    return _md::sumreduce_<T>(a, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{});
+    return _md::reduce_<T>(a, T(0), _md::r_add{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{});
+}
+/** @brief Product of all elements (empty -> 1). */
+template <class T, class E, class L, own O>
+_TNY_API T prod(const tensor<T,E,L,O> & a) {
+    return _md::reduce_<T>(a, T(1), _md::r_mul{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{});
+}
+/** @brief Maximum element. Requires a non-empty tensor. */
+template <class T, class E, class L, own O>
+_TNY_API T max(const tensor<T,E,L,O> & a) {
+    return _md::reduce_<T>(a, cs::numeric_limits<T>::lowest(), _md::r_max{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{});
+}
+/** @brief Minimum element. Requires a non-empty tensor. */
+template <class T, class E, class L, own O>
+_TNY_API T min(const tensor<T,E,L,O> & a) {
+    return _md::reduce_<T>(a, cs::numeric_limits<T>::max(), _md::r_min{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{});
 }
 
 /** @brief Inner product over matching extents. */

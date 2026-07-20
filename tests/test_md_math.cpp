@@ -52,6 +52,9 @@ int main()
     R(0,0)=1; R(0,1)=2; R(1,0)=3; R(1,1)=4;
     if (sum(R) != 10) return 10;
     if (dot(R, R) != 1+4+9+16) return 11;          // 30
+    if (prod(R) != 24) return 20;                  // 1*2*3*4
+    if (max(R) != 4)  return 21;
+    if (min(R) != 1)  return 22;
 
     // reduction over the (contiguous) view: buf[i] == 2*i + 199, i = 0..8
     double expect = 0; for (int i=0;i<9;++i) expect += 2*i + 199;
