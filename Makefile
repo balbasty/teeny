@@ -150,14 +150,15 @@ TESTS_MD = \
 	$(BUILDDIR)/test_md_iterate \
 	$(BUILDDIR)/test_md_cuda \
 	$(BUILDDIR)/test_md_distance_l1 \
-	$(BUILDDIR)/test_md_pull
+	$(BUILDDIR)/test_md_pull \
+	$(BUILDDIR)/test_md_posdef
 
 test-md: verb.build.test.md \
 	$(TESTS_MD) \
 	verb.build.test.md.done
 
 run-test-md: verb.run.test.md \
-	run-test-md_tensor-run run-test-md_math-run run-test-md_iterate-run run-test-md_cuda-run run-test-md_distance_l1-run run-test-md_pull-run \
+	run-test-md_tensor-run run-test-md_math-run run-test-md_iterate-run run-test-md_cuda-run run-test-md_distance_l1-run run-test-md_pull-run run-test-md_posdef-run \
 	verb.run.test.md.done
 
 run-test-md_tensor-run: $(BUILDDIR)/test_md_tensor
@@ -182,6 +183,9 @@ run-test-md_distance_l1-run: $(BUILDDIR)/test_md_distance_l1
 
 run-test-md_pull-run: $(BUILDDIR)/test_md_pull
 	$(BUILDDIR)/test_md_pull
+
+run-test-md_posdef-run: $(BUILDDIR)/test_md_posdef
+	$(BUILDDIR)/test_md_posdef
 
 clean-test-md:
 	$(DEL) $(TESTS_MD)
