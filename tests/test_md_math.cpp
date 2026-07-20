@@ -57,8 +57,15 @@ int main()
     double expect = 0; for (int i=0;i<9;++i) expect += 2*i + 199;
     if (sum(full) != expect) return 12;
 
-    // ---- out-of-place is disabled for dynamic extents (compile-time) ---
-    // (verified separately: `dyn_a + dyn_b` is ill-formed.)
+    // ---- out-of-place on DYNAMIC extents: allowed on the host, heap result
+    using DynE = extents<long, dynamic_extent, dynamic_extent>;
+    auto Da = owned<double, DynE>(DynE{2,2});
+    auto Db = owned<double, DynE>(DynE{2,2});
+    Da(0,0)=1; Da(0,1)=2; Da(1,0)=3; Da(1,1)=4;
+    Db(0,0)=10;Db(0,1)=20;Db(1,0)=30;Db(1,1)=40;
+    auto Dc = Da + Db;                             // -> heap-owned (host)
+    static_assert(decltype(Dc)::ownership == own::heap, "dynamic out-of-place -> heap");
+    if (Dc(0,0)!=11 || Dc(1,1)!=44) return 13;
 
     return 0;
 }

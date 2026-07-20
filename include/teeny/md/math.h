@@ -138,7 +138,11 @@ template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::div_(T s) { _md::scal(*this,s,_md::div{}); return *this; }
 
 /* ------------------------------------------------------------------ *
- *     Out-of-place operators (static extent only -> stack result)    *
+ *     Out-of-place operators                                         *
+ *                                                                    *
+ *  - fully-static extents  -> stack-owned result, host AND device.   *
+ *  - any dynamic extent    -> heap-owned result, HOST ONLY (the      *
+ *                             result must be allocated at run time).  *
  * ------------------------------------------------------------------ */
 
 #define _TNY_MD_BINOP(SYM, OP)                                                                    \
@@ -147,6 +151,14 @@ template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob, 
 _TNY_API auto operator SYM (const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {      \
     static_assert(cs::is_same<Ea,Eb>::value, "operator " #SYM ": extents must match");           \
     tensor<cs::common_type_t<Ta,Tb>, Ea, cs::layout_right, own::stack> c{};                       \
+    _md::zip(c, a, b, OP{});                                                                      \
+    return c;                                                                                     \
+}                                                                                                \
+template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob,                   \
+          cs::enable_if_t<!(tensor<Ta,Ea,La,Oa>::is_static && tensor<Tb,Eb,Lb,Ob>::is_static), int> = 0> \
+_TNY_HOST auto operator SYM (const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {     \
+    static_assert(cs::is_same<Ea,Eb>::value, "operator " #SYM ": extents must match");           \
+    auto c = owned<cs::common_type_t<Ta,Tb>, Ea>(a.extents());                                   \
     _md::zip(c, a, b, OP{});                                                                      \
     return c;                                                                                     \
 }

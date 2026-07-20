@@ -51,8 +51,8 @@ struct tensor : private Layout::template mapping<Extents> {
     template <own OO = O, cs::enable_if_t<OO == own::view, int> = 0>
     _TNY_API tensor(T * p, mapping_type m) : mapping_type(m), store_(p) {}
 
-    /** @brief Heap constructor: allocate storage for `m`. */
-    template <own OO = O, cs::enable_if_t<OO == own::heap, int> = 0>
+    /** @brief Owning constructor: allocate storage for `m` (heap/device/host/pinned). */
+    template <own OO = O, cs::enable_if_t<own_is_owning(OO), int> = 0>
     _TNY_HOST explicit tensor(mapping_type m)
         : mapping_type(m), store_(static_cast<cs::size_t>(m.required_span_size())) {}
 
