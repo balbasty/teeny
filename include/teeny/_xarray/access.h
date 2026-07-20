@@ -10,34 +10,33 @@ _TNY_NAMESPACE_BEGIN(tny)
 /**
  * @brief Access policy for a single, statically-indexed xarray element.
  *
- * Dispatches on whether the element stored at `Index` is a compile-time
- * (static) value or a runtime (dynamic) value:
- *   - dynamic element -> returns a reference into storage (readable & writable),
- *   - static  element -> returns the compile-time value by prvalue.
+ * Dispatches on whether the *slot* at `Index` is dynamic or static
+ * (decided on the logical `values` descriptor, not the storage layout):
+ *   - dynamic slot -> returns a reference into storage (readable & writable),
+ *   - static  slot -> returns the compile-time value by prvalue.
  *
  * `Index` is a static index (e.g. `statix::csize<0>` or `statix::cptrdiff<-1>`).
  *
- * @tparam XArray    An `xarray<T, values>` type.
- * @tparam Index     A static index type.
- * @tparam IsStatic  Deduced: whether the element at `Index` is static.
+ * @tparam XArray     An `xarray<T, values>` type.
+ * @tparam Index      A static index type.
+ * @tparam IsDynamic  Deduced: whether the slot at `Index` is dynamic.
  */
 template <class XArray, class Index,
-          bool IsStatic = statix::is_carray<
-              statix::at<typename XArray::tuple_type, Index>
+          bool IsDynamic = statix::is_cnone<
+              statix::at<typename XArray::values_type, Index>
           >::value>
 struct xarray_access;
 
-/* --- dynamic element: reference into the underlying tuple ---------- */
+/* --- dynamic slot: reference into the dynamic-only storage tuple --- */
 template <class XArray, class Index>
-struct xarray_access<XArray, Index, false> {
-    using tuple_type = typename XArray::tuple_type;
-    using value_type = typename XArray::value_type;
+struct xarray_access<XArray, Index, true> {
+    using values_type = typename XArray::values_type;
+    using value_type  = typename XArray::value_type;
 
-    // Position of the element among *all* tuple leaves (static leaves
-    // included). The storage tuple has one leaf per element, so the wrapped
-    // index directly names the leaf.
-    static constexpr size_t position = static_cast<size_t>(
-        statix::wrap_index<statix::size<tuple_type>, Index>::value);
+    // Non-negative logical index, then its ordinal among the stored dynamics.
+    static constexpr size_t logical  = static_cast<size_t>(
+        statix::wrap_index<statix::size<values_type>, Index>::value);
+    static constexpr size_t position = dynamic_ordinal<values_type, logical>::value;
 
     using type       = value_type &;
     using const_type = const value_type &;
@@ -49,12 +48,12 @@ struct xarray_access<XArray, Index, false> {
     { return cuda::std::get<position>(self); }
 };
 
-/* --- static element: compile-time value by prvalue ---------------- */
+/* --- static slot: compile-time value by prvalue ------------------- */
 template <class XArray, class Index>
-struct xarray_access<XArray, Index, true> {
-    using tuple_type = typename XArray::tuple_type;
-    using value_type = typename XArray::value_type;
-    using element    = statix::at<tuple_type, Index>;  // carray<value_type, V>
+struct xarray_access<XArray, Index, false> {
+    using values_type = typename XArray::values_type;
+    using value_type  = typename XArray::value_type;
+    using element     = statix::at<values_type, Index>;  // carray<value_type, V>
 
     using type       = value_type;
     using const_type = value_type;
