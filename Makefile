@@ -32,21 +32,25 @@ clean: clean-test
 test: verb.build.test \
 	test-statix \
 	test-xarray \
+	test-tensor \
 	verb.build.test.done
 
 run-test: verb.run.test \
 	run-test-statix \
 	run-test-xarray \
+	run-test-tensor \
 	verb.run.test.done
 
 clean-test: verb.clean.test \
 	clean-test-statix \
 	clean-test-xarray \
+	clean-test-tensor \
 	verb.clean.test.done
 
 .PHONY: all clean test run-test clean-test
 .PHONY: test-statix run-test-statix clean-test-statix
 .PHONY: test-xarray run-test-xarray clean-test-xarray
+.PHONY: test-tensor run-test-tensor clean-test-tensor
 
 ########################################################################
 # 	Test Targets
@@ -108,6 +112,25 @@ clean-test-xarray:
 	$(DEL) $(TESTS_XARRAY)
 
 ########################################################################
+
+TESTS_TENSOR = \
+	$(BUILDDIR)/test_tensor
+
+test-tensor: verb.build.test.tensor \
+	$(TESTS_TENSOR) \
+	verb.build.test.tensor.done
+
+run-test-tensor: verb.run.test.tensor \
+	run-test-tensor-run \
+	verb.run.test.tensor.done
+
+run-test-tensor-run: $(BUILDDIR)/test_tensor
+	$(BUILDDIR)/test_tensor
+
+clean-test-tensor:
+	$(DEL) $(TESTS_TENSOR)
+
+########################################################################
 # 	Messages
 ########################################################################
 
@@ -146,6 +169,18 @@ verb.run.test.xarray:
 
 verb.run.test.xarray.done:
 	$(call verb, "Running xarray tests: Done.")
+
+verb.build.test.tensor:
+	$(call verb, "Building tensor tests...")
+
+verb.build.test.tensor.done:
+	$(call verb, "Building tensor tests: Done.")
+
+verb.run.test.tensor:
+	$(call verb, "Running tensor tests...")
+
+verb.run.test.tensor.done:
+	$(call verb, "Running tensor tests: Done.")
 
 verb.clean.test:
 	$(call verb, "Cleaning all tests...")
