@@ -1,6 +1,7 @@
 #ifndef TNY_MD_TENSOR
 #define TNY_MD_TENSOR
 #include <cuda/std/mdspan>
+#include <cuda/std/tuple>
 #include <cuda/std/utility>
 #include <cuda/std/type_traits>
 #include <teeny/_core/defines.h>
@@ -68,6 +69,14 @@ template <class A> struct _is_index
 /** @brief A half-open slice `[start, stop)` for `operator()` / `take_along`. */
 template <class A, class B>
 _TNY_API auto rng(A start, B stop) { return cs::tuple<long,long>{ static_cast<long>(start), static_cast<long>(stop) }; }
+
+// position of axis A within the pack Axes... (-1 if absent)
+template <cs::size_t A, cs::size_t... Axes>
+_TNY_API constexpr int _pos_in() {
+    cs::size_t axs[] = { Axes..., static_cast<cs::size_t>(-1) };
+    for (cs::size_t p = 0; p < sizeof...(Axes); ++p) if (axs[p] == A) return static_cast<int>(p);
+    return -1;
+}
 
 /**
  * @brief One N-dimensional tensor, parameterised by ownership.
@@ -217,13 +226,42 @@ public:
 
     /* --- structural views (return md::tensor views) --------------- */
 
-    /** @brief (take_along) bind axis `D` to index `i`, dropping it -> a rank-(N-1) view. */
-    template <cs::size_t D, class I>
-    _TNY_API auto take_along(I i) noexcept
-    { return as_tensor(_detail::take_md<D>(view(), static_cast<index_type>(i), cs::make_index_sequence<rank()>{})); }
-    template <cs::size_t D, class I>
-    _TNY_API auto take_along(I i) const noexcept
-    { return as_tensor(_detail::take_md<D>(view(), static_cast<index_type>(i), cs::make_index_sequence<rank()>{})); }
+private:
+    // specifier for output axis A: the matching take_along arg (index -> wrap,
+    // slice -> pass through) if A is named, else `all` (keep the axis).
+    template <cs::size_t A, cs::size_t... Axes, class Tup>
+    _TNY_API auto _ta_spec(const Tup & t) const {
+        constexpr int p = _pos_in<A, Axes...>();
+        if constexpr (p < 0) return cs::full_extent;
+        else {
+            auto arg = cs::get<static_cast<cs::size_t>(p)>(t);
+            if constexpr (_is_index<decltype(arg)>::value) return _wrap<A>(arg);
+            else                                           return arg;
+        }
+    }
+    template <cs::size_t... Axes, class V, class Tup, cs::size_t... A>
+    _TNY_API auto _ta(V v, const Tup & t, cs::index_sequence<A...>) const {
+        return as_tensor(cs::submdspan(v, _ta_spec<A, Axes...>(t)...));
+    }
+public:
+    /**
+     * @brief Index/slice one or more named axes; other axes are kept.
+     *
+     * `take_along<Axes...>(args...)` applies `args[k]` to axis `Axes[k]` (each an
+     * integer -- negatives wrap -- or a slice `all`/`rng`) and keeps every other
+     * axis, returning a view. e.g. `t.take_along<1>(2)` drops axis 1 at index 2;
+     * `t.take_along<0,2>(i, rng(1,4))` binds axes 0 and 2 at once.
+     */
+    template <cs::size_t... Axes, class... Args>
+    _TNY_API auto take_along(Args... args) noexcept {
+        static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
+        return _ta<Axes...>(view(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
+    }
+    template <cs::size_t... Axes, class... Args>
+    _TNY_API auto take_along(Args... args) const noexcept {
+        static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
+        return _ta<Axes...>(view(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
+    }
 
     /** @brief Reorder the axes (a permutation of 0..N-1) -> a rank-N view. */
     template <cs::size_t... Perm>
