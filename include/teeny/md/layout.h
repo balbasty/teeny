@@ -17,6 +17,11 @@ namespace cs = cuda::std;
  * strides into the type, so a non-contiguous stride still folds to an
  * immediate (e.g. jitfields' posdef `Pointer<T, S>`).
  *
+ * Note: `submdspan` (and therefore the nd-peel `slices`/`slice_at`) is only
+ * defined by CCCL for the standard layouts, so it does not apply to this custom
+ * layout. Use `layout_right`/`layout_left`/`layout_stride` when you need to
+ * slice; use `layout_static_stride` for whole-tensor access with folded strides.
+ *
  * @tparam Strides  One compile-time stride per dimension.
  */
 template <cs::size_t... Strides>
