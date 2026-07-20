@@ -25,7 +25,7 @@ static void algo(Line line, scalar_t w) {
 // The whole kernel body: peel the batch axes, transform each line.
 template <class Tensor>
 static void run_md(Tensor & t, scalar_t w) {
-    for (auto line : slices<0,1>(t)) algo(line, w);          // rank-3: batch = axes 0,1
+    for (auto line : peel<0,1>(t)) algo(line, w);          // rank-3: batch = axes 0,1
 }
 
 /* --- faithful jitfields reference (same as test_tensor_distance_l1) --- */

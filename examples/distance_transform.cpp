@@ -1,7 +1,7 @@
 // distance_transform — a separable 1-D transform applied along the LAST axis,
 // with an ARBITRARY number of leading batch axes peeled by the nd-peel utility.
 //
-// The point: the batch loop *is* the library. `slices<Axes...>(t)` peels the
+// The point: the batch loop *is* the library. `peel<Axes...>(t)` peels the
 // listed axes and hands you each remaining sub-view (here a 1-D line); you never
 // write index2offset / sub2offset. Add or remove batch axes by changing the axis
 // list, not the loop body.
@@ -27,7 +27,7 @@ static void l1_line(Line line, double w) {
 // Whole kernel: peel every axis but the last, transform each line.
 template <cs::size_t... Batch, class Tensor>
 static void distance_l1(Tensor & t, double w) {
-    for (auto line : slices<Batch...>(t)) l1_line(line, w);
+    for (auto line : peel<Batch...>(t)) l1_line(line, w);
 }
 
 int main() {

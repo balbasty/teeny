@@ -50,8 +50,8 @@ surface:
 | **scatter (push)** | `t.add_at(v, i...)` or `tny::fetch_add(ptr, v)` — **atomic on device** |
 | assign / init | `t.copy_(src)` (broadcasts), `t.fill_(v)`, `t.zero_()` |
 | in-place / reduce math | `t.add_(x)/mul_(x)/…` (broadcasts), `sum/dot/min/max` |
-| **peel arbitrary batch** | `slices_front<Nbatch>(t)` → range of `(*spatial, C)` views; `slice_front_at<Nbatch>(t, i)` for a grid-stride index |
-| peel named axes | `slices<Axes...>(t)`, `take_along<Axes...>(...)`, `permute<...>()` |
+| **peel arbitrary batch** | `peel_front<Nbatch>(t)` → range of `(*spatial, C)` views; `peel_front_at<Nbatch>(t, i)` for a grid-stride index |
+| peel named axes | `peel<Axes...>(t)`, `take_along<Axes...>(...)`, `permute<...>()` |
 | add/drop size-1 axis | `unsqueeze<Ax>()`, `squeeze<Ax>()` |
 | **runtime→static dispatch** | `dispatch_value<1,2,3>(D, f)` (spatial rank / order / bound); `dispatch_rank(any(...), f)` (total rank at the ndarray boundary) |
 | host ndarray boundary | `any(data, shape, stride, ndim)` → `any_tensor`; `.fixed<R>()` |
@@ -82,7 +82,7 @@ dispatch_value<0,1,2,3,...>(order,  [&](auto O){ ... })      // interp order -> 
 dispatch_value on boundary mode(s) if you specialise them    // bound -> static (optional)
    ▼
 Nbatch = R - D.value - 1;   // batch dims = everything before spatial+channel
-for (auto cell : slices_front<Nbatch>(t))    // cell is (*spatial, C); parallelise this
+for (auto cell : peel_front<Nbatch>(t))    // cell is (*spatial, C); parallelise this
     kernel<D.value, O.value>(cell, grid_cell, ...);
 ```
 
@@ -91,15 +91,15 @@ Key facts carried from jitfields (§4.1):
   `(*batch, *spatial)` index; loop channels *inside* the kernel. Neighbours and
   weights are computed once per spatial location and reused across channels.
 - **Only spatial strides** go to the interpolator; batch offset is folded into
-  the base pointer — which is exactly what `slices_front<Nbatch>` produces (each
+  the base pointer — which is exactly what `peel_front<Nbatch>` produces (each
   peeled sub-view already has the batch offset baked into its data handle).
 - Choose **static specialisation for D ∈ {1,2,3}** (the common case, worth
   folding) and fall back to a generic-D path otherwise. `dispatch_value` gives
   you the static D with no hand-written switch.
 
 For the CPU driver, replace jitfields' `parallel_for(0, numel, grain, …)` with
-your platform's parallel-for over `slices_front`'s index range
-(`slice_front_at<Nbatch>(t, i)` gives the i-th cell for a grid-stride/worker
+your platform's parallel-for over `peel_front`'s index range
+(`peel_front_at<Nbatch>(t, i)` gives the i-th cell for a grid-stride/worker
 split). For CUDA, one thread per cell; `fetch_add` handles push races.
 
 ---
@@ -151,7 +151,7 @@ stride; neighbours/weights are hoisted above the channel loop.
 ### 4.2 distance (l1, euclidean)
 
 Separable: a 1-D sweep along one axis, batched over the rest. On teeny:
-`for (auto line : slices_front<Nbatch>(vol)) sweep(line, w)` — or peel all-but-one
+`for (auto line : peel_front<Nbatch>(vol)) sweep(line, w)` — or peel all-but-one
 axis and sweep the last. A full transform runs the sweep once per axis (permute
 so the target axis is innermost, or peel a different axis each pass).
 
@@ -182,7 +182,7 @@ Poles per order (order≤1 none; 2: √8-3; 3: √3-2; 4/5: two; 6/7: three), ga
 `Π(1-p)(1-1/p)`. Per pole: scale by gain, causal init + `f[i]+=p·f[i-1]`,
 anticausal init + `f[i]=p·(f[i+1]-f[i])`. Only the causal/anticausal boundary
 *initialisation* depends on the boundary mode (DCT1/DCT2/DFT implemented in
-jitfields). Same `slices_front` + innermost-axis sweep structure.
+jitfields). Same `peel_front` + innermost-axis sweep structure.
 
 ### 4.5 others (resize/restrict, regularisers)
 
@@ -276,7 +276,7 @@ Vendor teeny (`include/teeny/` + `examples/fastfields/{bounds,spline}.hpp`) into
 
 ## 9. Simplifications teeny enables (do these rather than copy conservatively)
 
-- Delete `index2offset`/`sub2offset`/`index2sub` batch plumbing → `slices_front`.
+- Delete `index2offset`/`sub2offset`/`index2sub` batch plumbing → `peel_front`.
 - Delete the per-rank hand-unrolled `1d/2d/3d/nd.h` gather trees → one separable
   recursion over static D (the reference `pull_rec`/`push_rec`).
 - Delete `Pointer<T,S>` static-stride pointer → `view_strided<S...>` /

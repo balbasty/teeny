@@ -12,7 +12,7 @@ make run-examples      # build + run, printing PASS/FAIL
 | File | Shows |
 |---|---|
 | `pull_nd.cpp` | N-D separable spline interpolation ("pull"), rank-generic, with selectable boundary conditions; the tensor-product accumulation written **once** and folded per rank. The flagship fastfields idiom. |
-| `distance_transform.cpp` | A separable 1-D transform applied along one axis, with **arbitrary batch rank** peeled by `slices<...>`. No hand-written `index2offset`. |
+| `distance_transform.cpp` | A separable 1-D transform applied along one axis, with **arbitrary batch rank** peeled by `peel<...>`. No hand-written `index2offset`. |
 | `cholesky_solve.cpp` | Small SPD Cholesky factor + solve on a matrix with **per-dimension compile-time strides** (`view_strided`) and stack-owned work tensors that are exactly `sizeof` their data. |
 | `broadcast_affine.cpp` | numpy-style broadcasting: per-channel affine (`x*scale + bias`) with `(C,1,1)` params over an `(C,H,W)` image, in-place and out-of-place. |
 | `pushpull_adjoint.cpp` | the flagship fastfields kernel: rank-generic spline **pull** (gather) and **push** (scatter, atomic on device), validated by the adjoint identity `<Px,y>==<x,Pᵀy>` across interpolation orders 0–3 and 4 boundary conditions. |

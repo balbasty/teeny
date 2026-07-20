@@ -1,6 +1,6 @@
 // Coverage for the kernel-support primitives added after the API review:
 // fill_/zero_/copy_, add_at (atomic-on-device scatter), dispatch_value,
-// slices_front, and static-preserving rng.
+// peel_front, and static-preserving slice.
 #include <teeny/teeny.h>
 #include <cuda/std/type_traits>
 
@@ -47,24 +47,26 @@ int main() {
     });
     if (rank_seen != 3) return 8;
 
-    // ---- slices_front<N>: peel the first N (batch) axes ---------------
+    // ---- peel_front<N>: peel the first N (batch) axes ---------------
     double buf[2*3*4];
     for (int i=0;i<2*3*4;++i) buf[i]=i;
     auto t = view(buf, extents<long,2,3,4>{});
     long count = 0, checksum = 0;
-    for (auto line : slices_front<2>(t)) {                  // peel axes 0,1 -> (4,) lines
+    for (auto line : peel_front<2>(t)) {                  // peel axes 0,1 -> (4,) lines
         ++count;
         for (long k=0;k<4;++k) checksum += (long)line(k);
     }
     if (count != 6) return 9;                               // 2*3 lines
     if (checksum != (2*3*4-1)*(2*3*4)/2) return 10;          // sum 0..23
 
-    // ---- static-preserving rng ----------------------------------------
+    // ---- slicing: kept axes stay static, ranged axis resolves at runtime -
+    // (a range goes through a layout_stride view — see the CCCL note in
+    //  tensor.h — so the ranged axis is dynamic, but `all`-kept axes stay static)
     auto M = local<double, extents<long,5,6>>();
-    auto sv = M(all, rng(Int<1>(), Int<4>()));              // static [1,4) on axis 1
-    static_assert(decltype(sv)::extents_type::static_extent(1) == 3,
-                  "static rng -> static subextent (folds)");
-    static_assert(decltype(sv)::extents_type::static_extent(0) == 5, "axis 0 kept static");
+    auto sv = M(all, slice(1, 4));                            // [1,4) on axis 1
+    static_assert(decltype(sv)::extents_type::static_extent(0) == 5, "kept axis stays static");
+    if (sv.extent(0) != 5 || sv.extent(1) != 3) return 11;
+    if (sv(4,2) != M(4,3)) return 12;                        // value is correct (right strides)
 
     return 0;
 }

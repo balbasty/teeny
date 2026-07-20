@@ -47,11 +47,11 @@ auto e = exp(a); a.sqrt_();                         // unary math (out-/in-place
 sum(m); prod(m); max(m); min(m); dot(a,b);
 
 // indexing / slicing (python-like: negatives wrap, `all`/`rng` slice):
-t(0, -1, rng(1,4));       // element or sub-view
+t(0, -1, slice(1,4));       // element or sub-view
 t.take_along<0,2>(i, all);// bind named axes, keep the rest
 t.permute<2,0,1>();       // reorder axes
 t.unsqueeze<2>();         // insert a size-1 axis (numpy newaxis)
-for (auto line : slices<0,1>(t)) work(line);       // nd-peel: iterate a subset of axes
+for (auto line : peel<0,1>(t)) work(line);       // nd-peel: iterate a subset of axes
 auto v3 = at.fixed<3>();  // dynamic-rank dispatch at the host boundary
 ```
 
@@ -64,7 +64,7 @@ auto v3 = at.fixed<3>();  // dynamic-rank dispatch at the host boundary
 | `layout.h` | `layout_static_stride<S...>` — per-dim compile-time strides |
 | `tensor.h` | `tensor<T, Extents, Layout, own>` + `view`/`local`/`owned` + slicing / `take_along` / `permute` / `unsqueeze` |
 | `math.h` | in-place / out-of-place ops (broadcasting) + unary math, `sum`/`prod`/`max`/`min`/`dot` |
-| `iterate.h` | nd-peel: `slices<Axes…>` / `slice_at<Axes…>` |
+| `iterate.h` | nd-peel: `peel<Axes…>` / `peel_at<Axes…>` |
 | `helpers.h` | `batch_offset` (index2offset), `channel` |
 | `dynamic.h` | `any_tensor` + `dispatch_rank` (runtime rank) |
 | `cuda.h` | opt-in device / host / pinned memory (needs the CUDA runtime) |

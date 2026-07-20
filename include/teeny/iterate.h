@@ -19,8 +19,8 @@ namespace cs = cuda::std;
  *  original data) is returned.                                       *
  *                                                                    *
  *  Two entry points:                                                 *
- *    slice_at<Axes...>(t, i)  -> the i-th sub-view  (grid-stride loop) *
- *    slices<Axes...>(t)       -> a range of them    (range-for)       *
+ *    peel_at<Axes...>(t, i)  -> the i-th sub-view  (grid-stride loop) *
+ *    peel<Axes...>(t)       -> a range of them    (range-for)       *
  * ================================================================== */
 
 namespace _md {
@@ -52,7 +52,7 @@ _TNY_API auto submd(const MD & src, const I * idx,
  *         of the peeled extents). Peeled axes vary in row-major order (the
  *         last listed axis fastest). Returns a `md::tensor` view. */
 template <cs::size_t... Axes, class MD>
-_TNY_API auto slice_at(const MD & src, typename MD::index_type i) {
+_TNY_API auto peel_at(const MD & src, typename MD::index_type i) {
     using I = typename MD::index_type;
     constexpr cs::size_t nd = sizeof...(Axes);
     const I e[nd ? nd : 1]   = { static_cast<I>(src.extent(Axes))... };
@@ -63,20 +63,20 @@ _TNY_API auto slice_at(const MD & src, typename MD::index_type i) {
                                 cs::make_index_sequence<MD::rank()>{}));
 }
 // convenience: peel from a md::tensor (uses its view). Non-const -> mutable
-// slices; const -> read-only slices.
+// peel; const -> read-only peel.
 template <cs::size_t... Axes, class T, class E, class L, own O>
-_TNY_API auto slice_at(tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i) {
-    return slice_at<Axes...>(t.view(), i);
+_TNY_API auto peel_at(tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i) {
+    return peel_at<Axes...>(t.view(), i);
 }
 template <cs::size_t... Axes, class T, class E, class L, own O>
-_TNY_API auto slice_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i) {
-    return slice_at<Axes...>(t.view(), i);
+_TNY_API auto peel_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i) {
+    return peel_at<Axes...>(t.view(), i);
 }
 
 /** @brief A range of sub-views obtained by peeling `Axes...`. Supports
  *         `size()`, `operator[]`, and range-for. */
 template <class MD, cs::size_t... Axes>
-struct slice_range {
+struct peel_range {
     using index_type = typename MD::index_type;
     MD src;
 
@@ -86,10 +86,10 @@ struct slice_range {
         for (cs::size_t p = 0; p < sizeof...(Axes); ++p) n *= e[p];
         return n;
     }
-    _TNY_API auto operator[](index_type i) const { return slice_at<Axes...>(src, i); }
+    _TNY_API auto operator[](index_type i) const { return peel_at<Axes...>(src, i); }
 
     struct iterator {
-        const slice_range * r;
+        const peel_range * r;
         index_type i;
         _TNY_API auto operator*() const { return (*r)[i]; }
         _TNY_API iterator & operator++() { ++i; return *this; }
@@ -101,22 +101,22 @@ struct slice_range {
 };
 
 /** @brief Build a range of sub-views by peeling `Axes...` of `t`. Non-const `t`
- *         yields mutable slices; const `t` yields read-only slices. */
+ *         yields mutable peel; const `t` yields read-only peel. */
 template <cs::size_t... Axes, class T, class E, class L, own O>
-_TNY_API auto slices(tensor<T,E,L,O> & t) {
-    return slice_range<decltype(t.view()), Axes...>{ t.view() };
+_TNY_API auto peel(tensor<T,E,L,O> & t) {
+    return peel_range<decltype(t.view()), Axes...>{ t.view() };
 }
 template <cs::size_t... Axes, class T, class E, class L, own O>
-_TNY_API auto slices(const tensor<T,E,L,O> & t) {
-    return slice_range<decltype(t.view()), Axes...>{ t.view() };
+_TNY_API auto peel(const tensor<T,E,L,O> & t) {
+    return peel_range<decltype(t.view()), Axes...>{ t.view() };
 }
 /** @brief Build a range of sub-views over a raw mdspan. */
 template <cs::size_t... Axes, class MD>
-_TNY_API slice_range<MD, Axes...> slices_of(const MD & m) { return { m }; }
+_TNY_API peel_range<MD, Axes...> peel_of(const MD & m) { return { m }; }
 
 namespace _md {
-template <class T, cs::size_t... A> _TNY_API auto sfront(T & t, cs::index_sequence<A...>) { return slices<A...>(t); }
-template <class T, cs::size_t... A> _TNY_API auto sfront_at(T & t, typename T::index_type i, cs::index_sequence<A...>) { return slice_at<A...>(t, i); }
+template <class T, cs::size_t... A> _TNY_API auto sfront(T & t, cs::index_sequence<A...>) { return peel<A...>(t); }
+template <class T, cs::size_t... A> _TNY_API auto sfront_at(T & t, typename T::index_type i, cs::index_sequence<A...>) { return peel_at<A...>(t, i); }
 } // namespace _md
 
 /** @brief Peel the FIRST `N` axes (e.g. an arbitrary number of leading batch
@@ -124,16 +124,16 @@ template <class T, cs::size_t... A> _TNY_API auto sfront_at(T & t, typename T::i
  *         runtime-batch-rank half of the `(*batch, *spatial, C)` pattern: pick
  *         `N` = number of batch dims and each sub-view is `(*spatial, C)`. */
 template <cs::size_t N, class T, class E, class L, own O>
-_TNY_API auto slices_front(tensor<T,E,L,O> & t)       { return _md::sfront(t, cs::make_index_sequence<N>{}); }
+_TNY_API auto peel_front(tensor<T,E,L,O> & t)       { return _md::sfront(t, cs::make_index_sequence<N>{}); }
 template <cs::size_t N, class T, class E, class L, own O>
-_TNY_API auto slices_front(const tensor<T,E,L,O> & t) { return _md::sfront(t, cs::make_index_sequence<N>{}); }
+_TNY_API auto peel_front(const tensor<T,E,L,O> & t) { return _md::sfront(t, cs::make_index_sequence<N>{}); }
 
 /** @brief The `i`-th sub-view obtained by peeling the first `N` axes (grid-stride style). */
 template <cs::size_t N, class T, class E, class L, own O>
-_TNY_API auto slice_front_at(tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i)
+_TNY_API auto peel_front_at(tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i)
 { return _md::sfront_at(t, i, cs::make_index_sequence<N>{}); }
 template <cs::size_t N, class T, class E, class L, own O>
-_TNY_API auto slice_front_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i)
+_TNY_API auto peel_front_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i)
 { return _md::sfront_at(t, i, cs::make_index_sequence<N>{}); }
 
 _TNY_NAMESPACE_END(tny)

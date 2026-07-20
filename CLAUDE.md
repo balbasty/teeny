@@ -42,7 +42,7 @@ include/teeny/
   math.h           in-place & out-of-place elementwise (broadcasting) + unary math
                    + reductions (sum/prod/max/min/dot). Members declared in
                    tensor.h, DEFINED here.
-  iterate.h        nd-peel: slices<Axes...> / slice_at<Axes...>
+  iterate.h        nd-peel: peel<Axes...> / peel_at<Axes...>
   helpers.h        batch_offset (index2offset), channel
   dynamic.h        any_tensor + dispatch_rank (runtime-rank host boundary)
   cuda.h           OPT-IN device/host/pinned memory (needs <cuda_runtime.h>);
@@ -101,9 +101,13 @@ t.data();  t.view();  t.extents();  t.mapping();
 
 // --- indexing / slicing (python-like) ---
 t(1, 2, 3);           // element access; negative indices wrap (count from the back)
-t(0, all, rng(1,4));  // any slice arg -> a lower-/same-rank VIEW. all = keep axis,
-                      //   rng(a,b) = half-open [a,b). Integer args drop that axis.
-t.take_along<0,2>(i, rng(1,4));  // bind named axes only; keep every other axis
+t(0, all, slice(1,4));  // any slice arg -> a lower-/same-rank VIEW. all = keep axis,
+                      //   slice(a,b) = half-open [a,b). Integer args drop that axis.
+t(0, slice(none,4), slice(1,none,2));  // python-like: none = open end, 3rd arg = step.
+                      //   negative bounds wrap; all == slice(none,none) (folds).
+                      //   NB a range routes through layout_stride (ranged axis -> dynamic;
+                      //   `all`-kept axes stay static). See the CCCL note in tensor.h.
+t.take_along<0,2>(i, slice(1,4));  // bind named axes only; keep every other axis
 t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1) -> view
 t.unsqueeze<2>();     // insert size-1 axis at pos 2 (numpy newaxis) -> rank+1 view
 t.squeeze<3>();       // drop a size-1 axis -> rank-1 view
@@ -129,12 +133,12 @@ auto e = exp(a); auto e = sqrt(a);    // unary free functions (neg/abs/exp/log/s
 sum(a); prod(a); max(a); min(a); dot(a,b);
 
 // --- nd-peel: iterate a SUBSET of axes, each yielding a lower-rank view ---
-for (auto line : slices<0,1>(t)) f(line);   // peel axes 0,1; each `line` is a view
-auto s = slice_at<0,1>(t, i);               // the i-th peeled sub-view (grid-stride style)
+for (auto line : peel<0,1>(t)) f(line);   // peel axes 0,1; each `line` is a view
+auto s = peel_at<0,1>(t, i);               // the i-th peeled sub-view (grid-stride style)
 
 // --- nd-peel: peel the FIRST N axes (arbitrary batch rank) ---
-for (auto v : slices_front<N>(t)) f(v);      // v is (*spatial, C); N = #batch dims
-auto v = slice_front_at<N>(t, i);            // the i-th (grid-stride style)
+for (auto v : peel_front<N>(t)) f(v);      // v is (*spatial, C); N = #batch dims
+auto v = peel_front_at<N>(t, i);            // the i-th (grid-stride style)
 
 // --- dynamic-rank / dynamic-value host boundary ---
 auto at = any(data, shape, stride, ndim);    // rank-erased, bounded MaxRank (default 8)
@@ -173,7 +177,7 @@ fold**, a plain `int`/`long` when the value is only known at run time.
   multi-index, then `submdspan` binds those axes and keeps the rest with
   `full_extent`. This replaces jitfields' hand-written `index2offset`.
 - **layout_static_stride** (`layout.h`): the one thing mdspan lacks — strides
-  baked into the type. NOTE: `submdspan` (and therefore `slices`/`take_along`/
+  baked into the type. NOTE: `submdspan` (and therefore `peel`/`take_along`/
   `permute`) is only defined by CCCL for the *standard* layouts, so it does NOT
   work on `layout_static_stride`. Use it for whole-tensor access with folded
   strides; use `layout_right`/`left`/`stride` when you need to slice.
@@ -216,5 +220,5 @@ changes so those stay expressible and fast.
   (the 8 boundary conditions + spline weight tables + separable gather/scatter,
   transcribed from jitfields — domain code that lives outside teeny core).
 - **Full porting plan:** `docs/fastfields-port.md` — the dispatch architecture
-  (`(*batch,*spatial,C)` via `slices_front`/`dispatch_value`), the complete
+  (`(*batch,*spatial,C)` via `peel_front`/`dispatch_value`), the complete
   boundary/order spec, kernel-by-kernel mechanics, and repo mapping.
