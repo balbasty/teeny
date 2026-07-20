@@ -119,6 +119,17 @@ _TNY_HOST tensor<T, Extents, Layout, own::heap> owned(Extents e) {
     return Tn(typename Tn::mapping_type(e));
 }
 
+/** @brief Wrap any `cuda::std::mdspan` (e.g. a `submdspan` result) as a
+ *         non-owning `md::tensor` view, so the tensor API applies to it. */
+template <class MD>
+_TNY_API tensor<typename MD::element_type, typename MD::extents_type,
+                typename MD::layout_type, own::view>
+as_tensor(const MD & m) {
+    using Tn = tensor<typename MD::element_type, typename MD::extents_type,
+                      typename MD::layout_type, own::view>;
+    return Tn(m.data_handle(), m.mapping());
+}
+
 _TNY_NAMESPACE_END(md)
 _TNY_NAMESPACE_END(tny)
 

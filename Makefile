@@ -146,14 +146,15 @@ clean-test-tensor:
 
 TESTS_MD = \
 	$(BUILDDIR)/test_md_tensor \
-	$(BUILDDIR)/test_md_math
+	$(BUILDDIR)/test_md_math \
+	$(BUILDDIR)/test_md_iterate
 
 test-md: verb.build.test.md \
 	$(TESTS_MD) \
 	verb.build.test.md.done
 
 run-test-md: verb.run.test.md \
-	run-test-md_tensor-run run-test-md_math-run \
+	run-test-md_tensor-run run-test-md_math-run run-test-md_iterate-run \
 	verb.run.test.md.done
 
 run-test-md_tensor-run: $(BUILDDIR)/test_md_tensor
@@ -161,6 +162,9 @@ run-test-md_tensor-run: $(BUILDDIR)/test_md_tensor
 
 run-test-md_math-run: $(BUILDDIR)/test_md_math
 	$(BUILDDIR)/test_md_math
+
+run-test-md_iterate-run: $(BUILDDIR)/test_md_iterate
+	$(BUILDDIR)/test_md_iterate
 
 clean-test-md:
 	$(DEL) $(TESTS_MD)

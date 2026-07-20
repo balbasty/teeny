@@ -11,5 +11,6 @@
 #include <teeny/md/tensor.h>
 #include <teeny/md/math.h>
 #include <teeny/md/helpers.h>
+#include <teeny/md/iterate.h>
 
 #endif // TNY_MD
