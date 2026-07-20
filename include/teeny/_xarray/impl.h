@@ -5,117 +5,169 @@
 #include <teeny/core.h>
 #include <teeny/statix.h>
 #include <teeny/_xarray/decl.h>
+#include <teeny/_xarray/access.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
 
-using cuda::std::tuple;
-using cuda::std::tuple_size;
-using cuda::std::tuple_element;
 using cuda::std::conditional_t;
-using cuda::std::is_same;
 
+/* ------------------------------------------------------------------ *
+ *     xarray_tuple                                                   *
+ *                                                                    *
+ *  Materialize the storage tuple from a `values` pack:               *
+ *   - dynamic slot (`cnone`)         -> `T`             (real leaf)  *
+ *   - static  slot (`cvalue<T,X>`)   -> `carray<T,X>`   (empty leaf) *
+ *                                                                    *
+ *  Uses `statix::tuple` throughout (NOT `cuda::std::tuple`) so that   *
+ *  `statix::cat` / `statix::as_tuple` resolve and the recursion      *
+ *  terminates.                                                       *
+ * ------------------------------------------------------------------ */
 
-template <size_t>
-struct xarray_numel: public statix::csize<size_t> {};
-
-template <class T, class values>
-struct _xarray_tuple;
-
-template <class T, class values>
-using xarray_tuple = typename _xarray_tuple<T, values>::type;
-
+// Primary: normalize any pack-like `values` to a `statix::tuple`.
 template <class T, class values>
 struct _xarray_tuple {
     using type = xarray_tuple<T, statix::as_tuple<values>>;
 };
 
 template <class T, class X0, class... X>
-struct _xarray_tuple<T, tuple<X0, X...>> {
+struct _xarray_tuple<T, statix::tuple<X0, X...>> {
     using type = statix::cat<
-        tuple<conditional_t<
-            is_same<X0, statix::cnone>::value,
+        statix::tuple<conditional_t<
+            statix::is_cnone<X0>::value,
             T,
             statix::as_carray<X0, T>
         >>,
-        xarray_tuple<T, tuple<X...>>
+        xarray_tuple<T, statix::tuple<X...>>
     >;
 };
 
 template <class T>
-struct _xarray_tuple<T, tuple<>> {
-    using type = tuple<>;
+struct _xarray_tuple<T, statix::tuple<>> {
+    using type = statix::tuple<>;
 };
 
+/* ------------------------------------------------------------------ *
+ *     xarray_num_dynamic                                             *
+ *                                                                    *
+ *  Count the dynamic (`cnone`) slots in a `values` pack.             *
+ * ------------------------------------------------------------------ */
+
+// Primary: normalize any pack-like `values` to a `statix::tuple`.
+template <class values>
+struct _xarray_num_dynamic {
+    using type = xarray_num_dynamic<statix::as_tuple<values>>;
+};
+
+template <class X0, class... X>
+struct _xarray_num_dynamic<statix::tuple<X0, X...>> {
+    using type = statix::csize<
+        (statix::is_cnone<X0>::value ? size_t(1) : size_t(0))
+        + xarray_num_dynamic<statix::tuple<X...>>::value
+    >;
+};
+
+template <>
+struct _xarray_num_dynamic<statix::tuple<>> {
+    using type = statix::csize<0>;
+};
+
+/* ------------------------------------------------------------------ *
+ *     xarray                                                         *
+ * ------------------------------------------------------------------ */
+
+/** @brief Common (values-independent) typedefs for every `xarray<T,.>`. */
 template <class T>
-struct xarray_base: public tuple<> {
-    using this_type  = xarray_base<T>;
+struct xarray_base {
     using value_type = T;
 };
 
+/**
+ * @brief Hybrid one-dimensional array (see `decl.h`).
+ *
+ * Inherits its storage from `xarray_tuple<T, values>` (a `statix::tuple`),
+ * so static elements cost no storage. Element access is routed through
+ * `xarray_access`, which yields a reference for dynamic elements and a
+ * prvalue for static ones.
+ */
 template <class T, class values>
 struct xarray:
     public xarray_tuple<T, values>,
     public xarray_base<T>
 {
 public:
-    using this_type  = xarray<T, values>;
-    using base_type  = xarray_base<T>;
-    using tuple_type = xarray_tuple<T, values>;
+    using this_type   = xarray<T, values>;
+    using base_type   = xarray_base<T>;
+    using tuple_type  = xarray_tuple<T, values>;
+    using values_type = statix::as_tuple<values>;
+    using value_type  = T;
 
 private:
-    template <class Index> access            = _xarray::access<this_type, Index>;
-    template <class Index> access_type       = _xarray::access_type<this_type, Index>;
-    template <class Index> access_const_type = _xarray::access_const_type<this_type, Index>;
-
-    using front_type       = statix::front<tuple_type>;
-    using front_type_const = statix::front<const tuple_type>;
-    using back_type        = statix::back<tuple_type>;
-    using back_type_const  = statix::back<const tuple_type>;
+    template <class Index>
+    using access = xarray_access<this_type, Index>;
 
 public:
+    /* --- constructors --------------------------------------------- */
 
-    using tuple_type::size;
+    // Inherit the storage-tuple constructors (default, copy, per-leaf...).
+    using tuple_type::tuple_type;
 
-    template <class Index> _TNYDEF(H,D,I)
-    access_const_type<Index> at(const Index & index) const {
-        return access<Index>::at(*this, index);
-    }
+    /* --- size ----------------------------------------------------- */
 
-    template <class Index> _TNYDEF(H,D,I)
-    access_type<Index> at(const Index & index) {
-        return access<Index>::at(*this, index);
-    }
+    /** @brief Total number of elements (static + dynamic). */
+    _TNYDEF(H,D,S,CX) size_t size() noexcept
+    { return statix::size<tuple_type>::value; }
 
-    template <class Index> _TNYDEF(H,D,I)
-    access_const_type<Index> operator[](const Index & index) const {
-        return access<Index>::bracket(*this, index);
-    }
+    /** @brief Number of dynamic (runtime-stored) elements. */
+    _TNYDEF(H,D,S,CX) size_t num_dynamic() noexcept
+    { return xarray_num_dynamic<values>::value; }
 
-    template <class Index> _TNYDEF(H,D,I)
-    access_type<Index> operator[](const Index & index) {
-        return access<Index>::bracket(*this, index);
-    }
+    /** @brief True if the array has no elements. */
+    _TNYDEF(H,D,S,CX) bool empty() noexcept
+    { return size() == 0; }
 
-    _TNYDEF(H,D,I)
-    auto front() const {
-        return at(csize<0>());
-    }
+    /* --- element access at a static index ------------------------- */
 
-    _TNYDEF(H,D,I)
-    auto front() {
-        return at(csize<0>());
-    }
+    /** @brief Access the element at a compile-time index. */
+    template <class Index>
+    _TNYDEF(H,D,I) typename access<Index>::type
+    at(Index index) noexcept
+    { return access<Index>::at(*this, index); }
 
-    _TNYDEF(H,D,I)
-    auto back() const {
-        return at(csize<size()-1>());
-    }
+    template <class Index>
+    _TNYDEF(H,D,I) typename access<Index>::const_type
+    at(Index index) const noexcept
+    { return access<Index>::at(*this, index); }
 
-    _TNYDEF(H,D,I)
-    auto back() {
-        return at(csize<size()-1>());
-    }
+    /** @brief Access the element at a compile-time index. */
+    template <class Index>
+    _TNYDEF(H,D,I) typename access<Index>::type
+    operator[](Index index) noexcept
+    { return access<Index>::at(*this, index); }
 
+    template <class Index>
+    _TNYDEF(H,D,I) typename access<Index>::const_type
+    operator[](Index index) const noexcept
+    { return access<Index>::at(*this, index); }
+
+    /* --- first / last element ------------------------------------- *
+     *  Templated on the return type so the body/return-type are only  *
+     *  instantiated on use (harmless for an empty xarray otherwise).  */
+
+    template <class R = typename access<statix::csize<0> >::type>
+    _TNYDEF(H,D,I) R front() noexcept
+    { return at(statix::csize<0>()); }
+
+    template <class R = typename access<statix::csize<0> >::const_type>
+    _TNYDEF(H,D,I) R front() const noexcept
+    { return at(statix::csize<0>()); }
+
+    template <class R = typename access<statix::cptrdiff<-1> >::type>
+    _TNYDEF(H,D,I) R back() noexcept
+    { return at(statix::cptrdiff<-1>()); }
+
+    template <class R = typename access<statix::cptrdiff<-1> >::const_type>
+    _TNYDEF(H,D,I) R back() const noexcept
+    { return at(statix::cptrdiff<-1>()); }
 };
 
 _TNY_NAMESPACE_END(tny)

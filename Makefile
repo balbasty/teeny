@@ -11,7 +11,15 @@ MKDIR     ?= mkdir -p
 BUILDDIR  ?= ./build
 CXXFLAGS  += -std=c++17
 INCLUDES  += -I./include -I./external/cccl/libcudacxx/include
-TESTFLAGS += -ferror-limit=1 -ftemplate-backtrace-limit=0
+
+# Stop at the first error (the flag differs between clang and gcc).
+CXX_IS_CLANG := $(shell $(CXX) --version 2>/dev/null | grep -qi clang && echo 1)
+ifeq ($(CXX_IS_CLANG),1)
+TESTFLAGS += -ferror-limit=1
+else
+TESTFLAGS += -fmax-errors=1
+endif
+TESTFLAGS += -ftemplate-backtrace-limit=0
 
 ########################################################################
 # 	Public Targets
@@ -23,17 +31,22 @@ clean: clean-test
 
 test: verb.build.test \
 	test-statix \
+	test-xarray \
 	verb.build.test.done
 
 run-test: verb.run.test \
 	run-test-statix \
+	run-test-xarray \
 	verb.run.test.done
 
 clean-test: verb.clean.test \
 	clean-test-statix \
+	clean-test-xarray \
 	verb.clean.test.done
 
 .PHONY: all clean test run-test clean-test
+.PHONY: test-statix run-test-statix clean-test-statix
+.PHONY: test-xarray run-test-xarray clean-test-xarray
 
 ########################################################################
 # 	Test Targets
@@ -72,6 +85,25 @@ clean-test-statix-%:
 	$(DEL) $(BUILDDIR)/test_statix_$*
 
 ########################################################################
+
+TESTS_XARRAY = \
+	$(BUILDDIR)/test_xarray
+
+test-xarray: verb.build.test.xarray \
+	$(TESTS_XARRAY) \
+	verb.build.test.xarray.done
+
+run-test-xarray: verb.run.test.xarray \
+	run-test-xarray-run \
+	verb.run.test.xarray.done
+
+run-test-xarray-run: $(BUILDDIR)/test_xarray
+	$(BUILDDIR)/test_xarray
+
+clean-test-xarray:
+	$(DEL) $(TESTS_XARRAY)
+
+########################################################################
 # 	Messages
 ########################################################################
 
@@ -98,6 +130,18 @@ verb.run.test.statix:
 
 verb.run.test.statix.done:
 	$(call verb, "Running statix tests: Done.")
+
+verb.build.test.xarray:
+	$(call verb, "Building xarray tests...")
+
+verb.build.test.xarray.done:
+	$(call verb, "Building xarray tests: Done.")
+
+verb.run.test.xarray:
+	$(call verb, "Running xarray tests...")
+
+verb.run.test.xarray.done:
+	$(call verb, "Running xarray tests: Done.")
 
 verb.clean.test:
 	$(call verb, "Cleaning all tests...")
