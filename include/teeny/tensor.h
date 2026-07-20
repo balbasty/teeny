@@ -40,6 +40,33 @@ _TNY_API auto perm_md(const MD & v, cs::index_sequence<P...>) {
         cs::array<Idx, sizeof...(P)>{ static_cast<Idx>(v.stride(P))... });
     return cs::mdspan<El, PE, cs::layout_stride>(v.data_handle(), m);
 }
+// insert a size-1 axis at position AX (output rank = N+1). The new axis gets
+// stride 1 (its index is always 0, so the value is irrelevant to the offset).
+// J... = 0..N ; input axis for output j is j (j<AX) or j-1 (j>AX).
+template <cs::size_t AX, class MD, cs::size_t... J>
+_TNY_API auto unsqueeze_md(const MD & v, cs::index_sequence<J...>) {
+    using El  = typename MD::element_type;
+    using Idx = typename MD::index_type;
+    using E   = typename MD::extents_type;
+    using OE  = cs::extents<Idx, (J == AX ? cs::size_t(1) : E::static_extent(J < AX ? J : J - 1))...>;
+    cs::layout_stride::mapping<OE> m(
+        OE(static_cast<Idx>(J == AX ? Idx(1) : v.extent(J < AX ? J : J - 1))...),
+        cs::array<Idx, sizeof...(J)>{ static_cast<Idx>(J == AX ? Idx(1) : v.stride(J < AX ? J : J - 1))... });
+    return cs::mdspan<El, OE, cs::layout_stride>(v.data_handle(), m);
+}
+// drop axis AX (must have extent 1) -> output rank = N-1. J... = 0..N-2 ;
+// input axis for output j is j (j<AX) or j+1 (j>=AX).
+template <cs::size_t AX, class MD, cs::size_t... J>
+_TNY_API auto squeeze_md(const MD & v, cs::index_sequence<J...>) {
+    using El  = typename MD::element_type;
+    using Idx = typename MD::index_type;
+    using E   = typename MD::extents_type;
+    using OE  = cs::extents<Idx, E::static_extent(J < AX ? J : J + 1)...>;
+    cs::layout_stride::mapping<OE> m(
+        OE(static_cast<Idx>(v.extent(J < AX ? J : J + 1))...),
+        cs::array<Idx, sizeof...(J)>{ static_cast<Idx>(v.stride(J < AX ? J : J + 1))... });
+    return cs::mdspan<El, OE, cs::layout_stride>(v.data_handle(), m);
+}
 } // namespace _detail
 
 // traits: which layouts expose compile-time strides
@@ -270,6 +297,24 @@ public:
     template <cs::size_t... Perm>
     _TNY_API auto permute() const noexcept
     { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor(_detail::perm_md(view(), cs::index_sequence<Perm...>{})); }
+
+    /** @brief Insert a size-1 axis at position `Ax` (numpy `newaxis`/`unsqueeze`)
+     *         -> a rank-(N+1) view. e.g. a `(H,W)` grid -> `(H,W,1)` with
+     *         `.unsqueeze<2>()`. */
+    template <cs::size_t Ax = 0>
+    _TNY_API auto unsqueeze() noexcept
+    { static_assert(Ax <= rank(), "unsqueeze: axis out of range"); return as_tensor(_detail::unsqueeze_md<Ax>(view(), cs::make_index_sequence<rank() + 1>{})); }
+    template <cs::size_t Ax = 0>
+    _TNY_API auto unsqueeze() const noexcept
+    { static_assert(Ax <= rank(), "unsqueeze: axis out of range"); return as_tensor(_detail::unsqueeze_md<Ax>(view(), cs::make_index_sequence<rank() + 1>{})); }
+
+    /** @brief Drop axis `Ax` (which must have extent 1) -> a rank-(N-1) view. */
+    template <cs::size_t Ax>
+    _TNY_API auto squeeze() noexcept
+    { static_assert(Ax < rank() && rank() > 0, "squeeze: axis out of range"); return as_tensor(_detail::squeeze_md<Ax>(view(), cs::make_index_sequence<rank() - 1>{})); }
+    template <cs::size_t Ax>
+    _TNY_API auto squeeze() const noexcept
+    { static_assert(Ax < rank() && rank() > 0, "squeeze: axis out of range"); return as_tensor(_detail::squeeze_md<Ax>(view(), cs::make_index_sequence<rank() - 1>{})); }
 
     /* --- in-place elementwise math (declared here, defined in math.h) --- */
     template <class B> _TNY_API tensor & add_(const B & b);

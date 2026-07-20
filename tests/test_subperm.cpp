@@ -41,5 +41,20 @@ int main()
     auto mt = m.permute<1,0>();                         // transpose view
     if (mt(0,1) != m(1,0) || mt(1,0) != m(0,1)) return 8;
 
+    // ---- unsqueeze / squeeze -------------------------------------------
+    auto u = t.unsqueeze<3>();                          // (2,3,4) -> (2,3,4,1)
+    static_assert(decltype(u)::rank() == 4, "unsqueeze adds an axis");
+    static_assert(decltype(u)::extents_type::static_extent(3) == 1, "new axis is 1");
+    if (u(1,2,3,0) != t(1,2,3)) return 9;
+    auto u0 = t.unsqueeze<0>();                         // (2,3,4) -> (1,2,3,4)
+    static_assert(decltype(u0)::extents_type::static_extent(0) == 1, "front axis is 1");
+    if (u0(0,1,2,3) != t(1,2,3)) return 10;
+    auto sq = u.squeeze<3>();                           // (2,3,4,1) -> (2,3,4)
+    static_assert(decltype(sq)::rank() == 3, "squeeze drops an axis");
+    if (sq(1,2,3) != t(1,2,3)) return 11;
+    // writes propagate through the inserted axis
+    u(0,0,0,0) = 55.0;
+    if (t(0,0,0) != 55.0) return 12;
+
     return 0;
 }
