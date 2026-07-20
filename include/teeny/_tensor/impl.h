@@ -77,6 +77,38 @@ struct tensor {
     /** @brief Raw access by an already-computed memory offset. */
     _TNYDEF(H,D,I,CX) T & operator[](Offset raw) const noexcept { return data[raw]; }
 
+    /* --- structural views ----------------------------------------- */
+
+    /**
+     * @brief Bind dimension `D` to index `i`, returning an (ndim-1) view.
+     *
+     * The data pointer is advanced by `i * stride[D]` and dimension `D` is
+     * dropped from both shape and stride. `i` may be a runtime integer or a
+     * static index.
+     */
+    template <size_t D, class Ix>
+    _TNYDEF(H,D,I) auto sub(Ix i) const noexcept
+        -> tensor<T, Offset,
+                  statix::erase_index<statix::as_tuple<Shape>,  (ptrdiff_t)D>,
+                  statix::erase_index<statix::as_tuple<Stride>, (ptrdiff_t)D> >
+    {
+        T * p = data + as_offset(i) * static_cast<Offset>(stride[statix::csize<D>()]);
+        return { p, tny::erase<(ptrdiff_t)D>(shape), tny::erase<(ptrdiff_t)D>(stride) };
+    }
+
+    /**
+     * @brief Reorder the dimensions (a permutation of `0..ndim-1`).
+     */
+    template <ptrdiff_t... I>
+    _TNYDEF(H,D,I) auto permute() const noexcept
+        -> tensor<T, Offset,
+                  statix::get_index<statix::as_tuple<Shape>,  I...>,
+                  statix::get_index<statix::as_tuple<Stride>, I...> >
+    {
+        static_assert(sizeof...(I) == ndim, "permute: need exactly ndim indices");
+        return { data, tny::select<I...>(shape), tny::select<I...>(stride) };
+    }
+
     /**
      * @brief Memory offset of a C-contiguous (row-major) linear index.
      *
@@ -86,6 +118,20 @@ struct tensor {
     _TNYDEF(H,D,I,CX) Offset offset_at(Offset linear) const noexcept {
         Offset off = 0;
         decode(off, linear, cuda::std::make_index_sequence<ndim>{});
+        return off;
+    }
+
+    /**
+     * @brief Memory offset of a Fortran-contiguous (column-major) linear index.
+     *
+     * Decodes `linear` with dimension 0 varying fastest --
+     * `linear = i0 + size0*(i1 + size1*(i2 + ...))` -- weighting by `stride`.
+     * This matches the batch-linearisation convention used by CUDA-launch
+     * loops (jitfields `index2offset`), and static extents/strides fold away.
+     */
+    _TNYDEF(H,D,I,CX) Offset foffset(Offset linear) const noexcept {
+        Offset off = 0, cur = 1;
+        fdecode(off, cur, linear, cuda::std::make_index_sequence<ndim>{});
         return off;
     }
 
@@ -116,6 +162,21 @@ private:
         const Offset sz = static_cast<Offset>(shape[d]);
         off    += (linear % sz) * static_cast<Offset>(stride[d]);
         linear /= sz;
+    }
+
+    template <size_t... Dm>
+    _TNYDEF(H,D,I,CX) void fdecode(Offset & off, Offset & cur, Offset linear,
+                                   cuda::std::index_sequence<Dm...>) const noexcept {
+        // Process dimensions first-to-last (column-major: dim 0 is fastest).
+        (fdecode_one(off, cur, linear, statix::csize<Dm>()), ...);
+    }
+
+    template <class Dim>
+    _TNYDEF(H,D,I,CX) void fdecode_one(Offset & off, Offset & cur, Offset linear, Dim d) const noexcept {
+        const Offset sz  = static_cast<Offset>(shape[d]);
+        const Offset nxt = cur * sz;
+        off += ((linear % nxt) / cur) * static_cast<Offset>(stride[d]);
+        cur  = nxt;
     }
 };
 

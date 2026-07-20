@@ -118,18 +118,22 @@ clean-test-xarray:
 ########################################################################
 
 TESTS_TENSOR = \
-	$(BUILDDIR)/test_tensor
+	$(BUILDDIR)/test_tensor \
+	$(BUILDDIR)/test_tensor_distance_l1
 
 test-tensor: verb.build.test.tensor \
 	$(TESTS_TENSOR) \
 	verb.build.test.tensor.done
 
 run-test-tensor: verb.run.test.tensor \
-	run-test-tensor-run \
+	run-test-tensor-run run-test-tensor_distance_l1-run \
 	verb.run.test.tensor.done
 
 run-test-tensor-run: $(BUILDDIR)/test_tensor
 	$(BUILDDIR)/test_tensor
+
+run-test-tensor_distance_l1-run: $(BUILDDIR)/test_tensor_distance_l1
+	$(BUILDDIR)/test_tensor_distance_l1
 
 clean-test-tensor:
 	$(DEL) $(TESTS_TENSOR)

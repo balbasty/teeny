@@ -79,5 +79,25 @@ int main()
     if (d.numel() != 24) return 12;
     if (d(0, 2, 3) != 2*4 + 3) return 13;
 
+    // ---- sub-view (drop a dimension) -----------------------------------
+    for (long i = 0; i < 24; ++i) buf[i] = i;
+    auto s1 = t.sub<1>(2L);              // bind dim 1 (size 3) to index 2 -> [2,4]
+    static_assert(decltype(s1)::ndim == 2, "sub drops a dim");
+    if (s1(1, 3) != 1*12 + 2*4 + 3) return 14;   // == t(1,2,3)
+    if (s1.numel() != 8) return 15;              // 2*4
+
+    // ---- permute -------------------------------------------------------
+    auto pt = t.permute<2,0,1>();        // dims -> [4,2,3], strides -> [1,12,4]
+    static_assert(decltype(pt)::ndim == 3, "permute keeps rank");
+    if (pt(3, 1, 2) != 1*12 + 2*4 + 3) return 16;   // == t(1,2,3)
+
+    // ---- foffset (Fortran-order decode) --------------------------------
+    // F-contiguous [2,3,4]: strides [1,2,6]; foffset must equal the linear
+    // index for that layout.
+    long fstr[3] = {1, 2, 6};
+    auto tf = make_tensor<shape_static>(buf, sizes, fstr);
+    for (long lin = 0; lin < 24; ++lin)
+        if (tf.foffset(lin) != lin) return 17;
+
     return 0;
 }
