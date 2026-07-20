@@ -1,103 +1,71 @@
-#include <teeny/tensor.h>
+#include <teeny/teeny.h>
 #include <cuda/std/type_traits>
 
 using namespace tny;
-using namespace tny::statix;
-using cuda::std::is_same;
+namespace cs = cuda::std;
+using cs::extents;
+using cs::dynamic_extent;
 
-// Descriptors for a rank-3 [2,3,4] tensor.
-using shape_static = tuple<cvalue<long,2>, cvalue<long,3>, cvalue<long,4> >;
-using stride_c     = tuple<cvalue<long,12>, cvalue<long,4>, cvalue<long,1> >;   // row-major
-using shape_mixed  = tuple<cnone, cvalue<long,3>, cvalue<long,4> >;             // [?,3,4]
+// A fully-static tensor view is exactly its data pointer (EBO on the mapping).
+using static_view = tensor<double, extents<long,2,3,4>, cs::layout_right, own::view>;
+static_assert(static_view::rank() == 3, "rank");
+static_assert(static_view::is_static, "static");
+static_assert(cs::is_trivially_copyable<static_view>::value, "view trivially copyable");
+static_assert(sizeof(static_view) == sizeof(double*), "static view == just a pointer");
 
-using tensor_static = tensor<long, long, shape_static, stride_c>;
-
-// ---- compile-time properties -------------------------------------------
-
-static_assert(tensor_static::ndim == 3, "ndim");
-static_assert(cuda::std::is_trivially_copyable<tensor_static>::value,
-              "trivially copyable (kernel-by-value)");
-// A fully-static tensor view carries no runtime shape/stride storage: it is
-// the data pointer plus a small constant, far smaller than a dynamic view
-// (which would store ndim extents + ndim strides).
-static_assert(sizeof(tensor_static) < sizeof(long*) + tensor_static::ndim * 2 * sizeof(long),
-              "static view stores no shape/stride data");
-static_assert(sizeof(tensor_static)
-              < sizeof(tensor<long, long, dynamic_values<3> >),
-              "static view is smaller than a dynamic one");
+// A stack tensor stores exactly its elements.
+using stack_33 = tensor<double, extents<long,3,3>, cs::layout_right, own::stack>;
+static_assert(sizeof(stack_33) == 9 * sizeof(double), "stack tensor == its data");
+static_assert(cs::is_trivially_copyable<stack_33>::value, "stack trivially copyable");
 
 int main()
 {
-    long buf[24];
+    double buf[24];
     for (long i = 0; i < 24; ++i) buf[i] = i;
-    long sizes[3]   = {2, 3, 4};
-    long strides[3] = {12, 4, 1};
 
-    // ---- fully-static tensor -------------------------------------------
-    auto t = make_tensor<shape_static, stride_c>(buf, sizes, strides);
+    // ---- view over a contiguous buffer --------------------------------
+    auto v = view(buf, extents<long,2,3,4>{});
+    if (v(1,2,3) != 1*12 + 2*4 + 3) return 1;
+    if (v.numel() != 24 || v.extent(1) != 3) return 2;
+    v(0,0,0) = 99; if (buf[0] != 99) return 3;
 
-    // numel folds to a compile-time constant.
-    static_assert(decltype(t.numel())::value == 24, "static numel folds");
-    if (t.numel() != 24) return 1;
+    // ---- per-dim compile-time NON-contiguous strides (posdef case) ----
+    // batch of 3x3 with a padded batch stride 16 (not the contiguous 9).
+    double pad[64]; for (int i=0;i<64;++i) pad[i]=i;
+    auto s = view_strided<16,3,1>(pad, extents<long,dynamic_extent,3,3>{4});
+    if (s(2,1,0) != 2*16 + 1*3 + 0) return 4;
+    static_assert(decltype(s)::rank() == 3, "strided rank");
 
-    // operator() matches manual row-major offset.
-    for (long i = 0; i < 2; ++i)
-    for (long j = 0; j < 3; ++j)
-    for (long k = 0; k < 4; ++k)
-        if (t(i, j, k) != i*12 + j*4 + k) return 2;
+    // ---- stack-owned, value semantics ---------------------------------
+    auto m = local<double, extents<long,3,3>>();
+    m(0,0) = 1; m(1,1) = 2; m(2,2) = 3;
+    auto m2 = m;                       // deep copy
+    m2(0,0) = 42; if (m(0,0) != 1) return 5;
 
-    // Mixed static / runtime indices.
-    if (t(csize<1>(), 2L, csize<3>()) != 1*12 + 2*4 + 3) return 3;
+    // ---- heap-owned (host), dynamic shape, move-only ------------------
+    using DynE = extents<long,dynamic_extent,dynamic_extent>;
+    auto h = owned<double, DynE>(DynE{2,3});
+    h(1,2) = 7; if (h(1,2) != 7 || h.numel() != 6) return 6;
+    auto h2 = static_cast<decltype(h)&&>(h);            // move
+    if (h2(1,2) != 7 || h.data() != nullptr) return 7;
 
-    // Static extents / strides read back.
-    if (t.size(csize<0>())      != 2)  return 4;
-    if (t.stride_at(csize<2>()) != 1)  return 5;
+    // ---- .view() yields a plain cuda::std::mdspan ---------------------
+    auto md = v.view();
+    static_assert(cs::is_same<decltype(md), cs::mdspan<double, extents<long,2,3,4>, cs::layout_right>>(), "view() -> mdspan");
+    if (md.extent(2) != 4) return 8;
 
-    // offset_at decodes a row-major linear index (contiguous -> identity).
-    for (long lin = 0; lin < 24; ++lin)
-        if (t.offset_at(lin) != lin) return 6;
+    // ---- helpers: channel peel + batch offset -------------------------
+    auto full = view(buf, extents<long,2,3,4>{});         // treat dim0 as "channel"
+    auto sp = channel(full.view(), 1);                    // spatial (3,4) view of channel 1
+    static_assert(decltype(sp)::rank() == 2, "channel peeled");
+    if (sp(0,0) != full(1,0,0)) return 9;
 
-    // Writes go through the view into the backing buffer.
-    t(1, 1, 1) = 777;
-    if (buf[12 + 4 + 1] != 777) return 7;
-
-    // ---- mixed static/dynamic shape, dynamic strides -------------------
-    auto m = make_tensor<shape_mixed>(buf, sizes, strides);   // stride all-dynamic
-    if (m.numel() != 24) return 8;                            // 2*3*4 (dim0 runtime)
-    if (m.size(csize<1>()) != 3) return 9;                    // static
-    if (m.size(csize<0>()) != 2) return 10;                   // dynamic, read from sizes[]
-    buf[12 + 4 + 1] = 55;
-    if (m(1, 1, 1) != 55) return 11;
-
-    // The dynamic-shape view stores exactly the dynamic extents (dim0) +
-    // all three dynamic strides.
-    static_assert(decltype(m)::shape_type::num_dynamic()  == 1, "mixed shape stores 1 extent");
-    static_assert(decltype(m)::stride_type::num_dynamic() == 3, "dynamic stride stores 3");
-
-    // ---- fully dynamic view --------------------------------------------
-    auto d = make_tensor<dynamic_values<3> >(buf, sizes, strides);
-    if (d.numel() != 24) return 12;
-    if (d(0, 2, 3) != 2*4 + 3) return 13;
-
-    // ---- sub-view (drop a dimension) -----------------------------------
-    for (long i = 0; i < 24; ++i) buf[i] = i;
-    auto s1 = t.sub<1>(2L);              // bind dim 1 (size 3) to index 2 -> [2,4]
-    static_assert(decltype(s1)::ndim == 2, "sub drops a dim");
-    if (s1(1, 3) != 1*12 + 2*4 + 3) return 14;   // == t(1,2,3)
-    if (s1.numel() != 8) return 15;              // 2*4
-
-    // ---- permute -------------------------------------------------------
-    auto pt = t.permute<2,0,1>();        // dims -> [4,2,3], strides -> [1,12,4]
-    static_assert(decltype(pt)::ndim == 3, "permute keeps rank");
-    if (pt(3, 1, 2) != 1*12 + 2*4 + 3) return 16;   // == t(1,2,3)
-
-    // ---- foffset (Fortran-order decode) --------------------------------
-    // F-contiguous [2,3,4]: strides [1,2,6]; foffset must equal the linear
-    // index for that layout.
-    long fstr[3] = {1, 2, 6};
-    auto tf = make_tensor<shape_static>(buf, sizes, fstr);
-    for (long lin = 0; lin < 24; ++lin)
-        if (tf.foffset(lin) != lin) return 17;
+    // batch_offset decodes an F-order index over the leading dims (0,1), last dim = 0.
+    auto fv = full.view();                                // (2,3,4)
+    for (long lin = 0; lin < 2*3; ++lin) {
+        long i0 = lin % 2, i1 = lin / 2;                  // F-order over dims 0,1
+        if (batch_offset(fv, lin) != fv.mapping()(i0, i1, 0)) return 10;
+    }
 
     return 0;
 }

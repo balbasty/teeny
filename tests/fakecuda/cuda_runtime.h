@@ -1,4 +1,4 @@
-// Minimal malloc-backed fake of the CUDA runtime, so teeny/md/cuda.h can be
+// Minimal malloc-backed fake of the CUDA runtime, so teeny/cuda.h can be
 // compiled AND run on a host without a CUDA toolkit. It validates the storage
 // structure (allocate / move / free / factories) -- NOT real GPU behaviour.
 #ifndef TNY_FAKE_CUDA_RUNTIME

@@ -1,133 +1,86 @@
 # teeny
 
-A teeny-tiny, header-only tensor library that works on host _and_ device (CUDA).
+A teeny-tiny, header-only tensor library that works on host _and_ device (CUDA),
+built on NVIDIA CCCL's `cuda::std::mdspan`.
 
-teeny's distinguishing feature is **hybrid static/dynamic shapes and strides**:
-every extent and stride of a tensor may be known at *compile time*, at *run
-time*, or a mix — decided **per dimension**. Dimensions known statically fold
-their index arithmetic into immediates (zero registers, zero loads); dynamic
-ones are carried as ordinary values. The same source specializes to a fully
-dynamic kernel, a fully static one, or anything in between — no separate
-`1d`/`2d`/`3d`/`nd` copies.
-
-It is meant to be `#include`d into C++/CUDA kernels (e.g. the ones in
+teeny is one tensor type whose **shape and strides may be static, dynamic, or a
+mix — per dimension** — so a kernel specializes to fully-dynamic, fully-static
+(everything folds to immediates), or anything in between, from a single source.
+It is meant to be `#include`d into C++/CUDA kernels (e.g.
 [jitfields](https://github.com/balbasty/jitfields)) to make them compact.
+
+mdspan (from CCCL) does the heavy lifting — per-dimension `extents`, layouts,
+offset mapping, and `submdspan`. teeny adds only what mdspan lacks: per-dimension
+compile-time strides, owning storage (stack / heap / CUDA memory), a
+valarray-like math layer, and kernel ergonomics (nd-peel, dynamic-rank dispatch).
 
 ## Requirements
 
-- **C++17** (the floor is set by the CCCL dependency, which refuses to build
-  below 17).
-- A host compiler (tested: g++ 13, clang++ 18) and/or `nvcc` for device code.
-- [NVIDIA CCCL](https://github.com/NVIDIA/cccl) for `cuda::std::*` on host and
-  device, vendored as a submodule:
-
+- **C++17** (the floor set by CCCL, which refuses to build lower).
+- A host compiler (tested: g++ 13, clang++ 18) and/or `nvcc`.
+- CCCL, vendored as a submodule:
   ```sh
   git submodule update --init --depth 1 external/cccl
   ```
+  Add `-I include -I external/cccl/libcudacxx/include`.
 
-Everything is header-only under `include/teeny`; add `-I include` and
-`-I external/cccl/libcudacxx/include`.
+## At a glance
 
-## Layers
+```cpp
+#include <teeny/teeny.h>
+using namespace tny;
+namespace cs = cuda::std;
 
-| Header | What it gives you |
+// one tensor type, ownership as a parameter (view / stack / heap / device / ...):
+auto v = view(ptr, cs::extents<long,2,3,4>{});     // non-owning, kernel-passable
+auto m = local<double, cs::extents<long,3,3>>();   // stack-owned (static shape)
+auto h = owned<double, DynE>(DynE{2,3});           // heap-owned (host, move-only)
+
+// mdspan's static/dynamic extents + a custom per-dim static-stride layout:
+auto s = view_strided<16,3,1>(ptr, cs::extents<long,cs::dynamic_extent,3,3>{n});
+
+// valarray-like math:
+m.add_(other); m.mul_(2.0);                        // in-place, any tensor/view
+auto c = a + b;   // out-of-place: static -> stack (host+device),
+                  //               dynamic -> heap (host only)
+sum(m); prod(m); max(m); min(m); dot(a,b);
+
+// structure:
+t.sub<1>(2);              // bind an axis -> lower-rank view
+t.permute<2,0,1>();       // reorder axes
+for (auto line : slices<0,1>(t)) work(line);       // nd-peel: iterate a subset of axes
+auto v3 = at.fixed<3>();  // dynamic-rank dispatch at the host boundary
+```
+
+## Headers (`include/teeny/`)
+
+| Header | Contents |
 |---|---|
-| `teeny/core.h` | host/device macros, `cuda::std` integer aliases |
-| `teeny/statix.h` | `tny::statix` — compile-time metaprogramming: `pack`, `carray`, `tuple`, a uniform pack API (`get`/`at`/`head`/`tail`/`cat`/`erase`/`reversed`/…), `_math` (`prod`/`sum`/`cumprod`/`shifted_cumprod`/…), Python-style indices & slices |
-| `teeny/xarray.h` | `tny::xarray<T, values>` — the hybrid 1-D array, plus its algebra and structural ops |
-| `teeny/tensor.h` | `tny::tensor<T, Offset, Shape, Stride>` — the N-D strided view |
-
-### `xarray<T, values>`
-
-A 1-D array where each slot is static (`cvalue<T,X>`) or dynamic (`cnone`).
-**Only the dynamic elements are stored** (`sizeof == max(1, num_dynamic *
-sizeof(T))`); static values live in the type. It is trivially copyable.
-
-```cpp
-using namespace tny; using namespace tny::statix;
-
-// [ ?, 3, 4 ] : one runtime extent, two compile-time ones.
-xarray<long, tuple<cnone, cvalue<long,3>, cvalue<long,4>>> a;
-a[csize<0>()] = 5;          // write the dynamic slot (returns long&)
-a[csize<1>()];              // -> 3, a compile-time prvalue
-a.front(); a.back();        // negative/static indices supported
-```
-
-Algebra (`tny::` free functions; fully-static inputs fold to a compile-time
-`cvalue`, otherwise a runtime value):
-
-```cpp
-tny::prod(a);               // numel;  tny::sum, tny::max, tny::dot(idx, stride)
-tny::for_each(a, f);        // unrolled loop: f(csize<I> tag, element)
-tny::from_pointer<V>(p);    // build from a raw size[]/stride[] vector
-tny::select<2,0,1>(a);      // gather / permute
-tny::erase<1>(a);           // drop a slot (squeeze); tny::reversed(a)
-```
-
-### `tensor<T, Offset, Shape, Stride>`
-
-A non-owning N-D strided view = `{ T* data; xarray shape; xarray stride; }`.
-Trivially copyable, so it passes into a `__global__` kernel by value.
-
-```cpp
-auto t = tny::make_tensor<Shape>(data, sizes, strides);   // Stride defaults dynamic
-t.numel();                          // folds to a constant for a static shape
-t(i, j, k);                         // mixed runtime / static (csize<>) indices
-t.offset_at(lin);  t.foffset(lin);  // row-major / column-major linear decode
-t.sub<D>(i);                        // drop a dim -> (ndim-1) view
-t.permute<2,0,1>();                 // reorder dims
-```
-
-For a fully-static shape+stride, `t(i,j,k)` compiles to the same immediate/shift
-address arithmetic as hand-written code — no shape or stride is loaded from
-memory.
+| `teeny.h` | umbrella (everything except `cuda.h`) |
+| `storage.h` | `own` modes + storage policies (`owning_storage<T,Alloc>`) |
+| `layout.h` | `layout_static_stride<S...>` — per-dim compile-time strides |
+| `tensor.h` | `tensor<T, Extents, Layout, own>` + `view`/`local`/`owned` + `sub`/`permute` |
+| `math.h` | in-place / out-of-place ops, `sum`/`prod`/`max`/`min`/`dot` |
+| `iterate.h` | nd-peel: `slices<Axes…>` / `slice_at<Axes…>` |
+| `helpers.h` | `batch_offset` (index2offset), `channel` |
+| `dynamic.h` | `any_tensor` + `dispatch_rank` (runtime rank) |
+| `cuda.h` | opt-in device / host / pinned memory (needs the CUDA runtime) |
 
 ## Building & testing
 
 ```sh
-make run-test              # builds and runs everything (default toolchain)
+make run-test              # build + run all tests (default toolchain)
 make CXX=clang++ run-test  # or pick a compiler
-make run-test-xarray       # a subset: statix / xarray / tensor
 ```
 
-Tests are header-only translation units under `tests/`, mixing `static_assert`
-batteries (type-level results, `sizeof`/EBO layout locks, trivially-copyable)
-with host runtime checks. `tests/test_tensor_distance_l1.cpp` ports the core of
-a real jitfields kernel and asserts bit-identical results against the original
-batching plumbing.
-
-## `tny::md` — the mdspan-based line (`teeny/md.h`)
-
-A second, lighter-weight take that builds on `cuda::std::mdspan` instead of the
-hand-rolled `statix` layer — mdspan already provides per-dimension static/dynamic
-extents, layouts, and sub-views on device, so this line only implements what it
-lacks. It is intended to eventually become all of teeny.
-
-```cpp
-using namespace tny::md; namespace cs = cuda::std;
-
-// one tensor class, ownership as a parameter (view / stack / heap):
-auto v = view(ptr, cs::extents<long,2,3,4>{});          // non-owning, kernel-passable
-auto m = local<double, cs::extents<long,3,3>>();        // stack-owned (static shape)
-auto h = owned<double, DynE>(DynE{2,3});                 // heap-owned (host, move-only)
-
-// valarray-like math:
-m.add_(other); m.mul_(2.0);                              // in-place, on any tensor/view
-auto c = a + b;   // out-of-place -- enabled ONLY when the result extent is static
-
-// the piece mdspan lacks: per-dimension compile-time (non-contiguous) strides
-auto s = view_strided<16,3,1>(ptr, cs::extents<long,cs::dynamic_extent,3,3>{n});
-```
-
-`view` / `stack` tensors are trivially copyable; a fully-static tensor is exactly
-the size of its data (the mapping sits in an empty base). Static-shape math folds
-to straight-line SIMD; per-dim static strides fold to immediates. Headers under
-`include/teeny/md/`; tests `tests/test_md_{tensor,math}.cpp`.
+Tests under `tests/` mix `static_assert` batteries with host runtime checks;
+`test_distance_l1`, `test_pull`, and `test_posdef` port real jitfields kernels
+and validate them numerically. `test_cuda` exercises the CUDA storage against a
+malloc-backed fake runtime (`tests/fakecuda/`).
 
 ## Status
 
-`statix`, `xarray` (+ algebra + structural ops), and `tensor` are implemented
-and tested on host under clang++ and g++ at C++17. Device (`nvcc`) compilation
-is intended and the headers avoid virtuals, exceptions, and device-side
-allocation, but a real GPU CI leg is still to be added. Slicing, strides-from-
-shape derivation, and further kernel ports are the natural next steps.
+Implemented and tested on host under clang++ and g++ at C++17. Device (`nvcc`)
+compilation is intended — the headers avoid virtuals, exceptions, and (on the
+device path) allocation — but a real GPU CI leg is still to be added, and
+`teeny/cuda.h` is so far validated only structurally.
