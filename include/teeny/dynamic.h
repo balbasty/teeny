@@ -79,6 +79,25 @@ _TNY_HOST bool dispatch_rank(const any_tensor<T, offset_t, MaxRank> & t, F && f)
     return _detail::dispatch_from<1>(t, f);
 }
 
+/**
+ * @brief Turn a runtime value into a compile-time one from a candidate list.
+ *
+ * `dispatch_value<1,2,3>(D, f)` calls `f(Int<k>{})` for the matching candidate
+ * `k == D` (so `f` receives a static `integral_constant` it can use as a
+ * template argument), and returns whether any matched. This is how a kernel
+ * turns a runtime spatial rank / interpolation order / boundary mode into a
+ * template parameter *early*, then dispatches to fully-static code — the
+ * `(*batch, *spatial, C)` pattern where spatial rank D ∈ {1,2,3} is specialised.
+ *
+ *     dispatch_value<1,2,3>(ndim_spatial, [&](auto d){ kernel<d.value>(view); });
+ */
+template <int... Vs, class F>
+_TNY_HOST bool dispatch_value(int v, F && f) {
+    bool matched = false;
+    ( (v == Vs ? (f(cs::integral_constant<int, Vs>{}), matched = true) : false), ... );
+    return matched;
+}
+
 _TNY_NAMESPACE_END(tny)
 
 #endif // TNY_MD_DYNAMIC

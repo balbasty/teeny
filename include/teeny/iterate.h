@@ -114,6 +114,28 @@ _TNY_API auto slices(const tensor<T,E,L,O> & t) {
 template <cs::size_t... Axes, class MD>
 _TNY_API slice_range<MD, Axes...> slices_of(const MD & m) { return { m }; }
 
+namespace _md {
+template <class T, cs::size_t... A> _TNY_API auto sfront(T & t, cs::index_sequence<A...>) { return slices<A...>(t); }
+template <class T, cs::size_t... A> _TNY_API auto sfront_at(T & t, typename T::index_type i, cs::index_sequence<A...>) { return slice_at<A...>(t, i); }
+} // namespace _md
+
+/** @brief Peel the FIRST `N` axes (e.g. an arbitrary number of leading batch
+ *         dims) -> a range of sub-views over the remaining axes. The
+ *         runtime-batch-rank half of the `(*batch, *spatial, C)` pattern: pick
+ *         `N` = number of batch dims and each sub-view is `(*spatial, C)`. */
+template <cs::size_t N, class T, class E, class L, own O>
+_TNY_API auto slices_front(tensor<T,E,L,O> & t)       { return _md::sfront(t, cs::make_index_sequence<N>{}); }
+template <cs::size_t N, class T, class E, class L, own O>
+_TNY_API auto slices_front(const tensor<T,E,L,O> & t) { return _md::sfront(t, cs::make_index_sequence<N>{}); }
+
+/** @brief The `i`-th sub-view obtained by peeling the first `N` axes (grid-stride style). */
+template <cs::size_t N, class T, class E, class L, own O>
+_TNY_API auto slice_front_at(tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i)
+{ return _md::sfront_at(t, i, cs::make_index_sequence<N>{}); }
+template <cs::size_t N, class T, class E, class L, own O>
+_TNY_API auto slice_front_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i)
+{ return _md::sfront_at(t, i, cs::make_index_sequence<N>{}); }
+
 _TNY_NAMESPACE_END(tny)
 
 #endif // TNY_MD_ITERATE

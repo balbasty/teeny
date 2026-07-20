@@ -93,9 +93,15 @@ template <class T, T V> struct _is_ic<cs::integral_constant<T,V>> : cs::true_typ
 template <class A> struct _is_index
     : cs::integral_constant<bool, cs::is_integral<A>::value || _is_ic<A>::value> {};
 
-/** @brief A half-open slice `[start, stop)` for `operator()` / `take_along`. */
+/** @brief A half-open slice `[start, stop)` for `operator()` / `take_along`.
+ *
+ * The argument types are **preserved**: pass static bounds (`rng(Int<1>(),
+ * Int<4>())`) and `submdspan` produces a *static* subextent that folds; pass
+ * runtime bounds (`rng(1, 4)`) and you get a dynamic subextent. (Bounds must be
+ * non-negative — negative slice bounds are not wrapped, unlike integer element
+ * indices.) */
 template <class A, class B>
-_TNY_API auto rng(A start, B stop) { return cs::tuple<long,long>{ static_cast<long>(start), static_cast<long>(stop) }; }
+_TNY_API auto rng(A start, B stop) { return cs::tuple<A,B>{ start, stop }; }
 
 // position of axis A within the pack Axes... (-1 if absent)
 template <cs::size_t A, cs::size_t... Axes>
@@ -103,6 +109,23 @@ _TNY_API constexpr int _pos_in() {
     cs::size_t axs[] = { Axes..., static_cast<cs::size_t>(-1) };
     for (cs::size_t p = 0; p < sizeof...(Axes); ++p) if (axs[p] == A) return static_cast<int>(p);
     return -1;
+}
+
+/**
+ * @brief Accumulate `v` into `*p`, **atomically on the device**.
+ *
+ * The one primitive scatter/push kernels need that a plain `+=` cannot give:
+ * on the device many threads accumulate into overlapping outputs, which races.
+ * On the host this is a plain `+=`; on the device it is `atomicAdd` (which for
+ * `double` needs `sm_60`+). Use via `t.add_at(v, i...)`.
+ */
+template <class T>
+_TNY_API void fetch_add(T * p, T v) noexcept {
+#ifdef __CUDA_ARCH__
+    atomicAdd(p, v);
+#else
+    *p += v;
+#endif
 }
 
 /**
@@ -243,6 +266,13 @@ public:
     _TNY_API const T & operator()(Args... a) const noexcept
     { return store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]; }
 
+    /** @brief Scatter-accumulate: `(*this)(i...) += v`, atomic on the device.
+     *         The write half of a "push"/splat kernel. Integer indices only
+     *         (negatives wrap, like `operator()`). */
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API void add_at(T v, Args... a) noexcept
+    { fetch_add(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)], v); }
+
     /** @brief Sub-view when any argument is a slice (`all`, `rng(a,b)`). */
     template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...), int> = 0>
     _TNY_API auto operator()(Args... a) noexcept
@@ -325,6 +355,11 @@ public:
     _TNY_API tensor & sub_(T s);
     _TNY_API tensor & mul_(T s);
     _TNY_API tensor & div_(T s);
+
+    /* --- assignment / fill (broadcasting) ------------------------- */
+    template <class B> _TNY_API tensor & copy_(const B & b);   // *this = b (broadcasts)
+    _TNY_API tensor & fill_(T s);                              // *this = s
+    _TNY_API tensor & zero_();                                 // *this = 0
 
     /* --- out-of-place elementwise (tensor OR scalar rhs) -> new tensor --- */
     template <class B> _TNY_API auto add(const B & b) const;

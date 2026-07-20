@@ -35,6 +35,10 @@ struct sub { template <class X, class Y> _TNY_API X operator()(X x, Y y) const {
 struct mul { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x * static_cast<X>(y); } };
 struct div { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x / static_cast<X>(y); } };
 
+/* ---- assignment functors ----------------------------------------- */
+struct rhs  { template <class X, class Y> _TNY_API X operator()(X, Y y) const { return static_cast<X>(y); } };  // c = b
+struct setc { template <class X> _TNY_API X operator()(X, X s) const { return s; } };                          // c = s
+
 /* ---- unary functors (cuda::std math -> device-callable) ---------- */
 struct u_neg  { template <class X> _TNY_API X operator()(X x) const { return -x; } };
 struct u_abs  { template <class X> _TNY_API X operator()(X x) const { return x < X(0) ? -x : x; } };
@@ -81,12 +85,31 @@ _TNY_API void zip(C & c, const A & a, const B & b, Op op) {
 /* ---- numpy-style broadcasting (same rank; a dim of 1 broadcasts) - *
  * c(i) = op(a(i), b(i)), where a and b broadcast into c's shape       *
  * (stride 0 on any axis whose operand extent is 1).                   */
+
+// one axis is broadcast-compatible if the extents are equal, one is 1, or
+// either is dynamic (only known at run time -> checked by _TNY_CHECK below).
+_TNY_API constexpr bool bc_axis_ok(cs::size_t a, cs::size_t b) {
+    return a == cs::dynamic_extent || b == cs::dynamic_extent || a == b || a == 1 || b == 1;
+}
+template <class Ea, class Eb, cs::size_t... D>
+_TNY_API constexpr bool bc_static_ok(cs::index_sequence<D...>) {
+    bool ok = true;
+    ( (ok = ok && bc_axis_ok(Ea::static_extent(D), Eb::static_extent(D))), ... );
+    return ok;
+}
+
 template <class C, class A, class B, class Op, cs::size_t... D>
 _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
     using I = typename C::index_type; using Cv = typename C::element_type;
     const I ce[] = { c.extent(D)... }, sc[] = { c.stride(D)... };
     const I ae[] = { a.extent(D)... }, sa[] = { a.stride(D)... };
     const I be[] = { b.extent(D)... }, sb[] = { b.stride(D)... };
+    // runtime shape check: each operand extent must equal c's or be 1 (a larger
+    // rhs would silently truncate — the worst failure mode in a numerics lib).
+    for (cs::size_t r = 0; r < sizeof...(D); ++r) {
+        _TNY_CHECK(ae[r] == ce[r] || ae[r] == 1, "broadcast: lhs extent mismatch");
+        _TNY_CHECK(be[r] == ce[r] || be[r] == 1, "broadcast: rhs extent mismatch");
+    }
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= ce[r];
     for (I lin = 0; lin < n; ++lin) {
         I rem = lin, oa = 0, ob = 0, oc = 0;
@@ -102,6 +125,9 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
 template <class C, class A, class B, class Op>
 _TNY_API void bzip(C & c, const A & a, const B & b, Op op) {
     static_assert(A::rank() == C::rank() && B::rank() == C::rank(), "broadcast: rank mismatch");
+    static_assert(bc_static_ok<typename A::extents_type, typename B::extents_type>(
+                      cs::make_index_sequence<C::rank()>{}),
+                  "broadcast: incompatible static extents");
     bzip_(c, a, b, op, cs::make_index_sequence<C::rank()>{});
 }
 
@@ -275,6 +301,10 @@ template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::sub_(T s) { _md::scal(*this,s,_md::sub{}); return *this; }
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::mul_(T s) { _md::scal(*this,s,_md::mul{}); return *this; }
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::div_(T s) { _md::scal(*this,s,_md::div{}); return *this; }
+template <class T,class E,class L,own O> template <class B>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::copy_(const B & b) { _md::bzip(*this,*this,b,_md::rhs{}); return *this; }
+template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::fill_(T s) { _md::scal(*this,s,_md::setc{}); return *this; }
+template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::zero_() { return fill_(T(0)); }
 
 /* ------------------------------------------------------------------ *
  *     Out-of-place operators                                         *

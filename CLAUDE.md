@@ -114,6 +114,11 @@ a.add_(2.0); a.mul_(0.5);                     // scalar rhs
 a.neg_(); a.abs_(); a.exp_(); a.log_();       // unary in-place
 a.sin_(); a.cos_(); a.sqrt_(); a.tanh_(); a.pow_(3.0);
 
+// --- assignment / scatter (kernel prologue/epilogue) ---
+a.fill_(0.0); a.zero_(); a.copy_(b);          // b broadcasts into a
+a.add_at(v, i, j);                            // scatter-accumulate: a(i,j) += v,
+                                              //   ATOMIC on device (push/splat write)
+
 // --- math (out-of-place -> NEW tensor; static shape -> stack, else heap/host) ---
 auto c = a + b;  auto c = a.add(b);   // tensor+tensor (broadcasts) or tensor+scalar
 auto c = a * 2.0;  auto c = 2.0 * a;  // scalar ops (+ and * are commutative)
@@ -127,10 +132,15 @@ sum(a); prod(a); max(a); min(a); dot(a,b);
 for (auto line : slices<0,1>(t)) f(line);   // peel axes 0,1; each `line` is a view
 auto s = slice_at<0,1>(t, i);               // the i-th peeled sub-view (grid-stride style)
 
-// --- dynamic-rank host boundary (numpy/torch/cupy ndarray -> fixed-rank kernel) ---
-auto at = any(data, shape, stride, ndim);   // rank-erased, bounded MaxRank (default 8)
+// --- nd-peel: peel the FIRST N axes (arbitrary batch rank) ---
+for (auto v : slices_front<N>(t)) f(v);      // v is (*spatial, C); N = #batch dims
+auto v = slice_front_at<N>(t, i);            // the i-th (grid-stride style)
+
+// --- dynamic-rank / dynamic-value host boundary ---
+auto at = any(data, shape, stride, ndim);    // rank-erased, bounded MaxRank (default 8)
 dispatch_rank(at, [&](auto v){ kernel(v); });  // instantiates kernel once per rank
-auto v3 = at.fixed<3>();                     // or force a known rank
+auto v3 = at.fixed<3>();                      // or force a known rank
+dispatch_value<1,2,3>(D, [&](auto d){ kern<d.value>(v); });  // runtime value -> static
 ```
 
 ### Static vs runtime values (important idiom)
