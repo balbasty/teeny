@@ -41,10 +41,10 @@ struct xarray_access<XArray, Index, true> {
     using type       = value_type &;
     using const_type = const value_type &;
 
-    _TNYDEF(H,D,I) static type at(XArray & self, Index) noexcept
+    _TNYDEF(H,D,I,CX) static type at(XArray & self, Index) noexcept
     { return cuda::std::get<position>(self); }
 
-    _TNYDEF(H,D,I) static const_type at(const XArray & self, Index) noexcept
+    _TNYDEF(H,D,I,CX) static const_type at(const XArray & self, Index) noexcept
     { return cuda::std::get<position>(self); }
 };
 
@@ -58,7 +58,7 @@ struct xarray_access<XArray, Index, false> {
     using type       = value_type;
     using const_type = value_type;
 
-    _TNYDEF(H,D,I) static value_type at(const XArray &, Index) noexcept
+    _TNYDEF(H,D,I,CX) static value_type at(const XArray &, Index) noexcept
     { return static_cast<value_type>(element::value); }
 };
 

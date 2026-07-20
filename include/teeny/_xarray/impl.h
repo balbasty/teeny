@@ -157,44 +157,47 @@ public:
 
     /** @brief Access the element at a compile-time index. */
     template <class Index, if_static<Index> = true>
-    _TNYDEF(H,D,I) typename access<Index>::type
+    _TNYDEF(H,D,I,CX) typename access<Index>::type
     at(Index index) noexcept
     { return access<Index>::at(*this, index); }
 
     template <class Index, if_static<Index> = true>
-    _TNYDEF(H,D,I) typename access<Index>::const_type
+    _TNYDEF(H,D,I,CX) typename access<Index>::const_type
     at(Index index) const noexcept
     { return access<Index>::at(*this, index); }
 
     /** @brief Access the element at a compile-time index. */
     template <class Index, if_static<Index> = true>
-    _TNYDEF(H,D,I) typename access<Index>::type
+    _TNYDEF(H,D,I,CX) typename access<Index>::type
     operator[](Index index) noexcept
     { return access<Index>::at(*this, index); }
 
     template <class Index, if_static<Index> = true>
-    _TNYDEF(H,D,I) typename access<Index>::const_type
+    _TNYDEF(H,D,I,CX) typename access<Index>::const_type
     operator[](Index index) const noexcept
     { return access<Index>::at(*this, index); }
 
     /* --- first / last element ------------------------------------- *
-     *  Templated on the return type so the body/return-type are only  *
-     *  instantiated on use (harmless for an empty xarray otherwise).  */
+     *  Function templates with a deduced return type: the body (and    *
+     *  thus the `access` instantiation) is only formed on use, so an    *
+     *  empty xarray instantiates fine and only errors if front()/back() *
+     *  is actually called. `decltype(auto)` preserves the reference for *
+     *  dynamic slots and the prvalue for static ones.                   */
 
-    template <class R = typename access<statix::csize<0> >::type>
-    _TNYDEF(H,D,I) R front() noexcept
+    template <class = void>
+    _TNYDEF(H,D,I,CX) decltype(auto) front() noexcept
     { return at(statix::csize<0>()); }
 
-    template <class R = typename access<statix::csize<0> >::const_type>
-    _TNYDEF(H,D,I) R front() const noexcept
+    template <class = void>
+    _TNYDEF(H,D,I,CX) decltype(auto) front() const noexcept
     { return at(statix::csize<0>()); }
 
-    template <class R = typename access<statix::cptrdiff<-1> >::type>
-    _TNYDEF(H,D,I) R back() noexcept
+    template <class = void>
+    _TNYDEF(H,D,I,CX) decltype(auto) back() noexcept
     { return at(statix::cptrdiff<-1>()); }
 
-    template <class R = typename access<statix::cptrdiff<-1> >::const_type>
-    _TNYDEF(H,D,I) R back() const noexcept
+    template <class = void>
+    _TNYDEF(H,D,I,CX) decltype(auto) back() const noexcept
     { return at(statix::cptrdiff<-1>()); }
 };
 
