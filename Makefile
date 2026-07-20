@@ -152,14 +152,15 @@ TESTS_MD = \
 	$(BUILDDIR)/test_md_distance_l1 \
 	$(BUILDDIR)/test_md_pull \
 	$(BUILDDIR)/test_md_posdef \
-	$(BUILDDIR)/test_md_subperm
+	$(BUILDDIR)/test_md_subperm \
+	$(BUILDDIR)/test_md_dynamic
 
 test-md: verb.build.test.md \
 	$(TESTS_MD) \
 	verb.build.test.md.done
 
 run-test-md: verb.run.test.md \
-	run-test-md_tensor-run run-test-md_math-run run-test-md_iterate-run run-test-md_cuda-run run-test-md_distance_l1-run run-test-md_pull-run run-test-md_posdef-run run-test-md_subperm-run \
+	run-test-md_tensor-run run-test-md_math-run run-test-md_iterate-run run-test-md_cuda-run run-test-md_distance_l1-run run-test-md_pull-run run-test-md_posdef-run run-test-md_subperm-run run-test-md_dynamic-run \
 	verb.run.test.md.done
 
 run-test-md_tensor-run: $(BUILDDIR)/test_md_tensor
@@ -190,6 +191,9 @@ run-test-md_posdef-run: $(BUILDDIR)/test_md_posdef
 
 run-test-md_subperm-run: $(BUILDDIR)/test_md_subperm
 	$(BUILDDIR)/test_md_subperm
+
+run-test-md_dynamic-run: $(BUILDDIR)/test_md_dynamic
+	$(BUILDDIR)/test_md_dynamic
 
 clean-test-md:
 	$(DEL) $(TESTS_MD)

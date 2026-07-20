@@ -12,5 +12,6 @@
 #include <teeny/md/math.h>
 #include <teeny/md/helpers.h>
 #include <teeny/md/iterate.h>
+#include <teeny/md/dynamic.h>
 
 #endif // TNY_MD
