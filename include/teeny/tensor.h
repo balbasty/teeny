@@ -23,10 +23,10 @@ as_tensor(const MD & m);
 /* --- detail: single-axis bind and permutation on a raw mdspan ----- */
 namespace _detail {
 template <cs::size_t D, cs::size_t A, class I>
-_TNY_API auto sub_arg(I i) { if constexpr (A == D) return i; else { (void)i; return cs::full_extent; } }
+_TNY_API auto take_arg(I i) { if constexpr (A == D) return i; else { (void)i; return cs::full_extent; } }
 template <cs::size_t D, class MD, cs::size_t... A>
-_TNY_API auto sub_md(const MD & v, typename MD::index_type i, cs::index_sequence<A...>) {
-    return cs::submdspan(v, sub_arg<D, A>(i)...);
+_TNY_API auto take_md(const MD & v, typename MD::index_type i, cs::index_sequence<A...>) {
+    return cs::submdspan(v, take_arg<D, A>(i)...);
 }
 template <class MD, cs::size_t... P>
 _TNY_API auto perm_md(const MD & v, cs::index_sequence<P...>) {
@@ -40,6 +40,23 @@ _TNY_API auto perm_md(const MD & v, cs::index_sequence<P...>) {
     return cs::mdspan<El, PE, cs::layout_stride>(v.data_handle(), m);
 }
 } // namespace _detail
+
+// traits: which layouts expose compile-time strides
+template <class L> struct _static_strides : cs::false_type {};
+template <cs::size_t... S> struct _static_strides<layout_static_stride<S...>> : cs::true_type {};
+template <class L> struct _contiguous_layout : cs::false_type {};
+template <> struct _contiguous_layout<cs::layout_right> : cs::true_type {};
+template <> struct _contiguous_layout<cs::layout_left>  : cs::true_type {};
+
+// D-th value of a size_t pack (recursive, so it is a constant expression)
+template <cs::size_t D, cs::size_t S0, cs::size_t... S>
+struct _nth_size { static constexpr cs::size_t value = _nth_size<D - 1, S...>::value; };
+template <cs::size_t S0, cs::size_t... S>
+struct _nth_size<0, S0, S...> { static constexpr cs::size_t value = S0; };
+
+template <cs::size_t D, class L> struct _static_stride_at;
+template <cs::size_t D, cs::size_t... S>
+struct _static_stride_at<D, layout_static_stride<S...>> { static constexpr cs::size_t value = _nth_size<D, S...>::value; };
 
 /**
  * @brief One N-dimensional tensor, parameterised by ownership.
@@ -80,10 +97,19 @@ struct tensor : private Layout::template mapping<Extents> {
     template <own OO = O, cs::enable_if_t<OO == own::view, int> = 0>
     _TNY_API tensor(T * p, mapping_type m) : mapping_type(m), store_(p) {}
 
+    /** @brief View constructor from a pointer + extents (contiguous / static-stride layouts). */
+    template <own OO = O, cs::enable_if_t<OO == own::view && cs::is_constructible<mapping_type, Extents>::value, int> = 0>
+    _TNY_API tensor(T * p, Extents e) : mapping_type(e), store_(p) {}
+
     /** @brief Owning constructor: allocate storage for `m` (heap/device/host/pinned). */
     template <own OO = O, cs::enable_if_t<own_is_owning(OO), int> = 0>
     _TNY_HOST explicit tensor(mapping_type m)
         : mapping_type(m), store_(static_cast<cs::size_t>(m.required_span_size())) {}
+
+    /** @brief Owning constructor from extents (contiguous / static-stride layouts). */
+    template <own OO = O, cs::enable_if_t<own_is_owning(OO) && cs::is_constructible<mapping_type, Extents>::value, int> = 0>
+    _TNY_HOST explicit tensor(Extents e)
+        : mapping_type(e), store_(static_cast<cs::size_t>(mapping_type(e).required_span_size())) {}
 
     /* --- geometry ------------------------------------------------- */
     static constexpr cs::size_t rank() noexcept { return Extents::rank(); }
@@ -91,6 +117,31 @@ struct tensor : private Layout::template mapping<Extents> {
     _TNY_API constexpr const Extents & extents() const noexcept { return mapping_type::extents(); }
     _TNY_API constexpr index_type extent(cs::size_t r) const noexcept { return mapping_type::extents().extent(r); }
     _TNY_API constexpr index_type stride(cs::size_t r) const noexcept { return mapping_type::stride(r); }
+
+    static constexpr bool has_static_strides   = _static_strides<Layout>::value;
+    static constexpr bool is_contiguous_layout = _contiguous_layout<Layout>::value;
+
+    /** @brief Extent of axis `D`: a compile-time `integral_constant` when the
+     *         extent is static, otherwise a runtime `index_type`. */
+    template <cs::size_t D>
+    _TNY_API constexpr auto extent() const noexcept {
+        if constexpr (Extents::static_extent(D) != cs::dynamic_extent)
+            return cs::integral_constant<index_type, static_cast<index_type>(Extents::static_extent(D))>{};
+        else
+            return mapping_type::extents().extent(D);
+    }
+    /** @brief Stride of axis `D`: a compile-time `integral_constant` when it is
+     *         known statically (static-stride layout, or a contiguous layout
+     *         over static extents), otherwise a runtime `index_type`. */
+    template <cs::size_t D>
+    _TNY_API constexpr auto stride() const noexcept {
+        if constexpr (has_static_strides)
+            return cs::integral_constant<index_type, static_cast<index_type>(_static_stride_at<D, Layout>::value)>{};
+        else if constexpr (is_static && is_contiguous_layout)
+            return cs::integral_constant<index_type, static_cast<index_type>(mapping_type{}.stride(D))>{};
+        else
+            return mapping_type::stride(D);
+    }
     _TNY_API constexpr index_type numel() const noexcept {
         index_type n = 1;
         for (cs::size_t r = 0; r < rank(); ++r) n *= extent(r);
@@ -109,13 +160,13 @@ struct tensor : private Layout::template mapping<Extents> {
 
     /* --- structural views (return md::tensor views) --------------- */
 
-    /** @brief Bind axis `D` to index `i`, dropping it -> a rank-(N-1) view. */
+    /** @brief (take_along) bind axis `D` to index `i`, dropping it -> a rank-(N-1) view. */
     template <cs::size_t D, class I>
-    _TNY_API auto sub(I i) noexcept
-    { return as_tensor(_detail::sub_md<D>(view(), static_cast<index_type>(i), cs::make_index_sequence<rank()>{})); }
+    _TNY_API auto take_along(I i) noexcept
+    { return as_tensor(_detail::take_md<D>(view(), static_cast<index_type>(i), cs::make_index_sequence<rank()>{})); }
     template <cs::size_t D, class I>
-    _TNY_API auto sub(I i) const noexcept
-    { return as_tensor(_detail::sub_md<D>(view(), static_cast<index_type>(i), cs::make_index_sequence<rank()>{})); }
+    _TNY_API auto take_along(I i) const noexcept
+    { return as_tensor(_detail::take_md<D>(view(), static_cast<index_type>(i), cs::make_index_sequence<rank()>{})); }
 
     /** @brief Reorder the axes (a permutation of 0..N-1) -> a rank-N view. */
     template <cs::size_t... Perm>
@@ -155,16 +206,17 @@ view_strided(T * p, Extents e) {
     return Tn(p, typename Tn::mapping_type(e));
 }
 
-/** @brief Stack-owned tensor (fully static shape); elements value-initialised. */
+/** @brief A non-owning view type. Construct as `view_t<T,E>(ptr, extents)`. */
 template <class T, class Extents, class Layout = cs::layout_right>
-_TNY_API tensor<T, Extents, Layout, own::stack> local() { return {}; }
+using view_t = tensor<T, Extents, Layout, own::view>;
 
-/** @brief Heap-owned tensor (host only, move-only). */
+/** @brief Stack-owned tensor (fully static shape). Use `local<T,E>{}`. */
 template <class T, class Extents, class Layout = cs::layout_right>
-_TNY_HOST tensor<T, Extents, Layout, own::heap> owned(Extents e) {
-    using Tn = tensor<T, Extents, Layout, own::heap>;
-    return Tn(typename Tn::mapping_type(e));
-}
+using local = tensor<T, Extents, Layout, own::stack>;
+
+/** @brief Heap-owned tensor (host only, move-only). Use `owned<T,E>(extents)`. */
+template <class T, class Extents, class Layout = cs::layout_right>
+using owned = tensor<T, Extents, Layout, own::heap>;
 
 /** @brief Wrap any `cuda::std::mdspan` (e.g. a `submdspan` result) as a
  *         non-owning `md::tensor` view, so the tensor API applies to it. */

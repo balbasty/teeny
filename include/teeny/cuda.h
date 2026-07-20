@@ -62,24 +62,15 @@ struct storage<T, own::pinned, N> : owning_storage<T, cuda_pinned_alloc> {
  *     Factories                                                      *
  * ------------------------------------------------------------------ */
 
-/** @brief Owning tensor in CUDA device memory (move-only). */
+/** @brief Owning tensor in CUDA device memory (move-only). `device<T,E>(extents)`. */
 template <class T, class Extents, class Layout = cs::layout_right>
-_TNY_HOST tensor<T, Extents, Layout, own::device> device(Extents e) {
-    using Tn = tensor<T, Extents, Layout, own::device>;
-    return Tn(typename Tn::mapping_type(e));
-}
-/** @brief Owning tensor in page-locked host memory (move-only). */
+using device = tensor<T, Extents, Layout, own::device>;
+/** @brief Owning tensor in page-locked host memory (move-only). `host<T,E>(extents)`. */
 template <class T, class Extents, class Layout = cs::layout_right>
-_TNY_HOST tensor<T, Extents, Layout, own::host> host(Extents e) {
-    using Tn = tensor<T, Extents, Layout, own::host>;
-    return Tn(typename Tn::mapping_type(e));
-}
-/** @brief Owning tensor in pinned/mapped host memory (move-only). */
+using host = tensor<T, Extents, Layout, own::host>;
+/** @brief Owning tensor in pinned/mapped host memory (move-only). `pinned<T,E>(extents)`. */
 template <class T, class Extents, class Layout = cs::layout_right>
-_TNY_HOST tensor<T, Extents, Layout, own::pinned> pinned(Extents e) {
-    using Tn = tensor<T, Extents, Layout, own::pinned>;
-    return Tn(typename Tn::mapping_type(e));
-}
+using pinned = tensor<T, Extents, Layout, own::pinned>;
 
 _TNY_NAMESPACE_END(tny)
 
