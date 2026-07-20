@@ -92,14 +92,15 @@ clean-test-statix-%:
 
 TESTS_XARRAY = \
 	$(BUILDDIR)/test_xarray \
-	$(BUILDDIR)/test_xarray_algebra
+	$(BUILDDIR)/test_xarray_algebra \
+	$(BUILDDIR)/test_xarray_structural
 
 test-xarray: verb.build.test.xarray \
 	$(TESTS_XARRAY) \
 	verb.build.test.xarray.done
 
 run-test-xarray: verb.run.test.xarray \
-	run-test-xarray-run run-test-xarray_algebra-run \
+	run-test-xarray-run run-test-xarray_algebra-run run-test-xarray_structural-run \
 	verb.run.test.xarray.done
 
 run-test-xarray-run: $(BUILDDIR)/test_xarray
@@ -107,6 +108,9 @@ run-test-xarray-run: $(BUILDDIR)/test_xarray
 
 run-test-xarray_algebra-run: $(BUILDDIR)/test_xarray_algebra
 	$(BUILDDIR)/test_xarray_algebra
+
+run-test-xarray_structural-run: $(BUILDDIR)/test_xarray_structural
+	$(BUILDDIR)/test_xarray_structural
 
 clean-test-xarray:
 	$(DEL) $(TESTS_XARRAY)
