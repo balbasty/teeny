@@ -185,6 +185,24 @@ struct tensor : private Layout::template mapping<Extents> {
     _TNY_API tensor & sub_(T s);
     _TNY_API tensor & mul_(T s);
     _TNY_API tensor & div_(T s);
+
+    /* --- out-of-place elementwise (tensor OR scalar rhs) -> new tensor --- */
+    template <class B> _TNY_API auto add(const B & b) const;
+    template <class B> _TNY_API auto sub(const B & b) const;
+    template <class B> _TNY_API auto mul(const B & b) const;
+    template <class B> _TNY_API auto div(const B & b) const;
+    template <class B> _TNY_API auto pow(const B & b) const;
+
+    /* --- in-place unary math (element-wise) ----------------------- */
+    _TNY_API tensor & neg_();
+    _TNY_API tensor & abs_();
+    _TNY_API tensor & exp_();
+    _TNY_API tensor & log_();
+    _TNY_API tensor & sin_();
+    _TNY_API tensor & cos_();
+    _TNY_API tensor & sqrt_();
+    _TNY_API tensor & tanh_();
+    _TNY_API tensor & pow_(T e);
 };
 
 /* ------------------------------------------------------------------ *
