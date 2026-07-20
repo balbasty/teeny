@@ -38,6 +38,12 @@ TESTS = \
 	$(BUILDDIR)/test_posdef \
 	$(BUILDDIR)/test_cuda
 
+EXAMPLES = \
+	$(BUILDDIR)/ex_pull_nd \
+	$(BUILDDIR)/ex_distance_transform \
+	$(BUILDDIR)/ex_cholesky_solve \
+	$(BUILDDIR)/ex_broadcast_affine
+
 ########################################################################
 # 	Public Targets
 ########################################################################
@@ -48,10 +54,14 @@ test: verb.build $(TESTS) verb.build.done
 
 run-test: verb.run $(TESTS:$(BUILDDIR)/test_%=run-%) verb.run.done
 
-clean:
-	$(DEL) $(TESTS)
+examples: verb.build $(EXAMPLES) verb.build.done
 
-.PHONY: all test run-test clean
+run-examples: verb.run $(EXAMPLES:$(BUILDDIR)/ex_%=runex-%) verb.run.done
+
+clean:
+	$(DEL) $(TESTS) $(EXAMPLES)
+
+.PHONY: all test run-test examples run-examples clean
 
 ########################################################################
 # 	Rules
@@ -62,6 +72,12 @@ $(BUILDDIR):
 
 $(BUILDDIR)/test_%: tests/test_%.cpp | $(BUILDDIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(TESTFLAGS) -o $@ $<
+
+$(BUILDDIR)/ex_%: examples/%.cpp | $(BUILDDIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(TESTFLAGS) -o $@ $<
+
+runex-%: $(BUILDDIR)/ex_%
+	@ $(BUILDDIR)/ex_$* >/dev/null && echo "  PASS  ex_$*" || echo "  FAIL  ex_$*"
 
 # test_cuda needs the fake CUDA runtime on the include path.
 $(BUILDDIR)/test_cuda: tests/test_cuda.cpp | $(BUILDDIR)
