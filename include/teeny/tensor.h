@@ -90,6 +90,12 @@ template <class T, T V> struct _is_ic<cs::integral_constant<T,V>> : cs::true_typ
 template <class A> struct _is_index
     : cs::integral_constant<bool, cs::is_integral<A>::value || _is_ic<A>::value> {};
 
+// normalise a python-style AXIS index (negatives count from the back) against a
+// rank. Axis template parameters are signed (`long`) so `-1` is the last axis.
+_TNY_API constexpr cs::size_t _norm_axis(long a, cs::size_t rank) noexcept {
+    return static_cast<cs::size_t>(a < 0 ? a + static_cast<long>(rank) : a);
+}
+
 /** @brief Open-ended slice sentinel — teeny's `None` (python `a[:n]` / `a[m:]`).
  *
  * `slice(none, n)` starts at 0, `slice(m, none)` runs to the end, and
@@ -232,7 +238,7 @@ struct tensor : private Layout::template mapping<Extents> {
      *         else a runtime `index_type`. */
     template <class Idx, cs::enable_if_t<_is_ic<Idx>::value, int> = 0>
     _TNY_API constexpr auto extent(Idx) const noexcept {
-        constexpr cs::size_t D = static_cast<cs::size_t>(Idx::value);
+        constexpr cs::size_t D = _norm_axis(static_cast<long>(Idx::value), rank());   // -1 = last axis
         if constexpr (Extents::static_extent(D) != cs::dynamic_extent)
             return cs::integral_constant<index_type, static_cast<index_type>(Extents::static_extent(D))>{};
         else
@@ -254,7 +260,7 @@ struct tensor : private Layout::template mapping<Extents> {
      *         always-unit stride of a contiguous layout even for dynamic shapes). */
     template <class Idx, cs::enable_if_t<_is_ic<Idx>::value, int> = 0>
     _TNY_API constexpr auto stride(Idx) const noexcept {
-        constexpr cs::size_t D = static_cast<cs::size_t>(Idx::value);
+        constexpr cs::size_t D = _norm_axis(static_cast<long>(Idx::value), rank());   // -1 = last axis
         // a strides<...> layout folds per-dim: static value if known, else runtime
         if constexpr (is_strides_layout && _static_stride_at<D, Layout>::value != dynamic_stride)
             return cs::integral_constant<index_type, static_cast<index_type>(_static_stride_at<D, Layout>::value)>{};
@@ -399,42 +405,42 @@ public:
      * axis, returning a view. e.g. `t.take_along<1>(2)` drops axis 1 at index 2;
      * `t.take_along<0,2>(i, rng(1,4))` binds axes 0 and 2 at once.
      */
-    template <cs::size_t... Axes, class... Args>
+    template <long... Axes, class... Args>
     _TNY_API auto take_along(Args... args) noexcept {
         static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
-        return _ta<Axes...>(_src_for<Args...>(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
+        return _ta<_norm_axis(Axes, rank())...>(_src_for<Args...>(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
     }
-    template <cs::size_t... Axes, class... Args>
+    template <long... Axes, class... Args>
     _TNY_API auto take_along(Args... args) const noexcept {
         static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
-        return _ta<Axes...>(_src_for<Args...>(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
+        return _ta<_norm_axis(Axes, rank())...>(_src_for<Args...>(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
     }
 
-    /** @brief Reorder the axes (a permutation of 0..N-1) -> a rank-N view. */
-    template <cs::size_t... Perm>
+    /** @brief Reorder the axes (a permutation of 0..N-1; negatives wrap) -> a rank-N view. */
+    template <long... Perm>
     _TNY_API auto permute() noexcept
-    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor(_detail::perm_md(view(), cs::index_sequence<Perm...>{})); }
-    template <cs::size_t... Perm>
+    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor(_detail::perm_md(view(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
+    template <long... Perm>
     _TNY_API auto permute() const noexcept
-    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor(_detail::perm_md(view(), cs::index_sequence<Perm...>{})); }
+    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor(_detail::perm_md(view(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
 
     /** @brief Insert a size-1 axis at position `Ax` (numpy `newaxis`/`unsqueeze`)
-     *         -> a rank-(N+1) view. e.g. a `(H,W)` grid -> `(H,W,1)` with
-     *         `.unsqueeze<2>()`. */
-    template <cs::size_t Ax = 0>
+     *         -> a rank-(N+1) view. Negative `Ax` counts from the back, so
+     *         `.unsqueeze<-1>()` appends a trailing axis: `(H,W)` -> `(H,W,1)`. */
+    template <long Ax = 0>
     _TNY_API auto unsqueeze() noexcept
-    { static_assert(Ax <= rank(), "unsqueeze: axis out of range"); return as_tensor(_detail::unsqueeze_md<Ax>(view(), cs::make_index_sequence<rank() + 1>{})); }
-    template <cs::size_t Ax = 0>
+    { constexpr cs::size_t A = _norm_axis(Ax, rank() + 1); static_assert(A <= rank(), "unsqueeze: axis out of range"); return as_tensor(_detail::unsqueeze_md<A>(view(), cs::make_index_sequence<rank() + 1>{})); }
+    template <long Ax = 0>
     _TNY_API auto unsqueeze() const noexcept
-    { static_assert(Ax <= rank(), "unsqueeze: axis out of range"); return as_tensor(_detail::unsqueeze_md<Ax>(view(), cs::make_index_sequence<rank() + 1>{})); }
+    { constexpr cs::size_t A = _norm_axis(Ax, rank() + 1); static_assert(A <= rank(), "unsqueeze: axis out of range"); return as_tensor(_detail::unsqueeze_md<A>(view(), cs::make_index_sequence<rank() + 1>{})); }
 
-    /** @brief Drop axis `Ax` (which must have extent 1) -> a rank-(N-1) view. */
-    template <cs::size_t Ax>
+    /** @brief Drop axis `Ax` (extent 1; negatives wrap) -> a rank-(N-1) view. */
+    template <long Ax>
     _TNY_API auto squeeze() noexcept
-    { static_assert(Ax < rank() && rank() > 0, "squeeze: axis out of range"); return as_tensor(_detail::squeeze_md<Ax>(view(), cs::make_index_sequence<rank() - 1>{})); }
-    template <cs::size_t Ax>
+    { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range"); return as_tensor(_detail::squeeze_md<A>(view(), cs::make_index_sequence<rank() - 1>{})); }
+    template <long Ax>
     _TNY_API auto squeeze() const noexcept
-    { static_assert(Ax < rank() && rank() > 0, "squeeze: axis out of range"); return as_tensor(_detail::squeeze_md<Ax>(view(), cs::make_index_sequence<rank() - 1>{})); }
+    { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range"); return as_tensor(_detail::squeeze_md<A>(view(), cs::make_index_sequence<rank() - 1>{})); }
 
     /* --- in-place elementwise math (declared here, defined in math.h) --- */
     template <class B> _TNY_API tensor & add_(const B & b);

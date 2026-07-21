@@ -56,5 +56,20 @@ int main()
     u(0,0,0,0) = 55.0;
     if (t(0,0,0) != 55.0) return 12;
 
+    // ---- negative axis indices (python-style) --------------------------
+    static_assert(t.extent(Int<-1>()) == 4, "extent(-1) = last axis");
+    static_assert(t.stride(Int<-1>()) == 1, "stride(-1) = last axis (unit)");
+    auto un = t.unsqueeze<-1>();                        // append trailing axis
+    static_assert(decltype(un)::rank() == 4 && decltype(un)::extents_type::static_extent(3) == 1, "unsqueeze<-1> appends");
+    if (un(1,2,3,0) != t(1,2,3)) return 13;
+    auto sq2 = un.squeeze<-1>();                        // drop it again
+    if (sq2(1,2,3) != t(1,2,3)) return 14;
+    auto pr = t.permute<-1,0,1>();                      // (2,3,4) -> (4,2,3)
+    if (pr(3,1,2) != t(1,2,3)) return 15;
+    auto s2 = t.take_along<-2>(1);                      // bind axis 1 -> (2,4)
+    if (s2(1,3) != t(1,1,3)) return 16;
+    long np = 0; for (auto line : peel<0,-2>(t)) { (void)line; ++np; }  // peel axes 0,1
+    if (np != 6) return 17;
+
     return 0;
 }

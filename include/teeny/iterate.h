@@ -64,13 +64,13 @@ _TNY_API auto peel_at(const MD & src, typename MD::index_type i) {
 }
 // convenience: peel from a md::tensor (uses its view). Non-const -> mutable
 // peel; const -> read-only peel.
-template <cs::size_t... Axes, class T, class E, class L, own O>
+template <long... Axes, class T, class E, class L, own O>
 _TNY_API auto peel_at(tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i) {
-    return peel_at<Axes...>(t.view(), i);
+    return peel_at<_norm_axis(Axes, tensor<T,E,L,O>::rank())...>(t.view(), i);
 }
-template <cs::size_t... Axes, class T, class E, class L, own O>
+template <long... Axes, class T, class E, class L, own O>
 _TNY_API auto peel_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i) {
-    return peel_at<Axes...>(t.view(), i);
+    return peel_at<_norm_axis(Axes, tensor<T,E,L,O>::rank())...>(t.view(), i);
 }
 
 /** @brief A range of sub-views obtained by peeling `Axes...`. Supports
@@ -102,13 +102,13 @@ struct peel_range {
 
 /** @brief Build a range of sub-views by peeling `Axes...` of `t`. Non-const `t`
  *         yields mutable peel; const `t` yields read-only peel. */
-template <cs::size_t... Axes, class T, class E, class L, own O>
+template <long... Axes, class T, class E, class L, own O>
 _TNY_API auto peel(tensor<T,E,L,O> & t) {
-    return peel_range<decltype(t.view()), Axes...>{ t.view() };
+    return peel_range<decltype(t.view()), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>{ t.view() };
 }
-template <cs::size_t... Axes, class T, class E, class L, own O>
+template <long... Axes, class T, class E, class L, own O>
 _TNY_API auto peel(const tensor<T,E,L,O> & t) {
-    return peel_range<decltype(t.view()), Axes...>{ t.view() };
+    return peel_range<decltype(t.view()), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>{ t.view() };
 }
 /** @brief Build a range of sub-views over a raw mdspan. */
 template <cs::size_t... Axes, class MD>

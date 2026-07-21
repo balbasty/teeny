@@ -130,6 +130,9 @@ t.take_along<0,2>(i, slice(1,4));  // bind named axes only; keep every other axi
 t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1) -> view
 t.unsqueeze<2>();     // insert size-1 axis at pos 2 (numpy newaxis) -> rank+1 view
 t.squeeze<3>();       // drop a size-1 axis -> rank-1 view
+// AXIS template args are signed: negatives count from the back (numpy). e.g.
+//   t.extent(Int<-1>()), t.unsqueeze<-1>() (append), t.permute<-1,0,1>(),
+//   t.take_along<-2>(i), peel<0,-1>(t).
 
 // --- math (in-place: any tensor/view; mutates *this) ---
 a.add_(b); a.sub_(b); a.mul_(b); a.div_(b);   // tensor rhs BROADCASTS numpy-style
