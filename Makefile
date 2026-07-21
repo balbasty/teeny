@@ -35,6 +35,7 @@ TESTS = \
 	$(BUILDDIR)/test_api \
 	$(BUILDDIR)/test_half \
 	$(BUILDDIR)/test_promote \
+	$(BUILDDIR)/test_strides \
 	$(BUILDDIR)/test_dynamic \
 	$(BUILDDIR)/test_distance_l1 \
 	$(BUILDDIR)/test_pull \

@@ -37,7 +37,7 @@ include/teeny/
   alias.h          cs:: vocabulary into tny:: + Int<V>/... static ints + `all` + shape<...>
   half.h           `half` (IEEE binary16) + `bfloat16` element types + compute_type
   storage.h        `own` enum + storage policies (owning_storage<T,Alloc>, cpp_alloc)
-  layout.h         layout_static_stride<S...> — per-dim compile-time strides
+  layout.h         strides<S...> — per-dim static/dynamic strides (extents for strides)
   tensor.h         the tensor class + view/local/owned/view_t aliases + as_tensor
                    + indexing/slicing, take_along, permute, unsqueeze/squeeze
   math.h           in-place & out-of-place elementwise (broadcasting) + unary math
@@ -95,7 +95,15 @@ device/host/pinned<T,E,L>   // from cuda.h
 
 Factories: `view(ptr, extents)` / `view<Layout>(ptr, extents)`,
 `view_strided<S...>(ptr, extents)` (compile-time strides),
-`as_tensor(any_mdspan)` (wrap a submdspan/mdspan result as a view).
+`as_tensor(any_mdspan)` (wrap a submdspan/mdspan result as a view). Functional
+factories that deduce the extents type: `make_view(ptr,e)`, `make_local<T>(e)`,
+`make_heap<T>(e)`, `make_device/host/pinned<T>(e)` (T explicit, E deduced).
+
+Custom strided layout: `strides<Sx, Sy, ...>` is the stride analogue of `shape`
+— per-dim static OR dynamic (`-1`/`dynamic_stride`), folding known strides to
+immediates and storing only the dynamic ones (EBO when all static):
+`tensor<float, shape<3,4>, strides<4,1>>(ptr)`. NB `submdspan` does not apply to
+it (same caveat as before) — slice on a standard layout instead.
 
 ## API cheat-sheet
 

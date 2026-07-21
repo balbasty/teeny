@@ -2,7 +2,7 @@
 #define TNY_MD_HELPERS
 #include <cuda/std/mdspan>
 #include <cuda/std/utility>
-#include <teeny/_core/defines.h>
+#include <teeny/defines.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
 

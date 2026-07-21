@@ -11,7 +11,7 @@
 #include <cuda/std/type_traits>
 #include <cuda/std/cstdint>
 #include <cuda/std/cstddef>
-#include <teeny/_core/defines.h>
+#include <teeny/defines.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
 

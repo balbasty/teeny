@@ -9,7 +9,7 @@
 //
 // Force the portable types even under nvcc with -DTNY_PORTABLE_HALF.
 #include <cuda/std/type_traits>
-#include <teeny/_core/defines.h>
+#include <teeny/defines.h>
 
 #if defined(__CUDACC__) && !defined(TNY_PORTABLE_HALF)
 #  define TNY_CUDA_HALF 1

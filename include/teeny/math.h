@@ -4,7 +4,7 @@
 #include <cuda/std/type_traits>
 #include <cuda/std/limits>
 #include <cuda/std/cmath>
-#include <teeny/_core/defines.h>
+#include <teeny/defines.h>
 #include <teeny/half.h>
 #include <teeny/tensor.h>
 

@@ -5,7 +5,7 @@
 // want device / page-locked / pinned owning tensors.
 #include <cuda_runtime.h>
 #include <cuda/std/cstddef>
-#include <teeny/_core/defines.h>
+#include <teeny/defines.h>
 #include <teeny/storage.h>
 #include <teeny/tensor.h>
 
@@ -71,6 +71,14 @@ using host = tensor<T, Extents, Layout, own::host>;
 /** @brief Owning tensor in pinned/mapped host memory (move-only). `pinned<T,E>(extents)`. */
 template <class T, class Extents, class Layout = cs::layout_right>
 using pinned = tensor<T, Extents, Layout, own::pinned>;
+
+/* --- functional factories (deduce the Extents type from the argument) --- */
+template <class T, class Layout = cs::layout_right, class Extents>
+_TNY_HOST auto make_device(Extents e) { return tensor<T, Extents, Layout, own::device>(e); }
+template <class T, class Layout = cs::layout_right, class Extents>
+_TNY_HOST auto make_host(Extents e)   { return tensor<T, Extents, Layout, own::host>(e); }
+template <class T, class Layout = cs::layout_right, class Extents>
+_TNY_HOST auto make_pinned(Extents e) { return tensor<T, Extents, Layout, own::pinned>(e); }
 
 _TNY_NAMESPACE_END(tny)
 

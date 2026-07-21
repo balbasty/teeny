@@ -4,7 +4,7 @@
 #include <cuda/std/tuple>
 #include <cuda/std/utility>
 #include <cuda/std/type_traits>
-#include <teeny/_core/defines.h>
+#include <teeny/defines.h>
 #include <teeny/storage.h>
 #include <teeny/layout.h>
 
@@ -69,22 +69,19 @@ _TNY_API auto squeeze_md(const MD & v, cs::index_sequence<J...>) {
 }
 } // namespace _detail
 
-// traits: which layouts expose compile-time strides
-template <class L> struct _static_strides : cs::false_type {};
-template <cs::size_t... S> struct _static_strides<layout_static_stride<S...>> : cs::true_type {};
+// traits: layout classification for stride folding
+template <class L> struct _is_strides : cs::false_type {};       // teeny's strides<S...>
+template <cs::size_t... S> struct _is_strides<strides_layout<S...>> : cs::true_type {};
+template <class L> struct _strides_all_static : cs::false_type {};  // and every stride known?
+template <cs::size_t... S> struct _strides_all_static<strides_layout<S...>> : cs::integral_constant<bool, strides_layout<S...>::all_static()> {};
 template <class L> struct _contiguous_layout : cs::false_type {};
 template <> struct _contiguous_layout<cs::layout_right> : cs::true_type {};
 template <> struct _contiguous_layout<cs::layout_left>  : cs::true_type {};
 
-// D-th value of a size_t pack (recursive, so it is a constant expression)
-template <cs::size_t D, cs::size_t S0, cs::size_t... S>
-struct _nth_size { static constexpr cs::size_t value = _nth_size<D - 1, S...>::value; };
-template <cs::size_t S0, cs::size_t... S>
-struct _nth_size<0, S0, S...> { static constexpr cs::size_t value = S0; };
-
-template <cs::size_t D, class L> struct _static_stride_at;
-template <cs::size_t D, cs::size_t... S>
-struct _static_stride_at<D, layout_static_stride<S...>> { static constexpr cs::size_t value = _nth_size<D, S...>::value; };
+// per-dim static stride from a strides<...> layout (dynamic_stride if runtime;
+// dynamic_stride for any non-strides layout so callers fall through).
+template <cs::size_t D, class L> struct _static_stride_at { static constexpr cs::size_t value = dynamic_stride; };
+template <cs::size_t D, cs::size_t... S> struct _static_stride_at<D, strides_layout<S...>> { static constexpr cs::size_t value = strides_layout<S...>::S_[D]; };
 
 // an "index" argument to operator() is a (static or runtime) integer; anything
 // else (all / rng, i.e. a slice specifier) turns operator() into a view.
@@ -202,6 +199,13 @@ struct tensor : private Layout::template mapping<Extents> {
     template <own OO = O, cs::enable_if_t<OO == own::view, int> = 0>
     _TNY_API tensor(T * p, mapping_type m) : mapping_type(m), store_(p) {}
 
+    /** @brief View constructor from a pointer alone — for a fully-static geometry
+     *         (static extents AND a fully determined layout: contiguous, or an
+     *         all-static `strides<...>`). e.g. `tensor<float, shape<3,4>, strides<4,1>>(ptr)`. */
+    template <own OO = O, cs::enable_if_t<OO == own::view && is_static &&
+              (_contiguous_layout<Layout>::value || _strides_all_static<Layout>::value), int> = 0>
+    _TNY_API tensor(T * p) : mapping_type(), store_(p) {}
+
     /** @brief View constructor from a pointer + extents (contiguous / static-stride layouts). */
     template <own OO = O, cs::enable_if_t<OO == own::view && cs::is_constructible<mapping_type, Extents>::value, int> = 0>
     _TNY_API tensor(T * p, Extents e) : mapping_type(e), store_(p) {}
@@ -220,7 +224,7 @@ struct tensor : private Layout::template mapping<Extents> {
     static constexpr cs::size_t rank() noexcept { return Extents::rank(); }
     _TNY_API constexpr const mapping_type & mapping() const noexcept { return *this; }
     _TNY_API constexpr const Extents & extents() const noexcept { return mapping_type::extents(); }
-    static constexpr bool has_static_strides   = _static_strides<Layout>::value;
+    static constexpr bool is_strides_layout    = _is_strides<Layout>::value;
     static constexpr bool is_contiguous_layout = _contiguous_layout<Layout>::value;
 
     /** @brief Extent of an axis given by a STATIC index (`extent(Int<0>())`):
@@ -251,7 +255,8 @@ struct tensor : private Layout::template mapping<Extents> {
     template <class Idx, cs::enable_if_t<_is_ic<Idx>::value, int> = 0>
     _TNY_API constexpr auto stride(Idx) const noexcept {
         constexpr cs::size_t D = static_cast<cs::size_t>(Idx::value);
-        if constexpr (has_static_strides)
+        // a strides<...> layout folds per-dim: static value if known, else runtime
+        if constexpr (is_strides_layout && _static_stride_at<D, Layout>::value != dynamic_stride)
             return cs::integral_constant<index_type, static_cast<index_type>(_static_stride_at<D, Layout>::value)>{};
         else if constexpr (is_static && is_contiguous_layout)
             return cs::integral_constant<index_type, static_cast<index_type>(mapping_type{}.stride(D))>{};
@@ -495,6 +500,23 @@ using local = tensor<T, Extents, Layout, own::stack>;
 /** @brief Heap-owned tensor (host only, move-only). Use `owned<T,E>(extents)`. */
 template <class T, class Extents, class Layout = cs::layout_right>
 using owned = tensor<T, Extents, Layout, own::heap>;
+
+/* --- functional factories (deduce the Extents type from the argument) ------ *
+ * Complements the type aliases above; the `make_` prefix keeps them distinct.
+ * Element type `T` is explicit (it can't be deduced from a shape); the extents
+ * type is deduced, so a runtime-built shape needs no `decltype` spelling.       */
+
+/** @brief `make_view<L>(ptr, extents)` — a non-owning view (alias of `view`). */
+template <class Layout = cs::layout_right, class T, class Extents>
+_TNY_API auto make_view(T * p, Extents e) { return view<Layout>(p, e); }
+
+/** @brief `make_local<T>(extents)` — a stack-owned tensor (static shape). */
+template <class T, class Layout = cs::layout_right, class Extents>
+_TNY_API auto make_local(Extents = Extents{}) { return tensor<T, Extents, Layout, own::stack>{}; }
+
+/** @brief `make_heap<T>(extents)` — a heap-owned tensor (host, move-only). */
+template <class T, class Layout = cs::layout_right, class Extents>
+_TNY_HOST auto make_heap(Extents e) { return tensor<T, Extents, Layout, own::heap>(e); }
 
 /** @brief Wrap any `cuda::std::mdspan` (e.g. a `submdspan` result) as a
  *         non-owning `md::tensor` view, so the tensor API applies to it. */
