@@ -79,6 +79,16 @@ int main()
     if (fl0(0,0,0) != t(1,0,0)) return 19;
     fl(0,0,0) = 42.0;                                  // mutable view
     if (t(0,0,3) != 42.0) return 20;
+    t(0,0,3) = 3;                                      // restore
+
+    // ---- reshape / flatten (contiguous views) --------------------------
+    auto rs = t.reshape<6,4>();                         // (2,3,4) -> (6,4)
+    static_assert(decltype(rs)::rank() == 2 && decltype(rs)::extents_type::static_extent(0) == 6, "reshape");
+    if (rs(0,0) != t(0,0,0) || rs(5,3) != t(1,2,3)) return 21;
+    auto fla = t.flatten();
+    if (fla.extent(0) != 24 || fla(23) != t(1,2,3)) return 22;
+    rs(0,0) = 88.0;                                    // reshape is a view
+    if (t(0,0,0) != 88.0) return 23;
 
     return 0;
 }

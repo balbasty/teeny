@@ -525,6 +525,34 @@ public:
     template <bool S = is_static, cs::enable_if_t<!S, int> = 0>
     _TNY_HOST auto clone() const { tensor<T, Extents, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
 
+    /** @brief View this tensor as a new static shape — requires it be C-contiguous
+     *         (`clone()` first otherwise) and the element count to match. */
+    template <cs::size_t... NewExt>
+    _TNY_API auto reshape() noexcept {
+        using NE = cs::extents<index_type, NewExt...>;
+        _TNY_CHECK(is_contiguous(), "reshape: needs a C-contiguous tensor (clone() first)");
+        _TNY_CHECK(numel() == static_cast<index_type>((index_type(1) * ... * index_type(NewExt))), "reshape: numel mismatch");
+        return tensor<T, NE, cs::layout_right, own::view>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{}));
+    }
+    template <cs::size_t... NewExt>
+    _TNY_API auto reshape() const noexcept {
+        using NE = cs::extents<index_type, NewExt...>;
+        _TNY_CHECK(is_contiguous(), "reshape: needs a C-contiguous tensor (clone() first)");
+        return tensor<const T, NE, cs::layout_right, own::view>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{}));
+    }
+
+    /** @brief View as 1-D (`ravel`) — requires C-contiguous (`clone()` first). */
+    _TNY_API auto flatten() noexcept {
+        using NE = cs::dextents<index_type, 1>;
+        _TNY_CHECK(is_contiguous(), "flatten: needs a C-contiguous tensor (clone() first)");
+        return tensor<T, NE, cs::layout_right, own::view>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{ numel() }));
+    }
+    _TNY_API auto flatten() const noexcept {
+        using NE = cs::dextents<index_type, 1>;
+        _TNY_CHECK(is_contiguous(), "flatten: needs a C-contiguous tensor (clone() first)");
+        return tensor<const T, NE, cs::layout_right, own::view>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{ numel() }));
+    }
+
     /** @brief Insert a size-1 axis at position `Ax` (numpy `newaxis`/`unsqueeze`)
      *         -> a rank-(N+1) view. Negative `Ax` counts from the back, so
      *         `.unsqueeze<-1>()` appends a trailing axis: `(H,W)` -> `(H,W,1)`. */

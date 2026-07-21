@@ -128,8 +128,12 @@ t(0, slice(none,4), slice(1,none,2));  // python-like: none = open end, 3rd arg 
                       //   `all`-kept axes stay static). See the CCCL note in tensor.h.
 t.take_along<0,2>(i, slice(1,4));  // bind named axes only; keep every other axis
 t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1) -> view
+t.flip<1>();          // reverse an axis (negative-stride view; needs signed index)
 t.unsqueeze<2>();     // insert size-1 axis at pos 2 (numpy newaxis) -> rank+1 view
 t.squeeze<3>();       // drop a size-1 axis -> rank-1 view
+t.reshape<6,4>(); t.flatten();  // contiguous-view reshape / ravel (clone() first if not)
+t.is_contiguous(); t.clone();   // query dense row-major; materialise a dense copy
+t(all, slice(none,none,-1));    // reverse a range (negative step; a[::-1])
 // AXIS template args are signed: negatives count from the back (numpy). e.g.
 //   t.extent(Int<-1>()), t.unsqueeze<-1>() (append), t.permute<-1,0,1>(),
 //   t.take_along<-2>(i), peel<0,-1>(t).
@@ -140,10 +144,13 @@ a.add_(2.0); a.mul_(0.5);                     // scalar rhs
 a.neg_(); a.abs_(); a.exp_(); a.log_();       // unary in-place
 a.sin_(); a.cos_(); a.sqrt_(); a.tanh_(); a.pow_(3.0);
 
-// --- assignment / scatter (kernel prologue/epilogue) ---
+// --- assignment / scatter / generic (kernel prologue/epilogue) ---
 a.fill_(0.0); a.zero_(); a.copy_(b);          // b broadcasts into a
+a.iota_(start, step);                         // 0,1,2,... (row-major)
+a.map_(f); a.zip_with_(g, b); auto c = a.map(f);  // user functor (device-safe struct)
 a.add_at(v, i, j);                            // scatter-accumulate: a(i,j) += v,
                                               //   ATOMIC on device (push/splat write)
+auto z = zeros<T>(shape); ones<T>(sh); full<T>(sh,v); arange<T>(n);  // creation
 
 // --- math (out-of-place -> NEW tensor; static shape -> stack, else heap/host) ---
 // result type = promote(A,B): C++ rules, but among floats the LOWER width wins
