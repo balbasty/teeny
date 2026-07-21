@@ -196,6 +196,20 @@ _TNY_API void scal(C & c, typename C::element_type s, Op op) {
     scal_(c, s, op, cs::make_index_sequence<C::rank()>{});
 }
 
+/* ---- c = start, start+step, ... in row-major logical order -------- */
+template <class C, cs::size_t... D>
+_TNY_API void iota_(C & c, typename C::element_type start, typename C::element_type step, cs::index_sequence<D...>) {
+    using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
+    const I e[]  = { c.extent(D)... };
+    const I sc[] = { c.stride(D)... };
+    I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
+    for (I lin = 0; lin < n; ++lin) {
+        I rem = lin, oc = 0;
+        for (int d = static_cast<int>(sizeof...(D)) - 1; d >= 0; --d) { I k = rem % e[d]; rem /= e[d]; oc += k * sc[d]; }
+        c.data()[oc] = static_cast<Cv>(start) + static_cast<Cv>(lin) * static_cast<Cv>(step);
+    }
+}
+
 /* ---- c(i) = op(a(i), scalar) ------------------------------------- */
 template <class C, class A, class S, class Op, cs::size_t... D>
 _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
@@ -349,6 +363,7 @@ template <class T,class E,class L,own O> template <class B>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::copy_(const B & b) { _md::bzip(*this,*this,b,_md::rhs{}); return *this; }
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::fill_(T s) { _md::scal(*this,s,_md::setc{}); return *this; }
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::zero_() { return fill_(T(0)); }
+template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::iota_(T start, T step) { _md::iota_(*this, start, step, cs::make_index_sequence<rank()>{}); return *this; }
 
 /* ------------------------------------------------------------------ *
  *     Out-of-place operators                                         *

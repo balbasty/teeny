@@ -540,6 +540,7 @@ public:
     template <class B> _TNY_API tensor & copy_(const B & b);   // *this = b (broadcasts)
     _TNY_API tensor & fill_(T s);                              // *this = s
     _TNY_API tensor & zero_();                                 // *this = 0
+    _TNY_API tensor & iota_(T start = T(0), T step = T(1));    // start, start+step, ... (row-major)
 
     /* --- out-of-place elementwise (tensor OR scalar rhs) -> new tensor --- */
     template <class B> _TNY_API auto add(const B & b) const;
@@ -607,6 +608,28 @@ _TNY_API auto make_local(Extents = Extents{}) { return tensor<T, Extents, Layout
 /** @brief `make_heap<T>(extents)` — a heap-owned tensor (host, move-only). */
 template <class T, class Layout = cs::layout_right, class Extents>
 _TNY_HOST auto make_heap(Extents e) { return tensor<T, Extents, Layout, own::heap>(e); }
+
+/* --- numpy-style creation factories: static shape -> stack (host+device),   *
+ *     dynamic shape -> heap (host only), mirroring the out-of-place ops.       */
+
+/** @brief `full<T>(extents, v)` — a new tensor filled with `v`. */
+template <class T, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() == 0, int> = 0>
+_TNY_API auto full(Extents, T v) { tensor<T, Extents, Layout, own::stack> t{}; t.fill_(v); return t; }
+template <class T, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() != 0, int> = 0>
+_TNY_HOST auto full(Extents e, T v) { tensor<T, Extents, Layout, own::heap> t(e); t.fill_(v); return t; }
+
+/** @brief `zeros<T>(extents)` / `ones<T>(extents)` — a new tensor of 0s / 1s. */
+template <class T, class Layout = cs::layout_right, class Extents>
+_TNY_API auto zeros(Extents e) { return full<T, Layout>(e, T(0)); }
+template <class T, class Layout = cs::layout_right, class Extents>
+_TNY_API auto ones(Extents e) { return full<T, Layout>(e, T(1)); }
+
+/** @brief `arange<T>(n)` — a 1-D tensor `[0, 1, ..., n-1]` (heap, host). */
+template <class T>
+_TNY_HOST auto arange(long n) {
+    using E = cs::dextents<cs::int64_t, 1>;
+    tensor<T, E, cs::layout_right, own::heap> t(E{n}); t.iota_(); return t;
+}
 
 /** @brief Wrap any `cuda::std::mdspan` (e.g. a `submdspan` result) as a
  *         non-owning `md::tensor` view, so the tensor API applies to it. */

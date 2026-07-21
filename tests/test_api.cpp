@@ -68,5 +68,18 @@ int main() {
     if (sv.extent(0) != 5 || sv.extent(1) != 3) return 11;
     if (sv(4,2) != M(4,3)) return 12;                        // value is correct (right strides)
 
+    // ---- creation factories + iota_ -----------------------------------
+    auto z = zeros<double>(shape<2,3>{});                    // static -> stack
+    static_assert(decltype(z)::ownership == own::stack, "static zeros -> stack");
+    if (sum(z) != 0.0) return 13;
+    auto o = ones<double>(shape<2,2>{});   if (sum(o) != 4.0) return 14;
+    auto fu = full<int>(shape<3>{}, 7);    if (fu(0) != 7 || fu(2) != 7) return 15;
+    auto dz = zeros<double>(shape<-1,3>{2});                 // dynamic -> heap
+    static_assert(decltype(dz)::ownership == own::heap, "dynamic zeros -> heap");
+    if (dz.extent(0) != 2 || sum(dz) != 0.0) return 16;
+    auto ar = arange<long>(5);             if (ar(0) != 0 || ar(4) != 4) return 17;
+    auto it = local<double, shape<2,3>>(); it.iota_(10.0, 2.0);   // 10,12,...,20 row-major
+    if (it(0,0) != 10.0 || it(0,1) != 12.0 || it(1,2) != 20.0) return 18;
+
     return 0;
 }
