@@ -282,22 +282,30 @@ struct tensor : private Layout::template mapping<Extents> {
 
     /* --- element access / slicing -------------------------------- */
 private:
-    // wrap a negative index python-style; fold when the index is static
+    // wrap a negative index python-style. The wrap is done in a SIGNED domain so
+    // that negative indices work even when index_type is unsigned (e.g. a raw
+    // extents<size_t,...>): casting `a` to index_type first would turn -1 into a
+    // huge value before the `< 0` test could catch it.
     template <cs::size_t Ax, class Arg>
     _TNY_API constexpr index_type _wrap(Arg a) const {
-        index_type i = static_cast<index_type>(a);
-        return i < index_type(0)
-             ? static_cast<index_type>(i + extent(cs::integral_constant<cs::size_t, Ax>{}))
-             : i;
+        using S = cs::make_signed_t<index_type>;
+        const S i = static_cast<S>(a);
+        const S n = static_cast<S>(extent(cs::integral_constant<cs::size_t, Ax>{}));
+        return static_cast<index_type>(i < S(0) ? i + n : i);
     }
     template <cs::size_t... Ax, class... Args>
     _TNY_API constexpr index_type _offset(cs::index_sequence<Ax...>, Args... a) const {
         return mapping_type::operator()(_wrap<Ax>(a)...);
     }
-    // resolve one slice bound against the axis extent n (none -> default; wrap negatives)
+    // resolve one slice bound against the axis extent n (none -> default; wrap
+    // negatives in a signed domain, so it works even for an unsigned index_type)
     template <class V> _TNY_API index_type _sl_bound(V v, index_type dflt, index_type n) const {
         if constexpr (cs::is_same<V, none_t>::value) { (void)v; (void)n; return dflt; }
-        else { index_type i = static_cast<index_type>(v); return i < index_type(0) ? static_cast<index_type>(i + n) : i; }
+        else {
+            using S = cs::make_signed_t<index_type>;
+            const S i = static_cast<S>(v);
+            return static_cast<index_type>(i < S(0) ? i + static_cast<S>(n) : i);
+        }
     }
     // turn a slice_spec into a submdspan `strided_slice{offset, width, stride}`.
     // `width` is measured in the original index space; submdspan yields

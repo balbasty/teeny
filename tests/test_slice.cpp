@@ -66,5 +66,13 @@ int main() {
     static_assert(decltype(g)::rank() == 3, "take_along keeps unnamed axes");
     if (g.extent(2) != 3 || g(1,2,0) != t(1,2,1)) return 16;
 
+    // negative indices/bounds must work even with an UNSIGNED index_type
+    // (the wrap is done in a signed domain, not after casting to index_type).
+    auto u = view(buf, cs::extents<cs::size_t,2,3,4>{});
+    static_assert(cs::is_unsigned<decltype(u)::index_type>::value, "unsigned index_type");
+    if (u(-1,-1,-1) != u(1,2,3)) return 17;           // negative element index wraps
+    auto us = u(0, slice(-2, none), all);             // negative slice bound wraps
+    if (us.extent(0) != 2 || us(0,0) != u(0,1,0)) return 18;
+
     return 0;
 }
