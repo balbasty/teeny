@@ -47,7 +47,8 @@ EXAMPLES = \
 	$(BUILDDIR)/ex_distance_transform \
 	$(BUILDDIR)/ex_cholesky_solve \
 	$(BUILDDIR)/ex_broadcast_affine \
-	$(BUILDDIR)/ex_pushpull_adjoint
+	$(BUILDDIR)/ex_pushpull_adjoint \
+	$(BUILDDIR)/ex_batched_inverse
 
 ########################################################################
 # 	Public Targets
@@ -80,6 +81,10 @@ $(BUILDDIR)/test_%: tests/test_%.cpp | $(BUILDDIR)
 
 $(BUILDDIR)/ex_%: examples/%.cpp | $(BUILDDIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(TESTFLAGS) -o $@ $<
+
+# batched_inverse uses std::thread
+$(BUILDDIR)/ex_batched_inverse: examples/batched_inverse.cpp | $(BUILDDIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -pthread $(TESTFLAGS) -o $@ $<
 
 runex-%: $(BUILDDIR)/ex_%
 	@ $(BUILDDIR)/ex_$* >/dev/null && echo "  PASS  ex_$*" || echo "  FAIL  ex_$*"
