@@ -81,5 +81,20 @@ int main() {
     auto it = local<double, shape<2,3>>(); it.iota_(10.0, 2.0);   // 10,12,...,20 row-major
     if (it(0,0) != 10.0 || it(0,1) != 12.0 || it(1,2) != 20.0) return 18;
 
+    // ---- generic map_ / zip_with_ + is_contiguous / clone -------------
+    struct sq  { double operator()(double x) const { return x*x; } };
+    struct add { double operator()(double a, double b) const { return a+b; } };
+    auto q = local<double, shape<3>>(); q.iota_(1.0); q.map_(sq{});   // 1,4,9
+    if (q(2) != 9.0) return 19;
+    auto r = local<double, shape<3>>(); r.fill_(1.0); r.zip_with_(add{}, q);
+    if (r(2) != 10.0) return 20;
+
+    double cb[6]; for (int i=0;i<6;++i) cb[i]=i;
+    auto vp = view(cb, shape<2,3>{}).permute<1,0>();                  // non-contiguous
+    if (vp.is_contiguous()) return 21;
+    auto cl = vp.clone();                                            // dense copy
+    static_assert(cs::is_same<decltype(cl)::layout_type, cs::layout_right>::value, "clone row-major");
+    if (!cl.is_contiguous() || cl(2,1) != vp(2,1)) return 22;
+
     return 0;
 }

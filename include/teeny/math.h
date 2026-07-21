@@ -429,6 +429,14 @@ _TNY_MD_UNARY_(tanh_, _md::u_tanh)
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::pow_(T e)
 { _md::scal(*this, e, _md::pw{}); return *this; }
 
+/* --- generic elementwise with a user functor --------------------- */
+template <class T,class E,class L,own O> template <class F>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::map_(F f) { _md::unary(*this, f); return *this; }
+template <class T,class E,class L,own O> template <class G, class B>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::zip_with_(G g, const B & b) { _md::bzip(*this, *this, b, g); return *this; }
+template <class T,class E,class L,own O> template <class F>
+_TNY_API auto tensor<T,E,L,O>::map(F f) const { return _md::uop_out(*this, f); }
+
 /* ------------------------------------------------------------------ *
  *     Reductions                                                      *
  * ------------------------------------------------------------------ */

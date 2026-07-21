@@ -312,6 +312,15 @@ struct tensor : private Layout::template mapping<Extents> {
         for (cs::size_t r = 0; r < rank(); ++r) n *= extent(r);
         return n;
     }
+    /** @brief Whether the strides are dense row-major (C-contiguous). */
+    _TNY_API constexpr bool is_contiguous() const noexcept {
+        index_type expect = 1;
+        for (int d = static_cast<int>(rank()) - 1; d >= 0; --d) {
+            if (static_cast<index_type>(stride(d)) != expect) return false;
+            expect *= static_cast<index_type>(extent(d));
+        }
+        return true;
+    }
 
     /* --- data / views -------------------------------------------- */
     _TNY_API T *       data()       noexcept { return store_.data(); }
@@ -508,6 +517,14 @@ public:
     _TNY_API auto flip() const noexcept
     { return as_tensor(_detail::flip_md<_norm_axis(Ax, rank())>(view(), cs::make_index_sequence<rank()>{})); }
 
+    /** @brief A dense, row-major OWNING copy of this tensor (materialise a view /
+     *         non-contiguous / permuted / flipped tensor). Static shape -> stack
+     *         (host+device); dynamic -> heap (host only). */
+    template <bool S = is_static, cs::enable_if_t<S, int> = 0>
+    _TNY_API auto clone() const { tensor<T, Extents, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
+    template <bool S = is_static, cs::enable_if_t<!S, int> = 0>
+    _TNY_HOST auto clone() const { tensor<T, Extents, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
+
     /** @brief Insert a size-1 axis at position `Ax` (numpy `newaxis`/`unsqueeze`)
      *         -> a rank-(N+1) view. Negative `Ax` counts from the back, so
      *         `.unsqueeze<-1>()` appends a trailing axis: `(H,W)` -> `(H,W,1)`. */
@@ -548,6 +565,11 @@ public:
     template <class B> _TNY_API auto mul(const B & b) const;
     template <class B> _TNY_API auto div(const B & b) const;
     template <class B> _TNY_API auto pow(const B & b) const;
+
+    /* --- generic elementwise with a user functor (device-safe) ---- */
+    template <class F> _TNY_API tensor & map_(F f);                    // *this = f(*this)
+    template <class G, class B> _TNY_API tensor & zip_with_(G g, const B & b);  // *this = g(*this, b) (broadcasts)
+    template <class F> _TNY_API auto map(F f) const;                   // -> new tensor = f(*this)
 
     /* --- in-place unary math (element-wise) ----------------------- */
     _TNY_API tensor & neg_();
