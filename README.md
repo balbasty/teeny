@@ -29,30 +29,37 @@ valarray-like math layer, and kernel ergonomics (nd-peel, dynamic-rank dispatch)
 ```cpp
 #include <teeny/teeny.h>
 using namespace tny;
-namespace cs = cuda::std;
 
-// one tensor type, ownership as a parameter (view / stack / heap / device / ...):
-auto v = view(ptr, cs::extents<long,2,3,4>{});     // non-owning, kernel-passable
-auto m = local<double, cs::extents<long,3,3>>();   // stack-owned (static shape)
-auto h = owned<double, DynE>(DynE{2,3});           // heap-owned (host, move-only)
+// one tensor type, ownership as a parameter (view / stack / heap / device / ...).
+// `shape<...>` is the python-friendly extents type (int64 index, matches DLPack):
+auto v = view(ptr, shape<2,3,4>{});         // non-owning, kernel-passable
+auto m = local<double, shape<3,3>>();       // stack-owned (static shape)
+auto h = owned<double, shape<dynamic_extent,3>>(shape<dynamic_extent,3>{n});  // heap-owned (host)
 
-// mdspan's static/dynamic extents + a custom per-dim static-stride layout:
-auto s = view_strided<16,3,1>(ptr, cs::extents<long,cs::dynamic_extent,3,3>{n});
+// static / dynamic sizes mix per dimension, plus a per-dim static-stride layout:
+auto s = view_strided<16,3,1>(ptr, shape<dynamic_extent,3,3>{n});
 
-// valarray-like math (broadcasting, numpy-style):
-m.add_(other); m.mul_(2.0);                        // in-place, any tensor/view
+// geometry: t.shape() / t.shape(d) (or t.extents() / t.extent(d)); t.rank(); t.numel();
+
+// valarray-like math (broadcasting, numpy-style; float16 > float32 > float64):
+m.add_(other); m.mul_(2.0);                 // in-place, any tensor/view
 auto c = a + b;           // out-of-place: static -> stack (host+device),
 auto d = a.add(b);        //               dynamic -> heap (host only)
-auto e = exp(a); a.sqrt_();                         // unary math (out-/in-place)
+auto e = exp(a); a.sqrt_();                  // unary math (out-/in-place)
 sum(m); prod(m); max(m); min(m); dot(a,b);
 
-// indexing / slicing (python-like: negatives wrap, `all`/`rng` slice):
-t(0, -1, slice(1,4));       // element or sub-view
-t.take_along<0,2>(i, all);// bind named axes, keep the rest
-t.permute<2,0,1>();       // reorder axes
-t.unsqueeze<2>();         // insert a size-1 axis (numpy newaxis)
-for (auto line : peel<0,1>(t)) work(line);       // nd-peel: iterate a subset of axes
-auto v3 = at.fixed<3>();  // dynamic-rank dispatch at the host boundary
+// indexing / slicing (python-like: negatives wrap; none = open end; 3rd arg = step):
+t(0, -1, slice(1,4));      // element, or a sub-view
+t(all, slice(none,4), slice(1,none,2));      // keep axis / open ends / strided
+t.take_along<0,2>(i, all); // bind named axes, keep the rest
+t.permute<2,0,1>();        // reorder axes
+t.unsqueeze<2>();          // insert a size-1 axis (numpy newaxis)
+for (auto line : peel<0,1>(t)) work(line);   // nd-peel: iterate a subset of axes
+for (auto v : peel_front<Nbatch>(t)) work(v);// peel arbitrary leading batch dims
+dispatch_value<1,2,3>(D, [&](auto d){ kernel<d.value>(v); });  // runtime -> static
+
+// half precision: `half` / `bfloat16` element types (native CUDA types under nvcc)
+auto hh = local<half, shape<64,64>>();
 ```
 
 ## Headers (`include/teeny/`)

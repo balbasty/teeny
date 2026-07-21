@@ -58,6 +58,23 @@ template <bool           V> using Bool   = cs::integral_constant<bool, V>;
 /** @brief Alias of `Long`; a compile-time index value. */
 template <long V> using ic = cs::integral_constant<long, V>;
 
+// fold a per-dim size to an mdspan extent: any NEGATIVE value (numpy's -1) means
+// dynamic; `dynamic_extent` itself passes through.
+template <class T> _TNY_API constexpr cs::size_t _dyn_extent(T e) {
+    if constexpr (cs::is_signed<T>::value) { if (e < T(0)) return cs::dynamic_extent; }
+    return static_cast<cs::size_t>(e);
+}
+
+/** @brief User-friendly shape type: `shape<2,3,4>` == `extents<int64_t, 2,3,4>`.
+ *
+ * The fixed-size `int64_t` index type matches DLPack's `shape` exactly, so it
+ * drops straight onto ndarray bindings. A dynamic dimension can be spelled
+ * either `dynamic_extent` or, numpy-style, **`-1`** — so `shape<-1,2,3>` ==
+ * `shape<dynamic_extent,2,3>` == `extents<int64_t, dynamic_extent, 2, 3>`. Use
+ * it in place of `extents<...>`: `local<double, shape<3,3>>`,
+ * `owned<float, shape<-1,4>>`. */
+template <auto... E> using shape = cs::extents<cs::int64_t, _dyn_extent(E)...>;
+
 /** @brief Keep-this-axis marker for slicing (an alias of `full_extent`). */
 constexpr cs::full_extent_t all{};
 

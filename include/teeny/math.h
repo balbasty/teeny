@@ -13,6 +13,47 @@ _TNY_NAMESPACE_BEGIN(tny)
 namespace cs = cuda::std;
 
 /* ================================================================== *
+ *  Type promotion for binary math.                                   *
+ *                                                                    *
+ *  Result type of `a + b` (and `.add`, `dot`, ...) follows the usual  *
+ *  C++ arithmetic conversions, EXCEPT among floating types where the  *
+ *  LOWER precision wins (float16 > float32 > float64), pytorch-style  *
+ *  — keeping the compact type through a chain of ops. Opt out (revert *
+ *  to plain C++ `common_type`) with `-DTNY_STD_PROMOTION`.            *
+ * ================================================================== */
+// floating-point "rank": -1 = not floating; else lower value = lower precision.
+template <class T> struct _frank              { static constexpr int value = -1; };
+template <> struct _frank<half>               { static constexpr int value = 0; };
+template <> struct _frank<bfloat16>           { static constexpr int value = 0; };
+template <> struct _frank<float>              { static constexpr int value = 1; };
+template <> struct _frank<double>             { static constexpr int value = 2; };
+template <> struct _frank<long double>        { static constexpr int value = 3; };
+
+// Both non-floating -> `common_type` (numpy-like: int8+int8 -> int8, NOT the
+// C++ integer-promoted int). common_type is only ever instantiated here, never
+// for a float that would choke it (e.g. cs::common_type<half,float> is
+// ill-formed — half has both an implicit `operator float` and an implicit ctor
+// from float), which is also why the float ranking below is explicit.
+template <class A, class B, bool Low, bool BothInt = (_frank<A>::value < 0 && _frank<B>::value < 0)>
+struct _promote { using type = cs::common_type_t<A, B>; };
+// At least one floating. `Low` = prefer the LOWER-precision float (teeny default,
+// half>float>double); otherwise the standard wider-float-wins. A non-float
+// operand yields the float; a same-rank tie between distinct 16-bit types -> float.
+template <class A, class B, bool Low>
+struct _promote<A, B, Low, false> {
+    static constexpr int fa = _frank<A>::value, fb = _frank<B>::value;
+    using type = cs::conditional_t<(fa < 0), B,
+                 cs::conditional_t<(fb < 0), A,
+                 cs::conditional_t<(fa == fb), cs::conditional_t<cs::is_same<A,B>::value, A, float>,
+                 cs::conditional_t<(Low ? (fa < fb) : (fa > fb)), A, B>>>>;
+};
+#ifdef TNY_STD_PROMOTION
+template <class A, class B> using promote_t = typename _promote<A, B, false>::type;  // wider float wins
+#else
+template <class A, class B> using promote_t = typename _promote<A, B, true>::type;   // lower float wins
+#endif
+
+/* ================================================================== *
  *  valarray-like math.                                               *
  *                                                                    *
  *  - In-place ops (`a.add_(b)`, `a.mul_(scalar)`) work on ANY tensor  *
@@ -211,14 +252,14 @@ template <class Op, class A, class B,
           cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() == 0, int> = 0>
 _TNY_API auto oop(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
-    tensor<cs::common_type_t<typename A::element_type, typename B::element_type>, RE, cs::layout_right, own::stack> c{};
+    tensor<promote_t<typename A::element_type, typename B::element_type>, RE, cs::layout_right, own::stack> c{};
     bzip(c, a, b, op); return c;
 }
 template <class Op, class A, class B,
           cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() != 0, int> = 0>
 _TNY_HOST auto oop(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
-    tensor<cs::common_type_t<typename A::element_type, typename B::element_type>, RE, cs::layout_right, own::heap>
+    tensor<promote_t<typename A::element_type, typename B::element_type>, RE, cs::layout_right, own::heap>
         c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<A::rank()>{}));
     bzip(c, a, b, op); return c;
 }
@@ -226,12 +267,12 @@ _TNY_HOST auto oop(const A & a, const B & b, Op op) {
 /* ---- out-of-place tensor (op) scalar ----------------------------- */
 template <class Op, class A, class S, cs::enable_if_t<A::is_static, int> = 0>
 _TNY_API auto oops(const A & a, S s, Op op) {
-    tensor<cs::common_type_t<typename A::element_type, S>, typename A::extents_type, cs::layout_right, own::stack> c{};
+    tensor<promote_t<typename A::element_type, S>, typename A::extents_type, cs::layout_right, own::stack> c{};
     scalo(c, a, s, op); return c;
 }
 template <class Op, class A, class S, cs::enable_if_t<!A::is_static, int> = 0>
 _TNY_HOST auto oops(const A & a, S s, Op op) {
-    tensor<cs::common_type_t<typename A::element_type, S>, typename A::extents_type, cs::layout_right, own::heap> c(a.extents());
+    tensor<promote_t<typename A::element_type, S>, typename A::extents_type, cs::layout_right, own::heap> c(a.extents());
     scalo(c, a, s, op); return c;
 }
 
@@ -409,7 +450,7 @@ _TNY_API T min(const tensor<T,E,L,O> & a) {
 template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>
 _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
     static_assert(tensor<Ta,Ea,La,Oa>::rank() == tensor<Tb,Eb,Lb,Ob>::rank(), "dot: rank mismatch");
-    using R = compute_type_t<cs::common_type_t<Ta,Tb>>;
+    using R = compute_type_t<promote_t<Ta,Tb>>;
     return _md::zipreduce_<R>(a, b, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{});
 }
 

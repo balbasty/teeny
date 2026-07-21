@@ -34,7 +34,7 @@ transforms, small linear algebra) compact and readable.
 ```
 include/teeny/
   _core/defines.h  macros: _TNY_API / _TNY_HOST, namespace open/close
-  alias.h          pulls cs:: vocabulary into tny:: + Int<V>/Long<V>/... static ints + `all`
+  alias.h          cs:: vocabulary into tny:: + Int<V>/... static ints + `all` + shape<...>
   half.h           `half` (IEEE binary16) + `bfloat16` element types + compute_type
   storage.h        `own` enum + storage policies (owning_storage<T,Alloc>, cpp_alloc)
   layout.h         layout_static_stride<S...> — per-dim compile-time strides
@@ -71,7 +71,9 @@ struct tensor;
   (`compute_type<T>`), so precision holds and the engines never need native
   half *host* operators.
 - **`Extents`** = `cuda::std::extents<Idx, E0, E1, ...>`; each `Ei` is a compile-time
-  size or `dynamic_extent`. Mix freely per dimension.
+  size or `dynamic_extent`. Mix freely per dimension. Prefer the `shape<...>`
+  alias (`= extents<int64_t, ...>`, DLPack's index type); a dynamic dim is
+  `dynamic_extent` or numpy-style **`-1`** (`shape<-1,3>` == `shape<dynamic_extent,3>`).
 - **`Layout`** = `layout_right` (default, C-order), `layout_left` (F-order),
   `layout_stride` (runtime strides), or teeny's `layout_static_stride<S...>`
   (compile-time strides).
@@ -131,6 +133,8 @@ a.add_at(v, i, j);                            // scatter-accumulate: a(i,j) += v
                                               //   ATOMIC on device (push/splat write)
 
 // --- math (out-of-place -> NEW tensor; static shape -> stack, else heap/host) ---
+// result type = promote(A,B): C++ rules, but among floats the LOWER width wins
+//   (half>float>double, pytorch-style). Opt out with -DTNY_STD_PROMOTION.
 auto c = a + b;  auto c = a.add(b);   // tensor+tensor (broadcasts) or tensor+scalar
 auto c = a * 2.0;  auto c = 2.0 * a;  // scalar ops (+ and * are commutative)
 auto c = a.pow(b);                    // element-wise power
