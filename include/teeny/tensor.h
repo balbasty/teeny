@@ -525,21 +525,26 @@ public:
     template <bool S = is_static, cs::enable_if_t<!S, int> = 0>
     _TNY_HOST auto clone() const { tensor<T, Extents, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
 
-    /** @brief View this tensor as a new static shape — requires it be C-contiguous
-     *         (`clone()` first otherwise) and the element count to match. */
-    template <cs::size_t... NewExt>
-    _TNY_API auto reshape() noexcept {
-        using NE = cs::extents<index_type, NewExt...>;
+private:
+    // shared reshape body: one axis may be `-1` (numpy-style, inferred from numel).
+    template <class El, long... NewExt>
+    _TNY_API auto _reshape(El * p) const noexcept {
+        static_assert(((NewExt < 0 ? 1 : 0) + ... + 0) <= 1, "reshape: at most one inferred (-1) dimension");
+        using NE = cs::extents<index_type, (NewExt < 0 ? cs::dynamic_extent : static_cast<cs::size_t>(NewExt))...>;
+        constexpr index_type known = (index_type(1) * ... * (NewExt < 0 ? index_type(1) : index_type(NewExt)));
         _TNY_CHECK(is_contiguous(), "reshape: needs a C-contiguous tensor (clone() first)");
-        _TNY_CHECK(numel() == static_cast<index_type>((index_type(1) * ... * index_type(NewExt))), "reshape: numel mismatch");
-        return tensor<T, NE, cs::layout_right, own::view>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{}));
+        _TNY_CHECK(known != 0 && numel() % known == 0, "reshape: numel not divisible by given extents");
+        const index_type inferred = numel() / (known ? known : index_type(1));
+        cs::array<index_type, sizeof...(NewExt)> ea{ (NewExt < 0 ? inferred : index_type(NewExt))... };
+        return tensor<El, NE, cs::layout_right, own::view>(p, typename cs::layout_right::template mapping<NE>(NE(ea)));
     }
-    template <cs::size_t... NewExt>
-    _TNY_API auto reshape() const noexcept {
-        using NE = cs::extents<index_type, NewExt...>;
-        _TNY_CHECK(is_contiguous(), "reshape: needs a C-contiguous tensor (clone() first)");
-        return tensor<const T, NE, cs::layout_right, own::view>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{}));
-    }
+public:
+    /** @brief View this tensor as a new shape — requires it be C-contiguous
+     *         (`clone()` first otherwise) and the element count to match. One
+     *         extent may be **`-1`** (numpy-style), inferred from the total size:
+     *         `t.reshape<6,-1>()`. */
+    template <long... NewExt> _TNY_API auto reshape() noexcept       { return _reshape<T, NewExt...>(store_.data()); }
+    template <long... NewExt> _TNY_API auto reshape() const noexcept { return _reshape<const T, NewExt...>(store_.data()); }
 
     /** @brief View as 1-D (`ravel`) — requires C-contiguous (`clone()` first). */
     _TNY_API auto flatten() noexcept {
