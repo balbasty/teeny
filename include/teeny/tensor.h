@@ -93,16 +93,23 @@ template <class T, T V> struct _is_ic<cs::integral_constant<T,V>> : cs::true_typ
 template <class A> struct _is_index
     : cs::integral_constant<bool, cs::is_integral<A>::value || _is_ic<A>::value> {};
 
-/** @brief Open-ended slice sentinel — teeny's `None` (python `a[:n]` / `a[m:]`).
+/** @brief Open-ended slice sentinels — teeny's `None` (python `a[:n]` / `a[m:]`).
  *
- * `none` is **static**: `slice(none, n)` starts at 0, `slice(m, none)` runs to
- * the end, and `slice(none, none)` folds to `full_extent` — i.e. `all` *is* the
- * static-none whole-axis slice (`all == slice(none, none)`), keeping the axis
- * and preserving its static extent. Combined with runtime bounds it resolves at
- * run time, so the one sentinel serves both the static (folding) and runtime
- * (dynamic) cases. */
-struct none_t {};
-constexpr none_t none{};
+ * There are two, mirroring teeny's static/runtime split (like `Int<V>` vs a
+ * plain `int`):
+ *   - **`none`** is **static** (a compile-time type). `slice(none, n)` starts at
+ *     0, `slice(m, none)` runs to the end, and `slice(none, none)` **folds** to
+ *     `full_extent` — so `all == slice(none, none)`, keeping the axis and its
+ *     *static* extent. `all` is built from the static none.
+ *   - **`rnone`** is the **runtime** none: same open-end meaning, but it never
+ *     folds — `slice(rnone, rnone)` is the whole axis resolved at run time (a
+ *     *dynamic* extent). Use it when the openness is a runtime decision and you
+ *     do not want to force the static path.
+ */
+struct none_t  {};   // static open-end (folds)
+struct rnone_t {};   // runtime open-end (never folds)
+constexpr none_t  none{};
+constexpr rnone_t rnone{};
 
 // a python-like slice spec `[start : stop : step]`; start/stop may be `none`.
 template <class A, class B, class S>
@@ -284,9 +291,9 @@ private:
     _TNY_API constexpr index_type _offset(cs::index_sequence<Ax...>, Args... a) const {
         return mapping_type::operator()(_wrap<Ax>(a)...);
     }
-    // resolve one slice bound against the axis extent n (none -> default; wrap negatives)
+    // resolve one slice bound against the axis extent n (none/rnone -> default; wrap negatives)
     template <class V> _TNY_API index_type _sl_bound(V v, index_type dflt, index_type n) const {
-        if constexpr (cs::is_same<V, none_t>::value) { (void)v; (void)n; return dflt; }
+        if constexpr (cs::is_same<V, none_t>::value || cs::is_same<V, rnone_t>::value) { (void)v; (void)n; return dflt; }
         else { index_type i = static_cast<index_type>(v); return i < index_type(0) ? static_cast<index_type>(i + n) : i; }
     }
     // turn a slice_spec into a submdspan `strided_slice{offset, width, stride}`.

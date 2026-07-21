@@ -107,7 +107,9 @@ t(1, 2, 3);           // element access; negative indices wrap (count from the b
 t(0, all, slice(1,4));  // any slice arg -> a lower-/same-rank VIEW. all = keep axis,
                       //   slice(a,b) = half-open [a,b). Integer args drop that axis.
 t(0, slice(none,4), slice(1,none,2));  // python-like: none = open end, 3rd arg = step.
-                      //   negative bounds wrap; all == slice(none,none) (folds).
+                      //   negative bounds wrap. Two open-end sentinels: static `none`
+                      //   (folds: all == slice(none,none), keeps static extent) and
+                      //   runtime `rnone` (whole axis resolved at run time -> dynamic).
                       //   NB a range routes through layout_stride (ranged axis -> dynamic;
                       //   `all`-kept axes stay static). See the CCCL note in tensor.h.
 t.take_along<0,2>(i, slice(1,4));  // bind named axes only; keep every other axis
