@@ -38,6 +38,8 @@ include/teeny/
   half.h           `half` (IEEE binary16) + `bfloat16` element types + compute_type
   storage.h        `own` enum + storage policies (owning_storage<T,Alloc>, cpp_alloc)
   layout.h         strides<S...> — per-dim static/dynamic strides (extents for strides)
+  indexing.h       free indexing/slicing vocabulary: slice()/none, _norm_axis,
+                   _wrap_idx, slice_spec + traits, _compact output-extents
   tensor.h         the tensor class + view/local/owned/view_t aliases + as_tensor
                    + indexing/slicing, take_along, permute, unsqueeze/squeeze
   math.h           in-place & out-of-place elementwise (broadcasting) + unary math
