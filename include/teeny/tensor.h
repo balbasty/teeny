@@ -21,14 +21,8 @@ _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
                 typename MD::layout_type, own::view>
 as_tensor(const MD & m);
 
-/* --- detail: single-axis bind and permutation on a raw mdspan ----- */
+/* --- detail: structural view builders on a raw mdspan ------------- */
 namespace _detail {
-template <cs::size_t D, cs::size_t A, class I>
-_TNY_API auto take_arg(I i) { if constexpr (A == D) return i; else { (void)i; return cs::full_extent; } }
-template <cs::size_t D, class MD, cs::size_t... A>
-_TNY_API auto take_md(const MD & v, typename MD::index_type i, cs::index_sequence<A...>) {
-    return cs::submdspan(v, take_arg<D, A>(i)...);
-}
 template <class MD, cs::size_t... P>
 _TNY_API auto perm_md(const MD & v, cs::index_sequence<P...>) {
     using El  = typename MD::element_type;
@@ -108,6 +102,23 @@ template <class A> struct _is_index
 // rank. Axis template parameters are signed (`long`) so `-1` is the last axis.
 _TNY_API constexpr cs::size_t _norm_axis(long a, cs::size_t rank) noexcept {
     return static_cast<cs::size_t>(a < 0 ? a + static_cast<long>(rank) : a);
+}
+struct none_t;   // fwd (defined below)
+// The one index/bound wrap used everywhere: `none` -> `dflt`; a negative value
+// wraps python-style (in a SIGNED domain, so it works for an unsigned index_type).
+// Folds when it can: a static (integral_constant) or unsigned arg needs no branch,
+// and -DTNY_NO_NEGATIVE_INDEX drops the wrap entirely for runtime signed args
+// (kernels that guarantee non-negative indices, for the tightest codegen).
+template <class Idx, class V>
+_TNY_API constexpr Idx _wrap_idx(V v, Idx n, Idx dflt) noexcept {
+    if constexpr (cs::is_same<V, none_t>::value)     { (void)v; (void)n; return dflt; }
+    else if constexpr (cs::is_unsigned<V>::value)    { (void)n; return static_cast<Idx>(v); }
+#ifdef TNY_NO_NEGATIVE_INDEX
+    else                                             { (void)n; return static_cast<Idx>(v); }
+#else
+    else { using S = cs::make_signed_t<Idx>; const S i = static_cast<S>(v);
+           return static_cast<Idx>(i < S(0) ? i + static_cast<S>(n) : i); }
+#endif
 }
 
 // ---- compile-time output extents for the manual range slicer --------------
@@ -330,30 +341,18 @@ struct tensor : private Layout::template mapping<Extents> {
 
     /* --- element access / slicing -------------------------------- */
 private:
-    // wrap a negative index python-style. The wrap is done in a SIGNED domain so
-    // that negative indices work even when index_type is unsigned (e.g. a raw
-    // extents<size_t,...>): casting `a` to index_type first would turn -1 into a
-    // huge value before the `< 0` test could catch it.
+    // wrap a negative index python-style for axis Ax (see free `_wrap_idx`).
     template <cs::size_t Ax, class Arg>
     _TNY_API constexpr index_type _wrap(Arg a) const {
-        using S = cs::make_signed_t<index_type>;
-        const S i = static_cast<S>(a);
-        const S n = static_cast<S>(extent(cs::integral_constant<cs::size_t, Ax>{}));
-        return static_cast<index_type>(i < S(0) ? i + n : i);
+        return _wrap_idx<index_type>(a, static_cast<index_type>(extent(cs::integral_constant<cs::size_t, Ax>{})), index_type(0));
     }
     template <cs::size_t... Ax, class... Args>
     _TNY_API constexpr index_type _offset(cs::index_sequence<Ax...>, Args... a) const {
         return mapping_type::operator()(_wrap<Ax>(a)...);
     }
-    // resolve one slice bound against the axis extent n (none -> default; wrap
-    // negatives in a signed domain, so it works even for an unsigned index_type)
+    // resolve one slice bound against the axis extent n (none -> default).
     template <class V> _TNY_API index_type _sl_bound(V v, index_type dflt, index_type n) const {
-        if constexpr (cs::is_same<V, none_t>::value) { (void)v; (void)n; return dflt; }
-        else {
-            using S = cs::make_signed_t<index_type>;
-            const S i = static_cast<S>(v);
-            return static_cast<index_type>(i < S(0) ? i + static_cast<S>(n) : i);
-        }
+        return _wrap_idx<index_type>(v, n, dflt);
     }
     // slice specifier for a NON-range arg (integer -> wrap; else `all`/full_extent).
     // Range slices don't use submdspan (see _slice_range) so never reach here.
@@ -376,8 +375,7 @@ private:
     // accumulate the base offset and (for kept axes) the output extent + stride.
     // `stop` default for a negative step: `none` -> -1 (go past index 0), python-style.
     template <class V> _TNY_API index_type _stop_neg(V v, index_type n) const {
-        if constexpr (cs::is_same<V, none_t>::value) { (void)v; (void)n; return index_type(-1); }
-        else { using S = cs::make_signed_t<index_type>; S i = static_cast<S>(v); return static_cast<index_type>(i < S(0) ? i + static_cast<S>(n) : i); }
+        return _wrap_idx<index_type>(v, n, index_type(-1));
     }
     template <cs::size_t Ax, class Arg>
     _TNY_API void _sl_axis(Arg a, index_type & off, index_type * ext, index_type * str, cs::size_t & k) const {
@@ -545,6 +543,22 @@ public:
      *         `t.reshape<6,-1>()`. */
     template <long... NewExt> _TNY_API auto reshape() noexcept       { return _reshape<T, NewExt...>(store_.data()); }
     template <long... NewExt> _TNY_API auto reshape() const noexcept { return _reshape<const T, NewExt...>(store_.data()); }
+
+private:
+    template <class El, class NewE, cs::size_t... D>
+    _TNY_API auto _recast(El * p, cs::index_sequence<D...>) const {
+        static_assert(NewE::rank() == rank(), "recast: rank must match");
+        return tensor<El, NewE, cs::layout_right, own::view>(
+            p, typename cs::layout_right::template mapping<NewE>(NewE(cs::array<index_type, rank()>{ static_cast<index_type>(extent(D))... })));
+    }
+public:
+    /** @brief Reinterpret with a MORE-STATIC extents type of the same rank —
+     *         recover statically-known inner dims at the dynamic (ndarray)
+     *         boundary: a runtime `(n,3,3)` view -> `.recast<shape<-1,3,3>>()` so
+     *         the `3`s fold. Static dims of `NewE` are validated against the
+     *         actual extents; requires a C-contiguous tensor. */
+    template <class NewE> _TNY_API auto recast()       { return _recast<T,       NewE>(store_.data(), cs::make_index_sequence<rank()>{}); }
+    template <class NewE> _TNY_API auto recast() const { return _recast<const T, NewE>(store_.data(), cs::make_index_sequence<rank()>{}); }
 
     /** @brief View as 1-D (`ravel`) — requires C-contiguous (`clone()` first). */
     _TNY_API auto flatten() noexcept {

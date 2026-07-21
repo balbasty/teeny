@@ -33,7 +33,7 @@ transforms, small linear algebra) compact and readable.
 
 ```
 include/teeny/
-  _core/defines.h  macros: _TNY_API / _TNY_HOST, namespace open/close
+  defines.h        macros: _TNY_API / _TNY_HOST, namespace open/close
   alias.h          cs:: vocabulary into tny:: + Int<V>/... static ints + `all` + shape<...>
   half.h           `half` (IEEE binary16) + `bfloat16` element types + compute_type
   storage.h        `own` enum + storage policies (owning_storage<T,Alloc>, cpp_alloc)
@@ -43,8 +43,7 @@ include/teeny/
   math.h           in-place & out-of-place elementwise (broadcasting) + unary math
                    + reductions (sum/prod/max/min/dot). Members declared in
                    tensor.h, DEFINED here.
-  iterate.h        nd-peel: peel<Axes...> / peel_at<Axes...>
-  helpers.h        batch_offset (index2offset), channel
+  iterate.h        nd-peel: peel/peel_at/peel_front + batch_offset/channel
   dynamic.h        any_tensor + dispatch_rank (runtime-rank host boundary)
   cuda.h           OPT-IN device/host/pinned memory (needs <cuda_runtime.h>);
                    NOT included by teeny.h

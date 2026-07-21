@@ -136,6 +136,35 @@ template <cs::size_t N, class T, class E, class L, own O>
 _TNY_API auto peel_front_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i)
 { return _md::sfront_at(t, i, cs::make_index_sequence<N>{}); }
 
+/* ------------------------------------------------------------------ *
+ *     Raw-offset helpers (lower-level than peel; work on any mdspan)  *
+ * ------------------------------------------------------------------ */
+
+/** @brief F-order linear index over the leading (rank-1) dims -> offset
+ *         (`index2offset`, dim 0 fastest). Fully unrolled, so static folds. */
+template <class MD, cs::size_t... D>
+_TNY_API auto batch_offset(const MD & a, typename MD::index_type lin, cs::index_sequence<D...>) {
+    using O = typename MD::index_type;
+    O off = 0, cur = 1;
+    ( ( off += ((lin % (cur * a.extent(D))) / cur) * a.stride(D), cur *= a.extent(D) ), ... );
+    return off;
+}
+template <class MD>
+_TNY_API auto batch_offset(const MD & a, typename MD::index_type lin) {
+    return batch_offset(a, lin, cs::make_index_sequence<MD::rank() - 1>{});
+}
+
+/** @brief Peel axis 0 (e.g. a channel axis) at index `c` -> a lower-rank view.
+ *         Rank-generic `submdspan` wrapper (`peel_at<0>` for a teeny tensor). */
+template <class MD, cs::size_t... I>
+_TNY_API auto channel(const MD & a, typename MD::index_type c, cs::index_sequence<I...>) {
+    return cs::submdspan(a, c, ((void)I, cs::full_extent)...);
+}
+template <class MD>
+_TNY_API auto channel(const MD & a, typename MD::index_type c) {
+    return channel(a, c, cs::make_index_sequence<MD::rank() - 1>{});
+}
+
 _TNY_NAMESPACE_END(tny)
 
 #endif // TNY_MD_ITERATE

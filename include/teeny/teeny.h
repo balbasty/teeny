@@ -12,7 +12,6 @@
 #include <teeny/layout.h>
 #include <teeny/tensor.h>
 #include <teeny/math.h>
-#include <teeny/helpers.h>
 #include <teeny/iterate.h>
 #include <teeny/dynamic.h>
 

@@ -96,5 +96,12 @@ int main() {
     static_assert(cs::is_same<decltype(cl)::layout_type, cs::layout_right>::value, "clone row-major");
     if (!cl.is_contiguous() || cl(2,1) != vp(2,1)) return 22;
 
+    // ---- recast: recover static inner dims at the dynamic boundary -----
+    double rb[18]; for (int i=0;i<18;++i) rb[i]=i;
+    auto dyn = view(rb, shape<-1,-1,-1>{2,3,3});                     // fully dynamic (dlpack-like)
+    auto stc = dyn.recast<shape<-1,3,3>>();                          // recover static 3x3
+    static_assert(decltype(stc)::extents_type::static_extent(1) == 3, "recast recovers static inner");
+    if (stc.extent(0) != 2 || stc(1,2,2) != 17) return 23;
+
     return 0;
 }
