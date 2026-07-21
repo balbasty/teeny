@@ -71,5 +71,14 @@ int main()
     long np = 0; for (auto line : peel<0,-2>(t)) { (void)line; ++np; }  // peel axes 0,1
     if (np != 6) return 17;
 
+    // ---- flip<Ax> (reversed-axis view; uses a negative stride) ----------
+    auto fl = t.flip<2>();                             // reverse last axis
+    for (long i=0;i<2;++i) for (long j=0;j<3;++j) for (long k=0;k<4;++k)
+        if (fl(i,j,k) != t(i,j,3-k)) return 18;
+    auto fl0 = t.flip<-3>();                            // reverse axis 0 (negative axis arg)
+    if (fl0(0,0,0) != t(1,0,0)) return 19;
+    fl(0,0,0) = 42.0;                                  // mutable view
+    if (t(0,0,3) != 42.0) return 20;
+
     return 0;
 }

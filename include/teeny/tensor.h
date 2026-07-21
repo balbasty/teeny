@@ -40,6 +40,20 @@ _TNY_API auto perm_md(const MD & v, cs::index_sequence<P...>) {
         cs::array<Idx, sizeof...(P)>{ static_cast<Idx>(v.stride(P))... });
     return cs::mdspan<El, PE, cs::layout_stride>(v.data_handle(), m);
 }
+// reverse axis AX: keep the extents, negate that axis' stride, and shift the
+// data handle to the last element along AX (so index 0 maps to the old last).
+template <cs::size_t AX, class MD, cs::size_t... D>
+_TNY_API auto flip_md(const MD & v, cs::index_sequence<D...>) {
+    using El  = typename MD::element_type;
+    using Idx = typename MD::index_type;
+    using E   = typename MD::extents_type;
+    static_assert(cs::is_signed<Idx>::value, "flip needs a signed index type (e.g. shape<...>)");
+    cs::layout_stride::mapping<E> m(
+        v.extents(),
+        cs::array<Idx, sizeof...(D)>{ static_cast<Idx>(D == AX ? -static_cast<Idx>(v.stride(D)) : static_cast<Idx>(v.stride(D)))... });
+    const Idx off = static_cast<Idx>((static_cast<Idx>(v.extent(AX)) - 1) * static_cast<Idx>(v.stride(AX)));
+    return cs::mdspan<El, E, cs::layout_stride>(v.data_handle() + off, m);
+}
 // insert a size-1 axis at position AX (output rank = N+1). The new axis gets
 // stride 1 (its index is always 0, so the value is irrelevant to the offset).
 // J... = 0..N ; input axis for output j is j (j<AX) or j-1 (j>AX).
@@ -95,6 +109,20 @@ template <class A> struct _is_index
 _TNY_API constexpr cs::size_t _norm_axis(long a, cs::size_t rank) noexcept {
     return static_cast<cs::size_t>(a < 0 ? a + static_cast<long>(rank) : a);
 }
+
+// ---- compile-time output extents for the manual range slicer --------------
+// Each axis maps to: DROP (integer arg, no output axis), its static extent (an
+// `all`/full_extent kept axis), or dynamic_extent (a range). `_compact` removes
+// the DROPs and builds the resulting extents type (static where derivable).
+inline constexpr cs::size_t _drop_axis = cs::size_t(-2);
+template <cs::size_t V, class E> struct _ext_prepend;
+template <cs::size_t V, class Idx, cs::size_t... E> struct _ext_prepend<V, cs::extents<Idx, E...>> { using type = cs::extents<Idx, V, E...>; };
+template <class Idx, cs::size_t... V> struct _compact { using type = cs::extents<Idx>; };
+template <class Idx, cs::size_t V0, cs::size_t... Vs>
+struct _compact<Idx, V0, Vs...> {
+    using rest = typename _compact<Idx, Vs...>::type;
+    using type = cs::conditional_t<V0 == _drop_axis, rest, typename _ext_prepend<V0, rest>::type>;
+};
 
 /** @brief Open-ended slice sentinel — teeny's `None` (python `a[:n]` / `a[m:]`).
  *
@@ -318,44 +346,72 @@ private:
             return static_cast<index_type>(i < S(0) ? i + static_cast<S>(n) : i);
         }
     }
-    // turn a slice_spec into a submdspan `strided_slice{offset, width, stride}`.
-    // `width` is measured in the original index space; submdspan yields
-    // ceil(width/stride). NOTE: ranges are always applied to a layout_stride
-    // source (see _src_for) because CCCL's submdspan mis-deduces exhaustiveness
-    // for a range on layout_right/left and would produce wrong strides.
-    template <cs::size_t Ax, class A, class B, class S>
-    _TNY_API auto _resolve(slice_spec<A,B,S> s) const {
-        const index_type n    = static_cast<index_type>(extent(cs::integral_constant<cs::size_t,Ax>{}));
-        const index_type st   = _sl_bound(s.start, index_type(0), n);
-        const index_type sp   = _sl_bound(s.stop,  n,             n);
-        const index_type step = static_cast<index_type>(s.step);
-        return cs::strided_slice<index_type,index_type,index_type>{ st, static_cast<index_type>(sp - st), step };
-    }
-    // slice specifier for axis Ax: integer -> wrap; `slice(none,none)` -> full_extent
-    // (folds, == `all`); any other slice -> strided_slice; `all` -> passed through.
+    // slice specifier for a NON-range arg (integer -> wrap; else `all`/full_extent).
+    // Range slices don't use submdspan (see _slice_range) so never reach here.
     template <cs::size_t Ax, class Arg>
     _TNY_API auto _spec(Arg a) const {
-        if constexpr (_is_index<Arg>::value)          return _wrap<Ax>(a);
+        if constexpr (_is_index<Arg>::value)           return _wrap<Ax>(a);
         else if constexpr (_is_full_slice<Arg>::value) { (void)a; return cs::full_extent; }
-        else if constexpr (_is_slice_spec<Arg>::value) return _resolve<Ax>(a);
         else                                           return a;   // full_extent (all)
     }
-    // reinterpret the data as an explicit layout_stride view (strides materialised)
-    template <class P, cs::size_t... Ax>
-    _TNY_API auto _sv(P p, cs::index_sequence<Ax...>) const {
-        cs::layout_stride::mapping<Extents> m(
-            extents(), cs::array<index_type, rank()>{ static_cast<index_type>(stride(Ax))... });
-        return cs::mdspan<cs::remove_pointer_t<P>, Extents, cs::layout_stride>(p, m);
-    }
-    _TNY_API auto _stride_view()       noexcept { return _sv(store_.data(), cs::make_index_sequence<rank()>{}); }
-    _TNY_API auto _stride_view() const noexcept { return _sv(store_.data(), cs::make_index_sequence<rank()>{}); }
-    // integer-drop / full_extent slicing is correct on the native layout and keeps
-    // static strides; a range must go through the layout_stride view.
-    template <class... Args> _TNY_API auto _src_for()       { if constexpr (_any_range<Args...>::value) return _stride_view(); else return view(); }
-    template <class... Args> _TNY_API auto _src_for() const { if constexpr (_any_range<Args...>::value) return _stride_view(); else return view(); }
+    // native-layout slicing for the non-range case (int drops + full_extent):
+    // submdspan is correct here and preserves static extents.
     template <class V, cs::size_t... Ax, class... Args>
     _TNY_API auto _slice(V v, cs::index_sequence<Ax...>, Args... a) const {
         return as_tensor(cs::submdspan(v, _spec<Ax>(a)...));
+    }
+
+    // ---- manual layout_stride sub-view builder for the RANGE path -------------
+    // CCCL's submdspan mis-deduces exhaustiveness for a range on layout_right/left
+    // AND cannot express a negative stride, so ranges are built by hand: per axis,
+    // accumulate the base offset and (for kept axes) the output extent + stride.
+    // `stop` default for a negative step: `none` -> -1 (go past index 0), python-style.
+    template <class V> _TNY_API index_type _stop_neg(V v, index_type n) const {
+        if constexpr (cs::is_same<V, none_t>::value) { (void)v; (void)n; return index_type(-1); }
+        else { using S = cs::make_signed_t<index_type>; S i = static_cast<S>(v); return static_cast<index_type>(i < S(0) ? i + static_cast<S>(n) : i); }
+    }
+    template <cs::size_t Ax, class Arg>
+    _TNY_API void _sl_axis(Arg a, index_type & off, index_type * ext, index_type * str, cs::size_t & k) const {
+        const index_type sd = static_cast<index_type>(stride(Ax));
+        const index_type n  = static_cast<index_type>(extent(cs::integral_constant<cs::size_t, Ax>{}));
+        if constexpr (_is_index<Arg>::value) {
+            off += _wrap<Ax>(a) * sd;                                // integer: drop this axis
+        } else if constexpr (_is_slice_spec<Arg>::value) {
+            const index_type step = static_cast<index_type>(a.step);
+            index_type st, cnt;
+            if (step >= index_type(0)) {
+                st = _sl_bound(a.start, index_type(0), n);
+                const index_type sp = _sl_bound(a.stop, n, n);
+                const index_type w = sp - st; cnt = w <= index_type(0) ? index_type(0) : (w + step - 1) / step;
+            } else {
+                const index_type ns = -step;
+                st = _sl_bound(a.start, n - 1, n);                   // default start = last
+                const index_type sp = _stop_neg(a.stop, n);         // default stop = before-0
+                const index_type w = st - sp; cnt = w <= index_type(0) ? index_type(0) : (w + ns - 1) / ns;
+            }
+            off += st * sd; ext[k] = cnt; str[k] = step * sd; ++k;  // stride may be negative
+        } else {                                                    // full_extent (all)
+            ext[k] = n; str[k] = sd; ++k;
+        }
+    }
+    // static output extent for one axis: DROP (integer), the input static extent
+    // (an `all`/full_extent kept axis), or dynamic (a range).
+    template <class Arg> static constexpr cs::size_t _out_static(cs::size_t se) {
+        if constexpr (_is_index<Arg>::value)                       return _drop_axis;
+        else if constexpr (cs::is_same<Arg, cs::full_extent_t>::value) return se;
+        else                                                       return cs::dynamic_extent;
+    }
+    template <class P, cs::size_t... Ax, class... Args>
+    _TNY_API auto _slice_range(P p, cs::index_sequence<Ax...>, Args... a) const {
+        constexpr cs::size_t Nk = (cs::size_t(0) + ... + (_is_index<Args>::value ? cs::size_t(0) : cs::size_t(1)));
+        // output extents: static for `all`-kept static axes, dynamic for ranges
+        using OE = typename _compact<index_type, _out_static<Args>(Extents::static_extent(Ax))...>::type;
+        index_type ext[Nk ? Nk : 1] = {}, str[Nk ? Nk : 1] = {}, off = 0; cs::size_t k = 0;
+        ( _sl_axis<Ax>(a, off, ext, str, k), ... );
+        cs::array<index_type, Nk> ea{}, sa{};
+        for (cs::size_t i = 0; i < Nk; ++i) { ea[i] = ext[i]; sa[i] = str[i]; }
+        cs::layout_stride::mapping<OE> m(OE(ea), sa);
+        return as_tensor(cs::mdspan<cs::remove_pointer_t<P>, OE, cs::layout_stride>(p + off, m));
     }
 public:
     /** @brief Element access when every argument is an integer (negatives wrap). */
@@ -373,13 +429,19 @@ public:
     _TNY_API void add_at(T v, Args... a) noexcept
     { fetch_add(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)], v); }
 
-    /** @brief Sub-view when any argument is a slice (`all`, `slice(a,b)`). */
+    /** @brief Sub-view when any argument is a slice (`all`, `slice(a,b[,step])`).
+     *         A real range (with an optional negative step) builds a layout_stride
+     *         view by hand; pure integer/`all` slicing stays on the native layout. */
     template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...), int> = 0>
-    _TNY_API auto operator()(Args... a) noexcept
-    { return _slice(_src_for<Args...>(), cs::make_index_sequence<rank()>{}, a...); }
+    _TNY_API auto operator()(Args... a) noexcept {
+        if constexpr (_any_range<Args...>::value) return _slice_range(store_.data(), cs::make_index_sequence<rank()>{}, a...);
+        else                                      return _slice(view(), cs::make_index_sequence<rank()>{}, a...);
+    }
     template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...), int> = 0>
-    _TNY_API auto operator()(Args... a) const noexcept
-    { return _slice(_src_for<Args...>(), cs::make_index_sequence<rank()>{}, a...); }
+    _TNY_API auto operator()(Args... a) const noexcept {
+        if constexpr (_any_range<Args...>::value) return _slice_range(store_.data(), cs::make_index_sequence<rank()>{}, a...);
+        else                                      return _slice(view(), cs::make_index_sequence<rank()>{}, a...);
+    }
 
     /* --- structural views (return md::tensor views) --------------- */
 
@@ -396,6 +458,17 @@ private:
     _TNY_API auto _ta(V v, const Tup & t, cs::index_sequence<A...>) const {
         return as_tensor(cs::submdspan(v, _ta_spec<A, Axes...>(t)...));
     }
+    // raw per-axis arg for the manual range path: the named arg, else full_extent.
+    template <cs::size_t A, cs::size_t... Axes, class Tup>
+    _TNY_API auto _ta_raw(const Tup & t) const {
+        constexpr int p = _pos_in<A, Axes...>();
+        if constexpr (p < 0) return cs::full_extent;
+        else                 return cs::get<static_cast<cs::size_t>(p)>(t);
+    }
+    template <cs::size_t... Axes, class P, class Tup, cs::size_t... A>
+    _TNY_API auto _ta_range(P p, const Tup & t, cs::index_sequence<A...> seq) const {
+        return _slice_range(p, seq, _ta_raw<A, Axes...>(t)...);
+    }
 public:
     /**
      * @brief Index/slice one or more named axes; other axes are kept.
@@ -408,12 +481,14 @@ public:
     template <long... Axes, class... Args>
     _TNY_API auto take_along(Args... args) noexcept {
         static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
-        return _ta<_norm_axis(Axes, rank())...>(_src_for<Args...>(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
+        if constexpr (_any_range<Args...>::value) return _ta_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
+        else                                      return _ta<_norm_axis(Axes, rank())...>(view(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
     }
     template <long... Axes, class... Args>
     _TNY_API auto take_along(Args... args) const noexcept {
         static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
-        return _ta<_norm_axis(Axes, rank())...>(_src_for<Args...>(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
+        if constexpr (_any_range<Args...>::value) return _ta_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
+        else                                      return _ta<_norm_axis(Axes, rank())...>(view(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
     }
 
     /** @brief Reorder the axes (a permutation of 0..N-1; negatives wrap) -> a rank-N view. */
@@ -423,6 +498,15 @@ public:
     template <long... Perm>
     _TNY_API auto permute() const noexcept
     { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor(_detail::perm_md(view(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
+
+    /** @brief Reverse axis `Ax` (negatives wrap) -> a view (numpy `flip`). Uses a
+     *         negative stride, so the index type must be signed (`shape<...>` is). */
+    template <long Ax = 0>
+    _TNY_API auto flip() noexcept
+    { return as_tensor(_detail::flip_md<_norm_axis(Ax, rank())>(view(), cs::make_index_sequence<rank()>{})); }
+    template <long Ax = 0>
+    _TNY_API auto flip() const noexcept
+    { return as_tensor(_detail::flip_md<_norm_axis(Ax, rank())>(view(), cs::make_index_sequence<rank()>{})); }
 
     /** @brief Insert a size-1 axis at position `Ax` (numpy `newaxis`/`unsqueeze`)
      *         -> a rank-(N+1) view. Negative `Ax` counts from the back, so

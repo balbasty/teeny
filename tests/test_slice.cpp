@@ -74,5 +74,22 @@ int main() {
     auto us = u(0, slice(-2, none), all);             // negative slice bound wraps
     if (us.extent(0) != 2 || us(0,0) != u(0,1,0)) return 18;
 
+    // ---- negative step (python a[::-1], a[5:0:-1], strided reverse) ------
+    auto line = view(buf, shape<4>{});                // signed index for reverse
+    auto rev = line(slice(none,none,-1));             // full reverse
+    if (rev.extent(0) != 4) return 19;
+    for (long i=0;i<4;++i) if (rev(i) != line(3-i)) return 20;
+    auto rev2 = line(slice(3,0,-1));                  // 3,2,1 (stop 0 excluded)
+    if (rev2.extent(0) != 3 || rev2(0)!=line(3) || rev2(2)!=line(1)) return 21;
+    auto rstep = line(slice(none,none,-2));           // 3,1
+    if (rstep.extent(0) != 2 || rstep(0)!=line(3) || rstep(1)!=line(1)) return 22;
+    // reverse is a mutable view
+    rev(0) = 77.0; if (line(3) != 77.0) return 23; line(3) = 3;
+
+    // 2-D: reverse rows via slicing, forward columns
+    auto M2 = view(buf, shape<3,4>{});
+    auto Mr = M2(slice(none,none,-1), all);
+    for (long i=0;i<3;++i) for (long j=0;j<4;++j) if (Mr(i,j) != M2(2-i,j)) return 24;
+
     return 0;
 }
