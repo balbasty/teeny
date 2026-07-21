@@ -1,0 +1,93 @@
+# teeny documentation — Zensical config (squidfunk's successor to Material for
+# MkDocs). Build with `pip install zensical` then `zensical build` (-> site/) or
+# `zensical serve` for a live preview. Zensical reads this file natively; it also
+# understands mkdocs.yml, but this repo uses the native TOML config.
+
+[project]
+
+site_name = "teeny"
+site_description = "A teeny, header-only C++17 tensor library for host + CUDA."
+site_author = "Yael Balbastre"
+
+site_url = "https://balbasty.github.io/teeny/"
+repo_url = "https://github.com/balbasty/teeny"
+repo_name = "balbasty/teeny"
+
+copyright = """
+Copyright &copy; 2026 The authors
+"""
+
+nav = [
+  {"Home" = "index.md"},
+  {"Getting started" = "getting-started.md"},
+  {"Guide" = [
+    {"Tensors & ownership" = "tensors.md"},
+    {"Shapes & strides" = "shapes-strides.md"},
+    {"Indexing & slicing" = "indexing.md"},
+    {"Math & broadcasting" = "math.md"},
+    {"Views & structure" = "structure.md"},
+    {"Dispatch & the ndarray boundary" = "dispatch.md"},
+    {"Half precision" = "half.md"},
+  ]},
+  {"Tutorials" = [
+    {"CPU + CUDA kernels for DLPack → Python" = "tutorials/dlpack-python.md"},
+  ]},
+  {"API reference" = "reference.md"},
+]
+
+[project.theme]
+
+language = "en"
+
+features = [
+  "content.code.copy",
+  "content.code.select",
+  "content.code.annotate",
+  "navigation.indexes",
+  "navigation.sections",
+  "navigation.top",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "teal"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "teal"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+# A small cube stands in for an n-d tensor (the project's own logo, not the
+# upstream template's).
+[project.theme.icon]
+logo = "material/cube-outline"
+repo = "fontawesome/brands/github"
+
+# ----------------------------------------------------------------------------
+# Markdown extras
+# ----------------------------------------------------------------------------
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.snippets]
+[project.markdown_extensions.pymdownx.superfences]
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+[project.markdown_extensions.pymdownx.emoji]
+emoji_generator = "zensical.extensions.emoji.to_svg"
+emoji_index = "zensical.extensions.emoji.twemoji"
+[project.markdown_extensions.pymdownx.keys]
+[project.markdown_extensions.tables]
+[project.markdown_extensions.toc]
+permalink = true
+toc_depth = 3

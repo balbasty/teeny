@@ -1,0 +1,24 @@
+name: Test on push
+
+# Trigger: run the compiler matrix on pushes to main that touch the library,
+# tests, examples, build, or the workflows themselves — and on every PR.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - include/**
+      - tests/**
+      - examples/**
+      - external/**
+      - Makefile
+      - .github/workflows/test*.yaml
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    uses: ./.github/workflows/test-matrix.yaml

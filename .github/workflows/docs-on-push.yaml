@@ -1,0 +1,24 @@
+name: Build and deploy docs on push
+
+# Trigger: rebuild and publish the docs whenever docs sources or the site config
+# change on main.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/**
+      - zensical.toml
+      - .github/workflows/docs*.yaml
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  docs:
+    uses: ./.github/workflows/docs.yaml
+    with:
+      tag: ${{ github.ref }}

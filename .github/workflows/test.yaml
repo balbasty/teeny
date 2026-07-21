@@ -1,0 +1,60 @@
+name: Run tests
+
+# Reusable, single-compiler test run. Builds every tests/test_*.cpp with the
+# requested C++ compiler at -std=c++17 and runs them (`make run-test`). Called
+# by test-matrix.yaml (once per compiler) and directly runnable from the UI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Commit / Branch / Tag / SHA to checkout
+        required: false
+        default: ""
+      cxx:
+        description: C++ compiler (g++ or clang++)
+        required: false
+        default: "g++"
+  workflow_call:
+    inputs:
+      tag:
+        description: Commit / Branch / Tag / SHA to checkout
+        required: false
+        default: ""
+        type: string
+      cxx:
+        description: C++ compiler (g++ or clang++)
+        required: false
+        default: "g++"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      # The CCCL dependency is a git submodule pinned via SSH in .gitmodules;
+      # rewrite to HTTPS so the runner can fetch it without an SSH key.
+      - name: Fetch CCCL submodule
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --recursive
+
+      # g++ and clang++ both ship on ubuntu-latest; only install if missing.
+      - name: Ensure ${{ inputs.cxx }} is available
+        run: |
+          if ! command -v ${{ inputs.cxx }} >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends build-essential clang
+          fi
+          ${{ inputs.cxx }} --version
+
+      - name: Build and run tests
+        run: make CXX=${{ inputs.cxx }} run-test
