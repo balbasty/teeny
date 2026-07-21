@@ -71,17 +71,17 @@ _TNY_API auto squeeze_md(const MD & v, cs::index_sequence<J...>) {
 
 // traits: layout classification for stride folding
 template <class L> struct _is_strides : cs::false_type {};       // teeny's strides<S...>
-template <cs::size_t... S> struct _is_strides<strides_layout<S...>> : cs::true_type {};
+template <cs::int64_t... S> struct _is_strides<strides<S...>> : cs::true_type {};
 template <class L> struct _strides_all_static : cs::false_type {};  // and every stride known?
-template <cs::size_t... S> struct _strides_all_static<strides_layout<S...>> : cs::integral_constant<bool, strides_layout<S...>::all_static()> {};
+template <cs::int64_t... S> struct _strides_all_static<strides<S...>> : cs::integral_constant<bool, strides<S...>::all_static()> {};
 template <class L> struct _contiguous_layout : cs::false_type {};
 template <> struct _contiguous_layout<cs::layout_right> : cs::true_type {};
 template <> struct _contiguous_layout<cs::layout_left>  : cs::true_type {};
 
-// per-dim static stride from a strides<...> layout (dynamic_stride if runtime;
-// dynamic_stride for any non-strides layout so callers fall through).
-template <cs::size_t D, class L> struct _static_stride_at { static constexpr cs::size_t value = dynamic_stride; };
-template <cs::size_t D, cs::size_t... S> struct _static_stride_at<D, strides_layout<S...>> { static constexpr cs::size_t value = strides_layout<S...>::S_[D]; };
+// per-dim static stride from a strides<...> layout (signed; `dynamic_stride` if
+// runtime, or for any non-strides layout so callers fall through).
+template <cs::size_t D, class L> struct _static_stride_at { static constexpr cs::int64_t value = dynamic_stride; };
+template <cs::size_t D, cs::int64_t... S> struct _static_stride_at<D, strides<S...>> { static constexpr cs::int64_t value = strides<S...>::S_[D]; };
 
 // an "index" argument to operator() is a (static or runtime) integer; anything
 // else (all / rng, i.e. a slice specifier) turns operator() into a view.
@@ -481,11 +481,11 @@ _TNY_API tensor<T, Extents, Layout, own::view> view(T * p, Extents e) {
     return Tn(p, typename Tn::mapping_type(e));
 }
 
-/** @brief Non-owning view with per-dimension compile-time strides. */
-template <cs::size_t... Strides, class T, class Extents>
-_TNY_API tensor<T, Extents, layout_static_stride<Strides...>, own::view>
+/** @brief Non-owning view with per-dimension compile-time strides (may be negative). */
+template <cs::int64_t... Strides, class T, class Extents>
+_TNY_API tensor<T, Extents, strides<Strides...>, own::view>
 view_strided(T * p, Extents e) {
-    using Tn = tensor<T, Extents, layout_static_stride<Strides...>, own::view>;
+    using Tn = tensor<T, Extents, strides<Strides...>, own::view>;
     return Tn(p, typename Tn::mapping_type(e));
 }
 

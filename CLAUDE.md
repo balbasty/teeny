@@ -99,11 +99,13 @@ Factories: `view(ptr, extents)` / `view<Layout>(ptr, extents)`,
 factories that deduce the extents type: `make_view(ptr,e)`, `make_local<T>(e)`,
 `make_heap<T>(e)`, `make_device/host/pinned<T>(e)` (T explicit, E deduced).
 
-Custom strided layout: `strides<Sx, Sy, ...>` is the stride analogue of `shape`
-— per-dim static OR dynamic (`-1`/`dynamic_stride`), folding known strides to
-immediates and storing only the dynamic ones (EBO when all static):
-`tensor<float, shape<3,4>, strides<4,1>>(ptr)`. NB `submdspan` does not apply to
-it (same caveat as before) — slice on a standard layout instead.
+Custom strided layout: `strides<Sx, Sy, ...>` is the stride analogue of `shape`,
+folding known strides to immediates and storing only the dynamic ones (EBO when
+all static): `tensor<float, shape<3,4>, strides<4,1>>(ptr)`. Strides are SIGNED,
+so `-1` means a real stride of −1 (reversed view), NOT dynamic — a runtime
+stride is spelled `dynamic_stride` (`strides<dynamic_stride,1>`, constructed with
+the runtime strides). NB `submdspan` does not apply to it — slice on a standard
+layout instead.
 
 ## API cheat-sheet
 
