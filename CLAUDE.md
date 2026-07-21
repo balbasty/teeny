@@ -64,9 +64,12 @@ template <class T, class Extents, class Layout = layout_right, own O = own::view
 struct tensor;
 ```
 
-- **`T`** element type. Any arithmetic type, plus teeny's `half` (IEEE binary16)
-  and `bfloat16` (`half.h`) — half-precision math computes/accumulates in `float`
-  (`compute_type<T>`) so reductions don't lose precision.
+- **`T`** element type. Any arithmetic type, plus `half` (IEEE binary16) and
+  `bfloat16` (`half.h`). Under nvcc these ARE the native CUDA `__half` /
+  `__nv_bfloat16`; on a host compiler they are portable software types with the
+  same layout. All elementwise/reduction math computes in `float`
+  (`compute_type<T>`), so precision holds and the engines never need native
+  half *host* operators.
 - **`Extents`** = `cuda::std::extents<Idx, E0, E1, ...>`; each `Ei` is a compile-time
   size or `dynamic_extent`. Mix freely per dimension.
 - **`Layout`** = `layout_right` (default, C-order), `layout_left` (F-order),
@@ -98,18 +101,17 @@ Factories: `view(ptr, extents)` / `view<Layout>(ptr, extents)`,
 // --- geometry (static index -> integral_constant, runtime index -> value) ---
 t.rank();  t.numel();
 t.extent(Int<0>());   // static lookup -> integral_constant when the extent is static
-t.extent(0);          // runtime lookup -> index_type
-t.stride(Int<1>());   // static when derivable (static-stride layout, or contiguous+static)
-t.data();  t.view();  t.extents();  t.mapping();
+t.extent(0);          // runtime lookup -> index_type   (t.shape(...) is a python-y alias)
+t.stride(Int<1>());   // static when derivable (static-stride layout; contiguous+static;
+                      //   or a contiguous layout's UNIT stride even for a dynamic shape)
+t.data();  t.view();  t.extents();  t.shape();  t.mapping();
 
 // --- indexing / slicing (python-like) ---
 t(1, 2, 3);           // element access; negative indices wrap (count from the back)
 t(0, all, slice(1,4));  // any slice arg -> a lower-/same-rank VIEW. all = keep axis,
                       //   slice(a,b) = half-open [a,b). Integer args drop that axis.
 t(0, slice(none,4), slice(1,none,2));  // python-like: none = open end, 3rd arg = step.
-                      //   negative bounds wrap. Two open-end sentinels: static `none`
-                      //   (folds: all == slice(none,none), keeps static extent) and
-                      //   runtime `rnone` (whole axis resolved at run time -> dynamic).
+                      //   negative bounds wrap; all == slice(none,none) (folds).
                       //   NB a range routes through layout_stride (ranged axis -> dynamic;
                       //   `all`-kept axes stay static). See the CCCL note in tensor.h.
 t.take_along<0,2>(i, slice(1,4));  // bind named axes only; keep every other axis

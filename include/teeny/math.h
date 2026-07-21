@@ -61,7 +61,7 @@ struct r_min { template <class A, class X> _TNY_API A operator()(A a, X x) const
 template <class C, class A, class B, class Op, cs::size_t... D>
 _TNY_API void zip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
     using I  = typename C::index_type;
-    using Cv = typename C::element_type;       // compute in the destination type
+    using Cv = compute_type_t<typename C::element_type>;  // compute in float for half types
     const I e[]  = { a.extent(D)... };
     const I sa[] = { a.stride(D)... };
     const I sb[] = { b.stride(D)... };
@@ -101,7 +101,7 @@ _TNY_API constexpr bool bc_static_ok(cs::index_sequence<D...>) {
 
 template <class C, class A, class B, class Op, cs::size_t... D>
 _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
-    using I = typename C::index_type; using Cv = typename C::element_type;
+    using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
     const I ce[] = { c.extent(D)... }, sc[] = { c.stride(D)... };
     const I ae[] = { a.extent(D)... }, sa[] = { a.stride(D)... };
     const I be[] = { b.extent(D)... }, sb[] = { b.stride(D)... };
@@ -135,7 +135,9 @@ _TNY_API void bzip(C & c, const A & a, const B & b, Op op) {
 /* ---- c = op(c, scalar), elementwise ------------------------------ */
 template <class C, class Op, cs::size_t... D>
 _TNY_API void scal_(C & c, typename C::element_type s, Op op, cs::index_sequence<D...>) {
-    using I = typename C::index_type;
+    using I  = typename C::index_type;
+    using Cv = compute_type_t<typename C::element_type>;   // compute in float for half types
+    const Cv sv = static_cast<Cv>(s);
     const I e[]  = { c.extent(D)... };
     const I sc[] = { c.stride(D)... };
     I n = 1;
@@ -145,7 +147,7 @@ _TNY_API void scal_(C & c, typename C::element_type s, Op op, cs::index_sequence
         for (int d = static_cast<int>(sizeof...(D)) - 1; d >= 0; --d) {
             I k = rem % e[d]; rem /= e[d]; oc += k * sc[d];
         }
-        c.data()[oc] = op(c.data()[oc], s);
+        c.data()[oc] = op(static_cast<Cv>(c.data()[oc]), sv);
     }
 }
 template <class C, class Op>
@@ -156,7 +158,7 @@ _TNY_API void scal(C & c, typename C::element_type s, Op op) {
 /* ---- c(i) = op(a(i), scalar) ------------------------------------- */
 template <class C, class A, class S, class Op, cs::size_t... D>
 _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
-    using I = typename C::index_type; using Cv = typename C::element_type;
+    using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
     const I e[] = { a.extent(D)... }, sa[] = { a.stride(D)... }, sc[] = { c.stride(D)... };
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
     for (I lin = 0; lin < n; ++lin) {
@@ -171,13 +173,13 @@ template <class C, class A, class S, class Op> _TNY_API void scalo(C & c, const 
 /* ---- c(i) = uop(a(i))  and  c(i) = uop(c(i)) (in place) ---------- */
 template <class C, class A, class Uop, cs::size_t... D>
 _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
-    using I = typename C::index_type; using Cv = typename C::element_type;
+    using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
     const I e[] = { a.extent(D)... }, sa[] = { a.stride(D)... }, sc[] = { c.stride(D)... };
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
     for (I lin = 0; lin < n; ++lin) {
         I rem = lin, oa = 0, oc = 0;
         for (int d = (int)sizeof...(D)-1; d >= 0; --d) { I k = rem%e[d]; rem/=e[d]; oa+=k*sa[d]; oc+=k*sc[d]; }
-        c.data()[oc] = static_cast<Cv>(f(a.data()[oa]));
+        c.data()[oc] = static_cast<Cv>(f(static_cast<Cv>(a.data()[oa])));
     }
 }
 template <class C, class A, class Uop> _TNY_API void unaryo(C & c, const A & a, Uop f)

@@ -45,20 +45,11 @@ int main() {
     if (a.extent(0) != 2 || a(0,0) != t(0,0,0) || a(1,3) != t(0,1,3)) return 10;
     auto b = t(0, slice(1, none), all);               // axis1 [1,3)
     if (b.extent(0) != 2 || b(0,0) != t(0,1,0)) return 11;
-    // static none: slice(none,none) folds to full_extent (== all), keeping the
-    // axis AND its static extent.
+    // slice(none,none) folds to full_extent (== all): keeps the axis AND its
+    // static extent.
     auto c = t(0, slice(none,none), all);
-    static_assert(decltype(c)::extents_type::static_extent(0) == 3, "slice(none,none)==all folds (static)");
+    static_assert(decltype(c)::extents_type::static_extent(0) == 3, "slice(none,none)==all folds");
     if (c.extent(0) != 3 || c(1,2) != t(0,1,2)) return 12;
-
-    // runtime none: slice(rnone,rnone) is the whole axis resolved at run time
-    // (dynamic extent, does NOT fold) -- same values, different static-ness.
-    auto rc = t(0, slice(rnone,rnone), all);
-    static_assert(decltype(rc)::extents_type::static_extent(0) == cs::dynamic_extent, "rnone -> dynamic");
-    if (rc.extent(0) != 3 || rc(1,2) != t(0,1,2)) return 100;
-    // mixed: static none start, runtime none stop
-    auto rm = t(0, slice(none, rnone), all);
-    if (rm.extent(0) != 3 || rm(2,3) != t(0,2,3)) return 101;
 
     // negative bounds wrap (count from the back)
     auto d = t(0, slice(-2, none), all);              // last two of axis1 -> [1,3)

@@ -1,18 +1,36 @@
 #ifndef TNY_HALF
 #define TNY_HALF
-// Portable half-precision element types: `half` (IEEE binary16) and `bfloat16`
-// (the two PyTorch uses). Host+device, no CUDA dependency: storage is a single
-// uint16 and all arithmetic is done in `float` then rounded back, so these work
-// as tensor element types in every teeny engine. On a CUDA build you may prefer
-// to map these to `__half` / `__nv_bfloat16` for native device math; the bit
-// layout is identical, so a reinterpret is valid.
-#include <cuda/std/cstdint>
+// Half-precision element types: `half` (IEEE binary16) and `bfloat16` (the two
+// PyTorch uses). Under nvcc these ARE the native CUDA types (`__half` /
+// `__nv_bfloat16`) so device kernels get hardware half math; on a host compiler
+// (g++/clang++, no CUDA) teeny falls back to portable software types with the
+// identical 16-bit layout. Elementwise/reduction math computes in `float`
+// (`compute_type<T>`), so we never depend on native half host operators.
+//
+// Force the portable types even under nvcc with -DTNY_PORTABLE_HALF.
 #include <cuda/std/type_traits>
 #include <teeny/_core/defines.h>
+
+#if defined(__CUDACC__) && !defined(TNY_PORTABLE_HALF)
+#  define TNY_CUDA_HALF 1
+#  include <cuda_fp16.h>
+#  include <cuda_bf16.h>
+#endif
 
 _TNY_NAMESPACE_BEGIN(tny)
 
 namespace cs = cuda::std;
+
+#ifdef TNY_CUDA_HALF
+
+/** @brief IEEE binary16 — the native CUDA `__half` under nvcc. */
+using half = __half;
+/** @brief bfloat16 — the native CUDA `__nv_bfloat16` under nvcc. */
+using bfloat16 = __nv_bfloat16;
+
+#else  // ---- portable software fallback (no CUDA) ----
+
+#include <cuda/std/cstdint>
 
 namespace _detail {
 union _f32 { float f; cs::uint32_t u; };
@@ -65,7 +83,7 @@ _TNY_API inline float f16_to_f32(cs::uint16_t h) {
     }
     return u2f(out);
 }
-// float32 -> bfloat16 (round to nearest even) and back
+// float32 <-> bfloat16 (round to nearest even)
 _TNY_API inline cs::uint16_t f32_to_bf16(float f) {
     cs::uint32_t x = f2u(f);
     if (((x >> 23) & 0xffu) == 0xffu && (x & 0x7fffffu))   // nan -> quiet nan
@@ -76,8 +94,7 @@ _TNY_API inline cs::uint16_t f32_to_bf16(float f) {
 _TNY_API inline float bf16_to_f32(cs::uint16_t h) { return u2f(static_cast<cs::uint32_t>(h) << 16); }
 } // namespace _detail
 
-// a half type is a uint16 store + convert-through-float arithmetic. The CRTP-ish
-// macro shares the operator soup between `half` and `bfloat16`.
+// a portable half type: a uint16 store + convert-through-float arithmetic.
 #define _TNY_HALF_TYPE(NAME, TO_F, FROM_F)                                                         \
 struct NAME {                                                                                       \
     cs::uint16_t bits{};                                                                            \
@@ -104,15 +121,16 @@ _TNY_HALF_TYPE(half,     _detail::f16_to_f32, _detail::f32_to_f16)
 _TNY_HALF_TYPE(bfloat16, _detail::bf16_to_f32, _detail::f32_to_bf16)
 #undef _TNY_HALF_TYPE
 
+#endif  // TNY_CUDA_HALF
+
 static_assert(sizeof(half) == 2 && sizeof(bfloat16) == 2, "half types are 16-bit");
-static_assert(cs::is_trivially_copyable<half>::value, "half must be kernel-passable");
 
 /**
- * @brief The type math should ACCUMULATE in for element type `T`.
+ * @brief The type math should ACCUMULATE / compute in for element type `T`.
  *
- * Half types accumulate in `float` (reductions / repeated adds in 16-bit lose
- * precision fast — jitfields' `reduce_t` pattern). Everything else accumulates
- * in itself.
+ * Half types compute in `float` (16-bit accumulation loses precision fast —
+ * jitfields' `reduce_t` pattern — and it lets the engines avoid depending on
+ * native half host operators). Everything else computes in itself.
  */
 template <class T> struct compute_type          { using type = T; };
 template <>        struct compute_type<half>     { using type = float; };
