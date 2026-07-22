@@ -72,9 +72,11 @@ int main()
     if (at.step(0) != 0) return 13;
     stride[0] = 12;                                      // restore
 
-    // ---- as_anyrank(..., copy): an inline, device-passable, INDEPENDENT copy --
-    auto ac = as_anyrank(buf, shape, stride, 3, copy);   // copies shape/stride inline
+    // ---- as_anyrank(..., copy_meta): inline, device-passable, INDEPENDENT copy -
+    auto ac = as_anyrank(buf, shape, stride, 3, copy_meta);   // copies shape/stride inline
     static_assert(cs::is_trivially_copyable<decltype(ac)>::value, "copy store -> trivially copyable");
+    static_assert(decltype(ac)::device_passable, "copy_meta carrier is device-passable");
+    static_assert(!decltype(at)::device_passable, "wrap carrier is host-only");
     if (ac.ndim != 3 || ac.size(1) != 3 || ac.step(0) != 12) return 14;
     stride[0] = 0;                                       // mutate the source...
     if (ac.step(0) != 12) return 15;                     // ...the copy is unaffected

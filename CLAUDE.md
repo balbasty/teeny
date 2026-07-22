@@ -206,7 +206,7 @@ auto v = peel_front_at<N>(t, i);            // the i-th (grid-stride style)
 // --- dynamic-rank / dynamic-value host boundary (dynamic.h) ---
 auto at = as_anyrank(data, shape, stride, ndim);    // -> anyrank: rank-erased carrier; WRAPS the
                                              //   shape/stride arrays (1-D tensor views), NO copy; HOST only (default)
-auto ac = as_anyrank(data, shape, stride, ndim, copy);  // COPIES into an inline TNY_MAX_RANK (default
+auto ac = as_anyrank(data, shape, stride, ndim, copy_meta);  // COPIES into an inline TNY_MAX_RANK (default
                                              //   32) store -> trivially copyable, device-passable
 dispatch_rank(at, [&](auto v){ kernel(v); });  // instantiates kernel once per TOTAL rank
 auto v3 = at.fixed<3>();                      // or force a known rank

@@ -27,19 +27,22 @@ using _meta_view = tensor<offset_t, cs::dextents<offset_t, 1>, cs::layout_right,
 
 template <class T, class offset_t, class Meta, cs::size_t Sr> struct anyrank_front;  // fwd
 
-/** @brief Tag for `as_anyrank(..., copy)`: COPY shape/stride into an inline,
- *         device-passable store instead of wrapping the caller's arrays. */
-struct copy_t {};
-constexpr copy_t copy{};
+/** @brief Tag for `as_anyrank(..., copy_meta)`: COPY shape/stride into an inline,
+ *         device-passable store instead of wrapping the caller's arrays. Named
+ *         `copy_meta`, not `copy`: a bare `copy` variable in `tny` would, under
+ *         `using namespace tny`, shadow an unqualified `std::copy(...)` call
+ *         (finding a variable suppresses ADL) — a nasty surprise. */
+struct copy_meta_t {};
+constexpr copy_meta_t copy_meta{};
 
 /**
  * @brief A rank-erased tensor for the host/ndarray dispatch boundary.
  *
  * Holds a data pointer, a runtime `ndim`, and 1-D `shape`/`stride` tensors
  * (`Meta`). `as_anyrank(...)` **wraps** the caller's arrays with no copy (a
- * `_meta_view` store, HOST only) — the default; `as_anyrank(..., copy)` COPIES
- * them into an INLINE `TNY_MAX_RANK` store, so the carrier is trivially copyable
- * and passes into a CUDA kernel by value.
+ * `_meta_view` store, HOST only) — the default; `as_anyrank(..., copy_meta)`
+ * COPIES them into an INLINE `TNY_MAX_RANK` store, so the carrier is trivially
+ * copyable and passes into a CUDA kernel by value (`device_passable == true`).
  *
  * You do NOT compute on it — it is a *doorway*, not a room. Turn it into a
  * statically-typed view at the boundary and compute on that:
@@ -67,12 +70,29 @@ struct anyrank {
         Meta::extents_type::static_extent(0) != cs::dynamic_extent
             ? Meta::extents_type::static_extent(0) : cs::size_t(TNY_MAX_RANK);
 
+    // True for an inline (copy) store; false for a view store that wraps external
+    // host arrays. Only a device_passable carrier may be used inside a kernel.
+    static constexpr bool device_passable =
+        (Meta::extents_type::static_extent(0) != cs::dynamic_extent);
+
+    // Compile-time trip-wire: using a view carrier on the device dereferences raw
+    // host pointers (UB). Under nvcc's device pass this turns that into an error;
+    // it is inert on the host and for a copy carrier.
+    _TNY_API static void _device_guard() noexcept {
+#ifdef __CUDA_ARCH__
+        static_assert(device_passable,
+            "this anyrank WRAPS host arrays (default as_anyrank) and is host-only; "
+            "rebuild it with the `copy_meta` tag to use it on the device");
+#endif
+    }
+
     _TNY_API offset_t size(int i)  const noexcept { return shape(i); }   // size of dim i
     _TNY_API offset_t step(int i)  const noexcept { return stride(i); }  // stride of dim i
 
     /** @brief View this tensor as a fixed rank `R` (requires `ndim == R`). */
     template <cs::size_t R>
     _TNY_API dyn_tensor<T, offset_t, R> fixed() const {
+        _device_guard();
         using E = cs::dextents<offset_t, R>;
         cs::array<offset_t, R> ext{}, st{};
         for (cs::size_t i = 0; i < R; ++i) { ext[i] = shape(i); st[i] = stride(i); }
@@ -84,6 +104,7 @@ struct anyrank {
     // the leading `ndim - Sr` runtime batch axes into the pointer offset).
     template <cs::size_t Sr>
     _TNY_API dyn_tensor<T, offset_t, Sr> _keep_last(offset_t lin) const {
+        _device_guard();
         const int nb = ndim - static_cast<int>(Sr);          // # batch dims (runtime)
         _TNY_CHECK(nb >= 0, "peel_front: keep-count exceeds ndim");
         offset_t off = 0, rem = lin;                          // decode lin over batch axes
@@ -145,12 +166,15 @@ struct anyrank_front {
  *         arrays must outlive the carrier. HOST only: the pointers are not valid
  *         inside a device kernel, so peel/dispatch on the host and pass the
  *         resulting fixed-rank views to the device. To instead copy into an
- *         inline, device-passable store, pass the `copy` tag (overload below).
- *         DLPack strides are in ELEMENTS; numpy `__array_interface__` in BYTES
- *         (divide by the itemsize first). */
+ *         inline, device-passable store, pass the `copy_meta` tag (overload
+ *         below). DLPack strides are in ELEMENTS; numpy `__array_interface__` in
+ *         BYTES (divide by the itemsize first). */
 template <class T, class offset_t>
 _TNY_HOST anyrank<T, offset_t, _meta_view<offset_t>>
 as_anyrank(T * data, offset_t * shape, offset_t * stride, int ndim) {
+    static_assert(!cs::is_const<offset_t>::value,
+        "as_anyrank: the default WRAPS mutable shape/stride arrays; for `const` arrays "
+        "(or to build a device-passable carrier) pass the `copy_meta` tag");
     anyrank<T, offset_t, _meta_view<offset_t>> t;
     t.data = data; t.ndim = ndim;
     cs::dextents<offset_t, 1> e{ static_cast<offset_t>(ndim) };
@@ -159,19 +183,20 @@ as_anyrank(T * data, offset_t * shape, offset_t * stride, int ndim) {
     return t;
 }
 
-/** @brief `as_anyrank(data, shape, stride, ndim, copy)` — COPY shape/stride into
- *         an inline store, so the carrier is trivially copyable and can be passed
- *         into a CUDA kernel by value (peel on device). `MaxRank` sets the inline
- *         capacity (default `TNY_MAX_RANK`); pass it as `as_anyrank<64>(...,copy)`. */
+/** @brief `as_anyrank(data, shape, stride, ndim, copy_meta)` — COPY shape/stride
+ *         into an inline store, so the carrier is trivially copyable and can be
+ *         passed into a CUDA kernel by value (peel on device). `MaxRank` sets the
+ *         inline capacity (default `TNY_MAX_RANK`); pass it as
+ *         `as_anyrank<64>(..., copy_meta)`. Accepts `const` arrays (it copies). */
 template <cs::size_t MaxRank = TNY_MAX_RANK, class T, class offset_t>
 _TNY_HOST anyrank<T, offset_t, _meta_store<offset_t, MaxRank>>
-as_anyrank(T * data, const offset_t * shape, const offset_t * stride, int ndim, copy_t) {
+as_anyrank(T * data, const offset_t * shape, const offset_t * stride, int ndim, copy_meta_t) {
     anyrank<T, offset_t, _meta_store<offset_t, MaxRank>> t;
     t.data = data; t.ndim = ndim;
     // Never write past the inline store: ndim can come straight from a DLPack
     // caller (torch allows 64 dims). Copy at most MaxRank; an oversized ndim is
     // then simply never matched by dispatch_rank / fixed<R>.
-    _TNY_CHECK(ndim <= static_cast<int>(MaxRank), "as_anyrank(copy): ndim exceeds MaxRank (raise -DTNY_MAX_RANK)");
+    _TNY_CHECK(ndim <= static_cast<int>(MaxRank), "as_anyrank(copy_meta): ndim exceeds MaxRank (raise -DTNY_MAX_RANK)");
     const int n = ndim < static_cast<int>(MaxRank) ? ndim : static_cast<int>(MaxRank);
     for (int i = 0; i < n; ++i) { t.shape(i) = shape[i]; t.stride(i) = stride[i]; }
     return t;
