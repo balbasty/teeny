@@ -31,6 +31,11 @@ using cs::layout_stride;
  *         `layout_left`). Use wherever a `Layout` is expected. */
 using corder = cs::layout_right;
 using forder = cs::layout_left;
+/** @brief `dynamic_strides` — the all-runtime strided layout (`cs::layout_stride`,
+ *         a full runtime stride array). The all-/mixed-static sibling is teeny's
+ *         `strides<S...>` (folds known strides to immediates). Same name shape as
+ *         `strides<...>` so the two read as a pair. */
+using dynamic_strides = cs::layout_stride;
 using cs::mdspan;
 using cs::submdspan;
 

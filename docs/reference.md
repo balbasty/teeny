@@ -17,7 +17,7 @@ a *runtime index* is a plain integer. "→ view" means a non-owning
 ## The tensor type
 
 ```cpp
-template <class T, class Extents, class Layout = layout_right, own O = own::view>
+template <class T, class Extents, class Layout = corder, own O = own::view>
 struct tensor;
 ```
 
@@ -25,7 +25,7 @@ struct tensor;
 |---|---|---|
 | `T` | element type | any arithmetic type, `half`, `bfloat16` |
 | `Extents` | the **shape** | `shape<2,3>` (a `cs::extents<int64_t,…>`; `-1` = dynamic) |
-| `Layout` | memory order | `layout_right`/`corder` (default), `layout_left`/`forder`, `layout_stride`, `strides<S...>` |
+| `Layout` | memory order | `corder` (C, default), `forder` (F), `dynamic_strides` (runtime), `strides<S...>` (static/mixed) |
 | `O` | ownership | `own::view` (default), `own::stack`, `own::heap`, `own::gpu`/`pinned`/`mapped`, `own::gpu_view` |
 
 Slicing / permuting / peeling / `.at()` of a `gpu` tensor yields an `own::gpu_view`
@@ -39,7 +39,7 @@ so their views are plain `view`.
 
 | Alias | Ownership | Notes |
 |---|---|---|
-| `view_t<T,E,L=layout_right>` | none (host view) | trivially copyable, kernel-passable; the bare `tensor` is this |
+| `view_t<T,E,L=corder>` | none (host view) | trivially copyable, kernel-passable; the bare `tensor` is this |
 | `local<T,E,L>` | stack | requires a fully static shape; `sizeof` == its data |
 | `owned<T,E,L>` | heap (host) | move-only |
 | `gpu<T,E,L>` / `pinned<T,E,L>` / `mapped<T,E,L>` | CUDA | from `<teeny/cuda.h>`; a view of a `gpu` is `own::gpu_view` |
@@ -52,12 +52,13 @@ Wrap existing memory (→ view):
 
 | Call | Returns | Notes |
 |---|---|---|
-| `wrap(ptr, shape)` | `view_t<T,E>` | C-order (`layout_right`) |
+| `wrap(ptr, shape)` | `view_t<T,E>` | C-order (`corder`) |
 | `wrap<Layout>(ptr, shape)` | `view_t<T,E,Layout>` | chosen layout |
-| `wrap(ptr, shape, {s0,s1,…})` | `view_t<T,E,layout_stride>` | **runtime** strides (elements; may be negative) |
-| `wrap_strided<S...>(ptr, shape)` | `view_t<T,E,strides<S...>>` | **compile-time** strides (fold into the type) |
+| `wrap(ptr, shape, {s0,s1,…})` | `view_t<T,E,dynamic_strides>` | **runtime** strides (elements; may be negative) |
+| `wrap<S...>(ptr, shape, {dyn…})` | `view_t<T,E,strides<S...>>` | **mixed** static/runtime strides (`dynamic_stride` slots) |
+| `wrap(ptr, shape, strides<S...>{})` | `view_t<T,E,strides<S...>>` | **compile-time** strides (fold into the type) |
 | `as_tensor(md)` | `view_t<…>` | wrap any `cs::mdspan`/`submdspan` result |
-| `make_view(ptr, shape)` | `view_t<T,E>` | deduces `E` |
+| `make_view(ptr, shape)` | `view_t<T,E>` | an alias of `wrap` that deduces `E` (`make_view<Layout>` for the layout) |
 
 Allocate new storage — element type **`T` defaults to `float`**; static shape →
 stack (host+device), dynamic shape → heap (host only):
@@ -79,14 +80,14 @@ stack (host+device), dynamic shape → heap (host only):
 | Call | Returns | Notes |
 |---|---|---|
 | `t.rank()` | `size_t` (constexpr) | number of axes |
-| `t.numel()` | `Idx` | product of extents |
+| `t.numel()` | `integral_constant` if fully static, else `Idx` | product of extents; folds when static |
 | `t.extent(d)` | `Idx` | runtime axis size |
 | `t.extent(Int<k>())` | `integral_constant` if static, else `Idx` | folds when static |
 | `t.shape()` / `t.shape(d)` | `Extents` / `Idx` | python-y aliases of `extents()` / `extent(d)` |
 | `t.stride(d)` | `Idx` | runtime axis stride |
 | `t.stride(Int<k>())` | `integral_constant` if derivable, else `Idx` | folds for static-stride / contiguous layouts |
 | `t.is_contiguous()` | `bool` | dense in **some** order (C, F, or permuted) |
-| `t.is_contiguous<L>()` | `bool` | exact: strides equal `L`'s packing (`layout_right`=C, `layout_left`=F) |
+| `t.is_contiguous<L>()` | `bool` | exact: strides equal `L`'s packing (`corder`=C, `forder`=F) |
 | `t.data()` | `T*` | base pointer |
 | `t.view()` | `cs::mdspan<T,E,L>` | the raw mdspan |
 | `t.extents()` / `t.mapping()` | `const Extents&` / `const mapping&` | |
@@ -143,7 +144,7 @@ and every op folds output strides, so they work on any source layout (incl.
 | `t.recast<NewExtents>()` | → view | reinterpret with a more-static same-rank extents |
 | `t.clone()` | owning (stack/heap) | materialise a dense row-major copy |
 
-`reshape`/`flatten`/`recast` need exact C-contiguity (`is_contiguous<layout_right>()`);
+`reshape`/`flatten`/`recast` need exact C-contiguity (`is_contiguous<corder>()`);
 `clone()` first if the source isn't.
 
 ### nd-peel (iteration)
@@ -235,7 +236,7 @@ Axis reductions: a fully static result → stack (host+device); any dynamic resu
 |---|---|---|
 | `as_anyrank(data, shape, stride, ndim)` | `anyrank` (view store) | **wraps** the arrays, no copy (default; host only) |
 | `as_anyrank(data, shape, stride, ndim, copy_meta)` | `anyrank` (inline store) | **copies** into a `TNY_MAX_RANK` store (device-passable); `as_anyrank<N>(…,copy_meta)` sets capacity |
-| `at.fixed<R>()` | rank-`R` `layout_stride` view | requires `ndim == R` |
+| `at.fixed<R>()` | rank-`R` `dynamic_strides` view | requires `ndim == R` |
 | `dispatch_rank(at, f)` | `bool` | call `f` with a fixed-rank view chosen by runtime `ndim` (one instantiation per total rank) |
 | `at.peel_front<N>()` / `at.peel_front_at<N>(i)` | range / view | batch idiom: keep the last `\|N\|` dims static, peel the rest (one kernel per `\|N\|`) |
 | `dispatch_value<Vs...>(v, f)` | `bool` | call `f(Int<k>{})` for the matching candidate `k == v` |

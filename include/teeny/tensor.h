@@ -174,10 +174,25 @@ struct tensor : private Layout::template mapping<Shape> {
     template <class Idx, cs::enable_if_t<!_is_ic<Idx>::value, int> = 0>
     _TNY_API constexpr index_type stride(Idx d) const noexcept
     { return mapping_type::stride(static_cast<cs::size_t>(d)); }
-    _TNY_API constexpr index_type numel() const noexcept {
+private:
+    static constexpr index_type _static_numel() noexcept {
         index_type n = 1;
-        for (cs::size_t r = 0; r < rank(); ++r) n *= extent(r);
+        for (cs::size_t r = 0; r < rank(); ++r) n *= static_cast<index_type>(Shape::static_extent(r));
         return n;
+    }
+public:
+    /** @brief Number of elements. A **fully static** shape folds to an
+     *         `integral_constant` (so it propagates into later compile-time
+     *         arithmetic, like `extent(Int<k>())`); any dynamic dim -> a runtime
+     *         `index_type`. */
+    _TNY_API constexpr auto numel() const noexcept {
+        if constexpr (is_static)
+            return cs::integral_constant<index_type, _static_numel()>{};
+        else {
+            index_type n = 1;
+            for (cs::size_t r = 0; r < rank(); ++r) n *= extent(r);
+            return n;
+        }
     }
     /** @brief Whether the elements occupy a **dense block of memory**, in *some*
      *         axis order — true for a C- or F-contiguous tensor, and also for a
