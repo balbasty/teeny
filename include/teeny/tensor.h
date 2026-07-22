@@ -208,21 +208,25 @@ public:
      *         from the extents. */
     _TNY_API constexpr bool is_contiguous() const noexcept {
         constexpr cs::size_t R = rank();
-        bool used[R ? R : 1] = {};
-        index_type prod = 1;                       // expected stride of the next-smallest axis
-        for (cs::size_t step = 0; step < R; ++step) {
-            int best = -1; index_type bs = 0;      // pick the unused extent>1 axis of least stride
-            for (cs::size_t r = 0; r < R; ++r) {
-                if (used[r] || extent(r) <= 1) continue;
-                const index_type s = static_cast<index_type>(stride(r));
-                if (best < 0 || s < bs) { best = static_cast<int>(r); bs = s; }
+        if constexpr (R == 0) {
+            return true;                           // a rank-0 tensor is one element -> trivially dense
+        } else {
+            bool used[R] = {};
+            index_type prod = 1;                   // expected stride of the next-smallest axis
+            for (cs::size_t step = 0; step < R; ++step) {
+                int best = -1; index_type bs = 0;  // pick the unused extent>1 axis of least stride
+                for (cs::size_t r = 0; r < R; ++r) {
+                    if (used[r] || extent(r) <= 1) continue;
+                    const index_type s = static_cast<index_type>(stride(r));
+                    if (best < 0 || s < bs) { best = static_cast<int>(r); bs = s; }
+                }
+                if (best < 0) break;               // no more constraining axes
+                if (bs != prod) return false;      // gap (or a negative/duplicate stride)
+                used[best] = true;
+                prod *= static_cast<index_type>(extent(best));
             }
-            if (best < 0) break;                   // no more constraining axes
-            if (bs != prod) return false;          // gap (or a negative/duplicate stride)
-            used[best] = true;
-            prod *= static_cast<index_type>(extent(best));
+            return true;
         }
-        return true;
     }
     /** @brief Exact contiguity in layout `L` (e.g. `corder`/`forder`): the actual
      *         strides equal what `L` produces for these extents. Two spellings —
@@ -230,10 +234,14 @@ public:
      *         (value form, layout deduced from the argument). */
     template <class L>
     _TNY_API bool is_contiguous() const noexcept {
-        typename L::template mapping<extents_type> m(extents());
-        for (cs::size_t r = 0; r < rank(); ++r)
-            if (static_cast<index_type>(stride(r)) != static_cast<index_type>(m.stride(r))) return false;
-        return true;
+        if constexpr (rank() == 0) {
+            return true;                           // rank-0: no strides -> matches any layout
+        } else {
+            typename L::template mapping<extents_type> m(extents());
+            for (cs::size_t r = 0; r < rank(); ++r)
+                if (static_cast<index_type>(stride(r)) != static_cast<index_type>(m.stride(r))) return false;
+            return true;
+        }
     }
     template <class L>
     _TNY_API bool is_contiguous(L) const noexcept { return is_contiguous<L>(); }

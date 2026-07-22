@@ -167,5 +167,13 @@ int main()
     auto tv = to<own::gpu>(make_gpu<float>(shape<2,3>{}));
     static_assert(decltype(tv)::ownership == own::gpu, "rvalue source -> owning copy, not a view");
 
+    // rank-0 device view download: read one element back from the GPU. Must
+    // COMPILE (dense_host's span loop guards rank-0 now, #55) and round-trip.
+    auto gr0 = gu.at(1,1);                               // rank-0 gpu_view (gu(1,1) == 4)
+    static_assert(decltype(gr0)::ownership == own::gpu_view, "at() of gpu -> rank-0 gpu_view");
+    auto dr0 = to<own::heap>(gr0);
+    static_assert(decltype(dr0)::rank() == 0, "rank-0 download stays rank-0");
+    if (dr0.item() != 4.f) return 18;
+
     return 0;
 }
