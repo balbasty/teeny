@@ -35,7 +35,7 @@ for (auto row : peel<0>(m)) work(row);  // iterate a subset of axes
 
 ```cpp
 tensor<double, shape<2,3>>  // == a view
-view_t<double, shape<2,3>>  // the explicit alias
+view<double, shape<2,3>>  // the explicit alias
 ```
 
 Factories:
