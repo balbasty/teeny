@@ -97,5 +97,75 @@ int main()
     if (dmp->dl_tensor.device.device_type != kDLCUDAHost) return 15;   // NOT kDLCUDAManaged
     dmp->deleter(dmp);
 
+    // ---- memory-backend to<Space, ET, Force>(x) ------------------------------
+    // (fake gpu memory is malloc-backed, so a download round-trips the values.)
+    auto host = local<float, shape<2,3>>{}; host.iota_(0.f, 1.f);   // 0..5
+
+    // host -> gpu (upload), then gpu -> heap (download): values survive.
+    auto gu = to<own::gpu>(host);
+    static_assert(decltype(gu)::ownership == own::gpu, "to<gpu> -> gpu");
+    static_assert(cs::is_same<decltype(gu)::element_type, float>::value, "dtype kept");
+    auto back = to<own::heap>(gu);
+    static_assert(decltype(back)::ownership == own::heap, "to<heap> -> heap");
+    if (back(1,2) != 5.f) return 5;
+
+    // convert dtype AND upload in one call.
+    auto gd = to<own::gpu, double>(host);
+    static_assert(cs::is_same<decltype(gd)::element_type, double>::value, "to<gpu,double> converts");
+    auto backd = to<own::heap>(gd);
+    if (backd(0,1) != 1.0) return 6;
+
+    // no-copy: source already gpu<float>, no Force -> a DEVICE view (gpu_view) borrow.
+    auto vv = to<own::gpu>(gu);
+    static_assert(decltype(vv)::ownership == own::gpu_view, "already there -> gpu_view, no copy");
+    if (vv.data() != gu.data()) return 7;
+
+    // Force a fresh gpu copy even though it already is gpu<float>.
+    auto fg = to<own::gpu, void, true>(gu);
+    static_assert(decltype(fg)::ownership == own::gpu, "forced -> owning gpu");
+    if (fg.data() == gu.data()) return 8;                // distinct storage
+
+    // download into a stack tensor (static shape).
+    auto sstk = to<own::stack>(gu);
+    static_assert(decltype(sstk)::ownership == own::stack, "to<stack> -> stack");
+    if (sstk(1,1) != 4.f) return 9;
+
+    // #15+#29 integration: downloading a device VIEW (a strided gpu_view slice)
+    // now takes the download path (own_is_device) instead of host-dereferencing.
+    auto gslice = gu(all, slice(0,2));                   // gpu_view, 2x2 window of gu (2x3)
+    static_assert(decltype(gslice)::ownership == own::gpu_view, "gpu slice is a device view");
+    auto dslice = to<own::heap>(gslice);
+    static_assert(decltype(dslice)::ownership == own::heap, "download -> heap");
+    if (dslice(0,0) != 0.f || dslice(1,1) != 4.f) return 10;   // strided device view downloaded correctly
+
+    // a FLIPPED (negative-stride) device view: x.data() points at the axis's LAST
+    // element, so the download must walk back to the region start (not read past
+    // the end). gu is 2x3 = [[0,1,2],[3,4,5]]; flip<0> -> rows reversed.
+    auto gflip = gu.flip<0>();                           // gpu_view, row 0 <-> row 1
+    static_assert(decltype(gflip)::ownership == own::gpu_view, "flipped gpu view");
+    auto dflip = to<own::heap>(gflip);
+    if (dflip(0,0) != 3.f || dflip(0,2) != 5.f || dflip(1,0) != 0.f || dflip(1,2) != 2.f) return 16;
+
+    // const-element source composes: x.to<>() borrows as tensor<const T>, and
+    // to<Space>(that) must strip the const (else it fails to compile / write const).
+    auto cb = host.to<>();                         // tensor<const float, ...> borrow
+    static_assert(cs::is_same<decltype(cb)::element_type, const float>::value, "borrow is const");
+    auto gcb = to<own::gpu>(cb);
+    static_assert(cs::is_same<decltype(gcb)::element_type, float>::value, "to<gpu> strips const");
+    if (to<own::heap>(gcb)(1,2) != 5.f) return 17;
+
+    // an F-order (column-major) gpu source must NOT be silently transposed on
+    // download: stage into a layout-matching host buffer, then densify.
+    auto gf = gpu<float, shape<2,3>, forder>(shape<2,3>{});
+    wrap<forder>(gf.data(), shape<2,3>{}).iota_(0.f, 1.f);   // logical (i,j) = i*3+j, stored F-order
+    auto bf = to<own::heap>(gf);
+    static_assert(decltype(bf)::ownership == own::heap, "download -> heap");
+    if (bf(0,2) != 2.f || bf(1,0) != 3.f || bf(1,2) != 5.f) return 11;   // values, not transposed
+
+    // rvalue source (a temporary) must be COPIED, never borrowed (no dangling /
+    // no freed-device-memory view).
+    auto tv = to<own::gpu>(make_gpu<float>(shape<2,3>{}));
+    static_assert(decltype(tv)::ownership == own::gpu, "rvalue source -> owning copy, not a view");
+
     return 0;
 }

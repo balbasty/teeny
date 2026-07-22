@@ -160,8 +160,11 @@ t.squeeze<3>();       // drop a size-1 axis -> rank-1 view
 t.reshape<6,4>(); t.flatten();  // contiguous-view reshape / ravel (clone() first if not)
 t.is_contiguous();              // dense in SOME order (C/F/permuted); <layout_right>() = exact C
 t.clone();                      // materialise a dense row-major copy
-t.to<double>();                 // pytorch-like: dense owning copy converted to T2 (to<>() == clone);
-                                //   static shape -> stack, dynamic -> heap. Memory-space moves: cuda.h.
+t.to<double>();                 // pytorch-like dtype convert -> dense owning copy (static->stack, dyn->heap).
+                                //   NO-COPY when it already matches: t.to<>() (same dtype) borrows a read-only
+                                //   view; t.to<T,true>() forces a copy (clone() is the unconditional spelling).
+to<own::gpu>(t);                // MEMORY-SPACE move (cuda.h free fn): to<Space,ET,Force>(x). Same no-copy/force
+                                //   rule — to<own::gpu>(gpu_x) borrows; to<own::gpu,void,true>(x) force-clones.
 t(all, slice(none,none,-1));    // reverse a range (negative step; a[::-1])
 // AXIS template args are signed: negatives count from the back (numpy). e.g.
 //   t.extent(Int<-1>()), t.unsqueeze<-1>() (append), t.permute<-1,0,1>(),
