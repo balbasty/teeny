@@ -90,8 +90,9 @@ int main() {
     if (r(2) != 10.0) return 20;
 
     double cb[6]; for (int i=0;i<6;++i) cb[i]=i;
-    auto vp = wrap(cb, shape<2,3>{}).permute<1,0>();                  // non-contiguous
-    if (vp.is_contiguous()) return 21;
+    auto vp = wrap(cb, shape<2,3>{}).permute<1,0>();                  // dense, but NOT row-major
+    if (!vp.is_contiguous()) return 21;                              // dense in SOME order (permuted) -> true
+    if (vp.is_contiguous<cs::layout_right>()) return 24;             // ...but not exact C-contiguous
     auto cl = vp.clone();                                            // dense copy
     static_assert(cs::is_same<decltype(cl)::layout_type, cs::layout_right>::value, "clone row-major");
     if (!cl.is_contiguous() || cl(2,1) != vp(2,1)) return 22;
