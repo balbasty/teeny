@@ -99,13 +99,18 @@ _TNY_HOST auto make_mapped(Shape e) { return tensor<T, Shape, Layout, own::mappe
  * ------------------------------------------------------------------ */
 namespace _detail {
 // A dense, row-major HOST copy of `x` with element type `E2`. A host-accessible
-// source (view/stack/heap/pinned/mapped) is read + converted directly. A DEVICE
-// source (`gpu` owning OR `gpu_view` — e.g. a slice/permute of a gpu tensor) is
-// downloaded raw into a host buffer spanning the SAME device span, re-imposing
-// `x`'s mapping (so any layout — C, F, or a strided view — is preserved, not
-// transposed), then densified on the host. `Force=true` on the inner `.to`
-// guarantees an OWNING dense buffer, never a borrow of the local (which would
-// dangle at return).
+// source (view/stack/heap/pinned/mapped) is read + converted directly, gathering
+// only the viewed extent. A DEVICE source (`gpu` owning OR `gpu_view` — a
+// slice/permute of a gpu tensor) is downloaded via one `cudaMemcpy` of its device
+// SPAN (base..last element), re-imposing `x`'s mapping (so any layout — C, F, or
+// strided — is preserved, not transposed), then densified on the host. `Force=true`
+// on the inner `.to` guarantees an OWNING dense buffer, never a borrow of the local.
+//
+// NOTE the span == numel for a CONTIGUOUS device view (so it copies exactly the
+// viewed extent — optimal), but span > numel for a STRIDED device view (e.g. a
+// column of a big matrix): the download then over-copies the underlying volume.
+// Correct, but wasteful for pathologically strided device views; a run-wise /
+// contiguous-then-copy gather is the follow-up (#50).
 template <class E2, class T, class Shape, class Layout, own O>
 _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
     using Ts = cs::remove_cv_t<T>;
@@ -140,10 +145,13 @@ _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
  *
  * Any **device** source — an owning `gpu` OR a `gpu_view` (a slice/permute/peel
  * of a gpu tensor) — is downloaded via `cudaMemcpy` (any layout, C/F/strided, is
- * preserved and densified on the host); a host-accessible source is read directly.
- * `Space == stack` needs a static shape. Since #15, a device view is correctly
- * *typed* (`gpu_view`), so it takes the download path instead of being
- * host-dereferenced — the hazard the earlier version warned about is closed.
+ * preserved and densified on the host); a host-accessible source is read directly,
+ * gathering only the viewed extent. `Space == stack` needs a static shape. Since
+ * #15, a device view is correctly *typed* (`gpu_view`), so it takes the download
+ * path instead of being host-dereferenced — the hazard the earlier version warned
+ * about is closed. NB a **contiguous** device view downloads exactly its `numel`
+ * elements; a **strided** device view currently downloads its full span (over-copies
+ * — a run-wise gather is a tracked follow-up, #50).
  *
  * @note The no-copy branch returns a **borrow** of `x` (a `gpu_view` when `x` is a
  * gpu tensor, else a host `view`), so it must outlive the result — same lifetime
