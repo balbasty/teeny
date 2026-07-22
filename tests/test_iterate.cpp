@@ -9,7 +9,7 @@ int main()
 {
     double buf[24];
     for (long i = 0; i < 24; ++i) buf[i] = i;
-    auto t = view(buf, extents<long,2,3,4>{});         // C-contiguous (strides 12,4,1)
+    auto t = wrap(buf, extents<long,2,3,4>{});         // C-contiguous (strides 12,4,1)
 
     // ---- peel axis 0: 2 sub-views of shape (3,4) -----------------------
     auto r0 = peel<0>(t);

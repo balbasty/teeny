@@ -50,7 +50,7 @@ int main() {
     // ---- peel_front<N>: peel the first N (batch) axes ---------------
     double buf[2*3*4];
     for (int i=0;i<2*3*4;++i) buf[i]=i;
-    auto t = view(buf, extents<long,2,3,4>{});
+    auto t = wrap(buf, extents<long,2,3,4>{});
     long count = 0, checksum = 0;
     for (auto line : peel_front<2>(t)) {                  // peel axes 0,1 -> (4,) lines
         ++count;
@@ -90,7 +90,7 @@ int main() {
     if (r(2) != 10.0) return 20;
 
     double cb[6]; for (int i=0;i<6;++i) cb[i]=i;
-    auto vp = view(cb, shape<2,3>{}).permute<1,0>();                  // non-contiguous
+    auto vp = wrap(cb, shape<2,3>{}).permute<1,0>();                  // non-contiguous
     if (vp.is_contiguous()) return 21;
     auto cl = vp.clone();                                            // dense copy
     static_assert(cs::is_same<decltype(cl)::layout_type, cs::layout_right>::value, "clone row-major");
@@ -98,7 +98,7 @@ int main() {
 
     // ---- recast: recover static inner dims at the dynamic boundary -----
     double rb[18]; for (int i=0;i<18;++i) rb[i]=i;
-    auto dyn = view(rb, shape<-1,-1,-1>{2,3,3});                     // fully dynamic (dlpack-like)
+    auto dyn = wrap(rb, shape<-1,-1,-1>{2,3,3});                     // fully dynamic (dlpack-like)
     auto stc = dyn.recast<shape<-1,3,3>>();                          // recover static 3x3
     static_assert(decltype(stc)::extents_type::static_extent(1) == 3, "recast recovers static inner");
     if (stc.extent(0) != 2 || stc(1,2,2) != 17) return 23;

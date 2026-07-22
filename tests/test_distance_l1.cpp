@@ -62,7 +62,7 @@ int main()
     before::run<3>(a, 1.5, size, stride);
     {
         using E = extents<offset_t, cs::dynamic_extent, cs::dynamic_extent, cs::dynamic_extent>;
-        auto t = view<cs::layout_left>(b, E{4,5,6});     // strides (1,4,20)
+        auto t = wrap<cs::layout_left>(b, E{4,5,6});     // strides (1,4,20)
         run_md(t, 1.5);
     }
     for (offset_t i = 0; i < total; ++i) if (a[i] != b[i]) return 1;
@@ -71,7 +71,7 @@ int main()
     fill(a,total); fill(b,total);
     before::run<3>(a, 1.5, size, stride);
     {
-        auto t = view<cs::layout_left>(b, extents<offset_t,4,5,6>{});
+        auto t = wrap<cs::layout_left>(b, extents<offset_t,4,5,6>{});
         run_md(t, 1.5);
     }
     for (offset_t i = 0; i < total; ++i) if (a[i] != b[i]) return 2;

@@ -24,7 +24,7 @@ int main()
     for (long i = 0; i < 24; ++i) buf[i] = i;
 
     // ---- view over a contiguous buffer --------------------------------
-    auto v = view(buf, extents<long,2,3,4>{});
+    auto v = wrap(buf, extents<long,2,3,4>{});
     if (v(1,2,3) != 1*12 + 2*4 + 3) return 1;
     if (v.numel() != 24 || v.extent(1) != 3) return 2;
     v(0,0,0) = 99; if (buf[0] != 99) return 3;
@@ -32,7 +32,7 @@ int main()
     // ---- per-dim compile-time NON-contiguous strides (posdef case) ----
     // batch of 3x3 with a padded batch stride 16 (not the contiguous 9).
     double pad[64]; for (int i=0;i<64;++i) pad[i]=i;
-    auto s = view_strided<16,3,1>(pad, extents<long,dynamic_extent,3,3>{4});
+    auto s = wrap_strided<16,3,1>(pad, extents<long,dynamic_extent,3,3>{4});
     if (s(2,1,0) != 2*16 + 1*3 + 0) return 4;
     static_assert(decltype(s)::rank() == 3, "strided rank");
 
@@ -55,7 +55,7 @@ int main()
     if (md.extent(2) != 4) return 8;
 
     // ---- peel axis 0 (e.g. a channel axis) at an index ----------------
-    auto full = view(buf, extents<long,2,3,4>{});         // treat dim0 as "channel"
+    auto full = wrap(buf, extents<long,2,3,4>{});         // treat dim0 as "channel"
     auto sp = peel_at<0>(full.view(), 1);                 // spatial (3,4) view of channel 1
     static_assert(decltype(sp)::rank() == 2, "peel_at<0> drops axis 0");
     if (sp(0,0) != full(1,0,0)) return 9;

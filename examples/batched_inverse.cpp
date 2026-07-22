@@ -80,8 +80,8 @@ static void invert_batch_cuda(const In & in, Out & out) {
 static void invert_batch(double * data, double * out, long n, int C) {
     dispatch_value<2,3,4>(C, [&](auto CC) {
         constexpr long c = CC.value;
-        auto in  = view(data, shape<dynamic_extent, c, c>{n});   // static inner, dynamic outer
-        auto ov  = view(out,  shape<dynamic_extent, c, c>{n});
+        auto in  = wrap(data, shape<dynamic_extent, c, c>{n});   // static inner, dynamic outer
+        auto ov  = wrap(out,  shape<dynamic_extent, c, c>{n});
         invert_batch_cpu(in, ov);                                // (or invert_batch_cuda on device)
     });
 }

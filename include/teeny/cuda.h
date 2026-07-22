@@ -1,6 +1,6 @@
 #ifndef TNY_MD_CUDA
 #define TNY_MD_CUDA
-// CUDA memory-space storage for tensor (device / page-locked / pinned owning
+// CUDA memory-space storage for tensor (gpu / pinned / mapped owning
 // modes). Safe to include ALWAYS — the body activates ONLY when the CUDA runtime
 // is reachable: compiling with nvcc, or <cuda_runtime.h> is on the include path
 // (auto-detected via __has_include). Otherwise this header is empty, so teeny.h
@@ -25,24 +25,24 @@ namespace cs = cuda::std;
  *     CUDA allocator policies                                        *
  * ------------------------------------------------------------------ */
 
-/** @brief Device memory (`cudaMalloc`). Not host-dereferenceable. */
-struct cuda_device_alloc {
+/** @brief Device (GPU) memory (`cudaMalloc`). Not host-dereferenceable. */
+struct cuda_gpu_alloc {
     template <class T> _TNY_HOST static T * allocate(cs::size_t n) {
         void * p = nullptr; cudaMalloc(&p, n * sizeof(T)); _TNY_CHECK(p, "cudaMalloc failed"); return static_cast<T *>(p);
     }
     template <class T> _TNY_HOST static void deallocate(T * p) { cudaFree(p); }
 };
 
-/** @brief Page-locked host memory (`cudaMallocHost`). */
-struct cuda_host_alloc {
+/** @brief Page-locked ("pinned") host memory (`cudaMallocHost`). */
+struct cuda_pinned_alloc {
     template <class T> _TNY_HOST static T * allocate(cs::size_t n) {
         void * p = nullptr; cudaMallocHost(&p, n * sizeof(T)); _TNY_CHECK(p, "cudaMallocHost failed"); return static_cast<T *>(p);
     }
     template <class T> _TNY_HOST static void deallocate(T * p) { cudaFreeHost(p); }
 };
 
-/** @brief Pinned + mapped host memory (`cudaHostAlloc`). */
-struct cuda_pinned_alloc {
+/** @brief Page-locked + device-mapped (zero-copy) host memory (`cudaHostAlloc`). */
+struct cuda_mapped_alloc {
     template <class T> _TNY_HOST static T * allocate(cs::size_t n) {
         void * p = nullptr; cudaHostAlloc(&p, n * sizeof(T), cudaHostAllocMapped); _TNY_CHECK(p, "cudaHostAlloc failed"); return static_cast<T *>(p);
     }
@@ -54,40 +54,41 @@ struct cuda_pinned_alloc {
  * ------------------------------------------------------------------ */
 
 template <class T, cs::size_t N>
-struct storage<T, own::device, N> : owning_storage<T, cuda_device_alloc> {
-    using owning_storage<T, cuda_device_alloc>::owning_storage;
-};
-template <class T, cs::size_t N>
-struct storage<T, own::host, N> : owning_storage<T, cuda_host_alloc> {
-    using owning_storage<T, cuda_host_alloc>::owning_storage;
+struct storage<T, own::gpu, N> : owning_storage<T, cuda_gpu_alloc> {
+    using owning_storage<T, cuda_gpu_alloc>::owning_storage;
 };
 template <class T, cs::size_t N>
 struct storage<T, own::pinned, N> : owning_storage<T, cuda_pinned_alloc> {
     using owning_storage<T, cuda_pinned_alloc>::owning_storage;
+};
+template <class T, cs::size_t N>
+struct storage<T, own::mapped, N> : owning_storage<T, cuda_mapped_alloc> {
+    using owning_storage<T, cuda_mapped_alloc>::owning_storage;
 };
 
 /* ------------------------------------------------------------------ *
  *     Factories                                                      *
  * ------------------------------------------------------------------ */
 
-/** @brief Owning tensor in CUDA device memory (move-only). `device<T,E>(extents)`. */
+/** @brief Owning tensor in device (GPU) memory (move-only). `gpu<T,E>(extents)`. */
 template <class T, class Extents, class Layout = cs::layout_right>
-using device = tensor<T, Extents, Layout, own::device>;
-/** @brief Owning tensor in page-locked host memory (move-only). `host<T,E>(extents)`. */
-template <class T, class Extents, class Layout = cs::layout_right>
-using host = tensor<T, Extents, Layout, own::host>;
-/** @brief Owning tensor in pinned/mapped host memory (move-only). `pinned<T,E>(extents)`. */
+using gpu = tensor<T, Extents, Layout, own::gpu>;
+/** @brief Owning tensor in page-locked ("pinned") host memory (move-only).
+ *         `pinned<T,E>(extents)` — pytorch's `pin_memory`. */
 template <class T, class Extents, class Layout = cs::layout_right>
 using pinned = tensor<T, Extents, Layout, own::pinned>;
+/** @brief Owning tensor in mapped (zero-copy) host memory (move-only). `mapped<T,E>(extents)`. */
+template <class T, class Extents, class Layout = cs::layout_right>
+using mapped = tensor<T, Extents, Layout, own::mapped>;
 
 /* --- functional factories (deduce the Extents type from the argument;
  *     `T` defaults to `float`, like the host factories) --- */
 template <class T = float, class Layout = cs::layout_right, class Extents>
-_TNY_HOST auto make_device(Extents e) { return tensor<T, Extents, Layout, own::device>(e); }
-template <class T = float, class Layout = cs::layout_right, class Extents>
-_TNY_HOST auto make_host(Extents e)   { return tensor<T, Extents, Layout, own::host>(e); }
+_TNY_HOST auto make_gpu(Extents e)    { return tensor<T, Extents, Layout, own::gpu>(e); }
 template <class T = float, class Layout = cs::layout_right, class Extents>
 _TNY_HOST auto make_pinned(Extents e) { return tensor<T, Extents, Layout, own::pinned>(e); }
+template <class T = float, class Layout = cs::layout_right, class Extents>
+_TNY_HOST auto make_mapped(Extents e) { return tensor<T, Extents, Layout, own::mapped>(e); }
 
 _TNY_NAMESPACE_END(tny)
 

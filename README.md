@@ -36,12 +36,12 @@ using namespace tny;
 
 // one tensor type, ownership as a parameter (view / stack / heap / device / ...).
 // `shape<...>` is the python-friendly extents type (int64 index, matches DLPack):
-auto v = view(ptr, shape<2,3,4>{});                           // non-owning, kernel-passable
+auto v = wrap(ptr, shape<2,3,4>{});                           // non-owning, kernel-passable
 auto m = local<double, shape<3,3>>();                         // stack-owned (static shape)
 auto h = owned<double, shape<-1,3>>(shape<-1,3>{n});   // heap-owned (host); -1 == dynamic
 
 // static / dynamic sizes mix per dimension, plus a per-dim static-stride layout:
-auto s = view_strided<16,3,1>(ptr, shape<dynamic_extent,3,3>{n});
+auto s = wrap_strided<16,3,1>(ptr, shape<dynamic_extent,3,3>{n});
 
 // geometry: t.shape() / t.shape(d) (or t.extents() / t.extent(d)); t.rank(); t.numel();
 
@@ -81,7 +81,7 @@ auto hh = local<half, shape<64,64>>();
 | `math.h` | in-place / out-of-place ops (broadcasting) + unary math + reductions |
 | `iterate.h` | nd-peel: `peel` / `peel_at` / `peel_front` / `peel_front_at` |
 | `dynamic.h` | `anyrank` (rank-erased carrier) + `peel_front<Sr>` + `dispatch_rank` |
-| `cuda.h` | opt-in device / host / pinned memory (needs the CUDA runtime) |
+| `cuda.h` | opt-in gpu / pinned / mapped memory (needs the CUDA runtime) |
 
 ## Building & testing
 

@@ -21,9 +21,9 @@ A dynamic dimension is `-1` (numpy-style) or `dynamic_extent`. Construct a tenso
 by supplying only the dynamic sizes:
 
 ```cpp
-auto a = view(ptr, shape<2,3,4>{});      // all static — nothing to supply
-auto b = view(ptr, shape<-1,3>{n});      // supply the one dynamic size, n
-auto c = view(ptr, shape<-1,-1>{r, k});  // supply both
+auto a = wrap(ptr, shape<2,3,4>{});      // all static — nothing to supply
+auto b = wrap(ptr, shape<-1,3>{n});      // supply the one dynamic size, n
+auto c = wrap(ptr, shape<-1,-1>{r, k});  // supply both
 ```
 
 Query sizes with `extent` / `shape` (a python-friendly alias):

@@ -14,21 +14,21 @@ namespace cs = cuda::std;
  * `view` / `stack` need no allocator. The owning modes differ only in where the
  * memory lives and how it is (de)allocated:
  *   - `heap`   : ordinary C++ `new[]` / `delete[]` (host memory).
- *   - `device` : `cudaMalloc`     (device memory; not host-dereferenceable).
- *   - `host`   : `cudaMallocHost` (page-locked host memory).
- *   - `pinned` : `cudaHostAlloc`  (pinned/mapped host memory).
- * The `device`/`host`/`pinned` storage is defined in the opt-in `teeny/cuda.h`
+ *   - `gpu`    : `cudaMalloc`     (device memory; not host-dereferenceable).
+ *   - `pinned` : `cudaMallocHost` (page-locked host memory — pytorch's "pinned").
+ *   - `mapped` : `cudaHostAlloc`  (page-locked + device-mapped / zero-copy).
+ * The `gpu`/`pinned`/`mapped` storage is defined in the opt-in `teeny/cuda.h`
  * (which needs the CUDA runtime); using them without it is a compile error.
  */
-enum class own { view, stack, heap, device, host, pinned };
+enum class own { view, stack, heap, gpu, pinned, mapped };
 
 /** @brief Whether the mode owns (and therefore allocates) its storage. */
 _TNY_API constexpr bool own_is_owning(own o) noexcept {
-    return o == own::heap || o == own::device || o == own::host || o == own::pinned;
+    return o == own::heap || o == own::gpu || o == own::pinned || o == own::mapped;
 }
 /** @brief Whether the storage is dereferenceable from the host. */
 _TNY_API constexpr bool own_is_host_accessible(own o) noexcept {
-    return o != own::device;
+    return o != own::gpu;
 }
 
 /* ------------------------------------------------------------------ *

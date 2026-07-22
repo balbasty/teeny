@@ -44,7 +44,7 @@ At the ndarray boundary a view is often fully dynamic. `recast` reinterprets it
 with a **more-static** extents type of the same rank, so known inner dims fold:
 
 ```cpp
-auto dyn = view(ptr, shape<-1,-1,-1>{n,3,3});  // came in fully dynamic
+auto dyn = wrap(ptr, shape<-1,-1,-1>{n,3,3});  // came in fully dynamic
 auto st  = dyn.recast<shape<-1,3,3>>();        // the 3s are now compile-time
 ```
 

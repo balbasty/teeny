@@ -34,7 +34,7 @@ int main() {
     // A (2,3,7) volume: batch axes 0,1; the transform runs along axis 2.
     double buf[2*3*7];
     for (int i = 0; i < 2*3*7; ++i) buf[i] = (i % 5 == 0) ? 0.0 : 1e9;
-    auto t = view(buf, extents<long,2,3,7>{});
+    auto t = wrap(buf, extents<long,2,3,7>{});
 
     distance_l1<0,1>(t, 1.0);                 // peel axes 0 and 1
 
@@ -51,7 +51,7 @@ int main() {
     // Different batch rank, SAME code: a (4,7) matrix, peel just axis 0.
     double buf2[4*7], ref2[4*7];
     for (int i = 0; i < 4*7; ++i) buf2[i] = ref2[i] = (i % 3 == 0) ? 0.0 : 1e9;
-    auto m = view(buf2, extents<long,4,7>{});
+    auto m = wrap(buf2, extents<long,4,7>{});
     distance_l1<0>(m, 1.0);
     for (int r = 0; r < 4; ++r) {                        // reference: 4 rows of 7
         double * f = ref2 + r*7; double tmp = f[0];

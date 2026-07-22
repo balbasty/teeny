@@ -6,7 +6,7 @@ namespace cs = cuda::std;
 int main() {
     double buf[120];
     for (long i=0;i<120;++i) buf[i]=i;
-    auto t = view(buf, extents<long,2,3,4,5>{});      // rank 4
+    auto t = wrap(buf, extents<long,2,3,4,5>{});      // rank 4
 
     // single named axis (integer) -> drop it
     auto a = t.take_along<1>(2);                       // axis1=2 -> (2,4,5)

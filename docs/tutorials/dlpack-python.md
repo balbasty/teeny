@@ -98,8 +98,8 @@ static void invert_dlpack(double* in, double* out, const int64_t* shape,
     dispatch_value<2,3,4>(C, [&](auto CC) {  // runtime C -> compile-time c
         constexpr long c = CC.value;
         // static inner dims, dynamic batch; strides<...> if non-contiguous.
-        auto vin  = view(in,  shape<dynamic_extent, c, c>{n});
-        auto vout = view(out, shape<dynamic_extent, c, c>{n});
+        auto vin  = wrap(in,  shape<dynamic_extent, c, c>{n});
+        auto vout = wrap(out, shape<dynamic_extent, c, c>{n});
 #ifdef __CUDACC__
         if (on_device) { invert_cuda(vin, vout); return; }
 #endif
@@ -113,7 +113,7 @@ static void invert_dlpack(double* in, double* out, const int64_t* shape,
     - **DLPack strides are in elements**, NumPy's `__array_interface__` strides
       are in **bytes** — divide by the itemsize before handing them to teeny.
     - If the input is non-contiguous, build the view with a strided layout:
-      `view_strided<...>` for compile-time strides, or pass the runtime strides
+      `wrap_strided<...>` for compile-time strides, or pass the runtime strides
       to a `strides<dynamic_stride,...>` mapping. For a *fully* runtime-strided,
       runtime-rank input use `as_anyrank(data, shape, stride, ndim)` +
       [`dispatch_rank`](../dispatch.md), then `recast<shape<-1,c,c>>()` to

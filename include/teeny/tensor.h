@@ -279,7 +279,7 @@ private:
     template <cs::size_t out_ax, cs::size_t ell_pos, cs::size_t fill, class Tup>
     _TNY_API static auto _ellip_arg(const Tup & t) {
         if constexpr (out_ax < ell_pos)         return cs::get<out_ax>(t);
-        else if constexpr (out_ax < ell_pos + fill) return tny::all;
+        else if constexpr (out_ax < ell_pos + fill) return cs::full_extent;  // == `all`, but usable
         else                                    return cs::get<out_ax - fill + 1>(t);
     }
     template <class Tup, cs::size_t... I>
@@ -629,17 +629,20 @@ public:
  *     Factories                                                      *
  * ------------------------------------------------------------------ */
 
-/** @brief Non-owning view over `p` with a contiguous layout (default C-order). */
+/** @brief Wrap `p` as a non-owning view with a contiguous layout (default
+ *         C-order). Named `wrap` (not `view`) so it never collides with the
+ *         member `t.view()` that returns a raw mdspan. */
 template <class Layout = cs::layout_right, class T, class Extents>
-_TNY_API tensor<T, Extents, Layout, own::view> view(T * p, Extents e) {
+_TNY_API tensor<T, Extents, Layout, own::view> wrap(T * p, Extents e) {
     using Tn = tensor<T, Extents, Layout, own::view>;
     return Tn(p, typename Tn::mapping_type(e));
 }
 
-/** @brief Non-owning view with per-dimension compile-time strides (may be negative). */
+/** @brief Wrap `p` as a non-owning view with per-dimension compile-time strides
+ *         (may be negative). */
 template <cs::int64_t... Strides, class T, class Extents>
 _TNY_API tensor<T, Extents, strides<Strides...>, own::view>
-view_strided(T * p, Extents e) {
+wrap_strided(T * p, Extents e) {
     using Tn = tensor<T, Extents, strides<Strides...>, own::view>;
     return Tn(p, typename Tn::mapping_type(e));
 }
@@ -661,9 +664,9 @@ using owned = tensor<T, Extents, Layout, own::heap>;
  * Element type `T` is explicit (it can't be deduced from a shape); the extents
  * type is deduced, so a runtime-built shape needs no `decltype` spelling.       */
 
-/** @brief `make_view<L>(ptr, extents)` — a non-owning view (alias of `view`). */
+/** @brief `make_view<L>(ptr, extents)` — a non-owning view (alias of `wrap`). */
 template <class Layout = cs::layout_right, class T, class Extents>
-_TNY_API auto make_view(T * p, Extents e) { return view<Layout>(p, e); }
+_TNY_API auto make_view(T * p, Extents e) { return wrap<Layout>(p, e); }
 
 /** @brief `make_local<T>(extents)` — a stack-owned tensor (static shape).
  *         `T` defaults to `float` (numpy's default float dtype). */
@@ -714,7 +717,7 @@ _TNY_HOST auto arange(long n) {
 }
 /** @brief Static `arange<T, N>()` — a stack `[0..N-1]` (host+device, folds). */
 template <class T = cs::int64_t, long N>
-_TNY_API auto arange() { tensor<T, shape<N>, cs::layout_right, own::stack> t{}; t.iota_(); return t; }
+_TNY_API auto arange() { tensor<T, cs::extents<cs::int64_t, static_cast<cs::size_t>(N)>, cs::layout_right, own::stack> t{}; t.iota_(); return t; }
 /** @brief `arange<T>(Int<N>())` — the static form spelled with a static integer. */
 template <class T = cs::int64_t, class V, V N>
 _TNY_API auto arange(cs::integral_constant<V, N>) { return arange<T, static_cast<long>(N)>(); }

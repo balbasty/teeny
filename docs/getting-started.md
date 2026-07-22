@@ -22,7 +22,7 @@ using namespace tny;
 
 int main() {
     double buf[6] = {1, 2, 3, 4, 5, 6};
-    auto m = view(buf, shape<2, 3>{});     // a 2×3 view over `buf`
+    auto m = wrap(buf, shape<2, 3>{});     // a 2×3 view over `buf`
     m(1, 2) = 60;                          // write through the view
     std::printf("%g  sum=%g\n", m(1, -1),  // -1 = last column
                                 (double)sum(m));

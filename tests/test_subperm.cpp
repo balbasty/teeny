@@ -9,7 +9,7 @@ int main()
 {
     double buf[24];
     for (long i = 0; i < 24; ++i) buf[i] = i;
-    auto t = view(buf, extents<long,2,3,4>{});          // strides (12,4,1)
+    auto t = wrap(buf, extents<long,2,3,4>{});          // strides (12,4,1)
 
     // ---- sub<D>(i): bind an axis, drop it ------------------------------
     auto s1 = t.take_along<1>(2);                              // fix axis 1 -> (2,4)

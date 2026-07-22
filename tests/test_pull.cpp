@@ -72,7 +72,7 @@ int main()
 
     // ---- D = 1 (linear): same convolve ----
     {
-        auto inp = view(buf, extents<long,7>{});
+        auto inp = wrap(buf, extents<long,7>{});
         for (double x : {0.0, 0.3, 2.7, 5.9, 6.5}) {
             auto s = cs::make_tuple(sample<1>(x, 7));
             if (!close(pull(inp, s), ref_lerp(buf, 7, x))) return 1;
@@ -80,7 +80,7 @@ int main()
     }
     // ---- D = 2 (bilinear): same convolve ----
     {
-        auto inp = view(buf, extents<long,5,6>{});     // row-major, strides (6,1)
+        auto inp = wrap(buf, extents<long,5,6>{});     // row-major, strides (6,1)
         for (double x : {0.0, 1.4, 3.9}) for (double y : {0.2, 2.5, 5.1}) {
             auto s = cs::make_tuple(sample<1>(x,5), sample<1>(y,6));
             if (!close(pull(inp, s), ref_bilerp(buf, 5, 6, x, y))) return 2;
@@ -88,7 +88,7 @@ int main()
     }
     // ---- D = 3 (trilinear): same convolve ----
     {
-        auto inp = view(buf, extents<long,4,5,6>{});   // strides (30,6,1)
+        auto inp = wrap(buf, extents<long,4,5,6>{});   // strides (30,6,1)
         for (double x : {0.0, 2.6}) for (double y : {1.1, 3.7}) for (double z : {0.5, 4.9}) {
             auto s = cs::make_tuple(sample<1>(x,4), sample<1>(y,5), sample<1>(z,6));
             if (!close(pull(inp, s), ref_trilerp(buf, 4,5,6, x,y,z))) return 3;
@@ -97,7 +97,7 @@ int main()
     // ---- D = 3 also works on a fully-dynamic-extent view (strides loaded) ----
     {
         using E = extents<long, cs::dynamic_extent, cs::dynamic_extent, cs::dynamic_extent>;
-        auto inp = view(buf, E{4,5,6});
+        auto inp = wrap(buf, E{4,5,6});
         double x=2.6,y=3.7,z=4.9;
         auto s = cs::make_tuple(sample<1>(x,4), sample<1>(y,5), sample<1>(z,6));
         if (!close(pull(inp, s), ref_trilerp(buf, 4,5,6, x,y,z))) return 4;

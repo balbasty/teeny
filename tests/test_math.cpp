@@ -32,7 +32,7 @@ int main()
 
     // ---- in-place on a strided view into a bigger buffer ---------------
     double buf[9]; for (int i=0;i<9;++i) buf[i]=i;
-    auto full = view(buf, extents<long,3,3>{});
+    auto full = wrap(buf, extents<long,3,3>{});
     full.add_(100.0);                              // scalar in place
     if (buf[0]!=100 || buf[8]!=108) return 6;
     full.mul_(2.0);

@@ -22,19 +22,19 @@ below. See [Tensors & ownership](tensors.md).
 view_t<T, E, L = layout_right>       // non-owning view (default; the bare `tensor` is this)
 local<T, E, L = layout_right>        // stack-owned (requires a fully static shape)
 owned<T, E, L = layout_right>        // heap-owned, host, move-only
-device<T, E, L>  host<T, E, L>  pinned<T, E, L>  // CUDA memory (from <teeny/cuda.h>)
+gpu<T, E, L>  pinned<T, E, L>  mapped<T, E, L>  // CUDA memory (from <teeny/cuda.h>)
 ```
 
 ### Factories
 
 ```cpp
-view(ptr, shape);  view<Layout>(ptr, shape);  // a view (C-order / chosen layout)
-view_strided<S...>(ptr, shape);               // view with compile-time strides
+wrap(ptr, shape);  wrap<Layout>(ptr, shape);  // a view (C-order / chosen layout)
+wrap_strided<S...>(ptr, shape);               // view with compile-time strides
 as_tensor(any_mdspan);                        // wrap an mdspan/submdspan result
 
 make_view(ptr, shape);           // deduce the extents type
 make_local<T>(shape);  make_heap<T>(shape);            // T defaults to float
-make_device<T>(shape); make_host<T>(shape); make_pinned<T>(shape);   // T defaults to float
+make_gpu<T>(shape); make_pinned<T>(shape); make_mapped<T>(shape);   // T defaults to float
 
 zeros<T>(shape);  ones<T>(shape);   // T defaults to float; static->stack, dyn->heap
 full(shape, v);                     // element type = the VALUE's type (full<T>(...) to force)

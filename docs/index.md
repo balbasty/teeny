@@ -17,8 +17,8 @@ transforms, small linear algebra, batched solves.
 #include <teeny/teeny.h>
 using namespace tny;
 
-auto img = view(ptr, shape<480, 640>{});   // non-owning view; static 480×640
-auto vol = view(ptr, shape<-1, 3, 3>{n});  // dynamic batch, static 3×3
+auto img = wrap(ptr, shape<480, 640>{});   // non-owning view; static 480×640
+auto vol = wrap(ptr, shape<-1, 3, 3>{n});  // dynamic batch, static 3×3
 
 img(0, -1);                            // element access -> T& ; negative index wraps
 img(all, slice(0, 32, 2));             // strided sub-view (no copy)

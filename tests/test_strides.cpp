@@ -16,8 +16,8 @@ int main() {
     static_assert(cs::is_same<decltype(A.stride(Int<1>())), cs::integral_constant<long,1>>::value, "stride 1 folds to 1");
     if (A(2,1) != pad[2*4+1]) return 1;
 
-    // via view_strided (back-compat: layout_static_stride == strides)
-    auto A2 = view_strided<4,1>(pad, shape<3,3>{});
+    // via wrap_strided (back-compat: layout_static_stride == strides)
+    auto A2 = wrap_strided<4,1>(pad, shape<3,3>{});
     if (A2(2,1) != A(2,1)) return 2;
 
     // --- MIXED: outer stride dynamic, inner static 1 ---

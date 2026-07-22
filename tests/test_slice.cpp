@@ -6,7 +6,7 @@ namespace cs = cuda::std;
 int main() {
     double buf[24];
     for (long i=0;i<24;++i) buf[i]=i;
-    auto t = view(buf, extents<long,2,3,4>{});        // strides (12,4,1)
+    auto t = wrap(buf, extents<long,2,3,4>{});        // strides (12,4,1)
 
     // all-integer -> element access (T&)
     if (t(1,2,3) != 1*12+2*4+3) return 1;
@@ -68,14 +68,14 @@ int main() {
 
     // negative indices/bounds must work even with an UNSIGNED index_type
     // (the wrap is done in a signed domain, not after casting to index_type).
-    auto u = view(buf, cs::extents<cs::size_t,2,3,4>{});
+    auto u = wrap(buf, cs::extents<cs::size_t,2,3,4>{});
     static_assert(cs::is_unsigned<decltype(u)::index_type>::value, "unsigned index_type");
     if (u(-1,-1,-1) != u(1,2,3)) return 17;           // negative element index wraps
     auto us = u(0, slice(-2, none), all);             // negative slice bound wraps
     if (us.extent(0) != 2 || us(0,0) != u(0,1,0)) return 18;
 
     // ---- negative step (python a[::-1], a[5:0:-1], strided reverse) ------
-    auto line = view(buf, shape<4>{});                // signed index for reverse
+    auto line = wrap(buf, shape<4>{});                // signed index for reverse
     auto rev = line(slice(none,none,-1));             // full reverse
     if (rev.extent(0) != 4) return 19;
     for (long i=0;i<4;++i) if (rev(i) != line(3-i)) return 20;
@@ -87,7 +87,7 @@ int main() {
     rev(0) = 77.0; if (line(3) != 77.0) return 23; line(3) = 3;
 
     // 2-D: reverse rows via slicing, forward columns
-    auto M2 = view(buf, shape<3,4>{});
+    auto M2 = wrap(buf, shape<3,4>{});
     auto Mr = M2(slice(none,none,-1), all);
     for (long i=0;i<3;++i) for (long j=0;j<4;++j) if (Mr(i,j) != M2(2-i,j)) return 24;
 

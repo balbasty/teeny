@@ -60,7 +60,7 @@ int main() {
     if (emptyish.extent(0) != 0) return 14;
 
     // ---- recast keeps only when contiguous; validates + folds inner dims -----
-    auto vv = view(buf, shape<-1,3,4>{2});     // (2,3,4) contiguous, dynamic outer
+    auto vv = wrap(buf, shape<-1,3,4>{2});     // (2,3,4) contiguous, dynamic outer
     auto rc = vv.recast<shape<2,3,4>>();        // all static now
     static_assert(decltype(rc.stride(Int<1>()))::value == 4, "recast folds inner stride");
     if (rc(1,2,3) != buf[12+8+3]) return 15;

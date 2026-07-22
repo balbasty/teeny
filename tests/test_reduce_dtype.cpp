@@ -8,7 +8,7 @@ int main()
 {
     // ---- default accumulator: double for small floats -----------------------
     float fbuf[4] = {1.f, 2.f, 3.f, 4.f};
-    auto f = view(fbuf, shape<4>{});
+    auto f = wrap(fbuf, shape<4>{});
     static_assert(cs::is_same<decltype(sum(f)), double>::value, "sum(float) -> double");
     static_assert(cs::is_same<decltype(mean(f)), double>::value, "mean(float) -> double");
     static_assert(cs::is_same<decltype(max(f)), double>::value, "max(float) -> double");
@@ -25,7 +25,7 @@ int main()
 
     // ---- integers accumulate in the item type by default --------------------
     int ibuf[3] = {10, 20, 30};
-    auto ii = view(ibuf, shape<3>{});
+    auto ii = wrap(ibuf, shape<3>{});
     static_assert(cs::is_same<decltype(sum(ii)), int>::value, "sum(int) -> int");
     if (sum(ii) != 60) return 3;
 
@@ -34,13 +34,13 @@ int main()
     static_assert(cs::is_same<decltype(sum<long>(ii)), long>::value, "sum<long>(int) -> long");
     // small-int overflow avoided by a wider accumulator
     signed char cbuf[4] = {100, 100, 100, 100};   // sum 400 overflows int8
-    auto cc = view(cbuf, shape<4>{});
+    auto cc = wrap(cbuf, shape<4>{});
     if (sum<int>(cc) != 400) return 4;
     static_assert(cs::is_same<decltype(sum(cc)), signed char>::value, "sum(int8) -> int8 (item, default)");
 
     // ---- axis reductions carry the accumulator into the result element type -
     float m[6] = {1,2,3,4,5,6};
-    auto M = view(m, shape<2,3>{});               // rows [1,2,3],[4,5,6]
+    auto M = wrap(m, shape<2,3>{});               // rows [1,2,3],[4,5,6]
     auto r0 = sum<0>(M);                          // default acc -> double result
     static_assert(cs::is_same<typename decltype(r0)::element_type, double>::value, "sum<0>(float) -> double result");
     if (r0(0) != 5.0 || r0(1) != 7.0 || r0(2) != 9.0) return 5;
@@ -53,7 +53,7 @@ int main()
 
     // axis sum over integers keeps the item type
     int im[4] = {1,2,3,4};
-    auto IM = view(im, shape<2,2>{});
+    auto IM = wrap(im, shape<2,2>{});
     auto is0 = sum<0>(IM);
     static_assert(cs::is_same<typename decltype(is0)::element_type, int>::value, "sum<0>(int) -> int result");
     if (is0(0) != 4 || is0(1) != 6) return 8;

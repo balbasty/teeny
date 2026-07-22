@@ -37,7 +37,7 @@ int main() {
 
     // recast value form: deduce the target extents from a shape<> value
     double buf[9]; for (int i=0;i<9;++i) buf[i]=i;
-    auto dyn = view(buf, shape<-1,-1>{3,3});
+    auto dyn = wrap(buf, shape<-1,-1>{3,3});
     auto st  = dyn.recast(shape<3,3>{});
     static_assert(decltype(st.extent(Int<0>()))::value == 3, "recast value form folds");
     if (st(2,2) != buf[8]) return 5;

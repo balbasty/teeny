@@ -9,7 +9,7 @@ int main()
     // ---- ellipsis expands to (rank - #other args) copies of `all` -----------
     double buf[2*3*4];
     for (int i = 0; i < 2*3*4; ++i) buf[i] = i;
-    auto t = view(buf, shape<2,3,4>{});   // rank 3, contiguous
+    auto t = wrap(buf, shape<2,3,4>{});   // rank 3, contiguous
 
     // t(ellipsis) == the whole thing (rank 3 view, static extents preserved).
     auto a = t(ellipsis);
@@ -47,10 +47,10 @@ int main()
 
     // ---- assigning INTO a slice copies CONTENTS (numpy a[:] = b) -------------
     double dst[2*3*4] = {};
-    auto D = view(dst, shape<2,3,4>{});
+    auto D = wrap(dst, shape<2,3,4>{});
     double src[2*3*4];
     for (int i = 0; i < 2*3*4; ++i) src[i] = 100 + i;
-    auto S = view(src, shape<2,3,4>{});
+    auto S = wrap(src, shape<2,3,4>{});
 
     D(ellipsis) = S;                         // whole-tensor copy
     for (int i = 0; i < 2*3*4; ++i) if (dst[i] != src[i]) return 8;
@@ -62,7 +62,7 @@ int main()
 
     // partial region copy with broadcasting (a (4,) row into a (3,4) plane)
     double row[4] = {1,2,3,4};
-    auto R = view(row, shape<1,4>{});         // broadcasts over the size-3 axis
+    auto R = wrap(row, shape<1,4>{});         // broadcasts over the size-3 axis
     D(1, ellipsis) = R;
     for (int r = 0; r < 3; ++r)
         for (int col = 0; col < 4; ++col)
@@ -70,8 +70,8 @@ int main()
 
     // `a = b` on a NAMED view still REBINDS (does not copy) -- the contrast.
     double p[3] = {1,2,3}, q[3] = {4,5,6};
-    auto P = view(p, shape<3>{});
-    auto Q = view(q, shape<3>{});
+    auto P = wrap(p, shape<3>{});
+    auto Q = wrap(q, shape<3>{});
     P = Q;                                    // rebind: P now views q
     if (P.data() != q) return 12;
     P(0) = 42.0;                              // writes q, not p

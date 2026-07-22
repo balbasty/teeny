@@ -16,7 +16,7 @@ value.
 
 ```cpp
 double buf[6] = {1,2,3,4,5,6};
-auto m = view(buf, shape<2,3>{});  // 2×3 view over buf — no allocation, no copy
+auto m = wrap(buf, shape<2,3>{});  // 2×3 view over buf — no allocation, no copy
 m(1,2) = 60;                       // writes go straight to buf
 ```
 
@@ -42,9 +42,9 @@ Factories:
 
 | factory | makes |
 |---|---|
-| `view(ptr, extents)` | C-order view |
-| `view<layout_left>(ptr, extents)` | F-order view |
-| `view_strided<Sx,Sy,...>(ptr, extents)` | view with compile-time strides (may be negative) |
+| `wrap(ptr, extents)` | C-order view |
+| `wrap<layout_left>(ptr, extents)` | F-order view |
+| `wrap_strided<Sx,Sy,...>(ptr, extents)` | view with compile-time strides (may be negative) |
 | `as_tensor(any_mdspan)` | wrap an `mdspan`/`submdspan` result as a view |
 | `make_view(ptr, extents)` | same as `view`, deducing the extents type |
 
@@ -101,14 +101,15 @@ when they die. Pick one by where the memory should live.
     auto g = make_heap<double>(shape<-1,3>{n});           // same, deducing E
     ```
 
-=== "`device` / `host` / `pinned` — CUDA"
+=== "`gpu` / `pinned` / `mapped` — CUDA"
 
     From `#include <teeny/cuda.h>` (needs the CUDA runtime). Move-only owning
-    tensors in device / page-locked / pinned memory.
+    tensors in device (`gpu`), page-locked host (`pinned`, pytorch's `pin_memory`),
+    or device-mapped zero-copy host (`mapped`) memory.
 
     ```cpp
     #include <teeny/cuda.h>
-    auto d = device<float, shape<-1,3,3>>(shape<-1,3,3>{n});  // cudaMalloc'd
+    auto d = gpu<float, shape<-1,3,3>>(shape<-1,3,3>{n});  // cudaMalloc'd
     my_kernel<<<grid, block>>>(d.view());                     // pass a view in
     ```
 
@@ -128,7 +129,7 @@ Inside a kernel you want a view (trivially copyable). Every owning tensor hands
 one out:
 
 ```cpp
-auto d = device<float, shape<-1,3,3>>(shape<-1,3,3>{n});
+auto d = gpu<float, shape<-1,3,3>>(shape<-1,3,3>{n});
 auto v = d.view();  // view over d's memory — pass THIS to the kernel
 ```
 
@@ -141,7 +142,7 @@ template <class T, class Extents, class Layout = layout_right, own O = own::view
 struct tensor;
 ```
 
-`own` is `{ view, stack, heap, device, host, pinned }`. Rarely named directly —
+`own` is `{ view, stack, heap, gpu, pinned, mapped }`. Rarely named directly —
 use the aliases (`view`/`local`/`owned`) and factories (`make_*`,
 `zeros`/`ones`/`full`) instead. The parameter lets one class and one set of
 algorithms cover every memory space.

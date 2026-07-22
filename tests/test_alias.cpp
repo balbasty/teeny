@@ -17,7 +17,7 @@ int main()
     static_assert(Uint8<200>::value == 200, "unsigned value");
     // still convert to a runtime integer (usable as an index)
     long a[5] = {0,1,2,3,4};
-    auto v = view(a, shape<5>{});
+    auto v = wrap(a, shape<5>{});
     if (v(I4<2>()) != 2) return 1;
 
     // ---- numpy dtype type aliases (bytes) ----------------------------------

@@ -47,7 +47,7 @@ include/teeny/
                    tensor.h, DEFINED here.
   iterate.h        nd-peel: peel / peel_at / peel_front / peel_front_at
   dynamic.h        anyrank (rank-erased carrier) + peel_front<Sr> + dispatch_rank
-  cuda.h           device/host/pinned memory. Self-guarded (__has_include /
+  cuda.h           gpu/pinned/mapped memory. Self-guarded (__has_include /
                    __CUDACC__): a no-op unless the CUDA runtime is reachable, so
                    teeny.h includes it unconditionally. TNY_NO_CUDA forces it off.
   teeny.h          umbrella (includes everything, cuda.h included + self-guarded)
@@ -81,7 +81,7 @@ struct tensor;
   (compile-time strides).
 - **`O`** ownership: `view` (non-owning, trivially copyable, kernel-passable),
   `stack` (inline array, requires fully static shape), `heap` (host `new[]`,
-  move-only), or CUDA `device`/`host`/`pinned` (from `cuda.h`).
+  move-only), or CUDA `gpu`/`pinned`/`mapped` (from `cuda.h`).
 
 The mapping lives in an **empty base** (private inheritance → EBO), so a
 fully-static stack tensor is *exactly* `sizeof` its data.
@@ -92,14 +92,14 @@ fully-static stack tensor is *exactly* `sizeof` its data.
 view_t<T,E,L>   // non-owning view type
 local<T,E,L>    // stack-owned (static shape)     e.g. local<double, shape<3,3>>{}
 owned<T,E,L>    // heap-owned (host, move-only)    e.g. owned<double, DynE>(DynE{2,3})
-device/host/pinned<T,E,L>   // from cuda.h
+gpu/pinned/mapped<T,E,L>   // from cuda.h
 ```
 
-Factories: `view(ptr, extents)` / `view<Layout>(ptr, extents)`,
-`view_strided<S...>(ptr, extents)` (compile-time strides),
+Factories: `wrap(ptr, extents)` / `wrap<Layout>(ptr, extents)`,
+`wrap_strided<S...>(ptr, extents)` (compile-time strides),
 `as_tensor(any_mdspan)` (wrap a submdspan/mdspan result as a view). Functional
 factories that deduce the extents type: `make_view(ptr,e)`, `make_local<T>(e)`,
-`make_heap<T>(e)`, `make_device/host/pinned<T>(e)` (E deduced; **T defaults to
+`make_heap<T>(e)`, `make_gpu/pinned/mapped<T>(e)` (E deduced; **T defaults to
 `float`**, override explicitly).
 
 Custom strided layout: `strides<Sx, Sy, ...>` is the stride analogue of `shape`,
