@@ -53,6 +53,7 @@ arange<T, N>();  arange<T>(Int<N>());  // static 1-D [0..N-1] (stack, folds)
 
 ```cpp
 template <auto... E>       using shape   = cs::extents<int64_t, E...>;  // -1 == dynamic
+template <size_t N>        using rank    = shape<-1 ...N times>;        // fully-dynamic rank-N shape
 template <int64_t... S>    struct strides;                // signed; dynamic_stride sentinel
 template <int64_t... S>    using layout_static_stride = strides<S...>;  // back-compat alias
 constexpr int64_t dynamic_stride;                         // a runtime stride
@@ -157,14 +158,15 @@ auto c = neg(a); abs(a); exp(a); log(a); sin(a); cos(a); sqrt(a); tanh(a);
 auto c = floor(a); ceil(a); round(a); trunc(a); sign(a);
 auto c = minimum(a, b); maximum(a, s); clamp(a, lo, hi);
 
-// reductions -> scalar (all axes). Accumulate in (and return) the "reduce type":
-//   double for small floats (float/double/half), item type for ints. Override
-//   the accumulator with a leading TYPE arg: sum<float>(a), dot<float>(a,b).
+// reductions -> scalar (all axes). ACCUMULATE in the "reduce type" (double for
+//   small floats float/double/half, item type for ints), then CAST the result to
+//   the tensor's element type: sum(float)->float. A leading TYPE arg makes that
+//   type BOTH accumulator and result: sum<double>(a), dot<double>(a,b).
 sum(a); prod(a); max(a); min(a); mean(a); dot(a, b);   // sum<Acc>(a), mean<Acc>(a), ...
 allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
-// axis reductions -> lower-rank tensor (named axes removed; negatives wrap). The
-//   result element type is the accumulator. sum<Axes...>(a) uses the default;
-//   sum<Acc, Axes...>(a) forces it (a leading TYPE = accumulator, a leading int = axis).
+// axis reductions -> lower-rank tensor (named axes removed; negatives wrap). Same
+//   rule: accumulate in reduce_type, result element type = the tensor's type;
+//   sum<Acc, Axes...>(a) makes Acc accumulator AND result (leading TYPE = acc, int = axis).
 sum<Axes...>(a); prod<...>(a); max<...>(a); min<...>(a); mean<...>(a);  // sum<Acc,Axes...>(a)
 ```
 
