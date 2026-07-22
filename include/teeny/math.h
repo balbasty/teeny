@@ -752,6 +752,26 @@ using _acc_t = cs::conditional_t<cs::is_same<Acc, void>::value, reduce_type_t<T>
 template <class Acc, class T>
 using _reduce_result_t = cs::conditional_t<cs::is_same<Acc, void>::value, T, Acc>;
 
+// Seeds for max/min reductions. `cs::numeric_limits` is NOT specialized for
+// teeny's software half/bfloat16, so `numeric_limits<half>::lowest()` returns the
+// value-initialized `half{}` == 0 — a WRONG max seed (a max over all-negative
+// halves would return 0, a min over all-positive would return 0). Route the small
+// floats through `float`'s ±infinity (a valid identity for max/min: every real
+// value beats ±inf, and the software half represents inf), uniform across the
+// native (nvcc __half) and portable half types. `R` is the accumulator type.
+template <class R> _TNY_API R _reduce_seed_lowest() {
+    if constexpr (cs::is_same<R, half>::value || cs::is_same<R, bfloat16>::value)
+        return static_cast<R>(-cs::numeric_limits<float>::infinity());
+    else
+        return cs::numeric_limits<R>::lowest();
+}
+template <class R> _TNY_API R _reduce_seed_highest() {
+    if constexpr (cs::is_same<R, half>::value || cs::is_same<R, bfloat16>::value)
+        return static_cast<R>(cs::numeric_limits<float>::infinity());
+    else
+        return cs::numeric_limits<R>::max();
+}
+
 // Reductions ACCUMULATE in the accumulator type (`double` by default for small
 // floats — see reduce_type_t, so precision holds), then CAST the result back to
 // the tensor's element type `T`. Pass an explicit accumulator to make it BOTH the
@@ -780,7 +800,7 @@ template <class Acc = void, class T, class E, class L, own O>
 _TNY_API auto max(const tensor<T,E,L,O> & a) {
     using R = _acc_t<Acc, T>;
     return static_cast<_reduce_result_t<Acc,T>>(
-        _md::reduce_<R>(a, cs::numeric_limits<R>::lowest(), _md::r_max{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
+        _md::reduce_<R>(a, _reduce_seed_lowest<R>(), _md::r_max{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
 }
 /** @brief Minimum element. Requires a non-empty tensor. Result type `T`
  *         (`min<Acc>(a)` returns `Acc`). */
@@ -788,7 +808,7 @@ template <class Acc = void, class T, class E, class L, own O>
 _TNY_API auto min(const tensor<T,E,L,O> & a) {
     using R = _acc_t<Acc, T>;
     return static_cast<_reduce_result_t<Acc,T>>(
-        _md::reduce_<R>(a, cs::numeric_limits<R>::max(), _md::r_min{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
+        _md::reduce_<R>(a, _reduce_seed_highest<R>(), _md::r_min{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
 }
 
 /* --- boolean reductions (members; chain after a comparison) -------- */
@@ -827,8 +847,8 @@ template <class Acc, long... Axes, class T,class E,class L,own O, class R = Acc,
 _TNY_HOST auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); }
 _TNY_MD_AXRED(sum,  R(0),                          r_add)
 _TNY_MD_AXRED(prod, R(1),                          r_mul)
-_TNY_MD_AXRED(max,  cs::numeric_limits<R>::lowest(), r_max)
-_TNY_MD_AXRED(min,  cs::numeric_limits<R>::max(),  r_min)
+_TNY_MD_AXRED(max,  _reduce_seed_lowest<R>(),  r_max)
+_TNY_MD_AXRED(min,  _reduce_seed_highest<R>(), r_min)
 #undef _TNY_MD_AXRED
 
 /** @brief Mean over the named axes -> a lower-rank tensor (sum / reduced count).

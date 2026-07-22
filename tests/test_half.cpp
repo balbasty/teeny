@@ -55,5 +55,19 @@ int main() {
     if (!approx(bf(3), 8.0, 0.0)) return 11;
     if (!approx(sum(bf), 2+4+6+8, 0.0)) return 12;
 
+    // ---- #47: explicit half/bfloat16 accumulator for max/min ----------
+    // numeric_limits isn't specialized for the software half, so the max/min
+    // SEED used to be 0 -> a max over ALL-NEGATIVE values wrongly returned 0.
+    auto neg = local<half, extents<long,3>>();
+    neg(0) = half(-5.0); neg(1) = half(-2.0); neg(2) = half(-9.0);
+    if (!approx(max<half>(neg), -2.0, 0.0)) return 13;    // NOT 0 (the old bug)
+    if (!approx(min<half>(neg), -9.0, 0.0)) return 14;
+    auto pos = local<bfloat16, extents<long,3>>();
+    pos(0) = bfloat16(3.0); pos(1) = bfloat16(7.0); pos(2) = bfloat16(4.0);
+    if (!approx(min<bfloat16>(pos), 3.0, 0.0)) return 15; // NOT 0
+    if (!approx(max<bfloat16>(pos), 7.0, 0.0)) return 16;
+    // default accumulator (double) already worked; confirm it still does.
+    if (!approx(max(neg), -2.0, 0.0)) return 17;
+
     return 0;
 }
