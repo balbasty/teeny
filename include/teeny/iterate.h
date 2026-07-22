@@ -112,15 +112,15 @@ struct peel_range {
     _TNY_API auto operator[](index_type i) const { return peel_at<Axes...>(src, i); }
 
     struct iterator {
-        const peel_range * r;
+        peel_range r;                 // by value (a single view) -> no dangle if the range is a temporary
         index_type i;
-        _TNY_API auto operator*() const { return (*r)[i]; }
+        _TNY_API auto operator*() const { return r[i]; }
         _TNY_API iterator & operator++() { ++i; return *this; }
         _TNY_API bool operator!=(const iterator & o) const { return i != o.i; }
         _TNY_API bool operator==(const iterator & o) const { return i == o.i; }
     };
-    _TNY_API iterator begin() const { return { this, 0 }; }
-    _TNY_API iterator end()   const { return { this, size() }; }
+    _TNY_API iterator begin() const { return { *this, 0 }; }
+    _TNY_API iterator end()   const { return { *this, size() }; }
 };
 
 /** @brief Build a range of sub-views by peeling `Axes...` of `t`. Non-const `t`

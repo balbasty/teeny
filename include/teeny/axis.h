@@ -39,7 +39,8 @@ _TNY_API auto flip_md(const MD & v, cs::index_sequence<D...>) {
     cs::layout_stride::mapping<E> m(
         v.extents(),
         cs::array<Idx, sizeof...(D)>{ static_cast<Idx>(D == AX ? -static_cast<Idx>(v.stride(D)) : static_cast<Idx>(v.stride(D)))... });
-    const Idx off = static_cast<Idx>((static_cast<Idx>(v.extent(AX)) - 1) * static_cast<Idx>(v.stride(AX)));
+    const Idx n = static_cast<Idx>(v.extent(AX));
+    const Idx off = n > Idx(0) ? (n - 1) * static_cast<Idx>(v.stride(AX)) : Idx(0);   // empty axis: no shift
     return cs::mdspan<El, E, cs::layout_stride>(v.data_handle() + off, m);
 }
 // insert a size-1 axis at position AX (output rank = N+1). The new axis gets

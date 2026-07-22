@@ -91,15 +91,23 @@ struct tensor : private Layout::template mapping<Extents> {
     template <own OO = O, cs::enable_if_t<OO == own::view && cs::is_constructible<mapping_type, Extents>::value, int> = 0>
     _TNY_API tensor(T * p, Extents e) : mapping_type(e), store_(p) {}
 
+    // Allocation size from a mapping, guarded: a negative required_span_size
+    // (negative strides — which are for VIEWS, not owning storage) would cast to
+    // a huge size_t and try to allocate the universe. Assert, and clamp to 0.
+    _TNY_HOST static cs::size_t _alloc_size(const mapping_type & m) {
+        const auto n = m.required_span_size();
+        _TNY_CHECK(n >= 0, "owning tensor: negative span size (negative strides are for views, not owners)");
+        return n < 0 ? cs::size_t(0) : static_cast<cs::size_t>(n);
+    }
     /** @brief Owning constructor: allocate storage for `m` (heap/device/host/pinned). */
     template <own OO = O, cs::enable_if_t<own_is_owning(OO), int> = 0>
     _TNY_HOST explicit tensor(mapping_type m)
-        : mapping_type(m), store_(static_cast<cs::size_t>(m.required_span_size())) {}
+        : mapping_type(m), store_(_alloc_size(m)) {}
 
     /** @brief Owning constructor from extents (contiguous / static-stride layouts). */
     template <own OO = O, cs::enable_if_t<own_is_owning(OO) && cs::is_constructible<mapping_type, Extents>::value, int> = 0>
     _TNY_HOST explicit tensor(Extents e)
-        : mapping_type(e), store_(static_cast<cs::size_t>(mapping_type(e).required_span_size())) {}
+        : mapping_type(e), store_(_alloc_size(mapping_type(e))) {}
 
     /* --- geometry ------------------------------------------------- */
     static constexpr cs::size_t rank() noexcept { return Extents::rank(); }
@@ -617,11 +625,17 @@ _TNY_API auto full(Extents, T v) { tensor<T, Extents, Layout, own::stack> t{}; t
 template <class T, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() != 0, int> = 0>
 _TNY_HOST auto full(Extents e, T v) { tensor<T, Extents, Layout, own::heap> t(e); t.fill_(v); return t; }
 
-/** @brief `zeros<T>(extents)` / `ones<T>(extents)` — a new tensor of 0s / 1s. */
-template <class T, class Layout = cs::layout_right, class Extents>
-_TNY_API auto zeros(Extents e) { return full<T, Layout>(e, T(0)); }
-template <class T, class Layout = cs::layout_right, class Extents>
-_TNY_API auto ones(Extents e) { return full<T, Layout>(e, T(1)); }
+/** @brief `zeros<T>(extents)` / `ones<T>(extents)` — a new tensor of 0s / 1s.
+ *         Static shape -> stack (host+device); dynamic -> heap (host only). The
+ *         annotation is split so it matches the overload `full` resolves to. */
+template <class T, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() == 0, int> = 0>
+_TNY_API  auto zeros(Extents e) { return full<T, Layout>(e, T(0)); }
+template <class T, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() != 0, int> = 0>
+_TNY_HOST auto zeros(Extents e) { return full<T, Layout>(e, T(0)); }
+template <class T, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() == 0, int> = 0>
+_TNY_API  auto ones(Extents e) { return full<T, Layout>(e, T(1)); }
+template <class T, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() != 0, int> = 0>
+_TNY_HOST auto ones(Extents e) { return full<T, Layout>(e, T(1)); }
 
 /** @brief `arange<T>(n)` — a 1-D tensor `[0, 1, ..., n-1]` (heap, host). */
 template <class T>

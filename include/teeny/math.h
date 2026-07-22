@@ -708,11 +708,17 @@ template <class T,class E,class L,own O> _TNY_API bool tensor<T,E,L,O>::any() co
  * `sum<0>(a)`, `mean<0,2>(a)`, ... remove those axes. Static result -> stack
  * (host+device); dynamic -> heap (host only, since it allocates). Reduce over
  * every axis (`sum(a)`) -> the scalar overloads above.                         */
+// Two overloads per reduction: a static result is stack-owned (host+device) so
+// the wrapper is _TNY_API; a dynamic result is heap-owned (host only) so it is
+// _TNY_HOST — matching the `axreduce` overload each resolves to (else nvcc would
+// see a _TNY_API wrapper call a __host__ allocator).
 #define _TNY_MD_AXRED(NAME, INIT, OP)                                                              \
-template <long... Axes, class T,class E,class L,own O, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0> \
-_TNY_API auto NAME(const tensor<T,E,L,O> & a) {                                                    \
-    using R = compute_type_t<T>; return _md::axreduce<Axes...>(a, INIT, _md::OP{});                \
-}
+template <long... Axes, class T,class E,class L,own O,                                             \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
+_TNY_API  auto NAME(const tensor<T,E,L,O> & a) { using R = compute_type_t<T>; return _md::axreduce<Axes...>(a, INIT, _md::OP{}); } \
+template <long... Axes, class T,class E,class L,own O,                                             \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
+_TNY_HOST auto NAME(const tensor<T,E,L,O> & a) { using R = compute_type_t<T>; return _md::axreduce<Axes...>(a, INIT, _md::OP{}); }
 _TNY_MD_AXRED(sum,  R(0),                          r_add)
 _TNY_MD_AXRED(prod, R(1),                          r_mul)
 _TNY_MD_AXRED(max,  cs::numeric_limits<R>::lowest(), r_max)
@@ -720,12 +726,15 @@ _TNY_MD_AXRED(min,  cs::numeric_limits<R>::max(),  r_min)
 #undef _TNY_MD_AXRED
 
 /** @brief Mean over the named axes -> a lower-rank tensor (sum / reduced count). */
-template <long... Axes, class T,class E,class L,own O, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
-_TNY_API auto mean(const tensor<T,E,L,O> & a) {
-    auto s = sum<Axes...>(a);
-    const auto cnt = a.numel() / s.numel();     // # elements folded into each output cell
-    s.div_(static_cast<T>(cnt));
-    return s;
+template <long... Axes, class T,class E,class L,own O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
+_TNY_API  auto mean(const tensor<T,E,L,O> & a) {
+    auto s = sum<Axes...>(a); s.div_(static_cast<T>(a.numel() / s.numel())); return s;
+}
+template <long... Axes, class T,class E,class L,own O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
+_TNY_HOST auto mean(const tensor<T,E,L,O> & a) {
+    auto s = sum<Axes...>(a); s.div_(static_cast<T>(a.numel() / s.numel())); return s;
 }
 
 /** @brief Inner product over matching extents (accumulated in the compute type). */

@@ -112,13 +112,13 @@ struct anyrank_front {
     _TNY_API auto operator[](offset_t i) const { return src.template peel_front_at<Sr>(i); }
 
     struct iterator {
-        const anyrank_front * r; offset_t i;
-        _TNY_API auto operator*() const { return (*r)[i]; }
+        anyrank_front r; offset_t i;   // by value (POD carrier) -> no dangle on a temporary range
+        _TNY_API auto operator*() const { return r[i]; }
         _TNY_API iterator & operator++() { ++i; return *this; }
         _TNY_API bool operator!=(const iterator & o) const { return i != o.i; }
     };
-    _TNY_API iterator begin() const { return { this, 0 }; }
-    _TNY_API iterator end()   const { return { this, size() }; }
+    _TNY_API iterator begin() const { return { *this, 0 }; }
+    _TNY_API iterator end()   const { return { *this, size() }; }
 };
 
 /** @brief Build an `anyrank` that COPIES shape/stride into its inline store
@@ -179,7 +179,7 @@ _TNY_HOST bool dispatch_from(const anyrank<T, offset_t, Meta> & t, F & f) {
  */
 template <class T, class offset_t, class Meta, class F>
 _TNY_HOST bool dispatch_rank(const anyrank<T, offset_t, Meta> & t, F && f) {
-    return _detail::dispatch_from<1>(t, f);
+    return _detail::dispatch_from<0>(t, f);   // R=0 handles a rank-0 (scalar) ndarray
 }
 
 /**
