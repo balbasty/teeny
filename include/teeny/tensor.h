@@ -17,7 +17,7 @@ namespace cs = cuda::std;
 
 // Forward declarations so the tensor's structural members can name as_tensor
 // (its argument is a cuda::std::mdspan, so ADL would not find it).
-template <class T, class Extents, class Layout = cs::layout_right, own O = own::view>
+template <class T, class Shape, class Layout = cs::layout_right, own O = own::view>
 struct tensor;
 template <class MD>
 _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
@@ -57,22 +57,24 @@ _TNY_API void fetch_add(T * p, T v) noexcept {
  * induced by the storage member, not hand-written.
  *
  * @tparam T        Element type.
- * @tparam Extents  `cuda::std::extents<Idx, E...>` (static or dynamic per dim).
+ * @tparam Shape    The shape: any `cuda::std::extents<Idx, E...>` (static or
+ *                  dynamic per dim). Spell it with the `shape<...>` alias.
  * @tparam Layout   mdspan layout policy (default `layout_right`).
  * @tparam O        Ownership kind (default `own::view`).
  */
-template <class T, class Extents, class Layout, own O>
-struct tensor : private Layout::template mapping<Extents> {
+template <class T, class Shape, class Layout, own O>
+struct tensor : private Layout::template mapping<Shape> {
     using element_type = T;
-    using extents_type = Extents;
+    using extents_type = Shape;   // the shape (a cuda::std::extents); `shape_type` is a synonym
+    using shape_type   = Shape;
     using layout_type  = Layout;
-    using index_type   = typename Extents::index_type;
-    using mapping_type = typename Layout::template mapping<Extents>;
-    using view_type       = cs::mdspan<T, Extents, Layout>;
-    using const_view_type = cs::mdspan<const T, Extents, Layout>;
+    using index_type   = typename Shape::index_type;
+    using mapping_type = typename Layout::template mapping<Shape>;
+    using view_type       = cs::mdspan<T, Shape, Layout>;
+    using const_view_type = cs::mdspan<const T, Shape, Layout>;
 
     static constexpr own  ownership = O;
-    static constexpr bool is_static = (Extents::rank_dynamic() == 0);
+    static constexpr bool is_static = (Shape::rank_dynamic() == 0);
     static constexpr cs::size_t buffer_size = storage_size<mapping_type, O == own::stack>::value;
     static_assert(O != own::stack || is_static, "stack tensor needs a fully static shape");
 
@@ -93,8 +95,8 @@ struct tensor : private Layout::template mapping<Extents> {
     _TNY_API explicit tensor(T * p) : mapping_type(), store_(p) {}   // explicit: no silent T* -> tensor
 
     /** @brief View constructor from a pointer + extents (contiguous / static-stride layouts). */
-    template <own OO = O, cs::enable_if_t<OO == own::view && cs::is_constructible<mapping_type, Extents>::value, int> = 0>
-    _TNY_API tensor(T * p, Extents e) : mapping_type(e), store_(p) {}
+    template <own OO = O, cs::enable_if_t<OO == own::view && cs::is_constructible<mapping_type, Shape>::value, int> = 0>
+    _TNY_API tensor(T * p, Shape e) : mapping_type(e), store_(p) {}
 
     // Allocation size from a mapping, guarded: a negative required_span_size
     // (negative strides — which are for VIEWS, not owning storage) would cast to
@@ -110,14 +112,14 @@ struct tensor : private Layout::template mapping<Extents> {
         : mapping_type(m), store_(_alloc_size(m)) {}
 
     /** @brief Owning constructor from extents (contiguous / static-stride layouts). */
-    template <own OO = O, cs::enable_if_t<own_is_owning(OO) && cs::is_constructible<mapping_type, Extents>::value, int> = 0>
-    _TNY_HOST explicit tensor(Extents e)
+    template <own OO = O, cs::enable_if_t<own_is_owning(OO) && cs::is_constructible<mapping_type, Shape>::value, int> = 0>
+    _TNY_HOST explicit tensor(Shape e)
         : mapping_type(e), store_(_alloc_size(mapping_type(e))) {}
 
     /* --- geometry ------------------------------------------------- */
-    static constexpr cs::size_t rank() noexcept { return Extents::rank(); }
+    static constexpr cs::size_t rank() noexcept { return Shape::rank(); }
     _TNY_API constexpr const mapping_type & mapping() const noexcept { return *this; }
-    _TNY_API constexpr const Extents & extents() const noexcept { return mapping_type::extents(); }
+    _TNY_API constexpr const Shape & extents() const noexcept { return mapping_type::extents(); }
     static constexpr bool is_strides_layout    = _is_strides<Layout>::value;
     static constexpr bool is_contiguous_layout = _contiguous_layout<Layout>::value;
 
@@ -127,8 +129,8 @@ struct tensor : private Layout::template mapping<Extents> {
     template <class Idx, cs::enable_if_t<_is_ic<Idx>::value, int> = 0>
     _TNY_API constexpr auto extent(Idx) const noexcept {
         constexpr cs::size_t D = _norm_axis(static_cast<long>(Idx::value), rank());   // -1 = last axis
-        if constexpr (Extents::static_extent(D) != cs::dynamic_extent)
-            return cs::integral_constant<index_type, static_cast<index_type>(Extents::static_extent(D))>{};
+        if constexpr (Shape::static_extent(D) != cs::dynamic_extent)
+            return cs::integral_constant<index_type, static_cast<index_type>(Shape::static_extent(D))>{};
         else
             return mapping_type::extents().extent(D);
     }
@@ -139,7 +141,7 @@ struct tensor : private Layout::template mapping<Extents> {
 
     /** @brief `shape()` / `shape(d)` — python-friendly aliases of `extents()` /
      *         `extent(d)` (static index -> integral_constant, runtime -> value). */
-    _TNY_API constexpr const Extents & shape() const noexcept { return extents(); }
+    _TNY_API constexpr const Shape & shape() const noexcept { return extents(); }
     template <class Idx> _TNY_API constexpr auto shape(Idx d) const noexcept { return extent(d); }
 
     /** @brief Stride of an axis given by a STATIC index (`stride(Int<0>())`):
@@ -257,8 +259,8 @@ private:
         constexpr cs::size_t Nk = (cs::size_t(0) + ... + (_is_index<Args>::value ? cs::size_t(0) : cs::size_t(1)));
         // output extents (static where a kept axis is static) and output strides
         // (static where source-stride × step is known) — folded into strides<...>.
-        using OE = typename _compact<index_type, _out_static<Args>(Extents::static_extent(Ax))...>::type;
-        using SF = typename _str_compact<_out_sstride<Args, Ax, Layout, Extents>()...>::type;
+        using OE = typename _compact<index_type, _out_static<Args>(Shape::static_extent(Ax))...>::type;
+        using SF = typename _str_compact<_out_sstride<Args, Ax, Layout, Shape>()...>::type;
         using Map = typename SF::template mapping<OE>;
         index_type ext[Nk ? Nk : 1] = {}, str[Nk ? Nk : 1] = {}, off = 0; cs::size_t k = 0;
         ( _sl_axis<Ax>(a, off, ext, str, k), ... );
@@ -436,9 +438,9 @@ public:
      *         non-contiguous / permuted / flipped tensor). Static shape -> stack
      *         (host+device); dynamic -> heap (host only). */
     template <bool S = is_static, cs::enable_if_t<S, int> = 0>
-    _TNY_API auto clone() const { tensor<T, Extents, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
+    _TNY_API auto clone() const { tensor<T, Shape, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
     template <bool S = is_static, cs::enable_if_t<!S, int> = 0>
-    _TNY_HOST auto clone() const { tensor<T, Extents, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
+    _TNY_HOST auto clone() const { tensor<T, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
 
 private:
     // shared reshape body: one axis may be `-1` (numpy-style, inferred from numel).
@@ -514,7 +516,7 @@ private:
     // axis (index 0), keep the rest. (A dynamic axis that is 1 only at run time
     // can't be dropped — the rank must stay static.)
     template <cs::size_t D> static _TNY_API auto _sq_arg() noexcept {
-        if constexpr (Extents::static_extent(D) == 1) return cs::integral_constant<index_type, 0>{};
+        if constexpr (Shape::static_extent(D) == 1) return cs::integral_constant<index_type, 0>{};
         else                                          return cs::full_extent;
     }
     template <class P, cs::size_t... D>
@@ -620,9 +622,9 @@ public:
     _TNY_API tensor & operator++() { return add_(T(1)); }
     _TNY_API tensor & operator--() { return sub_(T(1)); }
     template <bool S = is_static, cs::enable_if_t<S, int> = 0>
-    _TNY_API tensor<T, Extents, cs::layout_right, own::stack> operator++(int) { auto old = clone(); add_(T(1)); return old; }
+    _TNY_API tensor<T, Shape, cs::layout_right, own::stack> operator++(int) { auto old = clone(); add_(T(1)); return old; }
     template <bool S = is_static, cs::enable_if_t<S, int> = 0>
-    _TNY_API tensor<T, Extents, cs::layout_right, own::stack> operator--(int) { auto old = clone(); sub_(T(1)); return old; }
+    _TNY_API tensor<T, Shape, cs::layout_right, own::stack> operator--(int) { auto old = clone(); sub_(T(1)); return old; }
 };
 
 /* ------------------------------------------------------------------ *
@@ -632,9 +634,9 @@ public:
 /** @brief Wrap `p` as a non-owning view with a contiguous layout (default
  *         C-order). Named `wrap` (not `view`) so it never collides with the
  *         member `t.view()` that returns a raw mdspan. */
-template <class Layout = cs::layout_right, class T, class Extents>
-_TNY_API tensor<T, Extents, Layout, own::view> wrap(T * p, Extents e) {
-    using Tn = tensor<T, Extents, Layout, own::view>;
+template <class Layout = cs::layout_right, class T, class Shape>
+_TNY_API tensor<T, Shape, Layout, own::view> wrap(T * p, Shape e) {
+    using Tn = tensor<T, Shape, Layout, own::view>;
     return Tn(p, typename Tn::mapping_type(e));
 }
 
@@ -654,43 +656,43 @@ wrap(T * p, Extents e, cs::array<typename Extents::index_type, Extents::rank()> 
 
 /** @brief Wrap `p` as a non-owning view with per-dimension compile-time strides
  *         (may be negative). */
-template <cs::int64_t... Strides, class T, class Extents>
-_TNY_API tensor<T, Extents, strides<Strides...>, own::view>
-wrap_strided(T * p, Extents e) {
-    using Tn = tensor<T, Extents, strides<Strides...>, own::view>;
+template <cs::int64_t... Strides, class T, class Shape>
+_TNY_API tensor<T, Shape, strides<Strides...>, own::view>
+wrap_strided(T * p, Shape e) {
+    using Tn = tensor<T, Shape, strides<Strides...>, own::view>;
     return Tn(p, typename Tn::mapping_type(e));
 }
 
 /** @brief A non-owning view type. Construct as `view_t<T,E>(ptr, extents)`. */
-template <class T, class Extents, class Layout = cs::layout_right>
-using view_t = tensor<T, Extents, Layout, own::view>;
+template <class T, class Shape, class Layout = cs::layout_right>
+using view_t = tensor<T, Shape, Layout, own::view>;
 
 /** @brief Stack-owned tensor (fully static shape). Use `local<T,E>{}`. */
-template <class T, class Extents, class Layout = cs::layout_right>
-using local = tensor<T, Extents, Layout, own::stack>;
+template <class T, class Shape, class Layout = cs::layout_right>
+using local = tensor<T, Shape, Layout, own::stack>;
 
 /** @brief Heap-owned tensor (host only, move-only). Use `owned<T,E>(extents)`. */
-template <class T, class Extents, class Layout = cs::layout_right>
-using owned = tensor<T, Extents, Layout, own::heap>;
+template <class T, class Shape, class Layout = cs::layout_right>
+using owned = tensor<T, Shape, Layout, own::heap>;
 
-/* --- functional factories (deduce the Extents type from the argument) ------ *
+/* --- functional factories (deduce the Shape type from the argument) ------ *
  * Complements the type aliases above; the `make_` prefix keeps them distinct.
  * Element type `T` is explicit (it can't be deduced from a shape); the extents
  * type is deduced, so a runtime-built shape needs no `decltype` spelling.       */
 
 /** @brief `make_view<L>(ptr, extents)` — a non-owning view (alias of `wrap`). */
-template <class Layout = cs::layout_right, class T, class Extents>
-_TNY_API auto make_view(T * p, Extents e) { return wrap<Layout>(p, e); }
+template <class Layout = cs::layout_right, class T, class Shape>
+_TNY_API auto make_view(T * p, Shape e) { return wrap<Layout>(p, e); }
 
 /** @brief `make_local<T>(extents)` — a stack-owned tensor (static shape).
  *         `T` defaults to `float` (numpy's default float dtype). */
-template <class T = float, class Layout = cs::layout_right, class Extents>
-_TNY_API auto make_local(Extents = Extents{}) { return tensor<T, Extents, Layout, own::stack>{}; }
+template <class T = float, class Layout = cs::layout_right, class Shape>
+_TNY_API auto make_local(Shape = Shape{}) { return tensor<T, Shape, Layout, own::stack>{}; }
 
 /** @brief `make_heap<T>(extents)` — a heap-owned tensor (host, move-only).
  *         `T` defaults to `float`. */
-template <class T = float, class Layout = cs::layout_right, class Extents>
-_TNY_HOST auto make_heap(Extents e) { return tensor<T, Extents, Layout, own::heap>(e); }
+template <class T = float, class Layout = cs::layout_right, class Shape>
+_TNY_HOST auto make_heap(Shape e) { return tensor<T, Shape, Layout, own::heap>(e); }
 
 /* --- numpy-style creation factories: static shape -> stack (host+device),   *
  *     dynamic shape -> heap (host only), mirroring the out-of-place ops.       */
@@ -700,27 +702,27 @@ _TNY_HOST auto make_heap(Extents e) { return tensor<T, Extents, Layout, own::hea
  *         `full(s, 3.0)` is float); pass `full<T>(...)` to override. Unlike the
  *         value-less `zeros`/`ones` (which default to `float`), there is a value
  *         here to infer from, so we do. */
-template <class T = void, class Layout = cs::layout_right, class Extents, class V,
+template <class T = void, class Layout = cs::layout_right, class Shape, class V,
           class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
-          cs::enable_if_t<Extents::rank_dynamic() == 0, int> = 0>
-_TNY_API auto full(Extents, V v) { tensor<ET, Extents, Layout, own::stack> t{}; t.fill_(static_cast<ET>(v)); return t; }
-template <class T = void, class Layout = cs::layout_right, class Extents, class V,
+          cs::enable_if_t<Shape::rank_dynamic() == 0, int> = 0>
+_TNY_API auto full(Shape, V v) { tensor<ET, Shape, Layout, own::stack> t{}; t.fill_(static_cast<ET>(v)); return t; }
+template <class T = void, class Layout = cs::layout_right, class Shape, class V,
           class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
-          cs::enable_if_t<Extents::rank_dynamic() != 0, int> = 0>
-_TNY_HOST auto full(Extents e, V v) { tensor<ET, Extents, Layout, own::heap> t(e); t.fill_(static_cast<ET>(v)); return t; }
+          cs::enable_if_t<Shape::rank_dynamic() != 0, int> = 0>
+_TNY_HOST auto full(Shape e, V v) { tensor<ET, Shape, Layout, own::heap> t(e); t.fill_(static_cast<ET>(v)); return t; }
 
 /** @brief `zeros<T>(extents)` / `ones<T>(extents)` — a new tensor of 0s / 1s.
  *         `T` defaults to `float`. Static shape -> stack (host+device); dynamic
  *         -> heap (host only). The annotation is split so it matches the overload
  *         `full` resolves to. */
-template <class T = float, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() == 0, int> = 0>
-_TNY_API  auto zeros(Extents e) { return full<T, Layout>(e, T(0)); }
-template <class T = float, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() != 0, int> = 0>
-_TNY_HOST auto zeros(Extents e) { return full<T, Layout>(e, T(0)); }
-template <class T = float, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() == 0, int> = 0>
-_TNY_API  auto ones(Extents e) { return full<T, Layout>(e, T(1)); }
-template <class T = float, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() != 0, int> = 0>
-_TNY_HOST auto ones(Extents e) { return full<T, Layout>(e, T(1)); }
+template <class T = float, class Layout = cs::layout_right, class Shape, cs::enable_if_t<Shape::rank_dynamic() == 0, int> = 0>
+_TNY_API  auto zeros(Shape e) { return full<T, Layout>(e, T(0)); }
+template <class T = float, class Layout = cs::layout_right, class Shape, cs::enable_if_t<Shape::rank_dynamic() != 0, int> = 0>
+_TNY_HOST auto zeros(Shape e) { return full<T, Layout>(e, T(0)); }
+template <class T = float, class Layout = cs::layout_right, class Shape, cs::enable_if_t<Shape::rank_dynamic() == 0, int> = 0>
+_TNY_API  auto ones(Shape e) { return full<T, Layout>(e, T(1)); }
+template <class T = float, class Layout = cs::layout_right, class Shape, cs::enable_if_t<Shape::rank_dynamic() != 0, int> = 0>
+_TNY_HOST auto ones(Shape e) { return full<T, Layout>(e, T(1)); }
 
 /** @brief `arange<T>(n)` — a 1-D tensor `[0, 1, ..., n-1]` (heap, host). `T`
  *         defaults to `int64_t` (an integer range, like numpy `arange(n)`). */

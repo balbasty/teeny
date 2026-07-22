@@ -127,10 +127,10 @@ struct _str_compact<V0, Vs...> {
     using type = cs::conditional_t<V0 == _sdrop, rest, typename _str_prepend<V0, rest>::type>;
 };
 
-// static output stride for source axis Ax under (Layout, Extents), given the arg.
-template <class Arg, cs::size_t Ax, class Layout, class Extents>
+// static output stride for source axis Ax under (Layout, Shape), given the arg.
+template <class Arg, cs::size_t Ax, class Layout, class Shape>
 _TNY_API constexpr cs::int64_t _out_sstride() {
-    constexpr cs::int64_t ss = _src_sstride<Ax, Layout, Extents>();
+    constexpr cs::int64_t ss = _src_sstride<Ax, Layout, Shape>();
     if constexpr (_is_index<Arg>::value)          return _sdrop;                 // dropped
     else if constexpr (_is_full_slice<Arg>::value) return ss;                    // slice(none,none) == all
     else if constexpr (_is_slice_spec<Arg>::value) {                             // range: ss × step

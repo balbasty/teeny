@@ -76,28 +76,28 @@ struct strides {
         cs::size_t c = 0; for (cs::size_t i = 0; i < r; ++i) if (S_[i] == dynamic_stride) ++c; return c;
     }
 
-    // Extents is a private base (not a member) so the mapping is EMPTY (EBO)
+    // Shape is a private base (not a member) so the mapping is EMPTY (EBO)
     // when the shape is fully static, keeping strides<...> tensors sizeof-exact.
-    template <class Extents>
-    struct mapping : private _dyn_strides<typename Extents::index_type, strides::ndyn()>, private Extents {
-        using extents_type = Extents;
-        using index_type   = typename Extents::index_type;
-        using rank_type    = typename Extents::rank_type;
+    template <class Shape>
+    struct mapping : private _dyn_strides<typename Shape::index_type, strides::ndyn()>, private Shape {
+        using extents_type = Shape;
+        using index_type   = typename Shape::index_type;
+        using rank_type    = typename Shape::rank_type;
         using layout_type  = strides;
         using _dyn         = _dyn_strides<index_type, strides::ndyn()>;
-        static_assert(N == Extents::rank(), "strides: one stride per dimension");
+        static_assert(N == Shape::rank(), "strides: one stride per dimension");
 
         mapping() = default;
 
         /** @brief Fully-static strides: construct from extents only. */
         template <cs::size_t M = strides::ndyn(), cs::enable_if_t<M == 0, int> = 0>
-        _TNY_API constexpr mapping(const Extents & e) : Extents(e) {}
+        _TNY_API constexpr mapping(const Shape & e) : Shape(e) {}
 
         /** @brief Mixed strides: extents + the runtime strides (dim order, dynamic ones only). */
-        _TNY_API constexpr mapping(const Extents & e, const cs::array<index_type, strides::ndyn()> & dyn)
-            : _dyn{dyn}, Extents(e) {}
+        _TNY_API constexpr mapping(const Shape & e, const cs::array<index_type, strides::ndyn()> & dyn)
+            : _dyn{dyn}, Shape(e) {}
 
-        _TNY_API constexpr const Extents & extents() const noexcept { return *this; }
+        _TNY_API constexpr const Shape & extents() const noexcept { return *this; }
         _TNY_API constexpr index_type stride(rank_type r) const noexcept {
             return S_[r] == dynamic_stride ? _dyn::at(strides::slot(r)) : static_cast<index_type>(S_[r]);
         }
@@ -105,12 +105,12 @@ struct strides {
         _TNY_API constexpr index_type operator()(I... i) const noexcept {
             const index_type id[] = { static_cast<index_type>(i)... };
             index_type off = 0;
-            for (rank_type r = 0; r < Extents::rank(); ++r) off += id[r] * stride(r);
+            for (rank_type r = 0; r < Shape::rank(); ++r) off += id[r] * stride(r);
             return off;
         }
         _TNY_API constexpr index_type required_span_size() const noexcept {
             index_type n = 1;
-            for (rank_type r = 0; r < Extents::rank(); ++r) {
+            for (rank_type r = 0; r < Shape::rank(); ++r) {
                 if (extents().extent(r) == 0) return 0;
                 n += (static_cast<index_type>(extents().extent(r)) - 1) * stride(r);
             }

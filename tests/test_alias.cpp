@@ -31,6 +31,14 @@ int main()
     static_assert(cs::is_same<f2, half>::value,         "f2 == half");
     static_assert(cs::is_same<bf16, bfloat16>::value,   "bf16 == bfloat16");
 
+    // ---- numpy-style layout spellings --------------------------------------
+    static_assert(cs::is_same<corder, layout_right>::value, "corder == layout_right");
+    static_assert(cs::is_same<forder, layout_left>::value,  "forder == layout_left");
+    double lb[6] = {0,1,2,3,4,5};
+    auto cw = wrap<corder>(lb, shape<2,3>{});   // row-major: strides (3,1)
+    auto fw = wrap<forder>(lb, shape<2,3>{});   // col-major: strides (1,2)
+    if (cw(0,1) != 1 || fw(1,0) != 1) return 2;
+
     // usable as an element type in a factory
     auto z = zeros<i4>(shape<2,2>{});
     static_assert(cs::is_same<decltype(z)::element_type, cs::int32_t>::value, "zeros<i4>");

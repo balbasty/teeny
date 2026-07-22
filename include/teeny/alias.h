@@ -26,6 +26,11 @@ using cs::full_extent_t;
 using cs::layout_right;
 using cs::layout_left;
 using cs::layout_stride;
+/** @brief numpy-style spellings of the contiguous layouts: `corder` is C-order
+ *         (row-major, `layout_right`), `forder` is Fortran-order (column-major,
+ *         `layout_left`). Use wherever a `Layout` is expected. */
+using corder = cs::layout_right;
+using forder = cs::layout_left;
 using cs::mdspan;
 using cs::submdspan;
 
@@ -73,9 +78,6 @@ template <cs::uint8_t  V> using U1 = Uint8<V>;
 template <cs::uint16_t V> using U2 = Uint16<V>;
 template <cs::uint32_t V> using U4 = Uint32<V>;
 template <cs::uint64_t V> using U8 = Uint64<V>;
-
-/** @brief Alias of `Long`; a compile-time index value. */
-template <long V> using ic = cs::integral_constant<long, V>;
 
 /* ------------------------------------------------------------------ *
  *   Element dtype aliases (numpy short codes; width in BYTES)         *

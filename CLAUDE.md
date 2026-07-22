@@ -62,7 +62,7 @@ internal. `namespace cs = cuda::std;` throughout.
 ## The tensor type
 
 ```cpp
-template <class T, class Extents, class Layout = layout_right, own O = own::view>
+template <class T, class Shape, class Layout = layout_right, own O = own::view>
 struct tensor;
 ```
 
@@ -72,13 +72,15 @@ struct tensor;
   same layout. All elementwise/reduction math computes in `float`
   (`compute_type<T>`), so precision holds and the engines never need native
   half *host* operators.
-- **`Extents`** = `cuda::std::extents<Idx, E0, E1, ...>`; each `Ei` is a compile-time
-  size or `dynamic_extent`. Mix freely per dimension. Prefer the `shape<...>`
-  alias (`= extents<int64_t, ...>`, DLPack's index type); a dynamic dim is
-  `dynamic_extent` or numpy-style **`-1`** (`shape<-1,3>` == `shape<dynamic_extent,3>`).
-- **`Layout`** = `layout_right` (default, C-order), `layout_left` (F-order),
-  `layout_stride` (runtime strides), or teeny's `layout_static_stride<S...>`
-  (compile-time strides).
+- **`Shape`** (the second template parameter, exposed as `shape_type`, and still
+  `extents_type`) = any `cuda::std::extents<Idx, E0, E1, ...>`; each `Ei` is a
+  compile-time size or `dynamic_extent`. Mix freely per dimension. Prefer the
+  `shape<...>` alias (`= extents<int64_t, ...>`, DLPack's index type); a dynamic
+  dim is `dynamic_extent` or numpy-style **`-1`** (`shape<-1,3>` ==
+  `shape<dynamic_extent,3>`).
+- **`Layout`** = `layout_right` (default, C-order; alias `corder`), `layout_left`
+  (F-order; alias `forder`), `layout_stride` (runtime strides), or teeny's
+  `layout_static_stride<S...>` (compile-time strides).
 - **`O`** ownership: `view` (non-owning, trivially copyable, kernel-passable),
   `stack` (inline array, requires fully static shape), `heap` (host `new[]`,
   move-only), or CUDA `gpu`/`pinned`/`mapped` (from `cuda.h`).
@@ -225,7 +227,7 @@ slices of either**, and dispatches to the right output type:
 
 - `alias.h` provides short names for `cuda::std::integral_constant`:
   `Int<V>`, `Long<V>`, `Size<V>`, `Uint<V>`, `Int32<V>`, `Int64<V>`, `Diff<V>`,
-  `Bool<V>`, and `ic<V>`. Each converts implicitly to a runtime integer *and*
+  and `Bool<V>`. Each converts implicitly to a runtime integer *and*
   carries `::value`.
 - `extent(Int<0>())` returns an `integral_constant` when that extent is static
   (folds into later arithmetic); `extent(0)` returns a runtime `index_type`.

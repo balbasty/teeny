@@ -71,24 +71,24 @@ struct storage<T, own::mapped, N> : owning_storage<T, cuda_mapped_alloc> {
  * ------------------------------------------------------------------ */
 
 /** @brief Owning tensor in device (GPU) memory (move-only). `gpu<T,E>(extents)`. */
-template <class T, class Extents, class Layout = cs::layout_right>
-using gpu = tensor<T, Extents, Layout, own::gpu>;
+template <class T, class Shape, class Layout = cs::layout_right>
+using gpu = tensor<T, Shape, Layout, own::gpu>;
 /** @brief Owning tensor in page-locked ("pinned") host memory (move-only).
  *         `pinned<T,E>(extents)` — pytorch's `pin_memory`. */
-template <class T, class Extents, class Layout = cs::layout_right>
-using pinned = tensor<T, Extents, Layout, own::pinned>;
+template <class T, class Shape, class Layout = cs::layout_right>
+using pinned = tensor<T, Shape, Layout, own::pinned>;
 /** @brief Owning tensor in mapped (zero-copy) host memory (move-only). `mapped<T,E>(extents)`. */
-template <class T, class Extents, class Layout = cs::layout_right>
-using mapped = tensor<T, Extents, Layout, own::mapped>;
+template <class T, class Shape, class Layout = cs::layout_right>
+using mapped = tensor<T, Shape, Layout, own::mapped>;
 
-/* --- functional factories (deduce the Extents type from the argument;
+/* --- functional factories (deduce the Shape type from the argument;
  *     `T` defaults to `float`, like the host factories) --- */
-template <class T = float, class Layout = cs::layout_right, class Extents>
-_TNY_HOST auto make_gpu(Extents e)    { return tensor<T, Extents, Layout, own::gpu>(e); }
-template <class T = float, class Layout = cs::layout_right, class Extents>
-_TNY_HOST auto make_pinned(Extents e) { return tensor<T, Extents, Layout, own::pinned>(e); }
-template <class T = float, class Layout = cs::layout_right, class Extents>
-_TNY_HOST auto make_mapped(Extents e) { return tensor<T, Extents, Layout, own::mapped>(e); }
+template <class T = float, class Layout = cs::layout_right, class Shape>
+_TNY_HOST auto make_gpu(Shape e)    { return tensor<T, Shape, Layout, own::gpu>(e); }
+template <class T = float, class Layout = cs::layout_right, class Shape>
+_TNY_HOST auto make_pinned(Shape e) { return tensor<T, Shape, Layout, own::pinned>(e); }
+template <class T = float, class Layout = cs::layout_right, class Shape>
+_TNY_HOST auto make_mapped(Shape e) { return tensor<T, Shape, Layout, own::mapped>(e); }
 
 _TNY_NAMESPACE_END(tny)
 
