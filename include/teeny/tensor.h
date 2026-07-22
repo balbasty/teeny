@@ -482,7 +482,24 @@ public:
     _TNY_API tensor & cos_();
     _TNY_API tensor & sqrt_();
     _TNY_API tensor & tanh_();
+    _TNY_API tensor & floor_();
+    _TNY_API tensor & ceil_();
+    _TNY_API tensor & round_();
+    _TNY_API tensor & trunc_();
+    _TNY_API tensor & sign_();                 // -1 / 0 / +1
     _TNY_API tensor & pow_(T e);
+    _TNY_API tensor & clamp_(T lo, T hi);      // clamp each element to [lo, hi]
+
+    /* --- increment / decrement --------------------------------------- *
+     * Prefix ++/-- mutate in place (add/subtract 1 from every element).
+     * Postfix returns the pre-value, so it must allocate a copy -> only a
+     * STATIC shape (stack copy, host+device); a dynamic shape has no postfix. */
+    _TNY_API tensor & operator++() { return add_(T(1)); }
+    _TNY_API tensor & operator--() { return sub_(T(1)); }
+    template <bool S = is_static, cs::enable_if_t<S, int> = 0>
+    _TNY_API tensor<T, Extents, cs::layout_right, own::stack> operator++(int) { auto old = clone(); add_(T(1)); return old; }
+    template <bool S = is_static, cs::enable_if_t<S, int> = 0>
+    _TNY_API tensor<T, Extents, cs::layout_right, own::stack> operator--(int) { auto old = clone(); sub_(T(1)); return old; }
 };
 
 /* ------------------------------------------------------------------ *

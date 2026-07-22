@@ -74,7 +74,7 @@ auto hh = local<half, shape<64,64>>();
 | `math.h` | in-place / out-of-place ops (broadcasting) + unary math, `sum`/`prod`/`max`/`min`/`dot` |
 | `iterate.h` | nd-peel: `peel<Axes…>` / `peel_at<Axes…>` |
 | `helpers.h` | `batch_offset` (index2offset), `channel` |
-| `dynamic.h` | `any_tensor` + `dispatch_rank` (runtime rank) |
+| `dynamic.h` | `anyrank` + `dispatch_rank` (runtime rank) |
 | `cuda.h` | opt-in device / host / pinned memory (needs the CUDA runtime) |
 
 ## Building & testing

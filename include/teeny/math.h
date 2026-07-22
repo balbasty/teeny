@@ -102,7 +102,17 @@ struct u_sin  { template <class X> _TNY_API X operator()(X x) const { return cs:
 struct u_cos  { template <class X> _TNY_API X operator()(X x) const { return cs::cos(x); } };
 struct u_sqrt { template <class X> _TNY_API X operator()(X x) const { return cs::sqrt(x); } };
 struct u_tanh { template <class X> _TNY_API X operator()(X x) const { return cs::tanh(x); } };
+struct u_floor{ template <class X> _TNY_API X operator()(X x) const { return cs::floor(x); } };
+struct u_ceil { template <class X> _TNY_API X operator()(X x) const { return cs::ceil(x); } };
+struct u_round{ template <class X> _TNY_API X operator()(X x) const { return cs::round(x); } };
+struct u_trunc{ template <class X> _TNY_API X operator()(X x) const { return cs::trunc(x); } };
+struct u_sign { template <class X> _TNY_API X operator()(X x) const { return x < X(0) ? X(-1) : (x > X(0) ? X(1) : X(0)); } };
 struct pw     { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return cs::pow(x, static_cast<X>(y)); } };
+
+/* ---- binary min/max (broadcast) and clamp (functor with bounds) --- */
+struct b_min  { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { X yy = static_cast<X>(y); return yy < x ? yy : x; } };
+struct b_max  { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { X yy = static_cast<X>(y); return yy > x ? yy : x; } };
+struct u_clamp{ double lo, hi; template <class X> _TNY_API X operator()(X x) const { X l = static_cast<X>(lo), h = static_cast<X>(hi); return x < l ? l : (x > h ? h : x); } };
 
 /* ---- reduce ops (acc = op(acc, x)) ------------------------------- */
 struct r_add { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a + static_cast<A>(x); } };
@@ -459,17 +469,24 @@ _TNY_API auto operator-(const tensor<T,E,L,O> & a) { return _md::uop_out(a, _md:
 #define _TNY_MD_UNARY_(NAME, F)                                                                   \
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::NAME()        \
 { _md::unary(*this, F{}); return *this; }
-_TNY_MD_UNARY_(neg_,  _md::u_neg)
-_TNY_MD_UNARY_(abs_,  _md::u_abs)
-_TNY_MD_UNARY_(exp_,  _md::u_exp)
-_TNY_MD_UNARY_(log_,  _md::u_log)
-_TNY_MD_UNARY_(sin_,  _md::u_sin)
-_TNY_MD_UNARY_(cos_,  _md::u_cos)
-_TNY_MD_UNARY_(sqrt_, _md::u_sqrt)
-_TNY_MD_UNARY_(tanh_, _md::u_tanh)
+_TNY_MD_UNARY_(neg_,   _md::u_neg)
+_TNY_MD_UNARY_(abs_,   _md::u_abs)
+_TNY_MD_UNARY_(exp_,   _md::u_exp)
+_TNY_MD_UNARY_(log_,   _md::u_log)
+_TNY_MD_UNARY_(sin_,   _md::u_sin)
+_TNY_MD_UNARY_(cos_,   _md::u_cos)
+_TNY_MD_UNARY_(sqrt_,  _md::u_sqrt)
+_TNY_MD_UNARY_(tanh_,  _md::u_tanh)
+_TNY_MD_UNARY_(floor_, _md::u_floor)
+_TNY_MD_UNARY_(ceil_,  _md::u_ceil)
+_TNY_MD_UNARY_(round_, _md::u_round)
+_TNY_MD_UNARY_(trunc_, _md::u_trunc)
+_TNY_MD_UNARY_(sign_,  _md::u_sign)
 #undef _TNY_MD_UNARY_
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::pow_(T e)
 { _md::scal(*this, e, _md::pw{}); return *this; }
+template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::clamp_(T lo, T hi)
+{ _md::unary(*this, _md::u_clamp{ static_cast<double>(lo), static_cast<double>(hi) }); return *this; }
 
 /* --- generic elementwise with a user functor --------------------- */
 template <class T,class E,class L,own O> template <class F>
@@ -523,15 +540,40 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) 
 #define _TNY_MD_UNARY(NAME, F)                                                                    \
 template <class T,class E,class L,own O> _TNY_API auto NAME(const tensor<T,E,L,O> & a)             \
 { return _md::uop_out(a, F{}); }
-_TNY_MD_UNARY(neg,  _md::u_neg)
-_TNY_MD_UNARY(abs,  _md::u_abs)
-_TNY_MD_UNARY(exp,  _md::u_exp)
-_TNY_MD_UNARY(log,  _md::u_log)
-_TNY_MD_UNARY(sin,  _md::u_sin)
-_TNY_MD_UNARY(cos,  _md::u_cos)
-_TNY_MD_UNARY(sqrt, _md::u_sqrt)
-_TNY_MD_UNARY(tanh, _md::u_tanh)
+_TNY_MD_UNARY(neg,   _md::u_neg)
+_TNY_MD_UNARY(abs,   _md::u_abs)
+_TNY_MD_UNARY(exp,   _md::u_exp)
+_TNY_MD_UNARY(log,   _md::u_log)
+_TNY_MD_UNARY(sin,   _md::u_sin)
+_TNY_MD_UNARY(cos,   _md::u_cos)
+_TNY_MD_UNARY(sqrt,  _md::u_sqrt)
+_TNY_MD_UNARY(tanh,  _md::u_tanh)
+_TNY_MD_UNARY(floor, _md::u_floor)
+_TNY_MD_UNARY(ceil,  _md::u_ceil)
+_TNY_MD_UNARY(round, _md::u_round)
+_TNY_MD_UNARY(trunc, _md::u_trunc)
+_TNY_MD_UNARY(sign,  _md::u_sign)
 #undef _TNY_MD_UNARY
+
+/* --- binary minimum/maximum (broadcast) + clamp -> new tensor ------ */
+template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>
+_TNY_API auto minimum(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) { return _md::oop(a, b, _md::b_min{}); }
+template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>
+_TNY_API auto maximum(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) { return _md::oop(a, b, _md::b_max{}); }
+template <class T,class E,class L,own O, class S, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
+_TNY_API auto minimum(const tensor<T,E,L,O> & a, S s) { return _md::oops(a, s, _md::b_min{}); }
+template <class T,class E,class L,own O, class S, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
+_TNY_API auto maximum(const tensor<T,E,L,O> & a, S s) { return _md::oops(a, s, _md::b_max{}); }
+/** @brief `clamp(a, lo, hi)` -> a new tensor with each element clamped. */
+template <class T,class E,class L,own O>
+_TNY_API auto clamp(const tensor<T,E,L,O> & a, T lo, T hi) { return a.map(_md::u_clamp{ static_cast<double>(lo), static_cast<double>(hi) }); }
+
+/** @brief Arithmetic mean of all elements (accumulated in the compute type). */
+template <class T, class E, class L, own O>
+_TNY_API auto mean(const tensor<T,E,L,O> & a) {
+    using R = compute_type_t<T>;
+    return static_cast<R>(sum(a)) / static_cast<R>(a.numel());
+}
 
 _TNY_NAMESPACE_END(tny)
 

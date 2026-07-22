@@ -149,6 +149,8 @@ a += b; a -= 2.0; a *= b; a /= 2.0;           // compound-assign sugar (scalar o
 a.add_<true>(b); a.sub_<true>(2.0);           // ATOMIC accumulate (device scatter/push)
 a.neg_(); a.abs_(); a.exp_(); a.log_();       // unary in-place
 a.sin_(); a.cos_(); a.sqrt_(); a.tanh_(); a.pow_(3.0);
+a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_(); a.clamp_(lo,hi);
+++a; --a; auto old = a++;                      // prefix in place; postfix (static shape) -> stack copy
 
 // --- assignment / scatter / generic (kernel prologue/epilogue) ---
 a.fill_(0.0); a.zero_(); a.copy_(b);          // b broadcasts into a
@@ -165,10 +167,11 @@ auto c = a + b;  auto c = a.add(b);   // tensor+tensor (broadcasts) or tensor+sc
 auto c = a * 2.0;  auto c = 2.0 * a;  // scalar ops (+ and * commute; 2.0-a and 1.0/a reversed)
 auto c = -a;                          // unary minus -> new tensor
 auto c = a.pow(b);                    // element-wise power
-auto e = exp(a); auto e = sqrt(a);    // unary free functions (neg/abs/exp/log/sin/cos/sqrt/tanh)
+auto e = exp(a); auto e = sqrt(a);    // unary free (neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign)
+auto c = minimum(a,b); maximum(a,2.0); clamp(a,lo,hi);   // elementwise binary min/max, clamp
 
 // --- reductions -> scalar ---
-sum(a); prod(a); max(a); min(a); dot(a,b);
+sum(a); prod(a); max(a); min(a); mean(a); dot(a,b);
 
 // --- nd-peel: iterate a SUBSET of axes, each yielding a lower-rank view ---
 for (auto line : peel<0,1>(t)) f(line);   // peel axes 0,1; each `line` is a view

@@ -52,5 +52,26 @@ int main() {
     reg.add_<true>(one);            // 3,3,3
     if (reg(0)!=3.0 || reg(2)!=3.0) return 10;
 
+    // ---- rounding / sign / clamp (in-place and free) ------------------
+    auto g = local<double, extents<long,4>>(); g(0)=-1.7; g(1)=2.3; g(2)=0.0; g(3)=3.5;
+    auto fl = floor(g); if (fl(0)!=-2.0 || fl(1)!=2.0 || fl(3)!=3.0) return 11;
+    auto sg = sign(g);  if (sg(0)!=-1.0 || sg(2)!=0.0 || sg(3)!=1.0) return 12;
+    auto gr = g.clone(); gr.round_(); if (gr(0)!=-2.0 || gr(1)!=2.0 || gr(3)!=4.0) return 13;
+    auto gc = g.clone(); gc.clamp_(0.0, 3.0); if (gc(0)!=0.0 || gc(1)!=2.3 || gc(3)!=3.0) return 14;
+
+    // ---- minimum / maximum (broadcast) + mean -------------------------
+    auto x = local<double, extents<long,3>>(); x(0)=1; x(1)=5; x(2)=3;
+    auto y = local<double, extents<long,3>>(); y(0)=4; y(1)=2; y(2)=3;
+    auto mn = minimum(x,y); if (mn(0)!=1 || mn(1)!=2 || mn(2)!=3) return 15;
+    auto mx = maximum(x,2.5); if (mx(0)!=2.5 || mx(1)!=5 || mx(2)!=3) return 16;
+    if (mean(x) != 3.0) return 17;
+
+    // ---- ++ / -- (prefix in place; postfix static -> stack copy) ------
+    auto p = local<double, extents<long,2>>(); p.fill_(5.0);
+    ++p; if (p(0)!=6.0) return 18;
+    --p; --p; if (p(0)!=4.0) return 19;
+    auto pre = p++;                 // postfix returns pre-value (4), p becomes 5
+    if (pre(0)!=4.0 || p(0)!=5.0) return 20;
+
     return 0;
 }
