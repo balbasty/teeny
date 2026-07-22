@@ -208,6 +208,26 @@ See [Dispatch & the ndarray boundary](dispatch.md).
 
 ---
 
+## DLPack interchange (`<teeny/dlpack.h>`)
+
+Zero-copy exchange with numpy / torch / cupy / jax via `DLManagedTensor` (the
+structs are vendored — no external dependency). DLPack passes a pointer +
+metadata, never data.
+
+| Call | Returns | Notes |
+|---|---|---|
+| `to_dlpack(view)` | `DLManagedTensor*` | export a view — **borrows** data; caller keeps the memory alive |
+| `to_dlpack(std::move(owner))` | `DLManagedTensor*` | export an owning tensor — **moves** the buffer into the capsule |
+| `from_dlpack<T>(m)` | `anyrank<T>` | import (runtime rank); metadata copied, data borrowed |
+| `from_dlpack<T, R>(m)` | rank-`R` view | import at a known rank |
+| `dispatch_dlpack(m, f)` | `bool` | read dtype+rank from `m`, call `f` with a typed fixed-rank view |
+
+The consumer owns a returned `DLManagedTensor*` and must call `m->deleter(m)`
+once. On import, null `strides` ⇒ C-contiguous, `byte_offset` folds into the
+pointer, and the caller keeps `m` alive while the view is used.
+
+---
+
 ## Compile flags
 
 | flag | effect |
