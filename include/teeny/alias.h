@@ -109,6 +109,12 @@ template <class T> _TNY_API constexpr cs::size_t _dyn_extent(T e) {
  * `owned<float, shape<-1,4>>`. */
 template <auto... E> using shape = cs::extents<cs::int64_t, _dyn_extent(E)...>;
 
+/** @brief Fully-dynamic shape of a given rank: `rank<3>` == `shape<-1,-1,-1>`
+ *  == `extents<int64_t, dynamic_extent, dynamic_extent, dynamic_extent>`. Handy
+ *  for a rank-N view whose sizes are all runtime: `view_t<float, rank<3>>`.
+ *  `rank<0>` is the rank-0 (scalar) shape. */
+template <cs::size_t N> using rank = cs::dextents<cs::int64_t, N>;
+
 /** @brief Keep-this-axis marker for slicing (an alias of `full_extent`). */
 constexpr cs::full_extent_t all{};
 
