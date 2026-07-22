@@ -50,11 +50,29 @@ Factories:
 
 Copying a view copies the pointer, not the data; memory lifetime is the caller's.
 
-!!! warning "Assignment rebinds a view — it does not copy elements"
-    `a = b` on two views makes `a` point at `b`'s data (C++ value semantics); it
-    does **not** write `b`'s elements into `a`'s buffer. For the numpy `a[:] = b`
-    meaning (copy elements, broadcasting), use `a.copy_(b)`. (An *owning* tensor
-    `local`/`owned` does copy on assignment, as usual.)
+!!! warning "`a = b` rebinds a view; `a(ellipsis) = b` copies elements"
+    `a = b` on a **named** view makes `a` point at `b`'s data (C++ value
+    semantics); it does **not** write `b`'s elements into `a`'s buffer. To copy
+    elements (the numpy `a[:] = b`), assign into a **slice** instead — the result
+    of `operator()` is a temporary view, and assigning to it copies (with
+    broadcasting):
+
+    ```cpp
+    a = b;             // rebind: `a` now views `b`'s memory (nothing copied)
+    a(ellipsis) = b;   // copy: write b's elements into a's buffer (== a.copy_(b))
+    a(0, all) = b;     // copy into a sub-region; a(0, all) = 5.0 fills it
+    ```
+
+    Both `a.copy_(b)` and slice-assignment broadcast `b` and need matching rank
+    (teeny does not right-align; `unsqueeze` first). An *owning* `local`/`owned`
+    copies its elements on `a = b` as usual (it holds the storage, not a pointer).
+
+    **Different shapes/strides:** `a = b` is ordinary C++ assignment, so `a` and
+    `b` must be the *same tensor type* — teeny has no cross-type assignment. If a
+    dynamic-shaped `a` is assigned a `b` with a different runtime shape, `a`
+    simply takes on `b`'s shape and pointer (it is a rebind). Two *different*
+    static shapes are different types and won't compile — use `a(ellipsis) = b`
+    (or `a.copy_(b)`), which broadcasts, when you mean to copy across shapes.
 
 ## Owning variants
 

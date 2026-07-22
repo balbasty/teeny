@@ -40,6 +40,30 @@ _TNY_API constexpr cs::size_t _norm_axis(long a, cs::size_t rank) noexcept {
 struct none_t {};
 constexpr none_t none{};
 
+/** @brief Ellipsis sentinel — teeny's `...` (python `a[..., 0]` / numpy `Ellipsis`).
+ *
+ * In an index expression it stands for "as many `all` as it takes to fill the
+ * rank": `t(1, ellipsis, 2)` on a rank-5 tensor is `t(1, all, all, all, 2)`.
+ * At most one ellipsis per call. It expands to `rank - (#other args)` copies of
+ * `all` (which may be zero), then the call proceeds as usual — so if what
+ * remains is all integers you get an element `T&`, otherwise a view. */
+struct ellipsis_t {};
+constexpr ellipsis_t ellipsis{};
+template <class A> struct _is_ellipsis : cs::false_type {};
+template <> struct _is_ellipsis<ellipsis_t> : cs::true_type {};
+template <class... Args> struct _has_ellipsis
+    : cs::integral_constant<bool, (_is_ellipsis<Args>::value || ... || false)> {};
+
+// position of the (first) ellipsis in a pack, and how many there are.
+template <class... Args> _TNY_API constexpr cs::size_t _ellipsis_pos() {
+    bool is[] = { _is_ellipsis<Args>::value..., false };
+    for (cs::size_t i = 0; i < sizeof...(Args); ++i) if (is[i]) return i;
+    return sizeof...(Args);
+}
+template <class... Args> _TNY_API constexpr cs::size_t _ellipsis_count() {
+    return (cs::size_t(0) + ... + (_is_ellipsis<Args>::value ? cs::size_t(1) : cs::size_t(0)));
+}
+
 // The one index/bound wrap used everywhere: `none` -> `dflt`; a negative value
 // wraps python-style (in a SIGNED domain, so it works for an unsigned index_type).
 // Folds when it can: a static (integral_constant) or unsigned arg needs no branch,

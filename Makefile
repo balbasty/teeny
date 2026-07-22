@@ -31,6 +31,7 @@ TESTS = \
 	$(BUILDDIR)/test_axred \
 	$(BUILDDIR)/test_valueform \
 	$(BUILDDIR)/test_compare \
+	$(BUILDDIR)/test_ellipsis \
 	$(BUILDDIR)/test_iterate \
 	$(BUILDDIR)/test_subperm \
 	$(BUILDDIR)/test_takealong \

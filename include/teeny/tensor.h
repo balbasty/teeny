@@ -272,6 +272,35 @@ private:
             return tensor<Vt, OE, SF, own::view>(p + off, Map(OE(ea), dyn));
         }
     }
+    // ellipsis expansion: for output axis O, pick the front arg, an inserted
+    // `all`, or the back arg (shifted past the F inserted `all`s). One ellipsis
+    // at position Pe expands to F = rank - (N-1) copies of `all`.
+    template <cs::size_t Oi, cs::size_t Pe, cs::size_t F, class Tup>
+    _TNY_API static auto _ellip_arg(const Tup & t) {
+        if constexpr (Oi < Pe)          return cs::get<Oi>(t);
+        else if constexpr (Oi < Pe + F) return tny::all;
+        else                            return cs::get<Oi - F + 1>(t);
+    }
+    template <class Tup, cs::size_t... I>
+    _TNY_API static constexpr cs::size_t _tup_ellipsis_pos(cs::index_sequence<I...>) {
+        return _ellipsis_pos<cs::tuple_element_t<I, Tup>...>();
+    }
+    template <class Tup, cs::size_t... Oi>
+    _TNY_API decltype(auto) _ellip_call(Tup t, cs::index_sequence<Oi...>) {
+        constexpr cs::size_t N  = cs::tuple_size<Tup>::value;
+        static_assert(N - 1 <= rank(), "too many indices for ellipsis expansion");
+        constexpr cs::size_t Pe = _tup_ellipsis_pos<Tup>(cs::make_index_sequence<N>{});
+        constexpr cs::size_t F  = rank() - (N - 1);
+        return (*this)(_ellip_arg<Oi, Pe, F>(t)...);
+    }
+    template <class Tup, cs::size_t... Oi>
+    _TNY_API decltype(auto) _ellip_call(Tup t, cs::index_sequence<Oi...>) const {
+        constexpr cs::size_t N  = cs::tuple_size<Tup>::value;
+        static_assert(N - 1 <= rank(), "too many indices for ellipsis expansion");
+        constexpr cs::size_t Pe = _tup_ellipsis_pos<Tup>(cs::make_index_sequence<N>{});
+        constexpr cs::size_t F  = rank() - (N - 1);
+        return (*this)(_ellip_arg<Oi, Pe, F>(t)...);
+    }
 public:
     /** @brief Element access when every argument is an integer (negatives wrap). */
     template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
@@ -309,12 +338,23 @@ public:
      *         Integer args drop their axis, `all` keeps it, a range keeps a strided
      *         window — all via the one gather (folds static strides into
      *         `strides<...>`; works on any source layout). */
-    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...), int> = 0>
+    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API auto operator()(Args... a) noexcept
     { return _slice_range(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
-    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...), int> = 0>
+    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API auto operator()(Args... a) const noexcept
     { return _slice_range(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
+
+    /** @brief Ellipsis form: exactly one `ellipsis` in the args expands to
+     *         `rank - (#other args)` copies of `all`, then the call re-runs — so
+     *         `t(1, ellipsis, 2)` on rank 5 is `t(1, all, all, all, 2)`. What
+     *         remains decides the result (all integers -> element, else view). */
+    template <class... Args, cs::enable_if_t<_has_ellipsis<Args...>::value, int> = 0>
+    _TNY_API decltype(auto) operator()(Args... a) noexcept
+    { return _ellip_call(cs::make_tuple(a...), cs::make_index_sequence<rank()>{}); }
+    template <class... Args, cs::enable_if_t<_has_ellipsis<Args...>::value, int> = 0>
+    _TNY_API decltype(auto) operator()(Args... a) const noexcept
+    { return _ellip_call(cs::make_tuple(a...), cs::make_index_sequence<rank()>{}); }
 
     /* --- rank-0 <-> scalar interop -------------------------------- *
      * A rank-0 tensor holds exactly one element, so it acts like a scalar:
@@ -327,6 +367,17 @@ public:
     /** @brief The single element of a rank-0 tensor (explicit reader). */
     template <cs::size_t R = rank(), cs::enable_if_t<R == 0, int> = 0>
     _TNY_API T item() const noexcept { return store_.data()[0]; }
+
+    /* --- assign INTO a slice/temporary view: copies CONTENTS ------- *
+     * `a = b` on a NAMED view rebinds it (shallow — the C++ default). The result
+     * of a slice, e.g. `a(ellipsis) = b` or `a(0, all) = b`, is a TEMPORARY
+     * (rvalue) view; assigning to it copies b's elements into the viewed region
+     * (b broadcasts), the numpy `a[:] = b` meaning. The rvalue ref-qualifier is
+     * what tells the two apart. A scalar rhs fills. */
+    template <class B, class E2, class L2, own O2>
+    _TNY_API void operator=(const tensor<B,E2,L2,O2> & rhs) && { this->copy_(rhs); }
+    template <cs::size_t R = rank(), cs::enable_if_t<(R > 0), int> = 0>
+    _TNY_API void operator=(T v) && { this->fill_(v); }
 
     /* --- structural views (return md::tensor views) --------------- */
 

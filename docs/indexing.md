@@ -45,6 +45,7 @@ view into the same memory:
 | `slice(a, b)` | half-open range `[a, b)` |
 | `slice(a, b, step)` | strided range (`step` may be negative) |
 | `none` | an open end inside a `slice` |
+| `ellipsis` | stand-in for as many `all` as it takes to fill the rank |
 
 ```cpp
 t(1, all, all);                 // fix axis 0 -> lower-rank view
@@ -61,6 +62,21 @@ to a static extent). Negative bounds wrap.
 t(slice(-2, none));  // last two rows
 t(slice(3, 0, -1));  // rows 3,2,1  (stop excluded, like python)
 ```
+
+**Ellipsis** (`...`, numpy's `Ellipsis`) fills the middle for you: it expands to
+`rank - (#other args)` copies of `all` (possibly zero). At most one per call.
+
+```cpp
+t(1, ellipsis);      // == t(1, all, all)   drop the FIRST axis, keep the rest
+t(ellipsis, 2);      // == t(all, all, 2)   drop the LAST axis
+t(1, ellipsis, 2);   // == t(1, all, 2)     fill only the middle
+t(ellipsis) = b;     // whole-tensor slice-assign (copies b's elements in)
+```
+
+If what remains after expansion is all integers you get an element `T&`; anything
+else yields a view. Assigning into a slice — `t(...) = b`, `t(0, all) = 5.0` —
+copies (see [Tensors & ownership](tensors.md), which contrasts it with the
+rebinding `a = b`).
 
 Axes kept with `all` keep their static extent; a ranged axis becomes dynamic
 (its size is a runtime value). Reach for `all` when you want the extent to keep

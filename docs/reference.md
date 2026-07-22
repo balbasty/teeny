@@ -79,6 +79,8 @@ t.data();  t.view();  t.extents();  t.mapping();
 t(i, j, k);                     // element access -> T& (negatives wrap)
 t.at(i, j, k);                  // one element as a rank-0 VIEW (rank-0 <-> scalar, .item())
 t(0, all, slice(1, 4));         // any slice arg -> a VIEW
+t(1, ellipsis, 2);              // ellipsis = (rank - #other args) copies of `all`
+t(ellipsis) = b;  t(0, all) = v;  // assign INTO a slice copies/fills (a = b rebinds)
 slice(start, stop);  slice(start, stop, step);  // half-open range, optional (neg) step
 none;  all;                     // open slice end (== python None); keep-axis marker
 t.take_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest

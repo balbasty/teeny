@@ -128,6 +128,9 @@ t.at(1, 2, 3);        // same element as a rank-0 VIEW (has add_/etc.); rank-0 <
 t(0, all, slice(1,4));  // any slice arg -> a lower-/same-rank VIEW. all = keep axis,
                       //   slice(a,b) = half-open [a,b). Integer args drop that axis.
 t(0, slice(none,4), slice(1,none,2));  // python-like: none = open end, 3rd arg = step.
+t(1, ellipsis, 2);    // ellipsis (numpy ...) = (rank - #other args) copies of `all`; max one.
+t(ellipsis) = b; t(0,all) = 3.0;  // assign INTO a slice copies/fills (b broadcasts);
+                      //   `a = b` on a NAMED view REBINDS (shallow) — the contrast.
 t(0, slice<1,4>()); t(0, slice<0,8,2>());  // compile-time slice (bounds fold like `all`);
                       //   slice<Int<1>,Int<4>>() is the type form (only way to bake `none`).
                       //   negative bounds wrap; all == slice(none,none) (folds).
