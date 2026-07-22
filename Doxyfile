@@ -39,4 +39,4 @@ PREDEFINED             = "_TNY_API=" \
 # Skip the internal namespaces AND every underscore-prefixed helper (teeny's
 # convention for internals: _md, _detail, _compact, _meta_store, _keep_last, …)
 # from the public autodoc.
-EXCLUDE_SYMBOLS        = _* *::_*
+EXCLUDE_SYMBOLS        = _* *::_* DL* kDL*
