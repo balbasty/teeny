@@ -273,33 +273,34 @@ private:
         }
     }
     // ellipsis expansion: for output axis O, pick the front arg, an inserted
-    // `all`, or the back arg (shifted past the F inserted `all`s). One ellipsis
-    // at position Pe expands to F = rank - (N-1) copies of `all`.
-    template <cs::size_t Oi, cs::size_t Pe, cs::size_t F, class Tup>
+    // For output axis `out_ax`: pick the front arg, one of the inserted `all`s,
+    // or the back arg (shifted past the `fill` inserted `all`s). One ellipsis at
+    // position `ell_pos` expands to `fill = rank - (n_args - 1)` copies of `all`.
+    template <cs::size_t out_ax, cs::size_t ell_pos, cs::size_t fill, class Tup>
     _TNY_API static auto _ellip_arg(const Tup & t) {
-        if constexpr (Oi < Pe)          return cs::get<Oi>(t);
-        else if constexpr (Oi < Pe + F) return tny::all;
-        else                            return cs::get<Oi - F + 1>(t);
+        if constexpr (out_ax < ell_pos)         return cs::get<out_ax>(t);
+        else if constexpr (out_ax < ell_pos + fill) return tny::all;
+        else                                    return cs::get<out_ax - fill + 1>(t);
     }
     template <class Tup, cs::size_t... I>
     _TNY_API static constexpr cs::size_t _tup_ellipsis_pos(cs::index_sequence<I...>) {
         return _ellipsis_pos<cs::tuple_element_t<I, Tup>...>();
     }
-    template <class Tup, cs::size_t... Oi>
-    _TNY_API decltype(auto) _ellip_call(Tup t, cs::index_sequence<Oi...>) {
-        constexpr cs::size_t N  = cs::tuple_size<Tup>::value;
-        static_assert(N - 1 <= rank(), "too many indices for ellipsis expansion");
-        constexpr cs::size_t Pe = _tup_ellipsis_pos<Tup>(cs::make_index_sequence<N>{});
-        constexpr cs::size_t F  = rank() - (N - 1);
-        return (*this)(_ellip_arg<Oi, Pe, F>(t)...);
+    template <class Tup, cs::size_t... out_ax>
+    _TNY_API decltype(auto) _ellip_call(Tup t, cs::index_sequence<out_ax...>) {
+        constexpr cs::size_t n_args   = cs::tuple_size<Tup>::value;
+        static_assert(n_args - 1 <= rank(), "too many indices for ellipsis expansion");
+        constexpr cs::size_t ell_pos  = _tup_ellipsis_pos<Tup>(cs::make_index_sequence<n_args>{});
+        constexpr cs::size_t fill     = rank() - (n_args - 1);
+        return (*this)(_ellip_arg<out_ax, ell_pos, fill>(t)...);
     }
-    template <class Tup, cs::size_t... Oi>
-    _TNY_API decltype(auto) _ellip_call(Tup t, cs::index_sequence<Oi...>) const {
-        constexpr cs::size_t N  = cs::tuple_size<Tup>::value;
-        static_assert(N - 1 <= rank(), "too many indices for ellipsis expansion");
-        constexpr cs::size_t Pe = _tup_ellipsis_pos<Tup>(cs::make_index_sequence<N>{});
-        constexpr cs::size_t F  = rank() - (N - 1);
-        return (*this)(_ellip_arg<Oi, Pe, F>(t)...);
+    template <class Tup, cs::size_t... out_ax>
+    _TNY_API decltype(auto) _ellip_call(Tup t, cs::index_sequence<out_ax...>) const {
+        constexpr cs::size_t n_args   = cs::tuple_size<Tup>::value;
+        static_assert(n_args - 1 <= rank(), "too many indices for ellipsis expansion");
+        constexpr cs::size_t ell_pos  = _tup_ellipsis_pos<Tup>(cs::make_index_sequence<n_args>{});
+        constexpr cs::size_t fill     = rank() - (n_args - 1);
+        return (*this)(_ellip_arg<out_ax, ell_pos, fill>(t)...);
     }
 public:
     /** @brief Element access when every argument is an integer (negatives wrap). */
