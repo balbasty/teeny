@@ -56,6 +56,8 @@ namespace _dl {
 
 // teeny element type <-> DLDataType (lanes always 1). half/bfloat16 are teeny's.
 template <class T> _TNY_HOST DLDataType dtype_of() {
+    static_assert(cs::is_arithmetic<T>::value || cs::is_same<T, half>::value || cs::is_same<T, bfloat16>::value,
+                  "DLPack: unsupported element type (arithmetic / half / bfloat16 only)");
     DLDataType d; d.lanes = 1;
     if      constexpr (cs::is_same<T, half>::value)     { d.code = kDLFloat;  d.bits = 16; }
     else if constexpr (cs::is_same<T, bfloat16>::value) { d.code = kDLBfloat; d.bits = 16; }
@@ -102,10 +104,15 @@ _TNY_HOST DLManagedTensor * make_managed(const tensor<T, Shape, Layout, O> & t, 
     h->shape  = new cs::int64_t[nd ? nd : 1];
     h->stride = new cs::int64_t[nd ? nd : 1];
     // Read ALL of `t` (data, extents, strides) BEFORE moving `owner` in — for an
-    // owning export `owner` aliases `t`, and the move would leave `t` empty.
-    for (int i = 0; i < nd; ++i) {
-        h->shape[i]  = static_cast<cs::int64_t>(t.extent(i));
-        h->stride[i] = static_cast<cs::int64_t>(t.stride(i));   // DLPack strides are in ELEMENTS
+    // owning export `owner` aliases `t`, and the move would leave `t` empty. The
+    // `if constexpr` is needed for a rank-0 (scalar) tensor: `t.stride(i)` with a
+    // runtime index would still instantiate `layout::mapping::stride`, which CCCL
+    // constrains to rank > 0.
+    if constexpr (Shape::rank() > 0) {
+        for (int i = 0; i < nd; ++i) {
+            h->shape[i]  = static_cast<cs::int64_t>(t.extent(i));
+            h->stride[i] = static_cast<cs::int64_t>(t.stride(i));   // DLPack strides are in ELEMENTS
+        }
     }
     DLTensor & dt = h->mt.dl_tensor;
     dt.data = const_cast<void *>(static_cast<const void *>(t.data()));
@@ -151,17 +158,25 @@ _TNY_HOST DLManagedTensor * to_dlpack(tensor<T, Shape, Layout, O> && t) {
  *         (so it is self-contained), while the DATA is BORROWED — the caller keeps
  *         `m` alive while the view is used, then calls `m->deleter(m)`. A null
  *         `strides` (DLPack's C-contiguous shorthand) is expanded to row-major.
- *         `byte_offset` is folded into the data pointer. */
+ *         `byte_offset` is folded into the data pointer. NB the `device` field is
+ *         not inspected — teeny views are memory-space-agnostic, so a `kDLCUDA`
+ *         capsule yields a view over the (device) pointer; consult
+ *         `m->dl_tensor.device` yourself if you need to know where it lives. */
 template <class T>
 _TNY_HOST anyrank<T, cs::int64_t> from_dlpack(const DLManagedTensor * m) {
     const DLTensor & dt = m->dl_tensor;
     _TNY_CHECK(_dl::dtype_matches<T>(dt.dtype), "from_dlpack: DLPack dtype does not match T");
     const int nd = dt.ndim;
+    // Trust boundary: `ndim` comes straight from the producer (torch allows 64
+    // dims). CLAMP the local fills to TNY_MAX_RANK UNCONDITIONALLY — this must
+    // hold even under -DNDEBUG, where _TNY_CHECK is compiled out. An oversized
+    // ndim then simply never matches dispatch_rank / fixed<R>.
     _TNY_CHECK(nd <= static_cast<int>(TNY_MAX_RANK), "from_dlpack: ndim exceeds TNY_MAX_RANK (raise -DTNY_MAX_RANK)");
+    const int n = nd < static_cast<int>(TNY_MAX_RANK) ? nd : static_cast<int>(TNY_MAX_RANK);
     T * data = reinterpret_cast<T *>(reinterpret_cast<char *>(dt.data) + dt.byte_offset);
     cs::int64_t st[TNY_MAX_RANK];
-    if (dt.strides) { for (int i = 0; i < nd; ++i) st[i] = dt.strides[i]; }
-    else { cs::int64_t s = 1; for (int i = nd - 1; i >= 0; --i) { st[i] = s; s *= dt.shape[i]; } }  // C-contiguous
+    if (dt.strides) { for (int i = 0; i < n; ++i) st[i] = dt.strides[i]; }
+    else { cs::int64_t s = 1; for (int i = n - 1; i >= 0; --i) { st[i] = s; s *= dt.shape[i]; } }  // C-contiguous
     return as_anyrank(data, dt.shape, st, nd, copy_meta);
 }
 
@@ -174,10 +189,13 @@ _TNY_HOST dyn_tensor<T, cs::int64_t, R> from_dlpack(const DLManagedTensor * m) {
     _TNY_CHECK(_dl::dtype_matches<T>(dt.dtype), "from_dlpack<T,R>: DLPack dtype does not match T");
     _TNY_CHECK(dt.ndim == static_cast<int>(R),  "from_dlpack<T,R>: ndim != R");
     T * data = reinterpret_cast<T *>(reinterpret_cast<char *>(dt.data) + dt.byte_offset);
+    // Read only min(R, ndim) from the producer's arrays so a wrong-rank call can
+    // never read out of bounds (the check above is debug-only under NDEBUG).
+    const cs::size_t n = (dt.ndim >= 0 && static_cast<cs::size_t>(dt.ndim) < R) ? static_cast<cs::size_t>(dt.ndim) : R;
     cs::array<cs::int64_t, R> ext{}, st{};
-    for (cs::size_t i = 0; i < R; ++i) ext[i] = dt.shape[i];
-    if (dt.strides) { for (cs::size_t i = 0; i < R; ++i) st[i] = dt.strides[i]; }
-    else { cs::int64_t s = 1; for (int i = int(R) - 1; i >= 0; --i) { st[i] = s; s *= dt.shape[i]; } }
+    for (cs::size_t i = 0; i < n; ++i) ext[i] = dt.shape[i];
+    if (dt.strides) { for (cs::size_t i = 0; i < n; ++i) st[i] = dt.strides[i]; }
+    else { cs::int64_t s = 1; for (int i = int(n) - 1; i >= 0; --i) { st[i] = s; s *= dt.shape[i]; } }
     using E = cs::dextents<cs::int64_t, R>;
     cs::layout_stride::mapping<E> mp(E(ext), st);
     return dyn_tensor<T, cs::int64_t, R>(data, mp);
@@ -196,6 +214,7 @@ _TNY_HOST bool dispatch_dlpack(const DLManagedTensor * m, F && f) {
         return dispatch_rank(from_dlpack<T>(m), f);
     };
     if (d.lanes != 1) return false;
+    if (d.code == kDLBool && d.bits == 8) return by_rank(bool{});
     if (d.code == kDLFloat && d.bits == 32) return by_rank(float{});
     if (d.code == kDLFloat && d.bits == 64) return by_rank(double{});
     if (d.code == kDLFloat && d.bits == 16) return by_rank(half{});

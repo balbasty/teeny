@@ -82,5 +82,14 @@ int main()
     auto b = from_dlpack<float, 1>(&mb);
     if (b(0) != fbuf[2] || b(1) != fbuf[3]) return 17;
 
+    // ---- rank-0 (scalar) export compiles + round-trips -----------------------
+    double s = 7.0;
+    auto sc = wrap(&s, shape<>{});                    // a rank-0 view
+    DLManagedTensor * ms = to_dlpack(sc);
+    if (ms->dl_tensor.ndim != 0 || ms->dl_tensor.data != &s) return 18;
+    auto s0 = from_dlpack<double, 0>(ms);
+    if (double(s0) != 7.0) return 19;                 // rank-0 <-> scalar
+    ms->deleter(ms);
+
     return 0;
 }

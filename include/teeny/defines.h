@@ -21,7 +21,11 @@
 #   include <cassert>
 #   define _TNY_CHECK(cond, msg) assert((cond) && (msg))
 #else
-#   define _TNY_CHECK(cond, msg) ((void)0)
+// Compiled out on device / under NDEBUG, but still *consume* `cond` in an
+// UNEVALUATED context: `sizeof` keeps any parameter pack in `cond` expanded, so
+// `_TNY_CHECK` remains a valid operand inside a fold expression (e.g. recast's
+// per-axis validation). Zero runtime cost, no side effects.
+#   define _TNY_CHECK(cond, msg) ((void)sizeof((cond) ? 0 : 0))
 #endif
 
 #define _TNY_NAMESPACE_BEGIN(NAME) namespace NAME {
