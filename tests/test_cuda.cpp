@@ -130,5 +130,26 @@ int main()
     static_assert(decltype(sstk)::ownership == own::stack, "to<stack> -> stack");
     if (sstk(1,1) != 4.f) return 9;
 
+    // const-element source composes: x.to<>() borrows as tensor<const T>, and
+    // to<Space>(that) must strip the const (else it fails to compile / write const).
+    auto cb = host.to<>();                         // tensor<const float, ...> borrow
+    static_assert(cs::is_same<decltype(cb)::element_type, const float>::value, "borrow is const");
+    auto gcb = to<own::gpu>(cb);
+    static_assert(cs::is_same<decltype(gcb)::element_type, float>::value, "to<gpu> strips const");
+    if (to<own::heap>(gcb)(1,2) != 5.f) return 10;
+
+    // an F-order (column-major) gpu source must NOT be silently transposed on
+    // download: stage into a layout-matching host buffer, then densify.
+    auto gf = gpu<float, shape<2,3>, forder>(shape<2,3>{});
+    wrap<forder>(gf.data(), shape<2,3>{}).iota_(0.f, 1.f);   // logical (i,j) = i*3+j, stored F-order
+    auto bf = to<own::heap>(gf);
+    static_assert(decltype(bf)::ownership == own::heap, "download -> heap");
+    if (bf(0,2) != 2.f || bf(1,0) != 3.f || bf(1,2) != 5.f) return 11;   // values, not transposed
+
+    // rvalue source (a temporary) must be COPIED, never borrowed (no dangling /
+    // no freed-device-memory view).
+    auto tv = to<own::gpu>(make_gpu<float>(shape<2,3>{}));
+    static_assert(decltype(tv)::ownership == own::gpu, "rvalue source -> owning copy, not a view");
+
     return 0;
 }

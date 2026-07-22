@@ -501,9 +501,12 @@ public:
      *  **No copy when it already matches** — if `T2` is the current element type
      *  and `Force` is false, this returns a (read-only) *view* of `*this`, no
      *  allocation, keeping the source layout. So `x.to<>()` is a zero-cost borrow,
-     *  not a clone. Pass `Force = true` to always materialise a fresh owning copy
-     *  even when the dtype already matches (`x.to<float, true>()` force-clones a
-     *  `float` tensor); `x.clone()` is the unconditional-copy spelling.
+     *  not a clone. Because it borrows, the result must not outlive `x` — the same
+     *  lifetime rule as `view()`/`permute()`/slicing (don't bind `.to<>()` of a
+     *  temporary to a longer-lived name). Pass `Force = true` to always materialise
+     *  a fresh owning copy even when the dtype already matches (`x.to<float,
+     *  true>()` force-clones a `float` tensor); `x.clone()` is the
+     *  unconditional-copy spelling.
      *
      *  When a conversion IS needed (`T2` differs, or `Force`), the result is a
      *  dense, row-major OWNING copy cast elementwise (via `copy_`): static shape
