@@ -9,6 +9,7 @@
 //
 // Force the portable types even under nvcc with -DTNY_PORTABLE_HALF.
 #include <cuda/std/type_traits>
+#include <cuda/std/cstdint>
 #include <teeny/defines.h>
 
 #if defined(__CUDACC__) && !defined(TNY_PORTABLE_HALF)
@@ -29,8 +30,6 @@ using half = __half;
 using bfloat16 = __nv_bfloat16;
 
 #else  // ---- portable software fallback (no CUDA) ----
-
-#include <cuda/std/cstdint>
 
 namespace _detail {
 union _f32 { float f; cs::uint32_t u; };
@@ -115,7 +114,9 @@ _TNY_API inline NAME operator/(NAME a, NAME b) { return NAME(TO_F(a.bits) / TO_F
 _TNY_API inline bool operator==(NAME a, NAME b) { return TO_F(a.bits) == TO_F(b.bits); }            \
 _TNY_API inline bool operator!=(NAME a, NAME b) { return TO_F(a.bits) != TO_F(b.bits); }            \
 _TNY_API inline bool operator<(NAME a, NAME b)  { return TO_F(a.bits) <  TO_F(b.bits); }            \
-_TNY_API inline bool operator>(NAME a, NAME b)  { return TO_F(a.bits) >  TO_F(b.bits); }
+_TNY_API inline bool operator>(NAME a, NAME b)  { return TO_F(a.bits) >  TO_F(b.bits); }            \
+_TNY_API inline bool operator<=(NAME a, NAME b) { return TO_F(a.bits) <= TO_F(b.bits); }            \
+_TNY_API inline bool operator>=(NAME a, NAME b) { return TO_F(a.bits) >= TO_F(b.bits); }
 
 _TNY_HALF_TYPE(half,     _detail::f16_to_f32, _detail::f32_to_f16)
 _TNY_HALF_TYPE(bfloat16, _detail::bf16_to_f32, _detail::f32_to_bf16)

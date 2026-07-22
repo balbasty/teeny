@@ -127,40 +127,15 @@ struct c_lt { template <class X> _TNY_API bool operator()(X x, X y) const { retu
 struct c_le { template <class X> _TNY_API bool operator()(X x, X y) const { return x <= y; } };
 struct c_gt { template <class X> _TNY_API bool operator()(X x, X y) const { return x >  y; } };
 struct c_ge { template <class X> _TNY_API bool operator()(X x, X y) const { return x >= y; } };
-struct r_all { template <class X> _TNY_API bool operator()(bool a, X x) const { return a && (x != X(0)); } };
-struct r_any { template <class X> _TNY_API bool operator()(bool a, X x) const { return a || (x != X(0)); } };
+// compare through the compute type so half/bfloat16 don't need native host operators.
+struct r_all { template <class X> _TNY_API bool operator()(bool a, X x) const { using C = compute_type_t<X>; return a && (static_cast<C>(x) != C(0)); } };
+struct r_any { template <class X> _TNY_API bool operator()(bool a, X x) const { using C = compute_type_t<X>; return a || (static_cast<C>(x) != C(0)); } };
 
 /* ---- reduce ops (acc = op(acc, x)) ------------------------------- */
 struct r_add { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a + static_cast<A>(x); } };
 struct r_mul { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a * static_cast<A>(x); } };
 struct r_max { template <class A, class X> _TNY_API A operator()(A a, X x) const { A y = static_cast<A>(x); return y > a ? y : a; } };
 struct r_min { template <class A, class X> _TNY_API A operator()(A a, X x) const { A y = static_cast<A>(x); return y < a ? y : a; } };
-
-/* ---- c = op(a, b), elementwise over matching extents ------------- */
-template <class C, class A, class B, class Op, cs::size_t... D>
-_TNY_API void zip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
-    using I  = typename C::index_type;
-    using Cv = compute_type_t<typename C::element_type>;  // compute in float for half types
-    const I e[]  = { a.extent(D)... };
-    const I sa[] = { a.stride(D)... };
-    const I sb[] = { b.stride(D)... };
-    const I sc[] = { c.stride(D)... };
-    I n = 1;
-    for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
-    for (I lin = 0; lin < n; ++lin) {
-        I rem = lin, oa = 0, ob = 0, oc = 0;
-        for (int d = static_cast<int>(sizeof...(D)) - 1; d >= 0; --d) {
-            I k = rem % e[d]; rem /= e[d];
-            oa += k * sa[d]; ob += k * sb[d]; oc += k * sc[d];
-        }
-        c.data()[oc] = op(static_cast<Cv>(a.data()[oa]), static_cast<Cv>(b.data()[ob]));
-    }
-}
-template <class C, class A, class B, class Op>
-_TNY_API void zip(C & c, const A & a, const B & b, Op op) {
-    static_assert(A::rank() == C::rank() && B::rank() == C::rank(), "zip: rank mismatch");
-    zip_(c, a, b, op, cs::make_index_sequence<C::rank()>{});
-}
 
 /* ---- numpy-style broadcasting (same rank; a dim of 1 broadcasts) - *
  * c(i) = op(a(i), b(i)), where a and b broadcast into c's shape       *
@@ -416,8 +391,11 @@ template <class R, class A, class B, cs::size_t... D>
 _TNY_API R zipreduce_(const A & a, const B & b, cs::index_sequence<D...>) {
     using I = typename A::index_type;
     const I e[]  = { a.extent(D)... };
+    const I be[] = { b.extent(D)... };
     const I sa[] = { a.stride(D)... };
     const I sb[] = { b.stride(D)... };
+    for (cs::size_t r = 0; r < sizeof...(D); ++r)
+        _TNY_CHECK(e[r] == be[r], "dot: operand extents must match exactly (no broadcast)");
     I n = 1;
     for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
     R acc = R(0);
@@ -754,6 +732,8 @@ _TNY_API auto mean(const tensor<T,E,L,O> & a) {
 template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>
 _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
     static_assert(tensor<Ta,Ea,La,Oa>::rank() == tensor<Tb,Eb,Lb,Ob>::rank(), "dot: rank mismatch");
+    static_assert(_md::bc_static_ok<Ea, Eb>(cs::make_index_sequence<Ea::rank()>{}),
+                  "dot: incompatible static extents");   // both-static, unequal -> caught at compile time
     using R = compute_type_t<promote_t<Ta,Tb>>;
     return _md::zipreduce_<R>(a, b, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{});
 }

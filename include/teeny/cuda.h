@@ -28,7 +28,7 @@ namespace cs = cuda::std;
 /** @brief Device memory (`cudaMalloc`). Not host-dereferenceable. */
 struct cuda_device_alloc {
     template <class T> _TNY_HOST static T * allocate(cs::size_t n) {
-        void * p = nullptr; cudaMalloc(&p, n * sizeof(T)); return static_cast<T *>(p);
+        void * p = nullptr; cudaMalloc(&p, n * sizeof(T)); _TNY_CHECK(p, "cudaMalloc failed"); return static_cast<T *>(p);
     }
     template <class T> _TNY_HOST static void deallocate(T * p) { cudaFree(p); }
 };
@@ -36,7 +36,7 @@ struct cuda_device_alloc {
 /** @brief Page-locked host memory (`cudaMallocHost`). */
 struct cuda_host_alloc {
     template <class T> _TNY_HOST static T * allocate(cs::size_t n) {
-        void * p = nullptr; cudaMallocHost(&p, n * sizeof(T)); return static_cast<T *>(p);
+        void * p = nullptr; cudaMallocHost(&p, n * sizeof(T)); _TNY_CHECK(p, "cudaMallocHost failed"); return static_cast<T *>(p);
     }
     template <class T> _TNY_HOST static void deallocate(T * p) { cudaFreeHost(p); }
 };
@@ -44,7 +44,7 @@ struct cuda_host_alloc {
 /** @brief Pinned + mapped host memory (`cudaHostAlloc`). */
 struct cuda_pinned_alloc {
     template <class T> _TNY_HOST static T * allocate(cs::size_t n) {
-        void * p = nullptr; cudaHostAlloc(&p, n * sizeof(T), cudaHostAllocMapped); return static_cast<T *>(p);
+        void * p = nullptr; cudaHostAlloc(&p, n * sizeof(T), cudaHostAllocMapped); _TNY_CHECK(p, "cudaHostAlloc failed"); return static_cast<T *>(p);
     }
     template <class T> _TNY_HOST static void deallocate(T * p) { cudaFreeHost(p); }
 };

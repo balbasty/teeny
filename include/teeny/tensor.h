@@ -85,7 +85,7 @@ struct tensor : private Layout::template mapping<Extents> {
      *         all-static `strides<...>`). e.g. `tensor<float, shape<3,4>, strides<4,1>>(ptr)`. */
     template <own OO = O, cs::enable_if_t<OO == own::view && is_static &&
               (_contiguous_layout<Layout>::value || _strides_all_static<Layout>::value), int> = 0>
-    _TNY_API tensor(T * p) : mapping_type(), store_(p) {}
+    _TNY_API explicit tensor(T * p) : mapping_type(), store_(p) {}   // explicit: no silent T* -> tensor
 
     /** @brief View constructor from a pointer + extents (contiguous / static-stride layouts). */
     template <own OO = O, cs::enable_if_t<OO == own::view && cs::is_constructible<mapping_type, Extents>::value, int> = 0>
@@ -208,16 +208,22 @@ private:
             off += _wrap<Ax>(a) * sd;                                // integer: drop this axis
         } else if constexpr (_is_slice_spec<Arg>::value) {
             const index_type step = static_cast<index_type>(a.step);
+            const index_type Z = index_type(0);
             index_type st, cnt;
-            if (step >= index_type(0)) {
-                st = _sl_bound(a.start, index_type(0), n);
-                const index_type sp = _sl_bound(a.stop, n, n);
-                const index_type w = sp - st; cnt = w <= index_type(0) ? index_type(0) : (w + step - 1) / step;
+            if (step >= Z) {
+                st = _sl_bound(a.start, Z, n);
+                index_type sp = _sl_bound(a.stop, n, n);
+                st = st < Z ? Z : (st > n ? n : st);                // python clamp: start,stop in [0,n]
+                sp = sp < Z ? Z : (sp > n ? n : sp);
+                const index_type w = sp - st; cnt = w <= Z ? Z : (w + step - 1) / step;
             } else {
-                const index_type ns = -step;
+                const index_type ns = -step, hi = n - 1;
                 st = _sl_bound(a.start, n - 1, n);                   // default start = last
-                const index_type sp = _stop_neg(a.stop, n);         // default stop = before-0
-                const index_type w = st - sp; cnt = w <= index_type(0) ? index_type(0) : (w + ns - 1) / ns;
+                index_type sp = _stop_neg(a.stop, n);               // default stop = before-0
+                st = st > hi ? hi : (st < Z ? Z : st);              // python clamp: start in [0,n-1]
+                sp = sp > hi ? hi : (sp < index_type(-1) ? index_type(-1) : sp);   // stop in [-1,n-1]
+                const index_type w = (n <= Z) ? Z : (st - sp); cnt = w <= Z ? Z : (w + ns - 1) / ns;
+                if (n <= Z) st = Z;
             }
             off += st * sd; ext[k] = cnt; str[k] = step * sd; ++k;  // stride may be negative
         } else {                                                    // full_extent (all)
@@ -394,6 +400,14 @@ private:
     template <class El, class NewE, cs::size_t... D>
     _TNY_API auto _recast(El * p, cs::index_sequence<D...>) const {
         static_assert(NewE::rank() == rank(), "recast: rank must match");
+        // recast re-types the extents but reuses row-major strides, so it needs a
+        // C-contiguous source (else it would silently mis-address the data). And
+        // every static dim of NewE must equal the actual extent. Checked here
+        // (host-debug) because a non-contiguous ndarray is the norm at the boundary.
+        _TNY_CHECK(is_contiguous(), "recast: needs a C-contiguous tensor (clone() first)");
+        ( _TNY_CHECK(NewE::static_extent(D) == cs::dynamic_extent ||
+                     static_cast<index_type>(NewE::static_extent(D)) == static_cast<index_type>(extent(D)),
+                     "recast: a static dim does not match the actual extent"), ... );
         return tensor<El, NewE, cs::layout_right, own::view>(
             p, typename cs::layout_right::template mapping<NewE>(NewE(cs::array<index_type, rank()>{ static_cast<index_type>(extent(D))... })));
     }
@@ -401,8 +415,9 @@ public:
     /** @brief Reinterpret with a MORE-STATIC extents type of the same rank —
      *         recover statically-known inner dims at the dynamic (ndarray)
      *         boundary: a runtime `(n,3,3)` view -> `.recast<shape<-1,3,3>>()` so
-     *         the `3`s fold. Static dims of `NewE` are validated against the
-     *         actual extents; requires a C-contiguous tensor. */
+     *         the `3`s fold. **Requires a C-contiguous tensor** (`clone()` first
+     *         otherwise); each static dim of `NewE` is validated against the
+     *         actual extent. */
     template <class NewE> _TNY_API auto recast()       { return _recast<T,       NewE>(store_.data(), cs::make_index_sequence<rank()>{}); }
     template <class NewE> _TNY_API auto recast() const { return _recast<const T, NewE>(store_.data(), cs::make_index_sequence<rank()>{}); }
 

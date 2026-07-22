@@ -130,7 +130,12 @@ _TNY_HOST anyrank<T, offset_t, _meta_store<offset_t, MaxRank>>
 as_anyrank(T * data, const offset_t * shape, const offset_t * stride, int ndim) {
     anyrank<T, offset_t, _meta_store<offset_t, MaxRank>> t;
     t.data = data; t.ndim = ndim;
-    for (int i = 0; i < ndim; ++i) { t.shape(i) = shape[i]; t.stride(i) = stride[i]; }
+    // Never write past the inline store: ndim can come straight from a DLPack
+    // caller (torch allows 64 dims). Copy at most MaxRank; an oversized ndim is
+    // then simply never matched by dispatch_rank / fixed<R>.
+    _TNY_CHECK(ndim <= static_cast<int>(MaxRank), "as_anyrank: ndim exceeds MaxRank (raise -DTNY_MAX_RANK)");
+    const int n = ndim < static_cast<int>(MaxRank) ? ndim : static_cast<int>(MaxRank);
+    for (int i = 0; i < n; ++i) { t.shape(i) = shape[i]; t.stride(i) = stride[i]; }
     return t;
 }
 

@@ -48,5 +48,22 @@ int main() {
     for (auto plane : peel<0>(st)) acc += plane(2,3);   // sum st(0,2,3)+st(1,2,3)
     if (acc != st(0,2,3) + st(1,2,3)) return 10;
 
+    // ---- slice bounds clamp python-style (no out-of-bounds views) ------------
+    auto row = local<double, shape<5>>(); row.iota_(0.0, 1.0);     // 0..4
+    auto over = row(slice(1, 100));                                 // clamps to [1,5)
+    if (over.extent(0) != 4 || over(0) != 1.0 || over(3) != 4.0) return 11;
+    auto rev = row(slice(100, none, -1));                           // clamps start to 4
+    if (rev.extent(0) != 5 || rev(0) != 4.0 || rev(4) != 0.0) return 12;
+    auto revstop = row(slice(100, 1, -1));                          // 4,3,2
+    if (revstop.extent(0) != 3 || revstop(0) != 4.0 || revstop(2) != 2.0) return 13;
+    auto emptyish = row(slice(3, 1));                               // start>stop -> empty
+    if (emptyish.extent(0) != 0) return 14;
+
+    // ---- recast keeps only when contiguous; validates + folds inner dims -----
+    auto vv = view(buf, shape<-1,3,4>{2});     // (2,3,4) contiguous, dynamic outer
+    auto rc = vv.recast<shape<2,3,4>>();        // all static now
+    static_assert(decltype(rc.stride(Int<1>()))::value == 4, "recast folds inner stride");
+    if (rc(1,2,3) != buf[12+8+3]) return 15;
+
     return 0;
 }

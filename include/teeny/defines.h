@@ -14,12 +14,6 @@
 
 #define _TNY_API _TNY_HOSTDEVICE
 
-#ifdef __CUDA_ARCH__
-#       define _TNY_HOSTEXCEPT
-#else
-#       define _TNY_HOSTEXCEPT noexcept
-#endif
-
 // Debug-only precondition check (shape mismatches etc.). Active on the host in
 // non-NDEBUG builds; compiled out on the device and under NDEBUG so `_TNY_API`
 // code stays device-safe and release-fast.
