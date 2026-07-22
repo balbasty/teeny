@@ -45,7 +45,7 @@ include/teeny/
   math.h           in-place & out-of-place elementwise (broadcasting) + unary math
                    + reductions (sum/prod/max/min/dot). Members declared in
                    tensor.h, DEFINED here.
-  iterate.h        nd-peel: peel/peel_at/peel_front + batch_offset/channel
+  iterate.h        nd-peel: peel / peel_at / peel_front / peel_front_at
   dynamic.h        anyrank (rank-erased carrier) + peel_front<Sr> + dispatch_rank
   cuda.h           OPT-IN device/host/pinned memory (needs <cuda_runtime.h>);
                    NOT included by teeny.h

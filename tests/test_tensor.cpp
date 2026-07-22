@@ -54,18 +54,11 @@ int main()
     static_assert(cs::is_same<decltype(md), cs::mdspan<double, extents<long,2,3,4>, cs::layout_right>>(), "view() -> mdspan");
     if (md.extent(2) != 4) return 8;
 
-    // ---- helpers: channel peel + batch offset -------------------------
+    // ---- peel axis 0 (e.g. a channel axis) at an index ----------------
     auto full = view(buf, extents<long,2,3,4>{});         // treat dim0 as "channel"
-    auto sp = channel(full.view(), 1);                    // spatial (3,4) view of channel 1
-    static_assert(decltype(sp)::rank() == 2, "channel peeled");
+    auto sp = peel_at<0>(full.view(), 1);                 // spatial (3,4) view of channel 1
+    static_assert(decltype(sp)::rank() == 2, "peel_at<0> drops axis 0");
     if (sp(0,0) != full(1,0,0)) return 9;
-
-    // batch_offset decodes an F-order index over the leading dims (0,1), last dim = 0.
-    auto fv = full.view();                                // (2,3,4)
-    for (long lin = 0; lin < 2*3; ++lin) {
-        long i0 = lin % 2, i1 = lin / 2;                  // F-order over dims 0,1
-        if (batch_offset(fv, lin) != fv.mapping()(i0, i1, 0)) return 10;
-    }
 
     return 0;
 }

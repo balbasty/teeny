@@ -111,7 +111,6 @@ folds output strides and works on any source layout (incl. `strides<...>`). See
 ```cpp
 peel<Axes...>(t);       peel_at<Axes...>(t, i);        // peel named axes
 peel_front<N>(t);       peel_front_at<N>(t, i);        // peel the first N axes
-batch_offset(md, lin);  channel(md, c);                // low-level offset helpers
 ```
 
 See [Views & structure](structure.md#nd-peel-iterate-a-subset-of-axes).

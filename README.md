@@ -75,7 +75,7 @@ auto hh = local<half, shape<64,64>>();
 | `axis.h` | view builders: `permute`/`flip`/`squeeze`/`unsqueeze` |
 | `tensor.h` | `tensor<T, Extents, Layout, own>` + `view`/`local`/`owned` + slicing / `take_along` / `at` |
 | `math.h` | in-place / out-of-place ops (broadcasting) + unary math + reductions |
-| `iterate.h` | nd-peel: `peel`/`peel_at`/`peel_front` + `batch_offset`/`channel` |
+| `iterate.h` | nd-peel: `peel` / `peel_at` / `peel_front` / `peel_front_at` |
 | `dynamic.h` | `anyrank` (rank-erased carrier) + `peel_front<Sr>` + `dispatch_rank` |
 | `cuda.h` | opt-in device / host / pinned memory (needs the CUDA runtime) |
 
