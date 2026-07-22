@@ -170,8 +170,11 @@ auto c = a.pow(b);                    // element-wise power
 auto e = exp(a); auto e = sqrt(a);    // unary free (neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign)
 auto c = minimum(a,b); maximum(a,2.0); clamp(a,lo,hi);   // elementwise binary min/max, clamp
 
-// --- reductions -> scalar ---
+// --- reductions -> scalar (all axes) ---
 sum(a); prod(a); max(a); min(a); mean(a); dot(a,b);
+// --- axis reductions -> a lower-rank TENSOR (named axes removed; negatives wrap) ---
+sum<0>(a); mean<0,2>(a); max<1>(a); min<-1>(a); prod<0>(a);
+//   static result -> stack (host+device); any dynamic -> heap (HOST ONLY: allocates)
 
 // --- nd-peel: iterate a SUBSET of axes, each yielding a lower-rank view ---
 for (auto line : peel<0,1>(t)) f(line);   // peel axes 0,1; each `line` is a view

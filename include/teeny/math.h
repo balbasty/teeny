@@ -363,6 +363,65 @@ _TNY_API R reduce_(const A & a, R init, Op op, cs::index_sequence<D...>) {
     return acc;
 }
 
+/* ---- axis reductions -> a tensor (the reduced axes are removed) ---- *
+ * Output extents = input extents with `Axes...` dropped (static where the
+ * input is). Fully static -> stack (host+device); dynamic -> heap (HOST). */
+
+// static output extent for input axis D when reducing Axes... (drop if reduced).
+template <cs::size_t D, class E, long... Axes>
+_TNY_API constexpr cs::size_t red_ext() {
+    return _pos_in<D, _norm_axis(Axes, E::rank())...>() >= 0 ? _drop_axis : E::static_extent(D);
+}
+template <class E, long... Axes, cs::size_t... D>
+auto reduced_ext_(cs::index_sequence<D...>)
+    -> typename _compact<typename E::index_type, red_ext<D, E, Axes...>()...>::type;
+template <class E, long... Axes>
+using reduced_extents = decltype(reduced_ext_<E, Axes...>(cs::make_index_sequence<E::rank()>{}));
+
+// the engine: init `out` to `init`, then fold each input element into its output
+// cell (reduced axes contribute stride 0 to the output offset). `out` is a fresh
+// contiguous tensor, so out.data()[k] is its k-th element.
+template <class R, class Out, class A, class Op, cs::size_t... D>
+_TNY_API void reduce_axes_(Out & out, const A & a, R init, Op op, const bool * reduced, cs::index_sequence<D...>) {
+    using I = typename A::index_type; using Tout = typename Out::element_type;
+    constexpr int N = sizeof...(D);
+    const I e[]  = { static_cast<I>(a.extent(D))... };
+    const I sa[] = { static_cast<I>(a.stride(D))... };
+    I so[N]; int oi = 0;                                   // output stride per input axis (0 if reduced)
+    for (int d = 0; d < N; ++d) { if (reduced[d]) so[d] = I(0); else { so[d] = static_cast<I>(out.stride(oi)); ++oi; } }
+    const I on = static_cast<I>(out.numel());
+    for (I k = 0; k < on; ++k) out.data()[k] = static_cast<Tout>(init);
+    I n = 1; for (int d = 0; d < N; ++d) n *= e[d];
+    for (I lin = 0; lin < n; ++lin) {
+        I rem = lin, ia = 0, oo = 0;
+        for (int d = N - 1; d >= 0; --d) { I k = rem % e[d]; rem /= e[d]; ia += k * sa[d]; oo += k * so[d]; }
+        out.data()[oo] = static_cast<Tout>(op(static_cast<R>(out.data()[oo]), a.data()[ia]));
+    }
+}
+
+// fully static result -> stack (host+device)
+template <long... Axes, class R, class Op, class T,class E,class L,own O,
+          class OE = reduced_extents<E, Axes...>, cs::enable_if_t<OE::rank_dynamic() == 0, int> = 0>
+_TNY_API auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
+    tensor<T, OE, cs::layout_right, own::stack> out{};
+    bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
+    reduce_axes_<R>(out, a, init, op, red, cs::make_index_sequence<E::rank()>{});
+    return out;
+}
+// any dynamic result -> heap (HOST ONLY: it must allocate; not callable on device)
+template <long... Axes, class R, class Op, class T,class E,class L,own O,
+          class OE = reduced_extents<E, Axes...>, cs::enable_if_t<OE::rank_dynamic() != 0, int> = 0>
+_TNY_HOST auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
+    using I = typename E::index_type;
+    bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
+    cs::array<I, OE::rank()> ke{}; cs::size_t oi = 0;
+    for (cs::size_t d = 0; d < E::rank(); ++d) if (!red[d]) ke[oi++] = static_cast<I>(a.extent(d));
+    OE oe(ke);
+    tensor<T, OE, cs::layout_right, own::heap> out(oe);
+    reduce_axes_<R>(out, a, init, op, red, cs::make_index_sequence<E::rank()>{});
+    return out;
+}
+
 } // namespace _md
 
 /* ------------------------------------------------------------------ *
@@ -526,6 +585,30 @@ template <class T, class E, class L, own O>
 _TNY_API T min(const tensor<T,E,L,O> & a) {
     using R = compute_type_t<T>;
     return static_cast<T>(_md::reduce_<R>(a, cs::numeric_limits<R>::max(), _md::r_min{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
+}
+
+/* --- axis reductions: reduce over the named axes -> a lower-rank tensor ---- *
+ * `sum<0>(a)`, `mean<0,2>(a)`, ... remove those axes. Static result -> stack
+ * (host+device); dynamic -> heap (host only, since it allocates). Reduce over
+ * every axis (`sum(a)`) -> the scalar overloads above.                         */
+#define _TNY_MD_AXRED(NAME, INIT, OP)                                                              \
+template <long... Axes, class T,class E,class L,own O, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0> \
+_TNY_API auto NAME(const tensor<T,E,L,O> & a) {                                                    \
+    using R = compute_type_t<T>; return _md::axreduce<Axes...>(a, INIT, _md::OP{});                \
+}
+_TNY_MD_AXRED(sum,  R(0),                          r_add)
+_TNY_MD_AXRED(prod, R(1),                          r_mul)
+_TNY_MD_AXRED(max,  cs::numeric_limits<R>::lowest(), r_max)
+_TNY_MD_AXRED(min,  cs::numeric_limits<R>::max(),  r_min)
+#undef _TNY_MD_AXRED
+
+/** @brief Mean over the named axes -> a lower-rank tensor (sum / reduced count). */
+template <long... Axes, class T,class E,class L,own O, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+_TNY_API auto mean(const tensor<T,E,L,O> & a) {
+    auto s = sum<Axes...>(a);
+    const auto cnt = a.numel() / s.numel();     // # elements folded into each output cell
+    s.div_(static_cast<T>(cnt));
+    return s;
 }
 
 /** @brief Inner product over matching extents (accumulated in the compute type). */
