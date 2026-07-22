@@ -30,17 +30,18 @@ copyable, so it passes into a CUDA kernel by value.
 static view at the boundary and compute on that.
 
 ```cpp
-auto at = as_anyrank(data, shape, stride, ndim);  // -> anyrank (copies into inline store)
+auto at = as_anyrank(data, shape, stride, ndim);        // -> anyrank, WRAPS the arrays (no copy)
+auto ad = as_anyrank(data, shape, stride, ndim, copy);  // -> anyrank, COPIES into an inline store
 ```
 
-`as_anyrank` **copies** shape/stride into an inline `TNY_MAX_RANK` store (default
-32; `-DTNY_MAX_RANK=N`), so the carrier is trivially copyable and can be passed
-into a CUDA kernel by value. `as_anyrank_view(data, shape, stride, ndim)` instead
-**wraps** the arrays with no copy — e.g. straight off a DLPack tensor — but is
-host-only (those pointers aren't valid in a device kernel; peel/dispatch on the
-host and pass the fixed-rank views to the device). DLPack strides are in
-**elements**; numpy `__array_interface__` strides are in **bytes** (divide by the
-itemsize first).
+By default `as_anyrank` **wraps** the caller's shape/stride arrays with no copy —
+e.g. straight off a DLPack tensor — which is host-only (those pointers aren't
+valid in a device kernel; peel/dispatch on the host and pass the fixed-rank views
+to the device). Pass the `copy` tag to instead **copy** shape/stride into an
+inline `TNY_MAX_RANK` store (default 32; `-DTNY_MAX_RANK=N`, or per-call
+`as_anyrank<N>(..., copy)`), making the carrier trivially copyable so it can be
+passed into a CUDA kernel by value. DLPack strides are in **elements**; numpy
+`__array_interface__` strides are in **bytes** (divide by the itemsize first).
 
 ### `peel_front<Sr>` — the batch pattern (preferred)
 

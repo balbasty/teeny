@@ -15,7 +15,7 @@ int main()
 
     long shape[3]  = {2,3,4};
     long stride[3] = {12,4,1};
-    auto at = as_anyrank(buf, shape, stride, 3);  // runtime rank 3 (copies shape/stride)
+    auto at = as_anyrank(buf, shape, stride, 3);  // runtime rank 3 (WRAPS arrays, no copy)
     if (at.ndim != 3) return 1;
 
     // fixed<R>() -> a concrete rank-R md::tensor view.
@@ -63,17 +63,24 @@ int main()
     static_assert(decltype(cs2.stride(Int<1>()))::value == 1, "inner stride folds after recast");
     if (cs2(2,3) != buf[12 + 2*4 + 3]) return 10;
 
-    // ---- as_anyrank_view: wrap the shape/stride arrays with NO copy ----------
-    auto av = as_anyrank_view(buf, shape, stride, 3);   // shape/stride point at the arrays
-    if (av.ndim != 3 || av.size(1) != 3 || av.step(0) != 12) return 11;
-    auto vv = av.fixed<3>();
-    if (vv(1,2,3) != buf[1*12+2*4+3]) return 12;
-    long vacc = 0; for (auto cell : av.peel_front<-2>()) vacc += (long)sum(cell);
-    if (vacc != (long)expect) return 13;
-    // it really is a view: mutating the source stride array changes the wrapper.
+    // ---- default as_anyrank WRAPS the arrays (no copy) -----------------------
+    // `at` (above) points AT `shape`/`stride`; mutating the source shows through.
+    if (at.size(1) != 3 || at.step(0) != 12) return 11;
+    long vacc = 0; for (auto cell : at.peel_front<-2>()) vacc += (long)sum(cell);
+    if (vacc != (long)expect) return 12;
     stride[0] = 0;                                       // collapse axis 0 onto row 0
-    if (av.step(0) != 0) return 14;
+    if (at.step(0) != 0) return 13;
     stride[0] = 12;                                      // restore
+
+    // ---- as_anyrank(..., copy): an inline, device-passable, INDEPENDENT copy --
+    auto ac = as_anyrank(buf, shape, stride, 3, copy);   // copies shape/stride inline
+    static_assert(cs::is_trivially_copyable<decltype(ac)>::value, "copy store -> trivially copyable");
+    if (ac.ndim != 3 || ac.size(1) != 3 || ac.step(0) != 12) return 14;
+    stride[0] = 0;                                       // mutate the source...
+    if (ac.step(0) != 12) return 15;                     // ...the copy is unaffected
+    stride[0] = 12;
+    auto vc = ac.fixed<3>();
+    if (vc(1,2,3) != buf[1*12+2*4+3]) return 16;
 
     return 0;
 }

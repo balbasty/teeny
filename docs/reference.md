@@ -181,10 +181,10 @@ See [Half precision](half.md).
 
 ```cpp
 dispatch_value<Vs...>(v, f);            // runtime value -> integral_constant
-as_anyrank(data, shape, stride, ndim);  // -> anyrank; COPIES into an inline
-                                        //   TNY_MAX_RANK store (device-passable)
-as_anyrank_view(data, shape, stride, ndim);  // -> anyrank wrapping the arrays, NO copy
-                                             //   (host only; arrays must outlive it)
+as_anyrank(data, shape, stride, ndim);        // -> anyrank WRAPPING the arrays, NO copy
+                                              //   (default; host only, arrays must outlive it)
+as_anyrank(data, shape, stride, ndim, copy);  // -> anyrank COPYING into an inline
+                                              //   TNY_MAX_RANK store (device-passable)
 at.peel_front<Sr>();  at.peel_front_at<Sr>(i);  // batch idiom: one kernel per Sr
 dispatch_rank(at, f);                    // runtime rank -> fixed-rank view (per total rank)
 at.fixed<R>();                           // force a known rank
