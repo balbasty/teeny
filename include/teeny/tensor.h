@@ -174,15 +174,49 @@ struct tensor : private Layout::template mapping<Shape> {
         for (cs::size_t r = 0; r < rank(); ++r) n *= extent(r);
         return n;
     }
-    /** @brief Whether the strides are dense row-major (C-contiguous). */
+    /** @brief Whether the elements occupy a **dense block of memory**, in *some*
+     *         axis order — true for a C- or F-contiguous tensor, and also for a
+     *         permuted one (a permuted C-contiguous view still packs the same
+     *         memory densely). Formally: the strides are a permutation of a dense
+     *         nested packing (`1, e0, e0·e1, ...`). Size-1 axes are ignored (their
+     *         stride is unconstrained); an empty tensor is trivially contiguous.
+     *         Negative strides (flips) are *not* dense in this sense -> false.
+     *
+     *         Pass a layout for an **exact** check: `is_contiguous<layout_right>()`
+     *         / `is_contiguous<layout_left>()` (aka `corder`/`forder`) test C- /
+     *         F-contiguity specifically — or any layout whose mapping is derivable
+     *         from the extents. */
     _TNY_API constexpr bool is_contiguous() const noexcept {
-        index_type expect = 1;
-        for (int d = static_cast<int>(rank()) - 1; d >= 0; --d) {
-            if (static_cast<index_type>(stride(d)) != expect) return false;
-            expect *= static_cast<index_type>(extent(d));
+        constexpr cs::size_t R = rank();
+        bool used[R ? R : 1] = {};
+        index_type prod = 1;                       // expected stride of the next-smallest axis
+        for (cs::size_t step = 0; step < R; ++step) {
+            int best = -1; index_type bs = 0;      // pick the unused extent>1 axis of least stride
+            for (cs::size_t r = 0; r < R; ++r) {
+                if (used[r] || extent(r) <= 1) continue;
+                const index_type s = static_cast<index_type>(stride(r));
+                if (best < 0 || s < bs) { best = static_cast<int>(r); bs = s; }
+            }
+            if (best < 0) break;                   // no more constraining axes
+            if (bs != prod) return false;          // gap (or a negative/duplicate stride)
+            used[best] = true;
+            prod *= static_cast<index_type>(extent(best));
         }
         return true;
     }
+    /** @brief Exact contiguity in layout `L` (e.g. `corder`/`forder`): the actual
+     *         strides equal what `L` produces for these extents. Two spellings —
+     *         `t.is_contiguous<corder>()` (type form) and `t.is_contiguous(corder())`
+     *         (value form, layout deduced from the argument). */
+    template <class L>
+    _TNY_API bool is_contiguous() const noexcept {
+        typename L::template mapping<extents_type> m(extents());
+        for (cs::size_t r = 0; r < rank(); ++r)
+            if (static_cast<index_type>(stride(r)) != static_cast<index_type>(m.stride(r))) return false;
+        return true;
+    }
+    template <class L>
+    _TNY_API bool is_contiguous(L) const noexcept { return is_contiguous<L>(); }
 
     /* --- data / views -------------------------------------------- */
     _TNY_API T *       data()       noexcept { return store_.data(); }
@@ -449,7 +483,7 @@ private:
         static_assert(((NewExt < 0 ? 1 : 0) + ... + 0) <= 1, "reshape: at most one inferred (-1) dimension");
         using NE = cs::extents<index_type, (NewExt < 0 ? cs::dynamic_extent : static_cast<cs::size_t>(NewExt))...>;
         constexpr index_type known = (index_type(1) * ... * (NewExt < 0 ? index_type(1) : index_type(NewExt)));
-        _TNY_CHECK(is_contiguous(), "reshape: needs a C-contiguous tensor (clone() first)");
+        _TNY_CHECK(is_contiguous<cs::layout_right>(), "reshape: needs a C-contiguous tensor (clone() first)");
         _TNY_CHECK(known != 0 && numel() % known == 0, "reshape: numel not divisible by given extents");
         const index_type inferred = numel() / (known ? known : index_type(1));
         cs::array<index_type, sizeof...(NewExt)> ea{ (NewExt < 0 ? inferred : index_type(NewExt))... };
@@ -471,7 +505,7 @@ private:
         // C-contiguous source (else it would silently mis-address the data). And
         // every static dim of NewE must equal the actual extent. Checked here
         // (host-debug) because a non-contiguous ndarray is the norm at the boundary.
-        _TNY_CHECK(is_contiguous(), "recast: needs a C-contiguous tensor (clone() first)");
+        _TNY_CHECK(is_contiguous<cs::layout_right>(), "recast: needs a C-contiguous tensor (clone() first)");
         ( _TNY_CHECK(NewE::static_extent(D) == cs::dynamic_extent ||
                      static_cast<index_type>(NewE::static_extent(D)) == static_cast<index_type>(extent(D)),
                      "recast: a static dim does not match the actual extent"), ... );
@@ -491,12 +525,12 @@ public:
     /** @brief View as 1-D (`ravel`) — requires C-contiguous (`clone()` first). */
     _TNY_API auto flatten() noexcept {
         using NE = cs::dextents<index_type, 1>;
-        _TNY_CHECK(is_contiguous(), "flatten: needs a C-contiguous tensor (clone() first)");
+        _TNY_CHECK(is_contiguous<cs::layout_right>(), "flatten: needs a C-contiguous tensor (clone() first)");
         return tensor<T, NE, cs::layout_right, own::view>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{ numel() }));
     }
     _TNY_API auto flatten() const noexcept {
         using NE = cs::dextents<index_type, 1>;
-        _TNY_CHECK(is_contiguous(), "flatten: needs a C-contiguous tensor (clone() first)");
+        _TNY_CHECK(is_contiguous<cs::layout_right>(), "flatten: needs a C-contiguous tensor (clone() first)");
         return tensor<const T, NE, cs::layout_right, own::view>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{ numel() }));
     }
 

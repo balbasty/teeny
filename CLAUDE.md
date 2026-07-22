@@ -146,7 +146,8 @@ t.flip<1>();          // reverse an axis (negative-stride view; needs signed ind
 t.unsqueeze<2>();     // insert size-1 axis at pos 2 (numpy newaxis) -> rank+1 view
 t.squeeze<3>();       // drop a size-1 axis -> rank-1 view
 t.reshape<6,4>(); t.flatten();  // contiguous-view reshape / ravel (clone() first if not)
-t.is_contiguous(); t.clone();   // query dense row-major; materialise a dense copy
+t.is_contiguous();              // dense in SOME order (C/F/permuted); <layout_right>() = exact C
+t.clone();                      // materialise a dense row-major copy
 t(all, slice(none,none,-1));    // reverse a range (negative step; a[::-1])
 // AXIS template args are signed: negatives count from the back (numpy). e.g.
 //   t.extent(Int<-1>()), t.unsqueeze<-1>() (append), t.permute<-1,0,1>(),
