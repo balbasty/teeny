@@ -50,5 +50,16 @@ int main() {
     static_assert(decltype(h)::ownership == own::heap, "make_heap -> heap");
     if (h.extent(0) != 2 || h.extent(1) != 3) return 6;
 
+    // --- wrap(ptr, shape, runtime strides) -> a layout_stride view ---
+    auto rs = wrap(pad, shape<3,4>{}, {4,1});               // row-major, runtime strides
+    static_assert(cs::is_same<decltype(rs)::layout_type, cs::layout_stride>::value, "wrap+strides -> layout_stride");
+    if (rs(1,1) != pad[4+1]) return 8;
+    auto cs_ = wrap(pad, shape<3,4>{}, {1,3});              // column-major
+    if (cs_(1,0) != pad[1] || cs_(0,1) != pad[3]) return 9;
+    auto dyn = wrap(pad, shape<-1,4>{3}, {4,1});            // dynamic outer + strides
+    if (dyn(2,3) != pad[2*4+3]) return 10;
+    auto neg = wrap(pad + 8, shape<3,4>{}, {-4,1});         // reversed axis 0 (negative stride)
+    if (neg(0,0) != pad[8] || neg(2,0) != pad[0]) return 11;
+
     return 0;
 }

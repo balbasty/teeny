@@ -638,6 +638,20 @@ _TNY_API tensor<T, Extents, Layout, own::view> wrap(T * p, Extents e) {
     return Tn(p, typename Tn::mapping_type(e));
 }
 
+/** @brief Wrap `p` as a non-owning view with explicit **runtime strides** (a
+ *         `layout_stride` view). Pass one stride per dimension — an `array` or a
+ *         braced list — in ELEMENTS; strides may be negative (a reversed view).
+ *
+ *         `wrap(p, shape<2,3>{}, {3, 1})` is the row-major view; `{1, 2}` the
+ *         column-major one. For strides known at compile time prefer
+ *         `wrap_strided<S...>` (they fold into the type). */
+template <class T, class Extents>
+_TNY_API tensor<T, Extents, cs::layout_stride, own::view>
+wrap(T * p, Extents e, cs::array<typename Extents::index_type, Extents::rank()> st) {
+    using Tn = tensor<T, Extents, cs::layout_stride, own::view>;
+    return Tn(p, typename Tn::mapping_type(e, st));
+}
+
 /** @brief Wrap `p` as a non-owning view with per-dimension compile-time strides
  *         (may be negative). */
 template <cs::int64_t... Strides, class T, class Extents>
