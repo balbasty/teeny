@@ -11,10 +11,10 @@ int main()
     static_assert(cs::is_same<I2<1>, Int16<1>>::value,  "I2 == Int16");
     static_assert(cs::is_same<I4<3>, Int32<3>>::value,  "I4 == Int32");
     static_assert(cs::is_same<I8<1>, Int64<1>>::value,  "I8 == Int64");
-    static_assert(cs::is_same<U1<1>, Uint8<1>>::value,  "U1 == Uint8");
-    static_assert(cs::is_same<U4<1>, Uint32<1>>::value, "U4 == Uint32");
+    static_assert(cs::is_same<U1<1>, UInt8<1>>::value,  "U1 == UInt8");
+    static_assert(cs::is_same<U4<1>, UInt32<1>>::value, "U4 == UInt32");
     static_assert(I4<7>::value == 7, "value carried");
-    static_assert(Uint8<200>::value == 200, "unsigned value");
+    static_assert(UInt8<200>::value == 200, "unsigned value");
     // still convert to a runtime integer (usable as an index)
     long a[5] = {0,1,2,3,4};
     auto v = wrap(a, shape<5>{});

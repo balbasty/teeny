@@ -236,7 +236,7 @@ The API accepts **runtime integers, static integers (`integral_constant`), and
 slices of either**, and dispatches to the right output type:
 
 - `alias.h` provides short names for `cuda::std::integral_constant`:
-  `Int<V>`, `Long<V>`, `Size<V>`, `Uint<V>`, `Int32<V>`, `Int64<V>`, `Diff<V>`,
+  `Int<V>`, `Long<V>`, `Size<V>`, `UInt<V>`, `Int32<V>`, `Int64<V>`, `Diff<V>`,
   and `Bool<V>`. Each converts implicitly to a runtime integer *and*
   carries `::value`.
 - `extent(Int<0>())` returns an `integral_constant` when that extent is static

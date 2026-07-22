@@ -12,8 +12,8 @@ Everything is in `namespace tny`. `namespace cs = cuda::std`. Include
 ## The tensor type
 
 ```cpp
-template <class T, class Extents, class Layout = layout_right, own O = own::view>
-struct tensor;
+template <class T, class Shape, class Layout = layout_right, own O = own::view>
+struct tensor;  // Shape = any cuda::std::extents (spell it shape<...>); Layout: corder/forder/...
 ```
 
 One tensor type parameterised by element type, `cuda::std::extents`, an mdspan
@@ -58,18 +58,20 @@ template <int64_t... S>    using layout_static_stride = strides<S...>;  // back-
 constexpr int64_t dynamic_stride;                         // a runtime stride
 ```
 
-Static-integer aliases (each converts to a runtime integer and carries `::value`):
+Static-integer aliases (each converts to a runtime integer and carries `::value`);
+pass them where a static index/size is wanted, e.g. `x.extent(Int<0>())`:
 
 ```cpp
-Int<V> Long<V> Size<V> Uint<V> Diff<V> Bool<V> ic<V>          // classic
-Int8/16/32/64<V>  Uint8/16/32/64<V>                          // fixed-width
-I1 I2 I4 I8  U1 U2 U4 U8   // numpy short forms (BYTES): I4<V> == Int32<V>
+Int<0>{};  Long<3>{};  UInt<2>{};  Bool<true>{};  // classic:     Int Long Size UInt Diff Bool
+Int32<4>{};  UInt64<8>{};                         // fixed-width: Int8/16/32/64  UInt8/16/32/64
+I4<3>{};  U8<9>{};                                // numpy short (BYTES): I4==Int32, U8==UInt64
 ```
 
-Element **dtype** aliases (numpy short codes; width in bytes, `local<f4, shape<3>>`):
+Element **dtype** aliases — numpy short codes, width in **bytes**:
 
 ```cpp
-i1 i2 i4 i8   u1 u2 u4 u8   f4(float) f8(double)   f2(half) bf16(bfloat16)
+auto z = zeros<i4>(sh);        // i1 i2 i4 i8   u1 u2 u4 u8   (i4 == int32_t, u8 == uint64_t)
+auto m = local<f4, shape<3>>{};// f4 == float, f8 == double, f2 == half, bf16 == bfloat16
 ```
 
 See [Shapes & strides](shapes-strides.md).
@@ -79,11 +81,11 @@ See [Shapes & strides](shapes-strides.md).
 ## Geometry
 
 ```cpp
-t.rank();  t.numel();  t.is_contiguous();
-t.extent(d);          t.extent(Int<d>());  // runtime value / static integral_constant
-t.shape(d);           t.shape();           // aliases of extent(d) / extents()
-t.stride(d);          t.stride(Int<d>());  // static when derivable
-t.data();  t.view();  t.extents();  t.mapping();
+x.rank();  x.numel();  x.is_contiguous();
+x.extent(d);          x.extent(Int<d>());  // runtime value / static integral_constant
+x.shape(d);           x.shape();           // aliases of extent(d) / extents()
+x.stride(d);          x.stride(Int<d>());  // static when derivable
+x.data();  x.view();  x.extents();  x.mapping();
 ```
 
 ---
@@ -91,14 +93,14 @@ t.data();  t.view();  t.extents();  t.mapping();
 ## Indexing & slicing (`indexing.h`)
 
 ```cpp
-t(i, j, k);                     // element access -> T& (negatives wrap)
-t.at(i, j, k);                  // one element as a rank-0 VIEW (rank-0 <-> scalar, .item())
-t(0, all, slice(1, 4));         // any slice arg -> a VIEW
-t(1, ellipsis, 2);              // ellipsis = (rank - #other args) copies of `all`
-t(ellipsis) = b;  t(0, all) = v;  // assign INTO a slice copies/fills (a = b rebinds)
+x(i, j, k);                     // element access -> T& (negatives wrap)
+x.at(i, j, k);                  // one element as a rank-0 VIEW (rank-0 <-> scalar, .item())
+x(0, all, slice(1, 4));         // any slice arg -> a VIEW
+x(1, ellipsis, 2);              // ellipsis = (rank - #other args) copies of `all`
+x(ellipsis) = b;  x(0, all) = v;  // assign INTO a slice copies/fills (a = b rebinds)
 slice(start, stop);  slice(start, stop, step);  // half-open range, optional (neg) step
 none;  all;                     // open slice end (== python None); keep-axis marker
-t.take_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest
+x.take_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest
 ```
 
 See [Indexing & slicing](indexing.md).
@@ -108,13 +110,13 @@ See [Indexing & slicing](indexing.md).
 ## Structure (views) (`axis.h`, `tensor.h`)
 
 ```cpp
-t.permute<Perm...>();                 // reorder axes
-t.flip<Ax>();                         // reverse an axis (negative-stride view)
-t.unsqueeze<Ax>();  t.squeeze<Ax>();  // insert / drop a size-1 axis
-t.reshape<NewExt...>();               // contiguous-view reshape (one -1 inferred)
-t.flatten();                          // 1-D contiguous view
-t.clone();                            // dense row-major OWNING copy
-t.recast<NewExtents>();               // reinterpret with a more-static same-rank extents
+x.permute<Perm...>();                 // reorder axes
+x.flip<Ax>();                         // reverse an axis (negative-stride view)
+x.unsqueeze<Ax>();  x.squeeze<Ax>();  // insert / drop a size-1 axis
+x.reshape<NewExt...>();               // contiguous-view reshape (one -1 inferred)
+x.flatten();                          // 1-D contiguous view
+x.clone();                            // dense row-major OWNING copy
+x.recast<NewExtents>();               // reinterpret with a more-static same-rank extents
 ```
 
 Axis template arguments are signed (negatives count from the back). Every view op
@@ -126,8 +128,8 @@ folds output strides and works on any source layout (incl. `strides<...>`). See
 ## nd-peel (iteration) (`iterate.h`)
 
 ```cpp
-peel<Axes...>(t);       peel_at<Axes...>(t, i);  // peel named axes
-peel_front<N>(t);       peel_front_at<N>(t, i);  // peel the first N axes
+peel<Axes...>(x);       peel_at<Axes...>(x, i);  // peel named axes
+peel_front<N>(x);       peel_front_at<N>(x, i);  // peel the first N axes
 ```
 
 See [Views & structure](structure.md#nd-peel-iterate-a-subset-of-axes).
