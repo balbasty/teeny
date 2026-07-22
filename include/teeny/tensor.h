@@ -318,10 +318,19 @@ private:
     }
     // static output extent for one axis: DROP (integer), the input static extent
     // (an `all`/full_extent OR a folded `slice(none,none)` kept axis), or dynamic.
-    template <class Arg> static constexpr cs::size_t _out_static(cs::size_t se) {
+    template <class Arg, cs::size_t Se> static constexpr cs::size_t _out_static() {
         if constexpr (_is_index<Arg>::value)                            return _drop_axis;
-        else if constexpr (cs::is_same<Arg, cs::full_extent_t>::value)  return se;
-        else if constexpr (_is_full_slice<Arg>::value)                  return se;
+        else if constexpr (cs::is_same<Arg, cs::full_extent_t>::value)  return Se;
+        else if constexpr (_is_full_slice<Arg>::value)                  return Se;
+        // a compile-time range folds its extent too: source static + static
+        // start/stop/step -> the length is computable now (mirrors _sl_axis).
+        else if constexpr (_is_slice_spec<Arg>::value && Se != cs::dynamic_extent &&
+                           _static_bound<typename _slice_start<Arg>::type>::value &&
+                           _static_bound<typename _slice_stop<Arg>::type>::value &&
+                           _is_ic<typename _slice_step<Arg>::type>::value)
+            return _static_range_len<typename _slice_start<Arg>::type,
+                                     typename _slice_stop<Arg>::type,
+                                     typename _slice_step<Arg>::type>(static_cast<long>(Se));
         else                                                            return cs::dynamic_extent;
     }
     template <class P, cs::size_t... Ax, class... Args>
@@ -330,7 +339,7 @@ private:
         constexpr cs::size_t Nk = (cs::size_t(0) + ... + (_is_index<Args>::value ? cs::size_t(0) : cs::size_t(1)));
         // output extents (static where a kept axis is static) and output strides
         // (static where source-stride × step is known) — folded into strides<...>.
-        using OE = typename _compact<index_type, _out_static<Args>(Shape::static_extent(Ax))...>::type;
+        using OE = typename _compact<index_type, _out_static<Args, Shape::static_extent(Ax)>()...>::type;
         using SF = typename _str_compact<_out_sstride<Args, Ax, Layout, Shape>()...>::type;
         using Map = typename SF::template mapping<OE>;
         index_type ext[Nk ? Nk : 1] = {}, str[Nk ? Nk : 1] = {}, off = 0; cs::size_t k = 0;

@@ -141,6 +141,51 @@ _TNY_API constexpr cs::int64_t _out_sstride() {
     } else return ss;                                                            // full_extent (all): step 1
 }
 
+// start / stop bound types of a slice arg (companions to _slice_step).
+template <class Arg> struct _slice_start { using type = void; };
+template <class A, class B, class S> struct _slice_start<_slice_spec<A,B,S>> { using type = A; };
+template <class Arg> struct _slice_stop { using type = void; };
+template <class A, class B, class S> struct _slice_stop<_slice_spec<A,B,S>> { using type = B; };
+
+// a slice bound (start/stop) is STATICALLY known iff it's `none` or an integral_constant.
+template <class V> struct _static_bound
+    : cs::integral_constant<bool, cs::is_same<V, none_t>::value || _is_ic<V>::value> {};
+
+// resolve a static bound to an index at compile time, mirroring _wrap_idx: `none`
+// -> the default, else a signed value with negative-wrap. (Static bounds come from
+// Int<> literals, so the signed path is the right one — matches _sl_bound.)
+template <class V> _TNY_API constexpr long _bound_static(long dflt, long n) {
+    if constexpr (cs::is_same<V, none_t>::value) { (void)n; return dflt; }
+    else { const long i = static_cast<long>(V::value); return i < 0 ? i + n : i; }
+}
+// negative-step stop default is -1 (go past index 0), mirroring _stop_neg.
+template <class V> _TNY_API constexpr long _stop_static(long n) {
+    if constexpr (cs::is_same<V, none_t>::value) return -1;
+    else { const long i = static_cast<long>(V::value); return i < 0 ? i + n : i; }
+}
+// Compile-time length of slice<A,B,S> over a static source extent `n`. This MUST
+// reproduce the runtime _sl_axis count EXACTLY (else the folded static extent would
+// disagree with the runtime-filled value -> UB), so the clamps below mirror it 1:1.
+template <class A, class B, class S>
+_TNY_API constexpr cs::size_t _static_range_len(long n) {
+    const long step = static_cast<long>(S::value), Z = 0;
+    long st = 0, cnt = 0;
+    if (step >= Z) {
+        st = _bound_static<A>(Z, n);
+        long sp = _bound_static<B>(n, n);
+        st = st < Z ? Z : (st > n ? n : st);
+        sp = sp < Z ? Z : (sp > n ? n : sp);
+        const long w = sp - st; cnt = w <= Z ? Z : (w + step - 1) / step;
+    } else {
+        const long ns = -step, hi = n - 1;
+        st = _bound_static<A>(n - 1, n);
+        long sp = _stop_static<B>(n);
+        st = st > hi ? hi : (st < Z ? Z : st);
+        sp = sp > hi ? hi : (sp < -1 ? -1 : sp);
+        const long w = (n <= Z) ? Z : (st - sp); cnt = w <= Z ? Z : (w + ns - 1) / ns;
+    }
+    return static_cast<cs::size_t>(cnt);
+}
 // a "real" range (needs the layout_stride path) is a slice that is not a full slice
 template <class Arg> struct _is_real_range
     : cs::integral_constant<bool, _is_slice_spec<Arg>::value && !_is_full_slice<Arg>::value> {};
