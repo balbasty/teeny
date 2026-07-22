@@ -23,7 +23,7 @@ below. See [Tensors & ownership](tensors.md).
 ### Ownership aliases
 
 ```cpp
-view_t<T, E, L = corder>       // non-owning view (default; the bare `tensor` is this)
+view<T, E, L = corder>       // non-owning view (default; the bare `tensor` is this)
 local<T, E, L = corder>        // stack-owned (requires a fully static shape)
 owned<T, E, L = corder>        // heap-owned, host, move-only
 gpu<T, E, L>  pinned<T, E, L>  mapped<T, E, L>  // CUDA memory (from <teeny/cuda.h>)
@@ -86,7 +86,8 @@ x.rank();  x.numel();  x.is_contiguous();
 x.extent(d);          x.extent(Int<d>());  // runtime value / static integral_constant
 x.shape(d);           x.shape();           // aliases of extent(d) / extents()
 x.stride(d);          x.stride(Int<d>());  // static when derivable
-x.data();  x.view();  x.extents();  x.mapping();
+x.data();  x.view();  x.mdspan();  x.extents();  x.mapping();
+                      // view() = non-owning teeny view (gpu_view if device); mdspan() = raw cs::mdspan
 ```
 
 ---

@@ -249,8 +249,17 @@ public:
     /* --- data / views -------------------------------------------- */
     _TNY_API T *       data()       noexcept { return store_.data(); }
     _TNY_API const T * data() const noexcept { return store_.data(); }
-    _TNY_API view_type       view()       noexcept { return view_type(store_.data(), *this); }
-    _TNY_API const_view_type view() const noexcept { return const_view_type(store_.data(), *this); }
+    /** @brief The raw `cuda::std::mdspan` over this tensor's storage. */
+    _TNY_API view_type       mdspan()       noexcept { return view_type(store_.data(), *this); }
+    _TNY_API const_view_type mdspan() const noexcept { return const_view_type(store_.data(), *this); }
+
+    /** @brief A non-owning teeny **view** of this tensor's storage — a `view` (or
+     *         `gpu_view`, for a device tensor) that aliases the same memory (no
+     *         copy), keeping the source layout. On an already-non-owning tensor it
+     *         re-wraps the same pointer (an equivalent view). For the raw mdspan,
+     *         use `mdspan()`. */
+    _TNY_API auto view()       noexcept { return tensor<T,       Shape, Layout, own_view_of(O)>(store_.data(), mapping()); }
+    _TNY_API auto view() const noexcept { return tensor<const T, Shape, Layout, own_view_of(O)>(store_.data(), mapping()); }
 
     /* --- element access / slicing -------------------------------- */
 private:
@@ -482,19 +491,19 @@ public:
     /** @brief Reorder the axes (a permutation of 0..N-1; negatives wrap) -> a rank-N view. */
     template <long... Perm>
     _TNY_API auto permute() noexcept
-    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor<own_view_of(O)>(_detail::perm_md(view(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
+    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor<own_view_of(O)>(_detail::perm_md(mdspan(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
     template <long... Perm>
     _TNY_API auto permute() const noexcept
-    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor<own_view_of(O)>(_detail::perm_md(view(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
+    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor<own_view_of(O)>(_detail::perm_md(mdspan(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
 
     /** @brief Reverse axis `Ax` (negatives wrap) -> a view (numpy `flip`). Uses a
      *         negative stride, so the index type must be signed (`shape<...>` is). */
     template <long Ax = 0>
     _TNY_API auto flip() noexcept
-    { return as_tensor<own_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(view(), cs::make_index_sequence<rank()>{})); }
+    { return as_tensor<own_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(mdspan(), cs::make_index_sequence<rank()>{})); }
     template <long Ax = 0>
     _TNY_API auto flip() const noexcept
-    { return as_tensor<own_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(view(), cs::make_index_sequence<rank()>{})); }
+    { return as_tensor<own_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(mdspan(), cs::make_index_sequence<rank()>{})); }
 
     /** @brief A dense, row-major OWNING copy of this tensor (materialise a view /
      *         non-contiguous / permuted / flipped tensor). Static shape -> stack
@@ -596,10 +605,10 @@ public:
      *         `.unsqueeze<-1>()` appends a trailing axis: `(H,W)` -> `(H,W,1)`. */
     template <long Ax = 0>
     _TNY_API auto unsqueeze() noexcept
-    { constexpr cs::size_t A = _norm_axis(Ax, rank() + 1); static_assert(A <= rank(), "unsqueeze: axis out of range"); return as_tensor<own_view_of(O)>(_detail::unsqueeze_md<A>(view(), cs::make_index_sequence<rank() + 1>{})); }
+    { constexpr cs::size_t A = _norm_axis(Ax, rank() + 1); static_assert(A <= rank(), "unsqueeze: axis out of range"); return as_tensor<own_view_of(O)>(_detail::unsqueeze_md<A>(mdspan(), cs::make_index_sequence<rank() + 1>{})); }
     template <long Ax = 0>
     _TNY_API auto unsqueeze() const noexcept
-    { constexpr cs::size_t A = _norm_axis(Ax, rank() + 1); static_assert(A <= rank(), "unsqueeze: axis out of range"); return as_tensor<own_view_of(O)>(_detail::unsqueeze_md<A>(view(), cs::make_index_sequence<rank() + 1>{})); }
+    { constexpr cs::size_t A = _norm_axis(Ax, rank() + 1); static_assert(A <= rank(), "unsqueeze: axis out of range"); return as_tensor<own_view_of(O)>(_detail::unsqueeze_md<A>(mdspan(), cs::make_index_sequence<rank() + 1>{})); }
 
 private:
     static constexpr long _ax_all = cs::numeric_limits<long>::min();   // squeeze() sentinel: "all singletons"
@@ -620,13 +629,13 @@ public:
     _TNY_API auto squeeze() noexcept {
         if constexpr (Ax == _ax_all) return _squeeze_all(store_.data(), cs::make_index_sequence<rank()>{});
         else { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range");
-               return as_tensor<own_view_of(O)>(_detail::squeeze_md<A>(view(), cs::make_index_sequence<rank() - 1>{})); }
+               return as_tensor<own_view_of(O)>(_detail::squeeze_md<A>(mdspan(), cs::make_index_sequence<rank() - 1>{})); }
     }
     template <long Ax = _ax_all>
     _TNY_API auto squeeze() const noexcept {
         if constexpr (Ax == _ax_all) return _squeeze_all(store_.data(), cs::make_index_sequence<rank()>{});
         else { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range");
-               return as_tensor<own_view_of(O)>(_detail::squeeze_md<A>(view(), cs::make_index_sequence<rank() - 1>{})); }
+               return as_tensor<own_view_of(O)>(_detail::squeeze_md<A>(mdspan(), cs::make_index_sequence<rank() - 1>{})); }
     }
 
     /* --- value-form axis args: x.squeeze(Int<1>()) == x.squeeze<1>() ---- *
@@ -723,8 +732,8 @@ public:
  * ------------------------------------------------------------------ */
 
 /** @brief Wrap `p` as a non-owning view with a contiguous layout (default
- *         C-order). Named `wrap` (not `view`) so it never collides with the
- *         member `t.view()` that returns a raw mdspan. */
+ *         C-order). This is the factory; the `view<T,E>` alias is the type it
+ *         produces, and the member `t.view()` re-views an existing tensor. */
 template <class Layout = cs::layout_right, class T, class Shape>
 _TNY_API tensor<T, Shape, Layout, own::view> wrap(T * p, Shape e) {
     using Tn = tensor<T, Shape, Layout, own::view>;
@@ -788,9 +797,9 @@ template <class Tn> inline constexpr bool is_owning_v          = Tn::is_owning;
 template <class Tn> inline constexpr bool is_device_v          = Tn::is_device;
 template <class Tn> inline constexpr bool is_host_accessible_v = Tn::is_host_accessible;
 
-/** @brief A non-owning view type. Construct as `view_t<T,E>(ptr, extents)`. */
+/** @brief A non-owning view type. Construct as `view<T,E>(ptr, extents)`. */
 template <class T, class Shape, class Layout = cs::layout_right>
-using view_t = tensor<T, Shape, Layout, own::view>;
+using view = tensor<T, Shape, Layout, own::view>;
 
 /** @brief Stack-owned tensor (fully static shape). Use `local<T,E>{}`. */
 template <class T, class Shape, class Layout = cs::layout_right>

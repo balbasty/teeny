@@ -39,7 +39,7 @@ so their views are plain `view`.
 
 | Alias | Ownership | Notes |
 |---|---|---|
-| `view_t<T,E,L=corder>` | none (host view) | trivially copyable, kernel-passable; the bare `tensor` is this |
+| `view<T,E,L=corder>` | none (host view) | trivially copyable, kernel-passable; the bare `tensor` is this |
 | `local<T,E,L>` | stack | requires a fully static shape; `sizeof` == its data |
 | `owned<T,E,L>` | heap (host) | move-only |
 | `gpu<T,E,L>` / `pinned<T,E,L>` / `mapped<T,E,L>` | CUDA | from `<teeny/cuda.h>`; a view of a `gpu` is `own::gpu_view` |
@@ -52,13 +52,13 @@ Wrap existing memory (→ view):
 
 | Call | Returns | Notes |
 |---|---|---|
-| `wrap(ptr, shape)` | `view_t<T,E>` | C-order (`corder`) |
-| `wrap<Layout>(ptr, shape)` | `view_t<T,E,Layout>` | chosen layout |
-| `wrap(ptr, shape, {s0,s1,…})` | `view_t<T,E,dynamic_strides>` | **runtime** strides (elements; may be negative) |
-| `wrap<S...>(ptr, shape, {dyn…})` | `view_t<T,E,strides<S...>>` | **mixed** static/runtime strides (`dynamic_stride` slots) |
-| `wrap(ptr, shape, strides<S...>{})` | `view_t<T,E,strides<S...>>` | **compile-time** strides (fold into the type) |
-| `as_tensor(md)` | `view_t<…>` | wrap any `cs::mdspan`/`submdspan` result |
-| `make_view(ptr, shape)` | `view_t<T,E>` | an alias of `wrap` that deduces `E` (`make_view<Layout>` for the layout) |
+| `wrap(ptr, shape)` | `view<T,E>` | C-order (`corder`) |
+| `wrap<Layout>(ptr, shape)` | `view<T,E,Layout>` | chosen layout |
+| `wrap(ptr, shape, {s0,s1,…})` | `view<T,E,dynamic_strides>` | **runtime** strides (elements; may be negative) |
+| `wrap<S...>(ptr, shape, {dyn…})` | `view<T,E,strides<S...>>` | **mixed** static/runtime strides (`dynamic_stride` slots) |
+| `wrap(ptr, shape, strides<S...>{})` | `view<T,E,strides<S...>>` | **compile-time** strides (fold into the type) |
+| `as_tensor(md)` | `view<…>` | wrap any `cs::mdspan`/`submdspan` result |
+| `make_view(ptr, shape)` | `view<T,E>` | an alias of `wrap` that deduces `E` (`make_view<Layout>` for the layout) |
 
 Allocate new storage — element type **`T` defaults to `float`**; static shape →
 stack (host+device), dynamic shape → heap (host only):
@@ -89,7 +89,8 @@ stack (host+device), dynamic shape → heap (host only):
 | `t.is_contiguous()` | `bool` | dense in **some** order (C, F, or permuted) |
 | `t.is_contiguous<L>()` | `bool` | exact: strides equal `L`'s packing (`corder`=C, `forder`=F) |
 | `t.data()` | `T*` | base pointer |
-| `t.view()` | `cs::mdspan<T,E,L>` | the raw mdspan |
+| `t.view()` | `view<T,E,L>` (`gpu_view` if device) | non-owning teeny view aliasing `t`'s memory (no copy) |
+| `t.mdspan()` | `cs::mdspan<T,E,L>` | the raw mdspan |
 | `t.extents()` / `t.mapping()` | `const Extents&` / `const mapping&` | |
 
 ---

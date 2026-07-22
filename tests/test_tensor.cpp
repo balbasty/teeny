@@ -49,14 +49,20 @@ int main()
     auto h2 = static_cast<decltype(h)&&>(h);            // move
     if (h2(1,2) != 7 || h.data() != nullptr) return 7;
 
-    // ---- .view() yields a plain cuda::std::mdspan ---------------------
-    auto md = v.view();
-    static_assert(cs::is_same<decltype(md), cs::mdspan<double, extents<long,2,3,4>, cs::layout_right>>(), "view() -> mdspan");
+    // ---- .mdspan() yields a plain cuda::std::mdspan ------------------
+    auto md = v.mdspan();
+    static_assert(cs::is_same<decltype(md), cs::mdspan<double, extents<long,2,3,4>, cs::layout_right>>(), "mdspan() -> mdspan");
     if (md.extent(2) != 4) return 8;
+
+    // ---- .view() yields a non-owning teeny tensor view (not an mdspan) ---
+    auto tv = v.view();
+    static_assert(decltype(tv)::ownership == own::view, "view() -> tensor view");
+    static_assert(cs::is_same<decltype(tv)::element_type, double>(), "view() keeps dtype");
+    if (tv.data() != v.data() || tv(1,2,3) != v(1,2,3)) return 10;   // aliases the same storage
 
     // ---- peel axis 0 (e.g. a channel axis) at an index ----------------
     auto full = wrap(buf, extents<long,2,3,4>{});         // treat dim0 as "channel"
-    auto sp = peel_at<0>(full.view(), 1);                 // spatial (3,4) view of channel 1
+    auto sp = peel_at<0>(full, 1);                        // spatial (3,4) view of channel 1
     static_assert(decltype(sp)::rank() == 2, "peel_at<0> drops axis 0");
     if (sp(0,0) != full(1,0,0)) return 9;
 

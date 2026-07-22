@@ -40,7 +40,7 @@ include/teeny/
   layout.h         strides<S...> — per-dim static/dynamic strides (extents for strides)
   indexing.h       free indexing/slicing vocabulary: slice()/none, _norm_axis,
                    _wrap_idx, slice_spec + traits, _compact output-extents
-  tensor.h         the tensor class + view/local/owned/view_t aliases + as_tensor
+  tensor.h         the tensor class + view/local/owned aliases + as_tensor
                    + indexing/slicing, take_along, permute, unsqueeze/squeeze
   math.h           in-place & out-of-place elementwise (broadcasting) + unary math
                    + reductions (sum/prod/max/min/dot). Members declared in
@@ -102,7 +102,7 @@ fully-static stack tensor is *exactly* `sizeof` its data.
 ### Aliases (prefer these over spelling out `tensor<...>`)
 
 ```cpp
-view_t<T,E,L>   // non-owning view type
+view<T,E,L>   // non-owning view type
 local<T,E,L>    // stack-owned (static shape)     e.g. local<double, shape<3,3>>{}
 owned<T,E,L>    // heap-owned (host, move-only)    e.g. owned<double, DynE>(DynE{2,3})
 gpu/pinned/mapped<T,E,L>   // from cuda.h
@@ -135,7 +135,9 @@ t.extent(Int<0>());   // static lookup -> integral_constant when the extent is s
 t.extent(0);          // runtime lookup -> index_type   (t.shape(...) is a python-y alias)
 t.stride(Int<1>());   // static when derivable (static-stride layout; contiguous+static;
                       //   or a contiguous layout's UNIT stride even for a dynamic shape)
-t.data();  t.view();  t.extents();  t.shape();  t.mapping();
+t.data();  t.view();  t.mdspan();  t.extents();  t.shape();  t.mapping();
+                      //   view() = non-owning teeny view tensor (gpu_view if device);
+                      //   mdspan() = the raw cuda::std::mdspan
 
 // --- indexing / slicing (python-like) ---
 t(1, 2, 3);           // element access -> T& ; negative indices wrap (count from the back)

@@ -22,6 +22,7 @@ Generated from the header Doxygen comments (`doxygen` + `moxygen`). For a curate
 | [`peel_range`](#peel_range) | A range of sub-views obtained by peeling `Axes...`. |
 | [`storage`](#storage) |  |
 | [`gpu, N >`](#gpun) |  |
+| [`gpu_view, N >`](#gpu_viewn) |  |
 | [`heap, N >`](#heapn) |  |
 | [`mapped, N >`](#mappedn) |  |
 | [`pinned, N >`](#pinnedn) |  |
@@ -66,6 +67,7 @@ Ownership / memory-space of a tensor's storage.
 | `gpu` |  |
 | `pinned` |  |
 | `mapped` |  |
+| `gpu_view` |  |
 
 ## Typedefs
 
@@ -73,6 +75,7 @@ Ownership / memory-space of a tensor's storage.
 |--------|------|-------------|
 | `layout_right` | [`corder`](#corder)  | numpy-style spellings of the contiguous layouts: `corder` is C-order (row-major, `layout_right`), `forder` is Fortran-order (column-major, `layout_left`). |
 | `layout_left` | [`forder`](#forder)  |  |
+| `layout_stride` | [`dynamic_strides`](#dynamic_strides)  | `dynamic_strides` — the all-runtime strided layout (`layout_stride`, a full runtime stride array). |
 | `integral_constant< int, V >` | [`Int`](#int)  |  |
 | `integral_constant< long, V >` | [`Long`](#long)  |  |
 | `integral_constant< size_t, V >` | [`Size`](#size)  |  |
@@ -119,7 +122,7 @@ Ownership / memory-space of a tensor's storage.
 | `strides< S... >` | [`layout_static_stride`](#layout_static_stride)  | Back-compat alias: the original all-static-stride layout name. |
 | `typename _promote< A, B, true >::type` | [`promote_t`](#promote_t)  |  |
 | `conditional_t<(is_floating_point< T >::value||!is_same< compute_type_t< T >, T >::value), conditional_t<(sizeof(T) > 8), T, double >, T >` | [`reduce_type_t`](#reduce_type_t)  | Default accumulator type for a reduction over element type `T`. |
-| `tensor< T, Shape, Layout, own::view >` | [`view_t`](#view_t)  | A non-owning view type. |
+| `tensor< T, Shape, Layout, own::view >` | [`view`](#view)  | A non-owning view type. |
 | `tensor< T, Shape, Layout, own::stack >` | [`local`](#local)  | Stack-owned tensor (fully static shape). |
 | `tensor< T, Shape, Layout, own::heap >` | [`owned`](#owned)  | Heap-owned tensor (host only, move-only). |
 
@@ -142,6 +145,18 @@ Use wherever a `Layout` is expected.
 ```cpp
 using forder = layout_left
 ```
+
+---
+
+### dynamic_strides
+
+```cpp
+using dynamic_strides = layout_stride
+```
+
+`dynamic_strides` — the all-runtime strided layout (`layout_stride`, a full runtime stride array).
+
+The all-/mixed-static sibling is teeny's `strides<S...>` (folds known strides to immediates). Same name shape as `strides<...>` so the two read as a pair.
 
 ---
 
@@ -421,7 +436,7 @@ using rank = dextents< int64_t, N >
 
 Fully-dynamic shape of a given rank: `rank<3>` == `shape<-1,-1,-1>` == `extents<int64_t, dynamic_extent, dynamic_extent, dynamic_extent>`.
 
-Handy for a rank-N view whose sizes are all runtime: `view_t<float, rank<3>>`. `rank<0>` is the rank-0 (scalar) shape.
+Handy for a rank-N view whose sizes are all runtime: `view<float, rank<3>>`. `rank<0>` is the rank-0 (scalar) shape.
 
 ---
 
@@ -545,15 +560,15 @@ Default accumulator type for a reduction over element type `T`.
 
 ---
 
-### view_t
+### view
 
 ```cpp
-using view_t = tensor< T, Shape, Layout, own::view >
+using view = tensor< T, Shape, Layout, own::view >
 ```
 
 A non-owning view type.
 
-Construct as `view_t<T,E>(ptr, extents)`.
+Construct as `view<T,E>(ptr, extents)`.
 
 ---
 
@@ -586,7 +601,9 @@ Use `owned<T,E>(extents)`.
 | `auto` | [`make_gpu`](#make_gpu)  |  |
 | `auto` | [`make_pinned`](#make_pinned)  |  |
 | `auto` | [`make_mapped`](#make_mapped)  |  |
-| `DLManagedTensor *` | [`to_dlpack`](#to_dlpack)  | Export a **view** to a `DLManagedTensor` (borrows the data — the caller must keep the underlying memory alive; only the metadata is owned by the capsule). |
+| `auto` | [`to`](#to)  | Move `x` to memory space `Space` (`[own::gpu](#namespacetny_1a6a432f80fb491dbcb5d4b0692616b918a0aa0be2a866411d9ff03515227454947)`/`pinned`/`mapped`/`heap`), optionally converting the element type to `ET` — the memory-backend half of pytorch's `.to`. |
+| `auto` | [`to`](#to-1)  | Rvalue overload of `to<Space>`: a temporary source cannot be borrowed (the no-copy branch would dangle — and for a `gpu` temporary would point at freed device memory), so this always **forces a fresh owning copy**. |
+| `DLManagedTensor *` | [`to_dlpack`](#to_dlpack)  | Export a **view** (host `view` or device `gpu_view`) to a `DLManagedTensor` (borrows the data — the caller must keep the underlying memory alive; only the metadata is owned by the capsule). |
 | `DLManagedTensor *` | [`to_dlpack`](#to_dlpack-1)  | Export an **owning** tensor, TRANSFERRING ownership of the buffer into the capsule (the tensor is moved-from; the capsule's `deleter` frees the buffer). |
 | `anyrank< T, int64_t >` | [`from_dlpack`](#from_dlpack)  | Import a `DLManagedTensor` of known element type `T` as an `anyrank` (runtime rank). |
 | `dyn_tensor< T, int64_t, R >` | [`from_dlpack`](#from_dlpack-1)  | Import as a **fixed-rank** view (requires `m->dl_tensor.ndim == R`). |
@@ -603,7 +620,7 @@ Use `owned<T,E>(extents)`.
 | `auto` | [`peel_at`](#peel_at-2)  |  |
 | `auto` | [`peel`](#peel)  | Build a range of sub-views by peeling `Axes...` of `t`. |
 | `auto` | [`peel`](#peel-1)  |  |
-| `peel_range< MD, Axes... >` | [`peel_of`](#peel_of)  | Build a range of sub-views over a raw mdspan. |
+| `peel_range< MD, own::view, Axes... >` | [`peel_of`](#peel_of)  | Build a range of sub-views over a raw mdspan. |
 | `auto` | [`peel_front`](#peel_front)  | Peel the FIRST `N` axes -> a range of sub-views over the rest — the runtime-batch-rank half of `(*batch, *spatial, C)`. |
 | `auto` | [`peel_front`](#peel_front-1)  |  |
 | `auto` | [`peel_front_at`](#peel_front_at)  | The `i`-th sub-view obtained by peeling the first `N` axes (grid-stride style). |
@@ -628,8 +645,11 @@ Use `owned<T,E>(extents)`.
 | `auto` | [`clamp`](#clamp)  | `clamp(a, lo, hi)` -> a new tensor with each element clamped. |
 | `auto` | [`mean`](#mean-1)  | Arithmetic mean of all elements. |
 | `constexpr bool` | [`own_is_owning`](#own_is_owning) `constexpr` `noexcept` | Whether the mode owns (and therefore allocates) its storage. |
+| `constexpr bool` | [`own_is_view`](#own_is_view) `constexpr` `noexcept` | Whether the mode is a non-owning view (host `view` or `gpu_view`) — the pointer-wrapping modes (as opposed to `stack`'s inline array). |
+| `constexpr bool` | [`own_is_device`](#own_is_device) `constexpr` `noexcept` | Whether the storage lives in device (GPU) memory (owning or view). |
 | `constexpr bool` | [`own_is_host_accessible`](#own_is_host_accessible) `constexpr` `noexcept` | Whether the storage is dereferenceable from the host. |
-| `tensor< typename MD::element_type, typename MD::extents_type, typename MD::layout_type, own::view >` | [`as_tensor`](#as_tensor)  | Wrap any `cuda::std::mdspan` (e.g. |
+| `constexpr own` | [`own_view_of`](#own_view_of) `constexpr` `noexcept` | The non-owning VIEW kind that preserves a source's memory space: a device source (`gpu`/`gpu_view`) -> `gpu_view`, anything else -> `view`. |
+| `tensor< typename MD::element_type, typename MD::extents_type, typename MD::layout_type, OW >` | [`as_tensor`](#as_tensor)  | Wrap any `cuda::std::mdspan` (e.g. |
 | `void` | [`fetch_add`](#fetch_add) `noexcept` | Accumulate `v` into `*p`, atomic **on the device only**. |
 | `tensor< T, Shape, Layout, own::view >` | [`wrap`](#wrap)  | Wrap `p` as a non-owning view with a contiguous layout (default C-order). |
 | `tensor< T, Shape, layout_stride, own::view >` | [`wrap`](#wrap-1)  | Wrap `p` as a non-owning view with explicit **runtime strides** (a `layout_stride` view). |
@@ -671,15 +691,53 @@ template<class T = float, class Layout = layout_right, class Shape> auto make_ma
 
 ---
 
+### to
+
+```cpp
+template<own Space, class ET = void, bool Force = false, class T, class Shape, class Layout, own O> auto to(const tensor< T, Shape, Layout, O > & x)
+```
+
+Move `x` to memory space `Space` (`[own::gpu](#namespacetny_1a6a432f80fb491dbcb5d4b0692616b918a0aa0be2a866411d9ff03515227454947)`/`pinned`/`mapped`/`heap`), optionally converting the element type to `ET` — the memory-backend half of pytorch's `.to`.
+
+`ET` defaults to the source type. 
+```
+auto d = to<own::gpu>(h);           // upload host -> device
+auto e = to<own::gpu, half>(h);     // convert to half AND upload
+auto c = to<own::heap>(d);          // download device -> host
+```
+**No-op when already there:** if the source is already an owning tensor of element type `ET` in space `Space`, and `Force` is false, this returns a *view* of it (no copy, borrows the source) — like any teeny view op. Pass `Force = true` to always materialise a fresh owning copy (a force-clone into a space): 
+```
+       auto v = to<own::gpu>(g);           // g is already gpu<T> -> a view, no copy
+       auto k = to<own::gpu, void, true>(g);  // forced: a fresh gpu copy
+```
+ Any **device** source — an owning `gpu` OR a `gpu_view` (a slice/permute/peel of a gpu tensor) — is downloaded via `cudaMemcpy` (any layout, C/F/strided, is preserved and densified on the host); a host-accessible source is read directly, gathering only the viewed extent. `Space == stack` needs a static shape. Since #15, a device view is correctly *typed* (`gpu_view`), so it takes the download path instead of being host-dereferenced — the hazard the earlier version warned about is closed. NB a **contiguous** device view downloads exactly its `numel` elements; a **strided** device view currently downloads its full span (over-copies — a run-wise gather is a tracked follow-up, #50).
+
+:::note
+The no-copy branch returns a **borrow** of `x` (a `gpu_view` when `x` is a gpu tensor, else a host `view`), so it must outlive the result — same lifetime rule as `[view()](#view)`/`permute()`/slicing. Calling it on a temporary lvalue would dangle; the rvalue overload below forces a copy instead. 
+
+:::
+
+---
+
+### to
+
+```cpp
+template<own Space, class ET = void, bool Force = false, class T, class Shape, class Layout, own O> auto to(tensor< T, Shape, Layout, O > && x)
+```
+
+Rvalue overload of `to<Space>`: a temporary source cannot be borrowed (the no-copy branch would dangle — and for a `gpu` temporary would point at freed device memory), so this always **forces a fresh owning copy**.
+
+---
+
 ### to_dlpack
 
 ```cpp
-template<class T, class Shape, class Layout, own O, enable_if_t< O==own::view, int > = 0> DLManagedTensor * to_dlpack(const tensor< T, Shape, Layout, O > & t, DLDevice dev = { _dl::device_of< O >(), 0 })
+template<class T, class Shape, class Layout, own O, enable_if_t< own_is_view(O), int > = 0> DLManagedTensor * to_dlpack(const tensor< T, Shape, Layout, O > & t, DLDevice dev = { _dl::device_of< O >(), 0 })
 ```
 
-Export a **view** to a `DLManagedTensor` (borrows the data — the caller must keep the underlying memory alive; only the metadata is owned by the capsule).
+Export a **view** (host `view` or device `gpu_view`) to a `DLManagedTensor` (borrows the data — the caller must keep the underlying memory alive; only the metadata is owned by the capsule).
 
-The device defaults to the tensor's memory space (CPU for a plain view; pass `dev` to override). The consumer owns the returned pointer and MUST call `m->deleter(m)` exactly once when done.
+The device defaults to the tensor's memory space (`kDLCPU` for a host view, `kDLCUDA` for a `gpu_view`; pass `dev` to override). The consumer owns the returned pointer and MUST call `m->deleter(m)` exactly once.
 
 ---
 
@@ -703,7 +761,7 @@ template<class T> anyrank< T, int64_t > from_dlpack(const DLManagedTensor * m)
 
 Import a `DLManagedTensor` of known element type `T` as an `anyrank` (runtime rank).
 
-The shape/stride METADATA is copied into the carrier (so it is self-contained), while the DATA is BORROWED — the caller keeps `m` alive while the view is used, then calls `m->deleter(m)`. A null `strides` (DLPack's C-contiguous shorthand) is expanded to row-major. `byte_offset` is folded into the data pointer. NB the `device` field is not inspected — teeny views are memory-space-agnostic, so a `kDLCUDA` capsule yields a view over the (device) pointer; consult `m->dl_tensor.device` yourself if you need to know where it lives.
+The shape/stride METADATA is copied into the carrier (so it is self-contained), while the DATA is BORROWED — the caller keeps `m` alive while the view is used, then calls `m->deleter(m)`. A null `strides` (DLPack's C-contiguous shorthand) is expanded to row-major. `byte_offset` is folded into the data pointer. NB the `device` field is not inspected: the imported carrier is currently HOST-tagged (`anyrank`/`dyn_tensor` have no memory-space parameter yet), so a `kDLCUDA` capsule yields a host-tagged view over a device pointer — consult `m->dl_tensor.device` yourself before dereferencing on the host. (Tagging the rank-erased boundary with its space is tracked as follow-up on #15.)
 
 ---
 
@@ -823,7 +881,7 @@ template<size_t... Axes, class MD> auto peel_at(const MD & src, typename MD::ind
 
 The `i`-th sub-view obtained by peeling `Axes...` (0 <= i < product of the peeled extents).
 
-Peeled axes vary in row-major order (the last listed axis fastest). Returns a `md::tensor` view.
+Peeled axes vary in row-major order (the last listed axis fastest). Returns a `md::tensor` view. A raw mdspan carries no memory space, so this tags the result as a host `view`; the `md::tensor` overloads below preserve the source's space.
 
 ---
 
@@ -866,7 +924,7 @@ template<long... Axes, class T, class E, class L, own O> auto peel(const tensor<
 ### peel_of
 
 ```cpp
-template<size_t... Axes, class MD> peel_range< MD, Axes... > peel_of(const MD & m)
+template<size_t... Axes, class MD> peel_range< MD, own::view, Axes... > peel_of(const MD & m)
 ```
 
 Build a range of sub-views over a raw mdspan.
@@ -1107,6 +1165,30 @@ Whether the mode owns (and therefore allocates) its storage.
 
 ---
 
+### own_is_view
+
+`constexpr` `noexcept`
+
+```cpp
+constexpr constexpr bool own_is_view(own o) noexcept
+```
+
+Whether the mode is a non-owning view (host `view` or `gpu_view`) — the pointer-wrapping modes (as opposed to `stack`'s inline array).
+
+---
+
+### own_is_device
+
+`constexpr` `noexcept`
+
+```cpp
+constexpr constexpr bool own_is_device(own o) noexcept
+```
+
+Whether the storage lives in device (GPU) memory (owning or view).
+
+---
+
 ### own_is_host_accessible
 
 `constexpr` `noexcept`
@@ -1119,10 +1201,24 @@ Whether the storage is dereferenceable from the host.
 
 ---
 
+### own_view_of
+
+`constexpr` `noexcept`
+
+```cpp
+constexpr constexpr own own_view_of(own o) noexcept
+```
+
+The non-owning VIEW kind that preserves a source's memory space: a device source (`gpu`/`gpu_view`) -> `gpu_view`, anything else -> `view`.
+
+Every view-producing op (slice / permute / peel / reshape / at) tags its result with this so a device view is never mistaken for a host one.
+
+---
+
 ### as_tensor
 
 ```cpp
-template<class MD> tensor< typename MD::element_type, typename MD::extents_type, typename MD::layout_type, own::view > as_tensor(const MD & m)
+template<own OW = own::view, class MD> tensor< typename MD::element_type, typename MD::extents_type, typename MD::layout_type, OW > as_tensor(const MD & m)
 ```
 
 Wrap any `cuda::std::mdspan` (e.g.
@@ -1155,7 +1251,7 @@ template<class Layout = layout_right, class T, class Shape> tensor< T, Shape, La
 
 Wrap `p` as a non-owning view with a contiguous layout (default C-order).
 
-Named `wrap` (not `view`) so it never collides with the member `t.view()` that returns a raw mdspan.
+This is the factory; the `view<T,E>` alias is the type it produces, and the member `t.view()` re-views an existing tensor.
 
 ---
 
@@ -1307,6 +1403,10 @@ template<class T = int64_t, class V, V N> auto arange(integral_constant< V, N >)
 | `constexpr none_t` | [`none`](#none) `constexpr` |  |
 | `constexpr ellipsis_t` | [`ellipsis`](#ellipsis) `constexpr` |  |
 | `constexpr int64_t` | [`dynamic_stride`](#dynamic_stride) `constexpr` | Per-dimension dynamic-stride sentinel. |
+| `constexpr bool` | [`is_view_v`](#is_view_v) `constexpr` | Compile-time memory-space traits (SFINAE-friendly free forms of the tensor's `is_view`/`is_device`/… members): `is_view_v<decltype(x)>`. |
+| `constexpr bool` | [`is_owning_v`](#is_owning_v) `constexpr` |  |
+| `constexpr bool` | [`is_device_v`](#is_device_v) `constexpr` |  |
+| `constexpr bool` | [`is_host_accessible_v`](#is_host_accessible_v) `constexpr` |  |
 
 ---
 
@@ -1363,6 +1463,48 @@ constexpr int64_t dynamic_stride = numeric_limits<int64_t>()
 Per-dimension dynamic-stride sentinel.
 
 Strides are **signed**: a negative stride is a legitimate value (reversed / flipped views, and DLPack tensors carry them). So — unlike `shape<...>`, where `-1` marks a dynamic extent — we cannot use `-1` to mean "runtime" for a stride. Instead a reserved out-of-band value (`INT64_MIN`) marks a dynamic stride, leaving every ordinary stride (including negatives) expressible.
+
+---
+
+### is_view_v
+
+`constexpr`
+
+```cpp
+constexpr bool is_view_v = Tn::is_view
+```
+
+Compile-time memory-space traits (SFINAE-friendly free forms of the tensor's `is_view`/`is_device`/… members): `is_view_v<decltype(x)>`.
+
+---
+
+### is_owning_v
+
+`constexpr`
+
+```cpp
+constexpr bool is_owning_v = Tn::is_owning
+```
+
+---
+
+### is_device_v
+
+`constexpr`
+
+```cpp
+constexpr bool is_device_v = Tn::is_device
+```
+
+---
+
+### is_host_accessible_v
+
+`constexpr`
+
+```cpp
+constexpr bool is_host_accessible_v = Tn::is_host_accessible
+```
 
 
 
@@ -1910,7 +2052,7 @@ Named `copy_meta`, not `copy`: a bare `copy` variable in `tny` would, under `usi
 struct cpp_alloc
 ```
 
-Defined in include/teeny/storage.h:39
+Defined in include/teeny/storage.h:59
 
 Host allocator using C++ `new[]` / `delete[]`.
 
@@ -1938,7 +2080,7 @@ Host allocator using C++ `new[]` / `delete[]`.
 template<class T> static inline T * allocate(size_t n)
 ```
 
-Defined in include/teeny/storage.h:40
+Defined in include/teeny/storage.h:60
 
 ---
 
@@ -1950,7 +2092,7 @@ Defined in include/teeny/storage.h:40
 template<class T> static inline void deallocate(T * p)
 ```
 
-Defined in include/teeny/storage.h:41
+Defined in include/teeny/storage.h:61
 
 
 
@@ -2166,7 +2308,7 @@ template<class T, class Alloc>
 struct owning_storage
 ```
 
-Defined in include/teeny/storage.h:49
+Defined in include/teeny/storage.h:69
 
 Generic owning storage (move-only, no ref-counting), parameterised by an allocator policy.
 
@@ -2198,7 +2340,7 @@ Shared by all owning `own` modes.
 T * p = nullptr
 ```
 
-Defined in include/teeny/storage.h:50
+Defined in include/teeny/storage.h:70
 
 ### Public Methods
 
@@ -2219,7 +2361,7 @@ Defined in include/teeny/storage.h:50
 owning_storage() = default
 ```
 
-Defined in include/teeny/storage.h:51
+Defined in include/teeny/storage.h:71
 
 Defaulted constructor.
 
@@ -2233,7 +2375,7 @@ Defaulted constructor.
 inline explicit owning_storage(size_t n)
 ```
 
-Defined in include/teeny/storage.h:52
+Defined in include/teeny/storage.h:72
 
 ---
 
@@ -2243,7 +2385,7 @@ Defined in include/teeny/storage.h:52
 owning_storage(const owning_storage &) = delete
 ```
 
-Defined in include/teeny/storage.h:53
+Defined in include/teeny/storage.h:73
 
 Deleted constructor.
 
@@ -2257,7 +2399,7 @@ Deleted constructor.
 inline owning_storage(owning_storage && o) noexcept
 ```
 
-Defined in include/teeny/storage.h:55
+Defined in include/teeny/storage.h:75
 
 ---
 
@@ -2269,7 +2411,7 @@ Defined in include/teeny/storage.h:55
 inline T * data() noexcept
 ```
 
-Defined in include/teeny/storage.h:61
+Defined in include/teeny/storage.h:81
 
 ---
 
@@ -2281,7 +2423,7 @@ Defined in include/teeny/storage.h:61
 inline const T * data() const noexcept
 ```
 
-Defined in include/teeny/storage.h:62
+Defined in include/teeny/storage.h:82
 
 
 
@@ -2292,11 +2434,11 @@ Defined in include/teeny/storage.h:62
 ```
 
 ```cpp
-template<class MD, size_t... Axes>
+template<class MD, own OW, size_t... Axes>
 struct peel_range
 ```
 
-Defined in include/teeny/iterate.h:102
+Defined in include/teeny/iterate.h:111
 
 A range of sub-views obtained by peeling `Axes...`.
 
@@ -2327,7 +2469,7 @@ Supports `[size()](#size-3)`, `operator[]`, and range-for.
 MD src
 ```
 
-Defined in include/teeny/iterate.h:104
+Defined in include/teeny/iterate.h:113
 
 ### Public Methods
 
@@ -2348,7 +2490,7 @@ Defined in include/teeny/iterate.h:104
 inline index_type size() const noexcept
 ```
 
-Defined in include/teeny/iterate.h:106
+Defined in include/teeny/iterate.h:115
 
 ---
 
@@ -2360,7 +2502,7 @@ Defined in include/teeny/iterate.h:106
 inline auto operator[](index_type i) const
 ```
 
-Defined in include/teeny/iterate.h:112
+Defined in include/teeny/iterate.h:121
 
 ---
 
@@ -2372,7 +2514,7 @@ Defined in include/teeny/iterate.h:112
 inline iterator begin() const
 ```
 
-Defined in include/teeny/iterate.h:122
+Defined in include/teeny/iterate.h:131
 
 ---
 
@@ -2384,7 +2526,7 @@ Defined in include/teeny/iterate.h:122
 inline iterator end() const
 ```
 
-Defined in include/teeny/iterate.h:123
+Defined in include/teeny/iterate.h:132
 
 ### Public Types
 
@@ -2400,7 +2542,7 @@ Defined in include/teeny/iterate.h:123
 using index_type = typename MD::index_type
 ```
 
-Defined in include/teeny/iterate.h:103
+Defined in include/teeny/iterate.h:112
 
 
 
@@ -2414,7 +2556,7 @@ Defined in include/teeny/iterate.h:103
 struct iterator
 ```
 
-Defined in include/teeny/iterate.h:114
+Defined in include/teeny/iterate.h:123
 
 ### List of all members
 
@@ -2442,7 +2584,7 @@ Defined in include/teeny/iterate.h:114
 peel_range r
 ```
 
-Defined in include/teeny/iterate.h:115
+Defined in include/teeny/iterate.h:124
 
 ---
 
@@ -2452,7 +2594,7 @@ Defined in include/teeny/iterate.h:115
 index_type i
 ```
 
-Defined in include/teeny/iterate.h:116
+Defined in include/teeny/iterate.h:125
 
 ### Public Methods
 
@@ -2473,7 +2615,7 @@ Defined in include/teeny/iterate.h:116
 inline auto operator*() const
 ```
 
-Defined in include/teeny/iterate.h:117
+Defined in include/teeny/iterate.h:126
 
 ---
 
@@ -2485,7 +2627,7 @@ Defined in include/teeny/iterate.h:117
 inline iterator & operator++()
 ```
 
-Defined in include/teeny/iterate.h:118
+Defined in include/teeny/iterate.h:127
 
 ---
 
@@ -2497,7 +2639,7 @@ Defined in include/teeny/iterate.h:118
 inline bool operator!=(const iterator & o) const
 ```
 
-Defined in include/teeny/iterate.h:119
+Defined in include/teeny/iterate.h:128
 
 ---
 
@@ -2509,7 +2651,7 @@ Defined in include/teeny/iterate.h:119
 inline bool operator==(const iterator & o) const
 ```
 
-Defined in include/teeny/iterate.h:120
+Defined in include/teeny/iterate.h:129
 
 
 
@@ -2520,7 +2662,7 @@ template<class T, own O, size_t N>
 struct storage
 ```
 
-Defined in include/teeny/storage.h:70
+Defined in include/teeny/storage.h:90
 
 
 
@@ -2565,6 +2707,90 @@ Defined in include/teeny/cuda.h:57
 
 
 
+## gpu_view, N >
+
+```cpp
+#include <storage.h>
+```
+
+```cpp
+template<class T, size_t N>
+struct gpu_view, N >
+```
+
+Defined in include/teeny/storage.h:104
+
+### List of all members
+
+| Name | Kind | Owner |
+|------|------|-------|
+| [`p`](#p-1) | `variable` | Declared here |
+| [`storage`](#storage-1) | `function` | Declared here |
+| [`storage`](#storage-2) | `function` | Declared here |
+| [`data`](#data-3) | `function` | Declared here |
+
+### Public Attributes
+
+| Return | Name | Description |
+|--------|------|-------------|
+| `T *` | [`p`](#p-1)  |  |
+
+---
+
+#### p
+
+```cpp
+T * p = nullptr
+```
+
+Defined in include/teeny/storage.h:105
+
+### Public Methods
+
+| Return | Name | Description |
+|--------|------|-------------|
+|  | [`storage`](#storage-1)  | Defaulted constructor. |
+| `constexpr` | [`storage`](#storage-2) `inline` `constexpr` `noexcept` |  |
+| `constexpr T *` | [`data`](#data-3) `const` `inline` `constexpr` `noexcept` |  |
+
+---
+
+#### storage
+
+```cpp
+storage() = default
+```
+
+Defined in include/teeny/storage.h:106
+
+Defaulted constructor.
+
+---
+
+#### storage
+
+`inline` `constexpr` `noexcept`
+
+```cpp
+constexpr inline constexpr storage(T * q) noexcept
+```
+
+Defined in include/teeny/storage.h:107
+
+---
+
+#### data
+
+`const` `inline` `constexpr` `noexcept`
+
+```cpp
+constexpr inline constexpr T * data() const noexcept
+```
+
+Defined in include/teeny/storage.h:108
+
+
+
 ## heap, N >
 
 ```cpp
@@ -2576,7 +2802,7 @@ template<class T, size_t N>
 struct heap, N >
 ```
 
-Defined in include/teeny/storage.h:91
+Defined in include/teeny/storage.h:121
 
 > **Inherits:** [`owning_storage< T, cpp_alloc >`](#owning_storage)
 
@@ -2699,15 +2925,15 @@ template<class T, size_t N>
 struct stack, N >
 ```
 
-Defined in include/teeny/storage.h:83
+Defined in include/teeny/storage.h:113
 
 ### List of all members
 
 | Name | Kind | Owner |
 |------|------|-------|
 | [`a`](#a) | `variable` | Declared here |
-| [`data`](#data-3) | `function` | Declared here |
 | [`data`](#data-4) | `function` | Declared here |
+| [`data`](#data-5) | `function` | Declared here |
 
 ### Public Attributes
 
@@ -2723,14 +2949,14 @@ Defined in include/teeny/storage.h:83
 array< T, N > a {}
 ```
 
-Defined in include/teeny/storage.h:84
+Defined in include/teeny/storage.h:114
 
 ### Public Methods
 
 | Return | Name | Description |
 |--------|------|-------------|
-| `constexpr T *` | [`data`](#data-3) `inline` `constexpr` `noexcept` |  |
-| `constexpr const T *` | [`data`](#data-4) `const` `inline` `constexpr` `noexcept` |  |
+| `constexpr T *` | [`data`](#data-4) `inline` `constexpr` `noexcept` |  |
+| `constexpr const T *` | [`data`](#data-5) `const` `inline` `constexpr` `noexcept` |  |
 
 ---
 
@@ -2742,7 +2968,7 @@ Defined in include/teeny/storage.h:84
 constexpr inline constexpr T * data() noexcept
 ```
 
-Defined in include/teeny/storage.h:85
+Defined in include/teeny/storage.h:115
 
 ---
 
@@ -2754,7 +2980,7 @@ Defined in include/teeny/storage.h:85
 constexpr inline constexpr const T * data() const noexcept
 ```
 
-Defined in include/teeny/storage.h:86
+Defined in include/teeny/storage.h:116
 
 
 
@@ -2769,22 +2995,22 @@ template<class T, size_t N>
 struct view, N >
 ```
 
-Defined in include/teeny/storage.h:74
+Defined in include/teeny/storage.h:94
 
 ### List of all members
 
 | Name | Kind | Owner |
 |------|------|-------|
-| [`p`](#p-1) | `variable` | Declared here |
-| [`storage`](#storage-1) | `function` | Declared here |
-| [`storage`](#storage-2) | `function` | Declared here |
-| [`data`](#data-5) | `function` | Declared here |
+| [`p`](#p-2) | `variable` | Declared here |
+| [`storage`](#storage-3) | `function` | Declared here |
+| [`storage`](#storage-4) | `function` | Declared here |
+| [`data`](#data-6) | `function` | Declared here |
 
 ### Public Attributes
 
 | Return | Name | Description |
 |--------|------|-------------|
-| `T *` | [`p`](#p-1)  |  |
+| `T *` | [`p`](#p-2)  |  |
 
 ---
 
@@ -2794,15 +3020,15 @@ Defined in include/teeny/storage.h:74
 T * p = nullptr
 ```
 
-Defined in include/teeny/storage.h:75
+Defined in include/teeny/storage.h:95
 
 ### Public Methods
 
 | Return | Name | Description |
 |--------|------|-------------|
-|  | [`storage`](#storage-1)  | Defaulted constructor. |
-| `constexpr` | [`storage`](#storage-2) `inline` `constexpr` `noexcept` |  |
-| `constexpr T *` | [`data`](#data-5) `const` `inline` `constexpr` `noexcept` |  |
+|  | [`storage`](#storage-3)  | Defaulted constructor. |
+| `constexpr` | [`storage`](#storage-4) `inline` `constexpr` `noexcept` |  |
+| `constexpr T *` | [`data`](#data-6) `const` `inline` `constexpr` `noexcept` |  |
 
 ---
 
@@ -2812,7 +3038,7 @@ Defined in include/teeny/storage.h:75
 storage() = default
 ```
 
-Defined in include/teeny/storage.h:76
+Defined in include/teeny/storage.h:96
 
 Defaulted constructor.
 
@@ -2826,7 +3052,7 @@ Defaulted constructor.
 constexpr inline constexpr storage(T * q) noexcept
 ```
 
-Defined in include/teeny/storage.h:77
+Defined in include/teeny/storage.h:97
 
 ---
 
@@ -2838,7 +3064,7 @@ Defined in include/teeny/storage.h:77
 constexpr inline constexpr T * data() const noexcept
 ```
 
-Defined in include/teeny/storage.h:78
+Defined in include/teeny/storage.h:98
 
 
 
@@ -2853,7 +3079,7 @@ template<class Mapping, bool Stack>
 struct storage_size
 ```
 
-Defined in include/teeny/storage.h:97
+Defined in include/teeny/storage.h:127
 
 Storage element count for a stack tensor (0 for view/owning).
 
@@ -2879,7 +3105,7 @@ Storage element count for a stack tensor (0 for view/owning).
 constexpr size_t value = 0
 ```
 
-Defined in include/teeny/storage.h:97
+Defined in include/teeny/storage.h:127
 
 
 
@@ -2894,7 +3120,7 @@ template<class Mapping>
 struct storage_size< Mapping, true >
 ```
 
-Defined in include/teeny/storage.h:99
+Defined in include/teeny/storage.h:129
 
 ### List of all members
 
@@ -2919,7 +3145,7 @@ constexpr size_t value =
         static_cast<size_t>(Mapping().required_span_size())
 ```
 
-Defined in include/teeny/storage.h:100
+Defined in include/teeny/storage.h:130
 
 
 
@@ -3360,10 +3586,12 @@ The layout / extents / offset mapping is delegated to `cuda::std::mdspan` (the m
 | [`is_contiguous`](#is_contiguous) | `function` | Declared here |
 | [`is_contiguous`](#is_contiguous-1) | `function` | Declared here |
 | [`is_contiguous`](#is_contiguous-2) | `function` | Declared here |
-| [`data`](#data-6) | `function` | Declared here |
 | [`data`](#data-7) | `function` | Declared here |
-| [`view`](#view) | `function` | Declared here |
+| [`data`](#data-8) | `function` | Declared here |
+| [`mdspan`](#mdspan) | `function` | Declared here |
+| [`mdspan`](#mdspan-1) | `function` | Declared here |
 | [`view`](#view-1) | `function` | Declared here |
+| [`view`](#view-2) | `function` | Declared here |
 | [`operator()`](#operator-16) | `function` | Declared here |
 | [`operator()`](#operator-17) | `function` | Declared here |
 | [`at`](#at) | `function` | Declared here |
@@ -3382,7 +3610,8 @@ The layout / extents / offset mapping is delegated to `cuda::std::mdspan` (the m
 | [`flip`](#flip) | `function` | Declared here |
 | [`flip`](#flip-1) | `function` | Declared here |
 | [`clone`](#clone) | `function` | Declared here |
-| [`to`](#to) | `function` | Declared here |
+| [`to`](#to-2) | `function` | Declared here |
+| [`to`](#to-3) | `function` | Declared here |
 | [`reshape`](#reshape) | `function` | Declared here |
 | [`reshape`](#reshape-1) | `function` | Declared here |
 | [`recast`](#recast) | `function` | Declared here |
@@ -3461,6 +3690,10 @@ The layout / extents / offset mapping is delegated to `cuda::std::mdspan` (the m
 | [`zip_with_`](#zip_with_-1) | `function` | Declared here |
 | [`ownership`](#ownership) | `variable` | Declared here |
 | [`is_static`](#is_static) | `variable` | Declared here |
+| [`is_view`](#is_view) | `variable` | Declared here |
+| [`is_owning`](#is_owning) | `variable` | Declared here |
+| [`is_device`](#is_device) | `variable` | Declared here |
+| [`is_host_accessible`](#is_host_accessible) | `variable` | Declared here |
 | [`buffer_size`](#buffer_size) | `variable` | Declared here |
 | [`is_strides_layout`](#is_strides_layout) | `variable` | Declared here |
 | [`is_contiguous_layout`](#is_contiguous_layout) | `variable` | Declared here |
@@ -3488,7 +3721,7 @@ The layout / extents / offset mapping is delegated to `cuda::std::mdspan` (the m
 storage< T, O, buffer_size > store_ {}
 ```
 
-Defined in include/teeny/tensor.h:81
+Defined in include/teeny/tensor.h:86
 
 ### Public Methods
 
@@ -3508,14 +3741,16 @@ Defined in include/teeny/tensor.h:81
 | `constexpr auto` | [`shape`](#shape-3) `const` `inline` `constexpr` `noexcept` |  |
 | `constexpr auto` | [`stride`](#stride-2) `const` `inline` `constexpr` `noexcept` | Stride of an axis given by a STATIC index (`stride(Int<0>())`): a compile-time `integral_constant` when known statically (static- stride layout; a contiguous layout over static extents; or the always-unit stride of a contiguous layout even for dynamic shapes). |
 | `constexpr index_type` | [`stride`](#stride-3) `const` `inline` `constexpr` `noexcept` | Stride of an axis given by a RUNTIME index (`stride(0)`). |
-| `constexpr index_type` | [`numel`](#numel) `const` `inline` `constexpr` `noexcept` |  |
+| `constexpr auto` | [`numel`](#numel) `const` `inline` `constexpr` `noexcept` | Number of elements. |
 | `constexpr bool` | [`is_contiguous`](#is_contiguous) `const` `inline` `constexpr` `noexcept` | Whether the elements occupy a **dense block of memory**, in *some* axis order — true for a C- or F-contiguous tensor, and also for a permuted one (a permuted C-contiguous view still packs the same memory densely). |
 | `bool` | [`is_contiguous`](#is_contiguous-1) `const` `inline` `noexcept` | Exact contiguity in layout `L` (e.g. |
 | `bool` | [`is_contiguous`](#is_contiguous-2) `const` `inline` `noexcept` |  |
-| `T *` | [`data`](#data-6) `inline` `noexcept` |  |
-| `const T *` | [`data`](#data-7) `const` `inline` `noexcept` |  |
-| `view_type` | [`view`](#view) `inline` `noexcept` |  |
-| `const_view_type` | [`view`](#view-1) `const` `inline` `noexcept` |  |
+| `T *` | [`data`](#data-7) `inline` `noexcept` |  |
+| `const T *` | [`data`](#data-8) `const` `inline` `noexcept` |  |
+| `view_type` | [`mdspan`](#mdspan) `inline` `noexcept` | The raw `cuda::std::mdspan` over this tensor's storage. |
+| `const_view_type` | [`mdspan`](#mdspan-1) `const` `inline` `noexcept` |  |
+| `auto` | [`view`](#view-1) `inline` `noexcept` | A non-owning teeny **view** of this tensor's storage — a `view` (or `gpu_view`, for a device tensor) that aliases the same memory (no copy), keeping the source layout. |
+| `auto` | [`view`](#view-2) `const` `inline` `noexcept` |  |
 | `T &` | [`operator()`](#operator-16) `inline` `noexcept` | Element access when every argument is an integer (negatives wrap). |
 | `const T &` | [`operator()`](#operator-17) `const` `inline` `noexcept` |  |
 | `auto` | [`at`](#at) `inline` `noexcept` | `at(i...)` — a single element as a **rank-0 VIEW** (all-integer args; negatives wrap). |
@@ -3534,7 +3769,8 @@ Defined in include/teeny/tensor.h:81
 | `auto` | [`flip`](#flip) `inline` `noexcept` | Reverse axis `Ax` (negatives wrap) -> a view (numpy `flip`). |
 | `auto` | [`flip`](#flip-1) `const` `inline` `noexcept` |  |
 | `auto` | [`clone`](#clone) `const` `inline` |  |
-| `auto` | [`to`](#to) `const` `inline` |  |
+| `auto` | [`to`](#to-2) `const` `inline` | pytorch-like `.to<T2>()`: convert the element type to `T2`. |
+| `auto` | [`to`](#to-3) `const` `inline` |  |
 | `auto` | [`reshape`](#reshape) `inline` `noexcept` | View this tensor as a new shape — requires it be C-contiguous (`[clone()](#clone)` first otherwise) and the element count to match. |
 | `auto` | [`reshape`](#reshape-1) `const` `inline` `noexcept` |  |
 | `auto` | [`recast`](#recast) `inline` | Reinterpret with a MORE-STATIC extents type of the same rank — recover statically-known inner dims at the dynamic (ndarray) boundary: a runtime `(n,3,3)` view -> `.recast<shape<-1,3,3>>()` so the `3`s fold. |
@@ -3620,7 +3856,7 @@ Defined in include/teeny/tensor.h:81
 tensor() = default
 ```
 
-Defined in include/teeny/tensor.h:84
+Defined in include/teeny/tensor.h:89
 
 Defaulted constructor.
 
@@ -3631,10 +3867,10 @@ Defaulted constructor.
 `inline`
 
 ```cpp
-template<own OO = O, enable_if_t< OO==own::view, int > = 0> inline tensor(T * p, mapping_type m)
+template<own OO = O, enable_if_t< own_is_view(OO), int > = 0> inline tensor(T * p, mapping_type m)
 ```
 
-Defined in include/teeny/tensor.h:88
+Defined in include/teeny/tensor.h:93
 
 View constructor: wrap `p` with the given mapping.
 
@@ -3645,10 +3881,10 @@ View constructor: wrap `p` with the given mapping.
 `inline` `explicit`
 
 ```cpp
-template<own OO = O, enable_if_t< OO==own::view &&is_static &&(_contiguous_layout< Layout >::value||_strides_all_static< Layout >::value), int > = 0> inline explicit tensor(T * p)
+template<own OO = O, enable_if_t< own_is_view(OO) &&is_static &&(_contiguous_layout< Layout >::value||_strides_all_static< Layout >::value), int > = 0> inline explicit tensor(T * p)
 ```
 
-Defined in include/teeny/tensor.h:95
+Defined in include/teeny/tensor.h:100
 
 View constructor from a pointer alone — for a fully-static geometry (static extents AND a fully determined layout: contiguous, or an all-static `strides<...>`).
 
@@ -3661,10 +3897,10 @@ e.g. `tensor<float, shape<3,4>, strides<4,1>>(ptr)`.
 `inline`
 
 ```cpp
-template<own OO = O, enable_if_t< OO==own::view &&is_constructible< mapping_type, Shape >::value, int > = 0> inline tensor(T * p, Shape e)
+template<own OO = O, enable_if_t< own_is_view(OO) &&is_constructible< mapping_type, Shape >::value, int > = 0> inline tensor(T * p, Shape e)
 ```
 
-Defined in include/teeny/tensor.h:99
+Defined in include/teeny/tensor.h:104
 
 View constructor from a pointer + extents (contiguous / static-stride layouts).
 
@@ -3678,7 +3914,7 @@ View constructor from a pointer + extents (contiguous / static-stride layouts).
 template<own OO = O, enable_if_t< own_is_owning(OO), int > = 0> inline explicit tensor(mapping_type m)
 ```
 
-Defined in include/teeny/tensor.h:111
+Defined in include/teeny/tensor.h:116
 
 Owning constructor: allocate storage for `m` (heap/device/host/pinned).
 
@@ -3692,7 +3928,7 @@ Owning constructor: allocate storage for `m` (heap/device/host/pinned).
 template<own OO = O, enable_if_t< own_is_owning(OO) &&is_constructible< mapping_type, Shape >::value, int > = 0> inline explicit tensor(Shape e)
 ```
 
-Defined in include/teeny/tensor.h:116
+Defined in include/teeny/tensor.h:121
 
 Owning constructor from extents (contiguous / static-stride layouts).
 
@@ -3706,7 +3942,7 @@ Owning constructor from extents (contiguous / static-stride layouts).
 constexpr inline constexpr const mapping_type & mapping() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:121
+Defined in include/teeny/tensor.h:126
 
 ---
 
@@ -3718,7 +3954,7 @@ Defined in include/teeny/tensor.h:121
 constexpr inline constexpr const Shape & extents() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:122
+Defined in include/teeny/tensor.h:127
 
 ---
 
@@ -3730,7 +3966,7 @@ Defined in include/teeny/tensor.h:122
 template<class Idx, enable_if_t< _is_ic< Idx >::value, int > = 0> constexpr inline constexpr auto extent(Idx) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:130
+Defined in include/teeny/tensor.h:135
 
 Extent of an axis given by a STATIC index (`extent(Int<0>())`): a compile-time `integral_constant` when that extent is static, else a runtime `index_type`.
 
@@ -3744,7 +3980,7 @@ Extent of an axis given by a STATIC index (`extent(Int<0>())`): a compile-time `
 template<class Idx, enable_if_t<!_is_ic< Idx >::value, int > = 0> constexpr inline constexpr index_type extent(Idx d) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:139
+Defined in include/teeny/tensor.h:144
 
 Extent of an axis given by a RUNTIME index (`extent(0)`).
 
@@ -3758,7 +3994,7 @@ Extent of an axis given by a RUNTIME index (`extent(0)`).
 constexpr inline constexpr const Shape & shape() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:144
+Defined in include/teeny/tensor.h:149
 
 `[shape()](#shape)` / `[shape(d)](#shape)` — python-friendly aliases of `extents()` / `extent(d)` (static index -> integral_constant, runtime -> value).
 
@@ -3772,7 +4008,7 @@ Defined in include/teeny/tensor.h:144
 template<class Idx> constexpr inline constexpr auto shape(Idx d) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:145
+Defined in include/teeny/tensor.h:150
 
 ---
 
@@ -3784,7 +4020,7 @@ Defined in include/teeny/tensor.h:145
 template<class Idx, enable_if_t< _is_ic< Idx >::value, int > = 0> constexpr inline constexpr auto stride(Idx) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:152
+Defined in include/teeny/tensor.h:157
 
 Stride of an axis given by a STATIC index (`stride(Int<0>())`): a compile-time `integral_constant` when known statically (static- stride layout; a contiguous layout over static extents; or the always-unit stride of a contiguous layout even for dynamic shapes).
 
@@ -3798,7 +4034,7 @@ Stride of an axis given by a STATIC index (`stride(Int<0>())`): a compile-time `
 template<class Idx, enable_if_t<!_is_ic< Idx >::value, int > = 0> constexpr inline constexpr index_type stride(Idx d) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:170
+Defined in include/teeny/tensor.h:175
 
 Stride of an axis given by a RUNTIME index (`stride(0)`).
 
@@ -3809,10 +4045,14 @@ Stride of an axis given by a RUNTIME index (`stride(0)`).
 `const` `inline` `constexpr` `noexcept`
 
 ```cpp
-constexpr inline constexpr index_type numel() const noexcept
+constexpr inline constexpr auto numel() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:172
+Defined in include/teeny/tensor.h:188
+
+Number of elements.
+
+A **fully static** shape folds to an `integral_constant` (so it propagates into later compile-time arithmetic, like `extent(Int<k>())`); any dynamic dim -> a runtime `index_type`.
 
 ---
 
@@ -3824,7 +4064,7 @@ Defined in include/teeny/tensor.h:172
 constexpr inline constexpr bool is_contiguous() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:189
+Defined in include/teeny/tensor.h:209
 
 Whether the elements occupy a **dense block of memory**, in *some* axis order — true for a C- or F-contiguous tensor, and also for a permuted one (a permuted C-contiguous view still packs the same memory densely).
 
@@ -3842,7 +4082,7 @@ Pass a layout for an **exact** check: `is_contiguous<layout_right>()` / `is_cont
 template<class L> inline bool is_contiguous() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:212
+Defined in include/teeny/tensor.h:232
 
 Exact contiguity in layout `L` (e.g.
 
@@ -3858,7 +4098,7 @@ Exact contiguity in layout `L` (e.g.
 template<class L> inline bool is_contiguous(L) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:219
+Defined in include/teeny/tensor.h:239
 
 ---
 
@@ -3870,7 +4110,7 @@ Defined in include/teeny/tensor.h:219
 inline T * data() noexcept
 ```
 
-Defined in include/teeny/tensor.h:222
+Defined in include/teeny/tensor.h:242
 
 ---
 
@@ -3882,7 +4122,33 @@ Defined in include/teeny/tensor.h:222
 inline const T * data() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:223
+Defined in include/teeny/tensor.h:243
+
+---
+
+#### mdspan
+
+`inline` `noexcept`
+
+```cpp
+inline view_type mdspan() noexcept
+```
+
+Defined in include/teeny/tensor.h:245
+
+The raw `cuda::std::mdspan` over this tensor's storage.
+
+---
+
+#### mdspan
+
+`const` `inline` `noexcept`
+
+```cpp
+inline const_view_type mdspan() const noexcept
+```
+
+Defined in include/teeny/tensor.h:246
 
 ---
 
@@ -3891,10 +4157,14 @@ Defined in include/teeny/tensor.h:223
 `inline` `noexcept`
 
 ```cpp
-inline view_type view() noexcept
+inline auto view() noexcept
 ```
 
-Defined in include/teeny/tensor.h:224
+Defined in include/teeny/tensor.h:253
+
+A non-owning teeny **view** of this tensor's storage — a `view` (or `gpu_view`, for a device tensor) that aliases the same memory (no copy), keeping the source layout.
+
+On an already-non-owning tensor it re-wraps the same pointer (an equivalent view). For the raw mdspan, use `[mdspan()](#mdspan)`.
 
 ---
 
@@ -3903,10 +4173,10 @@ Defined in include/teeny/tensor.h:224
 `const` `inline` `noexcept`
 
 ```cpp
-inline const_view_type view() const noexcept
+inline auto view() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:225
+Defined in include/teeny/tensor.h:254
 
 ---
 
@@ -3918,7 +4188,7 @@ Defined in include/teeny/tensor.h:225
 template<class... Args, enable_if_t<(_is_index< Args >::value &&...), int > = 0> inline T & operator()(Args... a) noexcept
 ```
 
-Defined in include/teeny/tensor.h:344
+Defined in include/teeny/tensor.h:373
 
 Element access when every argument is an integer (negatives wrap).
 
@@ -3932,7 +4202,7 @@ Element access when every argument is an integer (negatives wrap).
 template<class... Args, enable_if_t<(_is_index< Args >::value &&...), int > = 0> inline const T & operator()(Args... a) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:347
+Defined in include/teeny/tensor.h:376
 
 ---
 
@@ -3944,7 +4214,7 @@ Defined in include/teeny/tensor.h:347
 template<class... Args, enable_if_t<(_is_index< Args >::value &&...), int > = 0> inline auto at(Args... a) noexcept
 ```
 
-Defined in include/teeny/tensor.h:357
+Defined in include/teeny/tensor.h:386
 
 `at(i...)` — a single element as a **rank-0 VIEW** (all-integer args; negatives wrap).
 
@@ -3960,7 +4230,7 @@ Unlike `operator()`, which returns a plain `T&`, this is a view, so the whole te
 template<class... Args, enable_if_t<(_is_index< Args >::value &&...), int > = 0> inline auto at(Args... a) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:362
+Defined in include/teeny/tensor.h:391
 
 ---
 
@@ -3972,7 +4242,7 @@ Defined in include/teeny/tensor.h:362
 template<class... Args, enable_if_t<(_is_index< Args >::value &&...), int > = 0> inline void add_at(T v, Args... a) noexcept
 ```
 
-Defined in include/teeny/tensor.h:371
+Defined in include/teeny/tensor.h:400
 
 Scatter-accumulate: `(*this)(i...) += v`, atomic on the device — the write half of a "push"/splat kernel.
 
@@ -3988,7 +4258,7 @@ Shorthand for `at(i...).add_<true>(v)` (integer indices only; negatives wrap).
 template<class... Args, enable_if_t<!(_is_index< Args >::value &&...) &&!_has_ellipsis< Args... >::value, int > = 0> inline auto operator()(Args... a) noexcept
 ```
 
-Defined in include/teeny/tensor.h:379
+Defined in include/teeny/tensor.h:408
 
 Sub-view when any argument is a slice (`all`, `slice(a,b[,step])`).
 
@@ -4004,7 +4274,7 @@ Integer args drop their axis, `all` keeps it, a range keeps a strided window —
 template<class... Args, enable_if_t<!(_is_index< Args >::value &&...) &&!_has_ellipsis< Args... >::value, int > = 0> inline auto operator()(Args... a) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:382
+Defined in include/teeny/tensor.h:411
 
 ---
 
@@ -4016,7 +4286,7 @@ Defined in include/teeny/tensor.h:382
 template<class... Args, enable_if_t< _has_ellipsis< Args... >::value, int > = 0> inline decltype(auto) operator()(Args... a) noexcept
 ```
 
-Defined in include/teeny/tensor.h:390
+Defined in include/teeny/tensor.h:419
 
 Ellipsis form: exactly one `ellipsis` in the args expands to `rank - (#other args)` copies of `all`, then the call re-runs — so `t(1, ellipsis, 2)` on rank 5 is `t(1, all, all, all, 2)`.
 
@@ -4032,7 +4302,7 @@ What remains decides the result (all integers -> element, else view).
 template<class... Args, enable_if_t< _has_ellipsis< Args... >::value, int > = 0> inline decltype(auto) operator()(Args... a) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:393
+Defined in include/teeny/tensor.h:422
 
 ---
 
@@ -4044,7 +4314,7 @@ Defined in include/teeny/tensor.h:393
 template<size_t R = rank(), enable_if_t< R==0, int > = 0> inline operator T() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:401
+Defined in include/teeny/tensor.h:430
 
 ---
 
@@ -4056,7 +4326,7 @@ Defined in include/teeny/tensor.h:401
 template<size_t R = rank(), enable_if_t< R==0, int > = 0> inline T item() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:406
+Defined in include/teeny/tensor.h:435
 
 The single element of a rank-0 tensor (explicit reader).
 
@@ -4070,7 +4340,7 @@ The single element of a rank-0 tensor (explicit reader).
 template<long... Axes, class... Args> inline auto take_along(Args... args) noexcept
 ```
 
-Defined in include/teeny/tensor.h:444
+Defined in include/teeny/tensor.h:473
 
 Index/slice one or more named axes; other axes are kept.
 
@@ -4086,7 +4356,7 @@ Index/slice one or more named axes; other axes are kept.
 template<long... Axes, class... Args> inline auto take_along(Args... args) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:449
+Defined in include/teeny/tensor.h:478
 
 ---
 
@@ -4098,7 +4368,7 @@ Defined in include/teeny/tensor.h:449
 template<long... Perm> inline auto permute() noexcept
 ```
 
-Defined in include/teeny/tensor.h:456
+Defined in include/teeny/tensor.h:485
 
 Reorder the axes (a permutation of 0..N-1; negatives wrap) -> a rank-N view.
 
@@ -4112,7 +4382,7 @@ Reorder the axes (a permutation of 0..N-1; negatives wrap) -> a rank-N view.
 template<long... Perm> inline auto permute() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:459
+Defined in include/teeny/tensor.h:488
 
 ---
 
@@ -4124,7 +4394,7 @@ Defined in include/teeny/tensor.h:459
 template<long Ax = 0> inline auto flip() noexcept
 ```
 
-Defined in include/teeny/tensor.h:465
+Defined in include/teeny/tensor.h:494
 
 Reverse axis `Ax` (negatives wrap) -> a view (numpy `flip`).
 
@@ -4140,7 +4410,7 @@ Uses a negative stride, so the index type must be signed (`shape<...>` is).
 template<long Ax = 0> inline auto flip() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:468
+Defined in include/teeny/tensor.h:497
 
 ---
 
@@ -4152,7 +4422,7 @@ Defined in include/teeny/tensor.h:468
 template<bool S = is_static, enable_if_t<!S, int > = 0> inline auto clone() const
 ```
 
-Defined in include/teeny/tensor.h:477
+Defined in include/teeny/tensor.h:506
 
 ---
 
@@ -4161,10 +4431,28 @@ Defined in include/teeny/tensor.h:477
 `const` `inline`
 
 ```cpp
-template<class T2 = element_type, bool S = is_static, enable_if_t<!S, int > = 0> inline auto to() const
+template<class T2 = element_type, bool Force = false, enable_if_t<!Force &&is_same< T2, element_type >::value, int > = 0> inline auto to() const
 ```
 
-Defined in include/teeny/tensor.h:489
+Defined in include/teeny/tensor.h:527
+
+pytorch-like `.to<T2>()`: convert the element type to `T2`.
+
+**No copy when it already matches** — if `T2` is the current element type and `Force` is false, this returns a (read-only) *view* of `*this`, no allocation, keeping the source layout. So `x.to<>()` is a zero-cost borrow, not a clone. Because it borrows, the result must not outlive `x` — the same lifetime rule as `[view()](#view-1)`/`[permute()](#permute)`/slicing (don't bind `.to<>()` of a temporary to a longer-lived name). Pass `Force = true` to always materialise a fresh owning copy even when the dtype already matches (`x.to<float, true>()` force-clones a `float` tensor); `x.clone()` is the unconditional-copy spelling.
+
+When a conversion IS needed (`T2` differs, or `Force`), the result is a dense, row-major OWNING copy cast elementwise (via `copy_`): static shape -> stack (host+device), dynamic -> heap (host only). To also move across memory spaces (host <-> CUDA) use the `to<[own::gpu](#namespacetny_1a6a432f80fb491dbcb5d4b0692616b918a0aa0be2a866411d9ff03515227454947), T2, Force>(x)` free functions from `<[teeny/cuda.h](#cudah)>`.
+
+---
+
+#### to
+
+`const` `inline`
+
+```cpp
+template<class T2 = element_type, bool Force = false, bool S = is_static, enable_if_t<(Force||!is_same< T2, element_type >::value) &&!S, int > = 0> inline auto to() const
+```
+
+Defined in include/teeny/tensor.h:535
 
 ---
 
@@ -4176,7 +4464,7 @@ Defined in include/teeny/tensor.h:489
 template<long... NewExt> inline auto reshape() noexcept
 ```
 
-Defined in include/teeny/tensor.h:509
+Defined in include/teeny/tensor.h:555
 
 View this tensor as a new shape — requires it be C-contiguous (`[clone()](#clone)` first otherwise) and the element count to match.
 
@@ -4192,7 +4480,7 @@ One extent may be **`-1`** (numpy-style), inferred from the total size: `t.resha
 template<long... NewExt> inline auto reshape() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:510
+Defined in include/teeny/tensor.h:556
 
 ---
 
@@ -4204,7 +4492,7 @@ Defined in include/teeny/tensor.h:510
 template<class NewE> inline auto recast()
 ```
 
-Defined in include/teeny/tensor.h:534
+Defined in include/teeny/tensor.h:580
 
 Reinterpret with a MORE-STATIC extents type of the same rank — recover statically-known inner dims at the dynamic (ndarray) boundary: a runtime `(n,3,3)` view -> `.recast<shape<-1,3,3>>()` so the `3`s fold.
 
@@ -4220,7 +4508,7 @@ Reinterpret with a MORE-STATIC extents type of the same rank — recover statica
 template<class NewE> inline auto recast() const
 ```
 
-Defined in include/teeny/tensor.h:535
+Defined in include/teeny/tensor.h:581
 
 ---
 
@@ -4232,7 +4520,7 @@ Defined in include/teeny/tensor.h:535
 inline auto flatten() noexcept
 ```
 
-Defined in include/teeny/tensor.h:538
+Defined in include/teeny/tensor.h:584
 
 View as 1-D (`ravel`) — requires C-contiguous (`[clone()](#clone)` first).
 
@@ -4246,7 +4534,7 @@ View as 1-D (`ravel`) — requires C-contiguous (`[clone()](#clone)` first).
 inline auto flatten() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:543
+Defined in include/teeny/tensor.h:589
 
 ---
 
@@ -4258,7 +4546,7 @@ Defined in include/teeny/tensor.h:543
 template<long Ax = 0> inline auto unsqueeze() noexcept
 ```
 
-Defined in include/teeny/tensor.h:553
+Defined in include/teeny/tensor.h:599
 
 Insert a size-1 axis at position `Ax` (numpy `newaxis`/`unsqueeze`) -> a rank-(N+1) view.
 
@@ -4274,7 +4562,7 @@ Negative `Ax` counts from the back, so `.unsqueeze<-1>()` appends a trailing axi
 template<long Ax = 0> inline auto unsqueeze() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:556
+Defined in include/teeny/tensor.h:602
 
 ---
 
@@ -4286,7 +4574,7 @@ Defined in include/teeny/tensor.h:556
 template<long Ax = _ax_all> inline auto squeeze() noexcept
 ```
 
-Defined in include/teeny/tensor.h:575
+Defined in include/teeny/tensor.h:621
 
 Drop a size-1 axis `Ax` (negatives wrap) -> a rank-(N-1) view.
 
@@ -4302,7 +4590,7 @@ Drop a size-1 axis `Ax` (negatives wrap) -> a rank-(N-1) view.
 template<long Ax = _ax_all> inline auto squeeze() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:581
+Defined in include/teeny/tensor.h:627
 
 ---
 
@@ -4314,7 +4602,7 @@ Defined in include/teeny/tensor.h:581
 template<class I, enable_if_t< _is_ic< I >::value, int > = 0> inline auto flip(I) noexcept
 ```
 
-Defined in include/teeny/tensor.h:591
+Defined in include/teeny/tensor.h:637
 
 ---
 
@@ -4326,7 +4614,7 @@ Defined in include/teeny/tensor.h:591
 template<class I, enable_if_t< _is_ic< I >::value, int > = 0> inline auto flip(I) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:592
+Defined in include/teeny/tensor.h:638
 
 ---
 
@@ -4338,7 +4626,7 @@ Defined in include/teeny/tensor.h:592
 template<class I, enable_if_t< _is_ic< I >::value, int > = 0> inline auto squeeze(I) noexcept
 ```
 
-Defined in include/teeny/tensor.h:593
+Defined in include/teeny/tensor.h:639
 
 ---
 
@@ -4350,7 +4638,7 @@ Defined in include/teeny/tensor.h:593
 template<class I, enable_if_t< _is_ic< I >::value, int > = 0> inline auto squeeze(I) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:594
+Defined in include/teeny/tensor.h:640
 
 ---
 
@@ -4362,7 +4650,7 @@ Defined in include/teeny/tensor.h:594
 template<class I, enable_if_t< _is_ic< I >::value, int > = 0> inline auto unsqueeze(I) noexcept
 ```
 
-Defined in include/teeny/tensor.h:595
+Defined in include/teeny/tensor.h:641
 
 ---
 
@@ -4374,7 +4662,7 @@ Defined in include/teeny/tensor.h:595
 template<class I, enable_if_t< _is_ic< I >::value, int > = 0> inline auto unsqueeze(I) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:596
+Defined in include/teeny/tensor.h:642
 
 ---
 
@@ -4386,7 +4674,7 @@ Defined in include/teeny/tensor.h:596
 template<class... I, enable_if_t<(sizeof...(I) > 0) &&(_is_ic< I >::value &&...), int > = 0> inline auto permute(I...) noexcept
 ```
 
-Defined in include/teeny/tensor.h:597
+Defined in include/teeny/tensor.h:643
 
 ---
 
@@ -4398,7 +4686,7 @@ Defined in include/teeny/tensor.h:597
 template<class... I, enable_if_t<(sizeof...(I) > 0) &&(_is_ic< I >::value &&...), int > = 0> inline auto permute(I...) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:598
+Defined in include/teeny/tensor.h:644
 
 ---
 
@@ -4410,7 +4698,7 @@ Defined in include/teeny/tensor.h:598
 template<class... I, enable_if_t<(sizeof...(I) > 0) &&(_is_ic< I >::value &&...), int > = 0> inline auto reshape(I...) noexcept
 ```
 
-Defined in include/teeny/tensor.h:599
+Defined in include/teeny/tensor.h:645
 
 ---
 
@@ -4422,7 +4710,7 @@ Defined in include/teeny/tensor.h:599
 template<class... I, enable_if_t<(sizeof...(I) > 0) &&(_is_ic< I >::value &&...), int > = 0> inline auto reshape(I...) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:600
+Defined in include/teeny/tensor.h:646
 
 ---
 
@@ -4434,7 +4722,7 @@ Defined in include/teeny/tensor.h:600
 template<class NewE> inline auto recast(NewE)
 ```
 
-Defined in include/teeny/tensor.h:601
+Defined in include/teeny/tensor.h:647
 
 ---
 
@@ -4446,7 +4734,7 @@ Defined in include/teeny/tensor.h:601
 template<class NewE> inline auto recast(NewE) const
 ```
 
-Defined in include/teeny/tensor.h:602
+Defined in include/teeny/tensor.h:648
 
 ---
 
@@ -4456,7 +4744,7 @@ Defined in include/teeny/tensor.h:602
 template<bool Atomic = false, class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & add_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:608
+Defined in include/teeny/tensor.h:654
 
 ---
 
@@ -4466,7 +4754,7 @@ Defined in include/teeny/tensor.h:608
 template<bool Atomic = false, class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & sub_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:609
+Defined in include/teeny/tensor.h:655
 
 ---
 
@@ -4476,7 +4764,7 @@ Defined in include/teeny/tensor.h:609
 template<class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & mul_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:610
+Defined in include/teeny/tensor.h:656
 
 ---
 
@@ -4486,7 +4774,7 @@ Defined in include/teeny/tensor.h:610
 template<class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & div_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:611
+Defined in include/teeny/tensor.h:657
 
 ---
 
@@ -4496,7 +4784,7 @@ Defined in include/teeny/tensor.h:611
 template<bool Atomic = false> tensor & add_(T s)
 ```
 
-Defined in include/teeny/tensor.h:612
+Defined in include/teeny/tensor.h:658
 
 ---
 
@@ -4506,7 +4794,7 @@ Defined in include/teeny/tensor.h:612
 template<bool Atomic = false> tensor & sub_(T s)
 ```
 
-Defined in include/teeny/tensor.h:613
+Defined in include/teeny/tensor.h:659
 
 ---
 
@@ -4516,7 +4804,7 @@ Defined in include/teeny/tensor.h:613
 tensor & mul_(T s)
 ```
 
-Defined in include/teeny/tensor.h:614
+Defined in include/teeny/tensor.h:660
 
 ---
 
@@ -4526,7 +4814,7 @@ Defined in include/teeny/tensor.h:614
 tensor & div_(T s)
 ```
 
-Defined in include/teeny/tensor.h:615
+Defined in include/teeny/tensor.h:661
 
 ---
 
@@ -4538,7 +4826,7 @@ Defined in include/teeny/tensor.h:615
 template<class B> inline tensor & operator+=(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:619
+Defined in include/teeny/tensor.h:665
 
 ---
 
@@ -4550,7 +4838,7 @@ Defined in include/teeny/tensor.h:619
 template<class B> inline tensor & operator-=(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:620
+Defined in include/teeny/tensor.h:666
 
 ---
 
@@ -4562,7 +4850,7 @@ Defined in include/teeny/tensor.h:620
 template<class B> inline tensor & operator*=(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:621
+Defined in include/teeny/tensor.h:667
 
 ---
 
@@ -4574,7 +4862,7 @@ Defined in include/teeny/tensor.h:621
 template<class B> inline tensor & operator/=(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:622
+Defined in include/teeny/tensor.h:668
 
 ---
 
@@ -4584,7 +4872,7 @@ Defined in include/teeny/tensor.h:622
 template<class B> tensor & copy_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:625
+Defined in include/teeny/tensor.h:671
 
 ---
 
@@ -4594,7 +4882,7 @@ Defined in include/teeny/tensor.h:625
 tensor & fill_(T s)
 ```
 
-Defined in include/teeny/tensor.h:626
+Defined in include/teeny/tensor.h:672
 
 ---
 
@@ -4604,7 +4892,7 @@ Defined in include/teeny/tensor.h:626
 tensor & zero_()
 ```
 
-Defined in include/teeny/tensor.h:627
+Defined in include/teeny/tensor.h:673
 
 ---
 
@@ -4614,7 +4902,7 @@ Defined in include/teeny/tensor.h:627
 tensor & iota_(T start = T(0), T step = T(1))
 ```
 
-Defined in include/teeny/tensor.h:628
+Defined in include/teeny/tensor.h:674
 
 ---
 
@@ -4626,7 +4914,7 @@ Defined in include/teeny/tensor.h:628
 template<class B> auto add(const B & b) const
 ```
 
-Defined in include/teeny/tensor.h:631
+Defined in include/teeny/tensor.h:677
 
 ---
 
@@ -4638,7 +4926,7 @@ Defined in include/teeny/tensor.h:631
 template<class B> auto sub(const B & b) const
 ```
 
-Defined in include/teeny/tensor.h:632
+Defined in include/teeny/tensor.h:678
 
 ---
 
@@ -4650,7 +4938,7 @@ Defined in include/teeny/tensor.h:632
 template<class B> auto mul(const B & b) const
 ```
 
-Defined in include/teeny/tensor.h:633
+Defined in include/teeny/tensor.h:679
 
 ---
 
@@ -4662,7 +4950,7 @@ Defined in include/teeny/tensor.h:633
 template<class B> auto div(const B & b) const
 ```
 
-Defined in include/teeny/tensor.h:634
+Defined in include/teeny/tensor.h:680
 
 ---
 
@@ -4674,7 +4962,7 @@ Defined in include/teeny/tensor.h:634
 template<class B> auto pow(const B & b) const
 ```
 
-Defined in include/teeny/tensor.h:635
+Defined in include/teeny/tensor.h:681
 
 ---
 
@@ -4684,7 +4972,7 @@ Defined in include/teeny/tensor.h:635
 template<class F> tensor & map_(F f)
 ```
 
-Defined in include/teeny/tensor.h:638
+Defined in include/teeny/tensor.h:684
 
 ---
 
@@ -4694,7 +4982,7 @@ Defined in include/teeny/tensor.h:638
 template<class G, class B> tensor & zip_with_(G g, const B & b)
 ```
 
-Defined in include/teeny/tensor.h:639
+Defined in include/teeny/tensor.h:685
 
 ---
 
@@ -4706,7 +4994,7 @@ Defined in include/teeny/tensor.h:639
 template<class F> auto map(F f) const
 ```
 
-Defined in include/teeny/tensor.h:640
+Defined in include/teeny/tensor.h:686
 
 ---
 
@@ -4718,7 +5006,7 @@ Defined in include/teeny/tensor.h:640
 bool all() const
 ```
 
-Defined in include/teeny/tensor.h:644
+Defined in include/teeny/tensor.h:690
 
 ---
 
@@ -4730,7 +5018,7 @@ Defined in include/teeny/tensor.h:644
 bool any() const
 ```
 
-Defined in include/teeny/tensor.h:645
+Defined in include/teeny/tensor.h:691
 
 ---
 
@@ -4740,7 +5028,7 @@ Defined in include/teeny/tensor.h:645
 tensor & neg_()
 ```
 
-Defined in include/teeny/tensor.h:648
+Defined in include/teeny/tensor.h:694
 
 ---
 
@@ -4750,7 +5038,7 @@ Defined in include/teeny/tensor.h:648
 tensor & abs_()
 ```
 
-Defined in include/teeny/tensor.h:649
+Defined in include/teeny/tensor.h:695
 
 ---
 
@@ -4760,7 +5048,7 @@ Defined in include/teeny/tensor.h:649
 tensor & exp_()
 ```
 
-Defined in include/teeny/tensor.h:650
+Defined in include/teeny/tensor.h:696
 
 ---
 
@@ -4770,7 +5058,7 @@ Defined in include/teeny/tensor.h:650
 tensor & log_()
 ```
 
-Defined in include/teeny/tensor.h:651
+Defined in include/teeny/tensor.h:697
 
 ---
 
@@ -4780,7 +5068,7 @@ Defined in include/teeny/tensor.h:651
 tensor & sin_()
 ```
 
-Defined in include/teeny/tensor.h:652
+Defined in include/teeny/tensor.h:698
 
 ---
 
@@ -4790,7 +5078,7 @@ Defined in include/teeny/tensor.h:652
 tensor & cos_()
 ```
 
-Defined in include/teeny/tensor.h:653
+Defined in include/teeny/tensor.h:699
 
 ---
 
@@ -4800,7 +5088,7 @@ Defined in include/teeny/tensor.h:653
 tensor & sqrt_()
 ```
 
-Defined in include/teeny/tensor.h:654
+Defined in include/teeny/tensor.h:700
 
 ---
 
@@ -4810,7 +5098,7 @@ Defined in include/teeny/tensor.h:654
 tensor & tanh_()
 ```
 
-Defined in include/teeny/tensor.h:655
+Defined in include/teeny/tensor.h:701
 
 ---
 
@@ -4820,7 +5108,7 @@ Defined in include/teeny/tensor.h:655
 tensor & floor_()
 ```
 
-Defined in include/teeny/tensor.h:656
+Defined in include/teeny/tensor.h:702
 
 ---
 
@@ -4830,7 +5118,7 @@ Defined in include/teeny/tensor.h:656
 tensor & ceil_()
 ```
 
-Defined in include/teeny/tensor.h:657
+Defined in include/teeny/tensor.h:703
 
 ---
 
@@ -4840,7 +5128,7 @@ Defined in include/teeny/tensor.h:657
 tensor & round_()
 ```
 
-Defined in include/teeny/tensor.h:658
+Defined in include/teeny/tensor.h:704
 
 ---
 
@@ -4850,7 +5138,7 @@ Defined in include/teeny/tensor.h:658
 tensor & trunc_()
 ```
 
-Defined in include/teeny/tensor.h:659
+Defined in include/teeny/tensor.h:705
 
 ---
 
@@ -4860,7 +5148,7 @@ Defined in include/teeny/tensor.h:659
 tensor & sign_()
 ```
 
-Defined in include/teeny/tensor.h:660
+Defined in include/teeny/tensor.h:706
 
 ---
 
@@ -4870,7 +5158,7 @@ Defined in include/teeny/tensor.h:660
 tensor & pow_(T e)
 ```
 
-Defined in include/teeny/tensor.h:661
+Defined in include/teeny/tensor.h:707
 
 ---
 
@@ -4880,7 +5168,7 @@ Defined in include/teeny/tensor.h:661
 tensor & clamp_(T lo, T hi)
 ```
 
-Defined in include/teeny/tensor.h:662
+Defined in include/teeny/tensor.h:708
 
 ---
 
@@ -4892,7 +5180,7 @@ Defined in include/teeny/tensor.h:662
 inline tensor & operator++()
 ```
 
-Defined in include/teeny/tensor.h:668
+Defined in include/teeny/tensor.h:714
 
 ---
 
@@ -4904,7 +5192,7 @@ Defined in include/teeny/tensor.h:668
 inline tensor & operator--()
 ```
 
-Defined in include/teeny/tensor.h:669
+Defined in include/teeny/tensor.h:715
 
 ---
 
@@ -4916,7 +5204,7 @@ Defined in include/teeny/tensor.h:669
 template<bool S = is_static, enable_if_t< S, int > = 0> inline tensor< T, Shape, layout_right, own::stack > operator++(int)
 ```
 
-Defined in include/teeny/tensor.h:671
+Defined in include/teeny/tensor.h:717
 
 ---
 
@@ -4928,7 +5216,7 @@ Defined in include/teeny/tensor.h:671
 template<bool S = is_static, enable_if_t< S, int > = 0> inline tensor< T, Shape, layout_right, own::stack > operator--(int)
 ```
 
-Defined in include/teeny/tensor.h:673
+Defined in include/teeny/tensor.h:719
 
 ---
 
@@ -5026,6 +5314,10 @@ Defined in include/teeny/math.h:709
 |--------|------|-------------|
 | `constexpr own` | [`ownership`](#ownership) `static` `constexpr` |  |
 | `constexpr bool` | [`is_static`](#is_static) `static` `constexpr` |  |
+| `constexpr bool` | [`is_view`](#is_view) `static` `constexpr` |  |
+| `constexpr bool` | [`is_owning`](#is_owning) `static` `constexpr` |  |
+| `constexpr bool` | [`is_device`](#is_device) `static` `constexpr` |  |
+| `constexpr bool` | [`is_host_accessible`](#is_host_accessible) `static` `constexpr` |  |
 | `constexpr size_t` | [`buffer_size`](#buffer_size) `static` `constexpr` |  |
 | `constexpr bool` | [`is_strides_layout`](#is_strides_layout) `static` `constexpr` |  |
 | `constexpr bool` | [`is_contiguous_layout`](#is_contiguous_layout) `static` `constexpr` |  |
@@ -5056,6 +5348,54 @@ Defined in include/teeny/tensor.h:77
 
 ---
 
+#### is_view
+
+`static` `constexpr`
+
+```cpp
+constexpr bool is_view = (O)
+```
+
+Defined in include/teeny/tensor.h:79
+
+---
+
+#### is_owning
+
+`static` `constexpr`
+
+```cpp
+constexpr bool is_owning = (O)
+```
+
+Defined in include/teeny/tensor.h:80
+
+---
+
+#### is_device
+
+`static` `constexpr`
+
+```cpp
+constexpr bool is_device = (O)
+```
+
+Defined in include/teeny/tensor.h:81
+
+---
+
+#### is_host_accessible
+
+`static` `constexpr`
+
+```cpp
+constexpr bool is_host_accessible = (O)
+```
+
+Defined in include/teeny/tensor.h:82
+
+---
+
 #### buffer_size
 
 `static` `constexpr`
@@ -5064,7 +5404,7 @@ Defined in include/teeny/tensor.h:77
 constexpr size_t buffer_size = <, O == >::value
 ```
 
-Defined in include/teeny/tensor.h:78
+Defined in include/teeny/tensor.h:83
 
 ---
 
@@ -5076,7 +5416,7 @@ Defined in include/teeny/tensor.h:78
 constexpr bool is_strides_layout = _is_strides<Layout>::value
 ```
 
-Defined in include/teeny/tensor.h:123
+Defined in include/teeny/tensor.h:128
 
 ---
 
@@ -5088,7 +5428,7 @@ Defined in include/teeny/tensor.h:123
 constexpr bool is_contiguous_layout = _contiguous_layout<Layout>::value
 ```
 
-Defined in include/teeny/tensor.h:124
+Defined in include/teeny/tensor.h:129
 
 ### Public Static Methods
 
@@ -5106,7 +5446,7 @@ Defined in include/teeny/tensor.h:124
 constexpr static inline constexpr size_t rank() noexcept
 ```
 
-Defined in include/teeny/tensor.h:120
+Defined in include/teeny/tensor.h:125
 
 ### Public Types
 
@@ -5484,7 +5824,7 @@ Defined in include/teeny/layout.h:86
 struct iterator
 ```
 
-Defined in include/teeny/iterate.h:114
+Defined in include/teeny/iterate.h:123
 
 ### List of all members
 
@@ -5512,7 +5852,7 @@ Defined in include/teeny/iterate.h:114
 peel_range r
 ```
 
-Defined in include/teeny/iterate.h:115
+Defined in include/teeny/iterate.h:124
 
 ---
 
@@ -5522,7 +5862,7 @@ Defined in include/teeny/iterate.h:115
 index_type i
 ```
 
-Defined in include/teeny/iterate.h:116
+Defined in include/teeny/iterate.h:125
 
 ### Public Methods
 
@@ -5543,7 +5883,7 @@ Defined in include/teeny/iterate.h:116
 inline auto operator*() const
 ```
 
-Defined in include/teeny/iterate.h:117
+Defined in include/teeny/iterate.h:126
 
 ---
 
@@ -5555,7 +5895,7 @@ Defined in include/teeny/iterate.h:117
 inline iterator & operator++()
 ```
 
-Defined in include/teeny/iterate.h:118
+Defined in include/teeny/iterate.h:127
 
 ---
 
@@ -5567,7 +5907,7 @@ Defined in include/teeny/iterate.h:118
 inline bool operator!=(const iterator & o) const
 ```
 
-Defined in include/teeny/iterate.h:119
+Defined in include/teeny/iterate.h:128
 
 ---
 
@@ -5579,7 +5919,7 @@ Defined in include/teeny/iterate.h:119
 inline bool operator==(const iterator & o) const
 ```
 
-Defined in include/teeny/iterate.h:120
+Defined in include/teeny/iterate.h:129
 
 
 
