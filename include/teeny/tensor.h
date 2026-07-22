@@ -205,7 +205,9 @@ struct tensor : private Layout::template mapping<Shape> {
         return true;
     }
     /** @brief Exact contiguity in layout `L` (e.g. `corder`/`forder`): the actual
-     *         strides equal what `L` produces for these extents. */
+     *         strides equal what `L` produces for these extents. Two spellings —
+     *         `t.is_contiguous<corder>()` (type form) and `t.is_contiguous(corder())`
+     *         (value form, layout deduced from the argument). */
     template <class L>
     _TNY_API bool is_contiguous() const noexcept {
         typename L::template mapping<extents_type> m(extents());
@@ -213,6 +215,8 @@ struct tensor : private Layout::template mapping<Shape> {
             if (static_cast<index_type>(stride(r)) != static_cast<index_type>(m.stride(r))) return false;
         return true;
     }
+    template <class L>
+    _TNY_API bool is_contiguous(L) const noexcept { return is_contiguous<L>(); }
 
     /* --- data / views -------------------------------------------- */
     _TNY_API T *       data()       noexcept { return store_.data(); }

@@ -41,7 +41,9 @@ c.flatten();                      // now contiguous
 
 `is_contiguous()` with no argument asks only whether the elements occupy a dense
 block of memory — so a *permuted* C-contiguous view still counts. Pass a layout
-(`layout_right`/`layout_left`) for an exact C/F check.
+for an exact C/F check, in either spelling: `is_contiguous<layout_right>()` (type
+form) or `is_contiguous(layout_right{})` (value form, layout deduced from the
+argument — e.g. `is_contiguous(corder())`).
 
 ## Recover static inner dims
 

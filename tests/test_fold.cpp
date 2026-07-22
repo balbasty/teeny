@@ -84,5 +84,10 @@ int main() {
     auto sq  = wrap(buf, shape<3,1,4>{});              // size-1 axis is ignored
     if (!sq.is_contiguous()) return 26;
 
+    // value form: is_contiguous(layout_right{}) == is_contiguous<layout_right>()
+    if (!cc.is_contiguous(layout_right{}))  return 27;
+    if (cc.is_contiguous(layout_left{}))    return 28;
+    if (!ff.is_contiguous(layout_left{}))   return 29;
+
     return 0;
 }
