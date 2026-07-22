@@ -59,7 +59,8 @@ int main()
     // A rectangular (non-square, extents != 1) shape must still be accepted.
     auto rk = local<double, extents<long,2,3>>(); rk.iota_(1.0, 1.0);   // 1..6
     if (dot(rk, rk) != 1+4+9+16+25+36) return 23;                       // 91
-    // (dot(shape<2,3>, shape<1,3>) is now a compile error — see test below.)
+    // (dot(shape<2,3>, shape<1,3>) is now a compile error; no compile-fail
+    //  harness exists in this repo to assert it — verified manually.)
 
     // reduction over the (contiguous) view: buf[i] == 2*i + 199, i = 0..8
     double expect = 0; for (int i=0;i<9;++i) expect += 2*i + 199;
