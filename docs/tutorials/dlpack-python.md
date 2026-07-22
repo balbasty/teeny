@@ -5,10 +5,8 @@ on CPU *and* CUDA, ingests an `ndarray`-like input (NumPy / PyTorch / CuPy /
 JAX via **DLPack**), and returns an `ndarray`-like output. The inner matrix is
 small (`C×C`, C ∈ {2,3,4}); the batch is arbitrary and only known at run time.
 
-The whole point: the `C×C` math should compile to tight, unrolled code (C is
-static), while the batch stays dynamic. teeny gives you exactly that seam.
-
-We build it in four short steps.
+The `C×C` math compiles to unrolled code (C is static) while the batch stays
+dynamic. Four steps.
 
 ---
 

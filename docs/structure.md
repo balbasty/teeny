@@ -46,8 +46,8 @@ Static dims of the target are validated against the actual extents.
 
 ## nd-peel — iterate a subset of axes
 
-The core batch idiom: peel some axes and get a lower-rank sub-view for each,
-without writing any index arithmetic.
+Peel some axes and get a lower-rank sub-view for each, without writing index
+arithmetic.
 
 ```cpp
 for (auto line : peel<0,1>(t)) work(line);   // peel axes 0,1; each is a view

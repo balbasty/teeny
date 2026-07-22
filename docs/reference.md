@@ -13,8 +13,8 @@ struct tensor;
 ```
 
 One tensor type parameterised by element type, `cuda::std::extents`, an mdspan
-layout, and ownership. You rarely name it directly — use the aliases and
-factories below. See [Tensors & ownership](tensors.md).
+layout, and ownership. Rarely named directly — use the aliases and factories
+below. See [Tensors & ownership](tensors.md).
 
 ### Ownership aliases
 
@@ -42,7 +42,7 @@ arange<T>(n);                                                 // 1-D [0..n-1] (h
 
 ---
 
-## Shapes & strides
+## Shapes & strides (`layout.h`, `alias.h`)
 
 ```cpp
 template <auto... E>       using shape   = cs::extents<int64_t, E...>;  // -1 == dynamic
@@ -51,8 +51,7 @@ template <int64_t... S>    using layout_static_stride = strides<S...>;  // back-
 constexpr int64_t dynamic_stride;                                      // a runtime stride
 ```
 
-Static-integer aliases (compile-time indices/extents; each converts to a runtime
-integer and carries `::value`):
+Static-integer aliases (each converts to a runtime integer and carries `::value`):
 
 ```cpp
 Int<V> Long<V> Size<V> Uint<V> Int32<V> Int64<V> Diff<V> Bool<V> ic<V>
@@ -74,10 +73,11 @@ t.data();  t.view();  t.extents();  t.mapping();
 
 ---
 
-## Indexing & slicing
+## Indexing & slicing (`indexing.h`)
 
 ```cpp
-t(i, j, k);                     // element access (negatives wrap)
+t(i, j, k);                     // element access -> T& (negatives wrap)
+t.at(i, j, k);                  // one element as a rank-0 VIEW (rank-0 <-> scalar, .item())
 t(0, all, slice(1, 4));         // any slice arg -> a VIEW
 slice(start, stop);  slice(start, stop, step);   // half-open range, optional (neg) step
 none;  all;                     // open slice end (== python None); keep-axis marker
@@ -88,7 +88,7 @@ See [Indexing & slicing](indexing.md).
 
 ---
 
-## Structure (views)
+## Structure (views) (`axis.h`, `tensor.h`)
 
 ```cpp
 t.permute<Perm...>();           // reorder axes
@@ -100,12 +100,13 @@ t.clone();                      // dense row-major OWNING copy
 t.recast<NewExtents>();         // reinterpret with a more-static same-rank extents
 ```
 
-Axis template arguments are signed (negatives count from the back). See
+Axis template arguments are signed (negatives count from the back). Every view op
+folds output strides and works on any source layout (incl. `strides<...>`). See
 [Views & structure](structure.md).
 
 ---
 
-## nd-peel (iteration)
+## nd-peel (iteration) (`iterate.h`)
 
 ```cpp
 peel<Axes...>(t);       peel_at<Axes...>(t, i);        // peel named axes
@@ -117,22 +118,31 @@ See [Views & structure](structure.md#nd-peel-iterate-a-subset-of-axes).
 
 ---
 
-## Math
+## Math (`math.h`)
 
 ```cpp
-// in-place (broadcasts tensor rhs; also scalar rhs)
-a.add_(x); a.sub_(x); a.mul_(x); a.div_(x);
-a.neg_(); a.abs_(); a.exp_(); a.log_(); a.sin_(); a.cos_(); a.sqrt_(); a.tanh_(); a.pow_(e);
+// in-place (broadcasts tensor rhs; also scalar rhs). add_/sub_ take a bool
+// Atomic flag: add_<true>(x) commits with fetch_add (atomic on device).
+a.add_(x); a.sub_(x); a.mul_(x); a.div_(x);   a.add_<true>(x); a.sub_<true>(s);
+a += x; a -= s; a *= x; a /= s;               // compound-assign
+++a; --a; auto old = a++;                      // prefix in place; postfix (static) -> stack copy
+a.neg_(); a.abs_(); a.exp_(); a.log_(); a.sin_(); a.cos_(); a.sqrt_(); a.tanh_();
+a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_(); a.pow_(e); a.clamp_(lo, hi);
+a & b; a | b; a ^ b; ~a; a &= b; a |= s;       // bitwise (INTEGER element types only)
 a.fill_(v); a.zero_(); a.copy_(b); a.iota_(start, step);
 a.map_(f); a.zip_with_(g, b);  auto c = a.map(f);       // user functor (device-safe)
 a.add_at(v, i...);  fetch_add(ptr, v);                  // scatter (atomic on device)
 
 // out-of-place -> new tensor (promotes types; static->stack, dyn->heap)
-auto c = a + b;  auto c = a.add(b);  auto c = a * 2.0;  auto c = a.pow(b);
+auto c = a + b;  a.add(b);  a * 2.0;  2.0 - a;  1.0 / a;  -a;  a.pow(b);
 auto c = neg(a); abs(a); exp(a); log(a); sin(a); cos(a); sqrt(a); tanh(a);
+auto c = floor(a); ceil(a); round(a); trunc(a); sign(a);
+auto c = minimum(a, b); maximum(a, s); clamp(a, lo, hi);
 
-// reductions -> scalar
-sum(a); prod(a); max(a); min(a); dot(a, b);
+// reductions -> scalar (all axes)
+sum(a); prod(a); max(a); min(a); mean(a); dot(a, b);
+// axis reductions -> lower-rank tensor (named axes removed; negatives wrap)
+sum<Axes...>(a); prod<...>(a); max<...>(a); min<...>(a); mean<...>(a);
 ```
 
 Promotion: C++ rules but lower-width float wins (`-DTNY_STD_PROMOTION` opts out).
@@ -140,7 +150,7 @@ See [Math & broadcasting](math.md).
 
 ---
 
-## Half precision
+## Half precision (`half.h`)
 
 ```cpp
 half;  bfloat16;                          // native __half/__nv_bfloat16 under nvcc
@@ -151,13 +161,14 @@ See [Half precision](half.md).
 
 ---
 
-## Dispatch (the ndarray boundary)
+## Dispatch (the ndarray boundary) (`dynamic.h`)
 
 ```cpp
 dispatch_value<Vs...>(v, f);              // runtime value -> integral_constant
 any(data, shape, stride, ndim);           // -> anyrank (rank-erased, bounded)
-dispatch_rank(anyrank, f);             // runtime rank -> fixed-rank view
-anyrank.fixed<R>();                    // force a known rank
+at.peel_front<Sr>();  at.peel_front_at<Sr>(i);   // batch idiom: one kernel per Sr
+dispatch_rank(at, f);                     // runtime rank -> fixed-rank view (per total rank)
+at.fixed<R>();                            // force a known rank
 ```
 
 See [Dispatch & the ndarray boundary](dispatch.md).
@@ -177,9 +188,8 @@ See [Dispatch & the ndarray boundary](dispatch.md).
 
 ## Generating this reference
 
-The headers carry Doxygen `@brief` comments, so `doxygen` produces a full XML/HTML
-reference out of the box; for a Markdown/MkDocs workflow, feed that to
+The headers carry Doxygen `@brief` comments, so `doxygen` produces a full
+XML/HTML reference; for a Markdown/MkDocs workflow, feed that to
 [`doxybook2`](https://github.com/matusnovak/doxybook2) or
 [`moxygen`](https://github.com/sourcey/moxygen). This page is hand-curated
-because the surface is small and a guided reference reads better than a dumped
-one.
+because the surface is small.

@@ -67,14 +67,16 @@ auto hh = local<half, shape<64,64>>();
 | Header | Contents |
 |---|---|
 | `teeny.h` | umbrella (everything except `cuda.h`) |
+| `alias.h` | `shape<...>`, `Int<V>`/… static ints, `all`, mdspan vocabulary in `tny::` |
 | `half.h` | `half` (binary16) + `bfloat16` element types + `compute_type` |
 | `storage.h` | `own` modes + storage policies (`owning_storage<T,Alloc>`) |
-| `layout.h` | `layout_static_stride<S...>` — per-dim compile-time strides |
-| `tensor.h` | `tensor<T, Extents, Layout, own>` + `view`/`local`/`owned` + slicing / `take_along` / `permute` / `unsqueeze` |
-| `math.h` | in-place / out-of-place ops (broadcasting) + unary math, `sum`/`prod`/`max`/`min`/`dot` |
-| `iterate.h` | nd-peel: `peel<Axes…>` / `peel_at<Axes…>` |
-| `helpers.h` | `batch_offset` (index2offset), `channel` |
-| `dynamic.h` | `anyrank` + `dispatch_rank` (runtime rank) |
+| `layout.h` | `strides<S...>` (`= layout_static_stride`) — per-dim static/dynamic strides |
+| `indexing.h` | slice vocabulary: `slice()`/`none`, axis/index wrapping |
+| `axis.h` | view builders: `permute`/`flip`/`squeeze`/`unsqueeze` |
+| `tensor.h` | `tensor<T, Extents, Layout, own>` + `view`/`local`/`owned` + slicing / `take_along` / `at` |
+| `math.h` | in-place / out-of-place ops (broadcasting) + unary math + reductions |
+| `iterate.h` | nd-peel: `peel`/`peel_at`/`peel_front` + `batch_offset`/`channel` |
+| `dynamic.h` | `anyrank` (rank-erased carrier) + `peel_front<Sr>` + `dispatch_rank` |
 | `cuda.h` | opt-in device / host / pinned memory (needs the CUDA runtime) |
 
 ## Building & testing
