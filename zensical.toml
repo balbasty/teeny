@@ -32,7 +32,11 @@ nav = [
   {"Tutorials" = [
     {"CPU + CUDA kernels for DLPack → Python" = "tutorials/dlpack-python.md"},
   ]},
-  {"API reference" = "reference.md"},
+  {"API" = [
+    {"Cheat sheet" = "cheatsheet.md"},
+    {"Reference" = "reference.md"},
+    {"Autodoc" = "api/index.md"},
+  ]},
 ]
 
 [project.theme]

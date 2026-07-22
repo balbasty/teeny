@@ -1,252 +1,249 @@
 # API reference
 
-Everything is in `namespace tny`. `namespace cs = cuda::std`. Include
+A thorough, type-annotated reference for the public API. For a one-screen scan
+of the whole surface, see the [Cheat sheet](cheatsheet.md); for the raw
+Doxygen-extracted signatures, see [Autodoc](api/index.md).
+
+Everything is in `namespace tny` (`namespace cs = cuda::std`). Include
 `<teeny/teeny.h>` for all of it; `<teeny/cuda.h>` adds the CUDA memory spaces.
+
+Legend: **`Idx`** = the extents' `index_type` (`int64_t` for `shape<...>`).
+**`T`** = element type. A *static index* is an `integral_constant` (`Int<k>()`);
+a *runtime index* is a plain integer. "→ view" means a non-owning
+`tensor<…, own::view>` aliasing the same memory (no copy).
 
 ---
 
 ## The tensor type
 
 ```cpp
-template <class T, class Shape, class Layout = layout_right, own O = own::view>
+template <class T, class Extents, class Layout = layout_right, own O = own::view>
 struct tensor;
 ```
 
-One tensor type parameterised by element type, **shape**, an mdspan layout, and
-ownership. Rarely named directly — use the aliases and factories below. See
-[Tensors & ownership](tensors.md).
-
-!!! note "`Shape` is any extents"
-    The `Shape` parameter is the tensor's per-dimension sizes — **any**
-    `cuda::std::extents<int64_t, ...>`. Spell it with the `shape<...>` alias
-    (`shape<2,3>`, a dynamic dim is `-1`); C++ readers, `shape` *is*
-    `cuda::std::extents`, nothing new. It is exposed as both `shape_type` and
-    `extents_type`. Layout is the memory order (`corder`/C or `forder`/F), a
-    separate axis from the shape.
+| Parameter | Meaning | Typical value |
+|---|---|---|
+| `T` | element type | any arithmetic type, `half`, `bfloat16` |
+| `Extents` | the **shape** | `shape<2,3>` (a `cs::extents<int64_t,…>`; `-1` = dynamic) |
+| `Layout` | memory order | `layout_right`/`corder` (default), `layout_left`/`forder`, `layout_stride`, `strides<S...>` |
+| `O` | ownership | `own::view` (default), `own::stack`, `own::heap`, `own::gpu`/`pinned`/`mapped` |
 
 ### Ownership aliases
 
-```cpp
-view_t<T, E, L = layout_right>       // non-owning view (default; the bare `tensor` is this)
-local<T, E, L = layout_right>        // stack-owned (requires a fully static shape)
-owned<T, E, L = layout_right>        // heap-owned, host, move-only
-gpu<T, E, L>  pinned<T, E, L>  mapped<T, E, L>  // CUDA memory (from <teeny/cuda.h>)
-```
-
-### Factories
-
-```cpp
-wrap(ptr, shape);  wrap<Layout>(ptr, shape);  // a view (C-order / chosen layout)
-wrap(ptr, shape, {s0, s1, ...});              // view with RUNTIME strides (layout_stride)
-wrap<S...>(ptr, shape, {dyn...});             // MIXED static/runtime strides (dynamic_stride slots)
-wrap(ptr, shape, strides<S...>{});            // view with COMPILE-TIME strides
-as_tensor(any_mdspan);                        // wrap an mdspan/submdspan result
-
-make_view(ptr, shape);           // deduce the extents type
-make_local<T>(shape);  make_heap<T>(shape);            // T defaults to float
-make_gpu<T>(shape); make_pinned<T>(shape); make_mapped<T>(shape);   // T defaults to float
-
-zeros<T>(shape);  ones<T>(shape);   // T defaults to float; static->stack, dyn->heap
-full(shape, v);                     // element type = the VALUE's type (full<T>(...) to force)
-arange<T>(n);                       // 1-D [0..n-1] (heap); T defaults to int64
-arange<T, N>();  arange<T>(Int<N>());  // static 1-D [0..N-1] (stack, folds)
-```
+| Alias | Ownership | Notes |
+|---|---|---|
+| `view_t<T,E,L=layout_right>` | none (view) | trivially copyable, kernel-passable; the bare `tensor` is this |
+| `local<T,E,L>` | stack | requires a fully static shape; `sizeof` == its data |
+| `owned<T,E,L>` | heap (host) | move-only |
+| `gpu<T,E,L>` / `pinned<T,E,L>` / `mapped<T,E,L>` | CUDA | from `<teeny/cuda.h>` |
 
 ---
 
-## Shapes & strides (`layout.h`, `alias.h`)
+## Factories
 
-```cpp
-template <auto... E>       using shape   = cs::extents<int64_t, E...>;  // -1 == dynamic
-template <size_t N>        using rank    = shape<-1 ...N times>;        // fully-dynamic rank-N shape
-template <int64_t... S>    struct strides;                // signed; dynamic_stride sentinel
-template <int64_t... S>    using layout_static_stride = strides<S...>;  // back-compat alias
-constexpr int64_t dynamic_stride;                         // a runtime stride
-using corder = layout_right;   // C-order (row-major); numpy-style spelling
-using forder = layout_left;    // F-order (column-major)
-```
+Wrap existing memory (→ view):
 
-Static-integer aliases (each converts to a runtime integer and carries `::value`):
+| Call | Returns | Notes |
+|---|---|---|
+| `wrap(ptr, shape)` | `view_t<T,E>` | C-order (`layout_right`) |
+| `wrap<Layout>(ptr, shape)` | `view_t<T,E,Layout>` | chosen layout |
+| `wrap(ptr, shape, {s0,s1,…})` | `view_t<T,E,layout_stride>` | **runtime** strides (elements; may be negative) |
+| `wrap_strided<S...>(ptr, shape)` | `view_t<T,E,strides<S...>>` | **compile-time** strides (fold into the type) |
+| `as_tensor(md)` | `view_t<…>` | wrap any `cs::mdspan`/`submdspan` result |
+| `make_view(ptr, shape)` | `view_t<T,E>` | deduces `E` |
 
-```cpp
-Int<V> Long<V> Size<V> Uint<V> Diff<V> Bool<V>          // classic
-Int8/16/32/64<V>  Uint8/16/32/64<V>                          // fixed-width
-I1 I2 I4 I8  U1 U2 U4 U8   // numpy short forms (BYTES): I4<V> == Int32<V>
-```
+Allocate new storage — element type **`T` defaults to `float`**; static shape →
+stack (host+device), dynamic shape → heap (host only):
 
-Element **dtype** aliases (numpy short codes; width in bytes, `local<f4, shape<3>>`):
-
-```cpp
-i1 i2 i4 i8   u1 u2 u4 u8   f4(float) f8(double)   f2(half) bf16(bfloat16)
-```
-
-See [Shapes & strides](shapes-strides.md).
+| Call | Returns | Element type |
+|---|---|---|
+| `make_local<T>(shape)` | `local<T,E>` | `T` (=`float`) |
+| `make_heap<T>(shape)` | `owned<T,E>` | `T` (=`float`) |
+| `make_gpu<T>(shape)` / `make_pinned<T>` / `make_mapped<T>` | CUDA owner | `T` (=`float`) |
+| `zeros<T>(shape)` / `ones<T>(shape)` | stack or heap | `T` (=`float`) |
+| `full(shape, v)` | stack or heap | **the value's type** (`full<T>(…)` to force) |
+| `arange<T>(n)` | `owned<T, shape<-1>>` | `T` (=`int64_t`); 1-D `[0,n)` |
+| `arange<T,N>()` / `arange<T>(Int<N>())` | `local<T, shape<N>>` | static 1-D `[0,N)` |
 
 ---
 
 ## Geometry
 
-```cpp
-t.rank();  t.numel();
-t.is_contiguous();                    // dense in SOME order (C, F, or permuted)
-t.is_contiguous<layout_right>();      // exact: C-contiguous (or <layout_left> for F)
-t.extent(d);          t.extent(Int<d>());  // runtime value / static integral_constant
-t.shape(d);           t.shape();           // aliases of extent(d) / extents()
-t.stride(d);          t.stride(Int<d>());  // static when derivable
-t.data();  t.view();  t.extents();  t.mapping();
-```
+| Call | Returns | Notes |
+|---|---|---|
+| `t.rank()` | `size_t` (constexpr) | number of axes |
+| `t.numel()` | `Idx` | product of extents |
+| `t.extent(d)` | `Idx` | runtime axis size |
+| `t.extent(Int<k>())` | `integral_constant` if static, else `Idx` | folds when static |
+| `t.shape()` / `t.shape(d)` | `Extents` / `Idx` | python-y aliases of `extents()` / `extent(d)` |
+| `t.stride(d)` | `Idx` | runtime axis stride |
+| `t.stride(Int<k>())` | `integral_constant` if derivable, else `Idx` | folds for static-stride / contiguous layouts |
+| `t.is_contiguous()` | `bool` | dense in **some** order (C, F, or permuted) |
+| `t.is_contiguous<L>()` | `bool` | exact: strides equal `L`'s packing (`layout_right`=C, `layout_left`=F) |
+| `t.data()` | `T*` | base pointer |
+| `t.view()` | `cs::mdspan<T,E,L>` | the raw mdspan |
+| `t.extents()` / `t.mapping()` | `const Extents&` / `const mapping&` | |
 
 ---
 
-## Indexing & slicing (`indexing.h`)
+## Indexing & slicing
 
-```cpp
-t(i, j, k);                     // element access -> T& (negatives wrap)
-t.at(i, j, k);                  // one element as a rank-0 VIEW (rank-0 <-> scalar, .item())
-t(0, all, slice(1, 4));         // any slice arg -> a VIEW
-t(1, ellipsis, 2);              // ellipsis = (rank - #other args) copies of `all`
-t(ellipsis) = b;  t(0, all) = v;  // assign INTO a slice copies/fills (a = b rebinds)
-slice(start, stop);  slice(start, stop, step);  // half-open range, optional (neg) step
-none;  all;                     // open slice end (== python None); keep-axis marker
-t.take_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest
-```
-
-See [Indexing & slicing](indexing.md).
-
----
-
-## Structure (views) (`axis.h`, `tensor.h`)
-
-```cpp
-t.permute<Perm...>();                 // reorder axes
-t.flip<Ax>();                         // reverse an axis (negative-stride view)
-t.unsqueeze<Ax>();  t.squeeze<Ax>();  // insert / drop a size-1 axis
-t.reshape<NewExt...>();               // contiguous-view reshape (one -1 inferred)
-t.flatten();                          // 1-D contiguous view
-t.clone();                            // dense row-major OWNING copy
-t.to<T2>();                           // dtype-converted dense copy (to<>() == clone; static->stack, dyn->heap)
-t.recast<NewExtents>();               // reinterpret with a more-static same-rank extents
-```
-
-Axis template arguments are signed (negatives count from the back). Every view op
-folds output strides and works on any source layout (incl. `strides<...>`). See
-[Views & structure](structure.md).
-
----
-
-## nd-peel (iteration) (`iterate.h`)
-
-```cpp
-peel<Axes...>(t);       peel_at<Axes...>(t, i);  // peel named axes
-peel_front<N>(t);       peel_front_at<N>(t, i);  // peel the first N axes
-```
-
-See [Views & structure](structure.md#nd-peel-iterate-a-subset-of-axes).
-
----
-
-## Math (`math.h`)
-
-```cpp
-// in-place (broadcasts tensor rhs; also scalar rhs). add_/sub_ take a bool
-// Atomic flag: add_<true>(x) commits with fetch_add (atomic on device).
-a.add_(x); a.sub_(x); a.mul_(x); a.div_(x);   a.add_<true>(x); a.sub_<true>(s);
-a += x; a -= s; a *= x; a /= s;  // compound-assign
-++a; --a; auto old = a++;        // prefix in place; postfix (static) -> stack copy
-a.neg_(); a.abs_(); a.exp_(); a.log_(); a.sin_(); a.cos_(); a.sqrt_(); a.tanh_();
-a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_(); a.pow_(e); a.clamp_(lo, hi);
-a & b; a | b; a ^ b; ~a; a &= b; a |= s;  // bitwise (INTEGER element types only)
-a.fill_(v); a.zero_(); a.copy_(b); a.iota_(start, step);
-a.map_(f); a.zip_with_(g, b);  auto c = a.map(f);  // user functor (device-safe)
-a.add_at(v, i...);  fetch_add(ptr, v);             // scatter (atomic on device)
-
-// out-of-place -> new tensor (promotes types; static->stack, dyn->heap)
-auto c = a + b;  a.add(b);  a * 2.0;  2.0 - a;  1.0 / a;  -a;  a.pow(b);
-auto c = neg(a); abs(a); exp(a); log(a); sin(a); cos(a); sqrt(a); tanh(a);
-auto c = floor(a); ceil(a); round(a); trunc(a); sign(a);
-auto c = minimum(a, b); maximum(a, s); clamp(a, lo, hi);
-
-// reductions -> scalar (all axes). ACCUMULATE in the "reduce type" (double for
-//   small floats float/double/half, item type for ints), then CAST the result
-//   back to the tensor's element type: sum(float_tensor) -> float. A leading TYPE
-//   arg makes that type BOTH the accumulator and the result: sum<double>(a).
-sum(a); prod(a); max(a); min(a); mean(a); dot(a, b);   // sum<Acc>(a), mean<Acc>(a), ...
-allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
-// axis reductions -> lower-rank tensor (named axes removed; negatives wrap). Same
-//   rule: accumulate in the reduce type, result element type = the tensor's type;
-//   sum<Acc, Axes...>(a) makes Acc the accumulator AND result (leading TYPE = acc,
-//   leading int = axis).
-sum<Axes...>(a); prod<...>(a); max<...>(a); min<...>(a); mean<...>(a);  // sum<Acc,Axes...>(a)
-```
-
-Promotion: C++ rules but lower-width float wins (`-DTNY_STD_PROMOTION` opts out).
-See [Math & broadcasting](math.md).
-
----
-
-## Half precision (`half.h`)
-
-```cpp
-half;  bfloat16;                      // native __half/__nv_bfloat16 under nvcc
-compute_type<T>;  compute_type_t<T>;  // half -> float; else T
-```
-
-See [Half precision](half.md).
-
----
-
-## Dispatch (the ndarray boundary) (`dynamic.h`)
-
-```cpp
-dispatch_value<Vs...>(v, f);            // runtime value -> integral_constant
-as_anyrank(data, shape, stride, ndim);        // -> anyrank WRAPPING the arrays, NO copy
-                                              //   (default; host only, arrays must outlive it)
-as_anyrank(data, shape, stride, ndim, copy_meta);  // -> anyrank COPYING into an inline
-                                              //   TNY_MAX_RANK store (device-passable)
-at.peel_front<Sr>();  at.peel_front_at<Sr>(i);  // batch idiom: one kernel per Sr
-dispatch_rank(at, f);                    // runtime rank -> fixed-rank view (per total rank)
-at.fixed<R>();                           // force a known rank
-```
-
-See [Dispatch & the ndarray boundary](dispatch.md).
-
----
-
-## DLPack interchange (`<teeny/dlpack.h>`)
-
-Zero-copy exchange with numpy / torch / cupy / jax via `DLManagedTensor` (the
-structs are vendored — no external dependency). DLPack passes a pointer +
-metadata, never data.
+Axis args accept a runtime integer, a static `Int<k>()`, or a slice specifier.
+Negative integer indices wrap (count from the back).
 
 | Call | Returns | Notes |
 |---|---|---|
-| `to_dlpack(view)` | `DLManagedTensor*` | export a view — **borrows** data; caller keeps the memory alive |
-| `to_dlpack(std::move(owner))` | `DLManagedTensor*` | export an owning tensor — **moves** the buffer into the capsule |
-| `from_dlpack<T>(m)` | `anyrank<T>` | import (runtime rank); metadata copied, data borrowed |
-| `from_dlpack<T, R>(m)` | rank-`R` view | import at a known rank |
-| `dispatch_dlpack(m, f)` | `bool` | read dtype+rank from `m`, call `f` with a typed fixed-rank view |
+| `t(i, j, k)` (all integers) | `T&` | element access |
+| `t.at(i, j, k)` (all integers) | rank-0 view | scalar-like: converts to/from `T`, `.item()`, has `add_<true>` |
+| `t(0, all, slice(1,4))` (any slice arg) | → view | lower-/same-rank |
+| `t(1, ellipsis, 2)` | → view or `T&` | `ellipsis` = `rank − #other args` copies of `all` (≤1 per call) |
+| `t.take_along<Axes...>(args...)` | → view | bind named axes only, keep the rest |
 
-The consumer owns a returned `DLManagedTensor*` and must call `m->deleter(m)`
-once. On import, null `strides` ⇒ C-contiguous, `byte_offset` folds into the
-pointer, and the caller keeps `m` alive while the view is used.
+Slice specifiers:
+
+| Spelling | Meaning |
+|---|---|
+| `all` | keep the whole axis (== `slice(none,none)`; folds, keeps static extent) |
+| `slice(a, b)` / `slice(a, b, step)` | half-open `[a,b)`, optional (negative) step |
+| `slice<a,b>()` / `slice<a,b,step>()` | compile-time bounds (fold like `all`) |
+| `none` | open slice end (python `None`) |
+| `ellipsis` | fill the middle with `all` |
+
+Assignment **into** a slice copies (broadcasts); on a **named** view it rebinds:
+
+| Statement | Effect |
+|---|---|
+| `a = b` (named view) | rebind `a` to `b`'s memory (shallow — nothing copied) |
+| `a(ellipsis) = b` / `a(0,all) = b` | copy `b`'s elements into the region (broadcasts) |
+| `a(...) = 5.0` | fill the region |
+
+---
+
+## Structure (views)
+
+All return a view; axis template args are signed (negatives count from the back)
+and every op folds output strides, so they work on any source layout (incl.
+`strides<...>`).
+
+| Call | Returns | Notes |
+|---|---|---|
+| `t.permute<Perm...>()` | → view | reorder axes (a permutation of `0..N-1`) |
+| `t.flip<Ax>()` | → view | reverse an axis (negative-stride) |
+| `t.unsqueeze<Ax>()` | → view, rank+1 | insert a size-1 axis |
+| `t.squeeze<Ax>()` / `t.squeeze()` | → view, rank−1 / − all size-1 | drop size-1 axis / axes |
+| `t.reshape<NewExt...>()` | → view | contiguous reshape (one `-1` inferred) |
+| `t.flatten()` | → 1-D view | ravel; needs C-contiguous |
+| `t.recast<NewExtents>()` | → view | reinterpret with a more-static same-rank extents |
+| `t.clone()` | owning (stack/heap) | materialise a dense row-major copy |
+
+`reshape`/`flatten`/`recast` need exact C-contiguity (`is_contiguous<layout_right>()`);
+`clone()` first if the source isn't.
+
+### nd-peel (iteration)
+
+| Call | Returns | Notes |
+|---|---|---|
+| `peel<Axes...>(t)` | a range of views | iterate the named axes; each item is a lower-rank view |
+| `peel_at<Axes...>(t, i)` | → view | the `i`-th sub-view (grid-stride style) |
+| `peel_front<N>(t)` | a range of views | `N≥0`: peel the first `N` axes; `N<0`: keep the last `|N|` |
+| `peel_front_at<N>(t, i)` | → view | the `i`-th (grid-stride style) |
+
+---
+
+## Math
+
+Element type of results follows `promote(A,B)` (C++ rules, but among floats the
+**lower** width wins — pytorch-style; `-DTNY_STD_PROMOTION` opts out).
+
+### In-place (mutates `*this`, returns `tensor&`)
+
+A tensor rhs broadcasts (numpy-style; needs equal rank — `unsqueeze` first); a
+scalar rhs applies to every element.
+
+| Call | Notes |
+|---|---|
+| `a.add_(x)` `a.sub_(x)` `a.mul_(x)` `a.div_(x)` | `x` = tensor (broadcasts) or scalar |
+| `a.add_<true>(x)` `a.sub_<true>(x)` | atomic accumulate (`fetch_add`; atomic on device) |
+| `a += x` `a -= x` `a *= x` `a /= x` | compound-assign sugar |
+| `++a` `--a` | prefix, in place |
+| `a++` | postfix → pre-value **stack copy** (static shape only) |
+| `a.neg_/abs_/exp_/log_/sin_/cos_/sqrt_/tanh_()` | unary, in place |
+| `a.floor_/ceil_/round_/trunc_/sign_()` `a.pow_(e)` `a.clamp_(lo,hi)` | unary, in place |
+| `a & b` `a \| b` `a ^ b` `~a` `a &= b` … | bitwise (**integer** element types only) |
+| `a.fill_(v)` `a.zero_()` `a.copy_(b)` `a.iota_(start,step)` | assignment / init (`b` broadcasts) |
+| `a.map_(f)` `a.zip_with_(g, b)` | user functor (a device-safe struct, not a lambda) |
+| `a.add_at(v, i...)` | scatter-accumulate `a(i...) += v` (atomic on device) |
+| `fetch_add(ptr, v)` | raw-pointer atomic add (device); the primitive under the above |
+
+### Out-of-place (→ new tensor; static shape → stack, else heap)
+
+| Call | Returns |
+|---|---|
+| `a + b` / `a.add(b)`, `a - b`, `a * b`, `a / b` | new tensor (tensor+tensor broadcasts, or +scalar) |
+| `2.0 * a`, `2.0 - a`, `1.0 / a`, `-a` | scalar–tensor / unary minus |
+| `a.pow(b)` | element-wise power |
+| `neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign(a)` | unary free functions |
+| `minimum(a,b)` `maximum(a,s)` `clamp(a,lo,hi)` | elementwise min/max/clamp |
+| `a.map(f)` | new tensor from a user functor |
+
+### Comparisons → a `bool` tensor (broadcast), reduced with `.all()`/`.any()`
+
+| Call | Returns |
+|---|---|
+| `a < b`, `a == 2.0`, `3.0 < a`, … (`== != < <= > >=`) | `bool` tensor |
+| `(a > 0).all()` / `(a > 3).any()` | `bool` (members) |
+
+### Reductions
+
+Accumulate in — and **return** — the *reduce type*: `double` for small floats
+(`float`/`double`/`half`; a wider float keeps its own type), the item type for
+integers. Override with a leading **type** argument.
+
+| Call | Returns | Notes |
+|---|---|---|
+| `sum(a)` `prod(a)` `max(a)` `min(a)` `mean(a)` | reduce type (scalar) | over all axes |
+| `dot(a, b)` | reduce type (scalar) | inner product (broadcasts) |
+| `sum<Acc>(a)`, `mean<Acc>(a)`, `dot<Acc>(a,b)` | `Acc` | force the accumulator/return type |
+| `allclose(a, b, rtol=1e-5, atol=1e-8)` | `bool` | `\|a−b\| ≤ atol+rtol·\|b\|` everywhere (broadcasts) |
+| `sum<Axes...>(a)` `mean<Axes...>` `max`/`min`/`prod<Axes...>` | lower-rank tensor | remove the named axes (negatives wrap) |
+| `sum<Acc, Axes...>(a)` | lower-rank tensor | leading **type** = accumulator, leading **int** = axis |
+
+Axis reductions: a fully static result → stack (host+device); any dynamic result
+→ heap (host only).
+
+---
+
+## Half precision
+
+| Name | Meaning |
+|---|---|
+| `half` / `bfloat16` | IEEE binary16 / bfloat16 (native `__half`/`__nv_bfloat16` under nvcc) |
+| `compute_type<T>` / `compute_type_t<T>` | `float` for half types, else `T` (math computes here) |
+
+---
+
+## Dispatch (the ndarray boundary)
+
+| Call | Returns | Notes |
+|---|---|---|
+| `as_anyrank(data, shape, stride, ndim)` | `anyrank` (view store) | **wraps** the arrays, no copy (default; host only) |
+| `as_anyrank(data, shape, stride, ndim, copy_meta)` | `anyrank` (inline store) | **copies** into a `TNY_MAX_RANK` store (device-passable); `as_anyrank<N>(…,copy_meta)` sets capacity |
+| `at.fixed<R>()` | rank-`R` `layout_stride` view | requires `ndim == R` |
+| `dispatch_rank(at, f)` | `bool` | call `f` with a fixed-rank view chosen by runtime `ndim` (one instantiation per total rank) |
+| `at.peel_front<N>()` / `at.peel_front_at<N>(i)` | range / view | batch idiom: keep the last `\|N\|` dims static, peel the rest (one kernel per `\|N\|`) |
+| `dispatch_value<Vs...>(v, f)` | `bool` | call `f(Int<k>{})` for the matching candidate `k == v` |
+
+DLPack strides are in **elements**; numpy `__array_interface__` in **bytes**
+(divide by the itemsize first).
 
 ---
 
 ## Compile flags
 
-| flag | effect |
+| Flag | Effect |
 |---|---|
 | `-DTNY_STD_PROMOTION` | standard C++ float promotion (wider wins) instead of lower-wins |
 | `-DTNY_NO_NEGATIVE_INDEX` | drop python-style negative-index wrap from `operator()` (tightest codegen) |
 | `-DTNY_PORTABLE_HALF` | force the portable software `half`/`bfloat16` even under nvcc |
-| `-DNDEBUG` | strip debug shape/precondition checks (host-only, already off on device) |
-
----
-
-## Generating this reference
-
-The headers carry Doxygen `@brief` comments, so `doxygen` produces a full
-XML/HTML reference; for a Markdown/MkDocs workflow, feed that to
-[`doxybook2`](https://github.com/matusnovak/doxybook2) or
-[`moxygen`](https://github.com/sourcey/moxygen). This page is hand-curated
-because the surface is small.
+| `-DTNY_MAX_RANK=N` | inline `anyrank` capacity / dispatch bound (default 32) |
+| `-DNDEBUG` | strip debug shape/precondition checks (host-only; already off on device) |

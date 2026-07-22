@@ -45,6 +45,17 @@ jobs:
       - name: Install Zensical
         run: pip install -r docs/requirements.txt
 
+      # Regenerate the Autodoc page (docs/api/index.md) from the header comments:
+      # doxygen -> XML -> moxygen -> Markdown. Keeps the committed page in sync.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install doxygen
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends doxygen
+      - name: Generate autodoc
+        run: bash docs/gen-api.sh
+
       - name: Build site
         run: zensical build
 

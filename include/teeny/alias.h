@@ -54,7 +54,7 @@ using cs::integral_constant;
 template <int            V> using Int    = cs::integral_constant<int, V>;
 template <long           V> using Long   = cs::integral_constant<long, V>;
 template <cs::size_t     V> using Size   = cs::integral_constant<cs::size_t, V>;
-template <unsigned       V> using Uint   = cs::integral_constant<unsigned, V>;
+template <unsigned       V> using UInt   = cs::integral_constant<unsigned, V>;
 template <cs::ptrdiff_t  V> using Diff   = cs::integral_constant<cs::ptrdiff_t, V>;
 template <bool           V> using Bool   = cs::integral_constant<bool, V>;
 // fixed-width integer value forms
@@ -62,10 +62,10 @@ template <cs::int8_t     V> using Int8   = cs::integral_constant<cs::int8_t, V>;
 template <cs::int16_t    V> using Int16  = cs::integral_constant<cs::int16_t, V>;
 template <cs::int32_t    V> using Int32  = cs::integral_constant<cs::int32_t, V>;
 template <cs::int64_t    V> using Int64  = cs::integral_constant<cs::int64_t, V>;
-template <cs::uint8_t    V> using Uint8  = cs::integral_constant<cs::uint8_t, V>;
-template <cs::uint16_t   V> using Uint16 = cs::integral_constant<cs::uint16_t, V>;
-template <cs::uint32_t   V> using Uint32 = cs::integral_constant<cs::uint32_t, V>;
-template <cs::uint64_t   V> using Uint64 = cs::integral_constant<cs::uint64_t, V>;
+template <cs::uint8_t    V> using UInt8  = cs::integral_constant<cs::uint8_t, V>;
+template <cs::uint16_t   V> using UInt16 = cs::integral_constant<cs::uint16_t, V>;
+template <cs::uint32_t   V> using UInt32 = cs::integral_constant<cs::uint32_t, V>;
+template <cs::uint64_t   V> using UInt64 = cs::integral_constant<cs::uint64_t, V>;
 
 // numpy short spellings of the fixed-width value forms (width in BYTES, like
 // numpy: `I4` is a 4-byte int32 value — NOT Rust's bit-width `i4`). So
@@ -74,10 +74,10 @@ template <cs::int8_t   V> using I1 = Int8<V>;
 template <cs::int16_t  V> using I2 = Int16<V>;
 template <cs::int32_t  V> using I4 = Int32<V>;
 template <cs::int64_t  V> using I8 = Int64<V>;
-template <cs::uint8_t  V> using U1 = Uint8<V>;
-template <cs::uint16_t V> using U2 = Uint16<V>;
-template <cs::uint32_t V> using U4 = Uint32<V>;
-template <cs::uint64_t V> using U8 = Uint64<V>;
+template <cs::uint8_t  V> using U1 = UInt8<V>;
+template <cs::uint16_t V> using U2 = UInt16<V>;
+template <cs::uint32_t V> using U4 = UInt32<V>;
+template <cs::uint64_t V> using U8 = UInt64<V>;
 
 /* ------------------------------------------------------------------ *
  *   Element dtype aliases (numpy short codes; width in BYTES)         *
