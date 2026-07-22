@@ -34,5 +34,32 @@ int main()
     auto p = mapped<float, extents<long,3>>(extents<long,3>{});
     p(0) = 7; if (p(0) != 7) return 4;
 
+    // ---- #15: a VIEW of device memory carries its space (own::gpu_view) -------
+    static_assert(own_is_device(own::gpu) && own_is_device(own::gpu_view), "device modes");
+    static_assert(!own_is_host_accessible(own::gpu_view), "gpu_view not host-accessible");
+    static_assert(!own_is_owning(own::gpu_view) && own_is_view(own::gpu_view), "gpu_view is a non-owning view");
+    static_assert(own_view_of(own::gpu) == own::gpu_view, "view of gpu -> gpu_view");
+    static_assert(own_view_of(own::gpu_view) == own::gpu_view, "view of gpu_view -> gpu_view");
+    static_assert(own_view_of(own::heap) == own::view && own_view_of(own::stack) == own::view, "host source -> host view");
+    static_assert(own_view_of(own::pinned) == own::view && own_view_of(own::mapped) == own::view, "pinned/mapped are host -> view");
+
+    // slicing / structure / peel of a gpu tensor all yield gpu_view, not view.
+    auto g = gpu<float, shape<4,5>>(shape<4,5>{});
+    static_assert(decltype(g(1, all))::ownership       == own::gpu_view, "gpu slice -> gpu_view");
+    static_assert(decltype(g(all, slice(1,4)))::ownership == own::gpu_view, "gpu range slice -> gpu_view");
+    static_assert(decltype(g.at(0,0))::ownership       == own::gpu_view, "gpu .at -> gpu_view");
+    static_assert(decltype(g.permute<1,0>())::ownership == own::gpu_view, "gpu permute -> gpu_view");
+    static_assert(decltype(g.flip<0>())::ownership     == own::gpu_view, "gpu flip -> gpu_view");
+    static_assert(decltype(g.unsqueeze<0>())::ownership == own::gpu_view, "gpu unsqueeze -> gpu_view");
+    static_assert(decltype(peel_front_at<1>(g, 0))::ownership == own::gpu_view, "gpu peel_front_at -> gpu_view");
+    static_assert(decltype(peel_at<0>(g, 0))::ownership == own::gpu_view, "gpu peel_at -> gpu_view");
+    // a slice of a gpu_view stays a gpu_view (space is preserved through chains).
+    auto gv = g(all, slice(0,3));
+    static_assert(decltype(gv.permute<1,0>())::ownership == own::gpu_view, "gpu_view chain stays gpu_view");
+
+    // contrast: a view of host-accessible owning memory (pinned) is a plain view.
+    auto pm = pinned<float, shape<4,5>>(shape<4,5>{});
+    static_assert(decltype(pm(1, all))::ownership == own::view, "pinned slice -> host view");
+
     return 0;
 }

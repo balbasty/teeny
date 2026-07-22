@@ -85,9 +85,16 @@ struct tensor;
 - **`Layout`** = `layout_right` (default, C-order; alias `corder`), `layout_left`
   (F-order; alias `forder`), `layout_stride` (runtime strides), or teeny's
   `layout_static_stride<S...>` (compile-time strides).
-- **`O`** ownership: `view` (non-owning, trivially copyable, kernel-passable),
-  `stack` (inline array, requires fully static shape), `heap` (host `new[]`,
-  move-only), or CUDA `gpu`/`pinned`/`mapped` (from `cuda.h`).
+- **`O`** ownership: `view` (non-owning host view, trivially copyable,
+  kernel-passable), `stack` (inline array, requires fully static shape), `heap`
+  (host `new[]`, move-only), CUDA `gpu`/`pinned`/`mapped` (from `cuda.h`), or
+  `gpu_view` (a non-owning view of **device** memory). Slicing / permuting /
+  peeling / `.at()` of a `gpu` tensor yields a `gpu_view`, not a `view`, so a
+  device pointer is never mistaken for a host one in the type. Helpers:
+  `own_is_device(O)` (gpu/gpu_view), `own_is_host_accessible(O)`, `own_is_view(O)`
+  (view/gpu_view), `own_view_of(O)` (the view kind that preserves a source's
+  space — used by every view-producing op). `pinned`/`mapped` are host-accessible,
+  so their views are plain `view`.
 
 The mapping lives in an **empty base** (private inheritance → EBO), so a
 fully-static stack tensor is *exactly* `sizeof` its data.
