@@ -10,32 +10,32 @@ Every axis argument has a **value form** too: pass a static integer
 ## Rearrange axes
 
 ```cpp
-t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1)
-t.permute<-1,0,1>();  // negatives allowed
-t.permute(Int<2>(), Int<0>(), Int<1>());   // value form
-t.flip<1>();          // reverse an axis (a negative-stride view; needs a signed
-                      //   index type, which shape<...> is)
+t.permute<2,0,1>();               // reorder axes (a permutation of 0..N-1)
+t.permute<-1,0,1>();              // negatives allowed
+t.permute(Int<2>(), Int<0>(), Int<1>());  // value form
+t.flip<1>();                      // reverse an axis (a negative-stride view; needs a signed
+                                  //   index type, which shape<...> is)
 ```
 
 ## Add / drop / reshape
 
 ```cpp
-t.unsqueeze<2>();     // insert a size-1 axis (numpy newaxis) -> rank+1
-t.unsqueeze<-1>();    // append a trailing axis, e.g. (H,W) -> (H,W,1)
-t.squeeze<3>();       // drop a specific size-1 axis -> rank-1
-t.squeeze();          // drop EVERY statically-size-1 axis
-t.reshape<6,4>();     // view as a new shape (needs C-contiguous, same numel)
-t.reshape<6,-1>();    // one -1 dimension is inferred from numel
-t.flatten();          // view as 1-D (ravel)
+t.unsqueeze<2>();   // insert a size-1 axis (numpy newaxis) -> rank+1
+t.unsqueeze<-1>();  // append a trailing axis, e.g. (H,W) -> (H,W,1)
+t.squeeze<3>();     // drop a specific size-1 axis -> rank-1
+t.squeeze();        // drop EVERY statically-size-1 axis
+t.reshape<6,4>();   // view as a new shape (needs C-contiguous, same numel)
+t.reshape<6,-1>();  // one -1 dimension is inferred from numel
+t.flatten();        // view as 1-D (ravel)
 ```
 
 `reshape`/`flatten` require the tensor to be **C-contiguous** (they reinterpret
 the same memory). If it isn't, materialise first:
 
 ```cpp
-t.is_contiguous();    // query
-auto c = t.clone();   // a dense, row-major OWNING copy (static -> stack, dyn -> heap)
-c.flatten();          // now contiguous
+t.is_contiguous();   // query
+auto c = t.clone();  // a dense, row-major OWNING copy (static -> stack, dyn -> heap)
+c.flatten();         // now contiguous
 ```
 
 ## Recover static inner dims
@@ -56,8 +56,8 @@ Peel some axes and get a lower-rank sub-view for each, without writing index
 arithmetic.
 
 ```cpp
-for (auto line : peel<0,1>(t)) work(line);   // peel axes 0,1; each is a view
-auto s = peel_at<0,1>(t, i);                 // the i-th sub-view (grid-stride style)
+for (auto line : peel<0,1>(t)) work(line);  // peel axes 0,1; each is a view
+auto s = peel_at<0,1>(t, i);                // the i-th sub-view (grid-stride style)
 
 for (auto cell : peel_front<N>(t)) work(cell);  // peel the FIRST N axes
 auto c = peel_front_at<N>(t, i);                // the i-th

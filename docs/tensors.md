@@ -16,26 +16,26 @@ value.
 
 ```cpp
 double buf[6] = {1,2,3,4,5,6};
-auto m = view(buf, shape<2,3>{});   // 2×3 view over buf — no allocation, no copy
-m(1,2) = 60;                        // writes go straight to buf
+auto m = view(buf, shape<2,3>{});  // 2×3 view over buf — no allocation, no copy
+m(1,2) = 60;                       // writes go straight to buf
 ```
 
 Everything works on a view:
 
 ```cpp
-m(0,-1);                    // element access (negative index counts from the back)
-m(all, slice(0,2));         // sub-view (still no copy)
-m.permute<1,0>();           // transpose (a view)
-m.add_(other);              // in-place math
-auto s = sum(m);            // reductions
-for (auto row : peel<0>(m)) work(row);   // iterate a subset of axes
+m(0,-1);                             // element access (negative index counts from the back)
+m(all, slice(0,2));                  // sub-view (still no copy)
+m.permute<1,0>();                    // transpose (a view)
+m.add_(other);                       // in-place math
+auto s = sum(m);                     // reductions
+for (auto row : peel<0>(m)) work(row);  // iterate a subset of axes
 ```
 
 `view` is the default ownership, so the bare type name is a view:
 
 ```cpp
-tensor<double, shape<2,3>>   // == a view
-view_t<double, shape<2,3>>   // the explicit alias
+tensor<double, shape<2,3>>  // == a view
+view_t<double, shape<2,3>>  // the explicit alias
 ```
 
 Factories:
@@ -62,7 +62,7 @@ when they die. Pick one by where the memory should live.
     Use for kernel-local scratch (a small matrix, an accumulator).
 
     ```cpp
-    auto m = local<double, shape<3,3>>{};   // 9 doubles on the stack
+    auto m = local<double, shape<3,3>>{};  // 9 doubles on the stack
     static_assert(sizeof(m) == 9*sizeof(double));
     m.fill_(0.0);
     ```
@@ -73,8 +73,8 @@ when they die. Pick one by where the memory should live.
     shapes.
 
     ```cpp
-    auto h = owned<double, shape<-1,3>>(shape<-1,3>{n});   // n×3 on the heap
-    auto g = make_heap<double>(shape<-1,3>{n});            // same, deducing E
+    auto h = owned<double, shape<-1,3>>(shape<-1,3>{n});  // n×3 on the heap
+    auto g = make_heap<double>(shape<-1,3>{n});           // same, deducing E
     ```
 
 === "`device` / `host` / `pinned` — CUDA"
@@ -92,10 +92,10 @@ Creation factories build and fill an owning tensor in one step (static shape →
 `local`, dynamic → `owned`):
 
 ```cpp
-auto z = zeros<double>(shape<3,3>{});   // stack, all zeros
-auto o = ones<float>(shape<-1,4>{n});   // heap, all ones
-auto f = full<int>(shape<8>{}, 7);      // filled with 7
-auto a = arange<long>(10);              // [0,1,…,9] (1-D heap)
+auto z = zeros<double>(shape<3,3>{});  // stack, all zeros
+auto o = ones<float>(shape<-1,4>{n});  // heap, all ones
+auto f = full<int>(shape<8>{}, 7);     // filled with 7
+auto a = arange<long>(10);             // [0,1,…,9] (1-D heap)
 ```
 
 ## Getting a view from an owning tensor
@@ -105,7 +105,7 @@ one out:
 
 ```cpp
 auto d = device<float, shape<-1,3,3>>(shape<-1,3,3>{n});
-auto v = d.view();   // view over d's memory — pass THIS to the kernel
+auto v = d.view();  // view over d's memory — pass THIS to the kernel
 ```
 
 ## The `own` template parameter

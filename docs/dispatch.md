@@ -13,7 +13,7 @@ argument. Returns whether any matched.
 
 ```cpp
 dispatch_value<1,2,3>(spatial_ndim, [&](auto D) {
-    kernel<D.value>(view);          // D.value is a compile-time constant here
+    kernel<D.value>(view);  // D.value is a compile-time constant here
 });
 ```
 
@@ -30,7 +30,7 @@ copyable, so it passes into a CUDA kernel by value.
 static view at the boundary and compute on that.
 
 ```cpp
-auto at = as_anyrank(data, shape, stride, ndim);   // -> anyrank (copies shape/stride; TNY_MAX_RANK inline cap)
+auto at = as_anyrank(data, shape, stride, ndim);  // -> anyrank (copies into inline store)
 ```
 
 `as_anyrank` **copies** shape/stride into an inline `TNY_MAX_RANK` store (default
@@ -49,8 +49,8 @@ and keep the trailing `Sr` "interesting" dims static. The kernel instantiates
 **once per `Sr`**, not once per total rank.
 
 ```cpp
-for (auto cell : at.peel_front<Sr>()) kernel<Sr>(cell);   // each cell is rank-Sr
-auto cell = at.peel_front_at<Sr>(i);                      // i-th (grid-stride)
+for (auto cell : at.peel_front<Sr>()) kernel<Sr>(cell);  // each cell is rank-Sr
+auto cell = at.peel_front_at<Sr>(i);                     // i-th (grid-stride)
 ```
 
 Each `cell` is a `dextents<_,Sr>` view (inner extents dynamic). Follow with
@@ -65,7 +65,7 @@ instantiated once per possible total rank. Returns false if `ndim` exceeds
 
 ```cpp
 dispatch_rank(at, [&](auto v) { kernel(v); });  // once per total rank
-auto v3 = at.fixed<3>();                         // or force a known rank
+auto v3 = at.fixed<3>();                        // or force a known rank
 ```
 
 ## The full boundary pattern
@@ -78,7 +78,7 @@ DLPack / ndarray  ──as_anyrank(data, shape, stride, ndim)──►  anyrank
    ▼  dispatch_value<1,2,3>(spatial_ndim)  -> static spatial rank D
    ▼  Sr = D + 1  (spatial + channel)
    for (auto cell : at.peel_front<Sr>()) {
-       kernel<D>(cell.recast<shape<-1,…static inner…>>(), …);   // parallelise this
+       kernel<D>(cell.recast<shape<-1,…static inner…>>(), …);  // parallelise this
    }
 ```
 

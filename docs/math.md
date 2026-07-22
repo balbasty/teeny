@@ -10,20 +10,20 @@ Never allocate. A tensor right-hand side **broadcasts** numpy-style (a size-1
 axis is stretched); a scalar applies elementwise.
 
 ```cpp
-a.add_(b); a.sub_(b); a.mul_(b); a.div_(b);   // tensor rhs broadcasts
-a.add_(2.0); a.mul_(0.5);                      // scalar rhs
+a.add_(b); a.sub_(b); a.mul_(b); a.div_(b);  // tensor rhs broadcasts
+a.add_(2.0); a.mul_(0.5);                    // scalar rhs
 
-a += b;  a -= 2.0;  a *= b;  a /= 2.0;         // compound-assign (scalar or tensor rhs)
-++a; --a;                                      // prefix: add/sub 1 in place
-auto old = a++;                                // postfix: pre-value as a stack copy
-                                               //   (STATIC shape only)
+a += b;  a -= 2.0;  a *= b;  a /= 2.0;  // compound-assign (scalar or tensor rhs)
+++a; --a;                               // prefix: add/sub 1 in place
+auto old = a++;                         // postfix: pre-value as a stack copy
+                                        //   (STATIC shape only)
 ```
 
 `add_`/`sub_` take a bool `Atomic` flag (default false). When true the write is
 `fetch_add` (atomic on device) — the scatter/"push" accumulate:
 
 ```cpp
-a.add_<true>(b);   // accumulate a delta, atomic on device
+a.add_<true>(b);  // accumulate a delta, atomic on device
 a.sub_<true>(2.0);
 ```
 
@@ -32,34 +32,34 @@ Unary math (in place):
 ```cpp
 a.neg_(); a.abs_(); a.exp_(); a.log_();
 a.sin_(); a.cos_(); a.sqrt_(); a.tanh_(); a.pow_(3.0);
-a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_();   // sign_ -> -1/0/+1
-a.clamp_(lo, hi);                                            // clamp to [lo,hi]
+a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_();  // sign_ -> -1/0/+1
+a.clamp_(lo, hi);                                          // clamp to [lo,hi]
 ```
 
 Bitwise ops are available for **integer element types only**:
 
 ```cpp
-a & b;  a | b;  a ^ b;  ~a;        // out-of-place (tensor or scalar rhs), unary NOT
-a &= b; a |= 1; a ^= b;            // in-place
+a & b;  a | b;  a ^ b;  ~a;  // out-of-place (tensor or scalar rhs), unary NOT
+a &= b; a |= 1; a ^= b;      // in-place
 ```
 
 Broadcasting example — per-channel scale/bias over a `(C,H,W)` image with
 `(C,1,1)` parameters:
 
 ```cpp
-img.mul_(scale);   // scale is (C,1,1) -> stretched over H and W
+img.mul_(scale);  // scale is (C,1,1) -> stretched over H and W
 img.add_(bias);
 ```
 
 ## Assignment, scatter, generic
 
 ```cpp
-a.fill_(0.0); a.zero_(); a.copy_(b);   // b broadcasts into a
-a.iota_(start, step);                  // start, start+step, … (row-major)
-a.map_(f);                             // *this = f(*this)      (user functor)
-a.zip_with_(g, b);                     // *this = g(*this, b)   (broadcasts)
-auto c = a.map(f);                     // out-of-place variant
-a.add_at(v, i, j);                     // scatter: a(i,j) += v — ATOMIC on device
+a.fill_(0.0); a.zero_(); a.copy_(b);  // b broadcasts into a
+a.iota_(start, step);                 // start, start+step, … (row-major)
+a.map_(f);                            // *this = f(*this)      (user functor)
+a.zip_with_(g, b);                    // *this = g(*this, b)   (broadcasts)
+auto c = a.map(f);                    // out-of-place variant
+a.add_at(v, i, j);                    // scatter: a(i,j) += v — ATOMIC on device
 ```
 
 `map_`/`zip_with_` take a functor **struct** (a lambda would need
@@ -73,17 +73,17 @@ write half of a scatter/"push" kernel (`atomicAdd` on device).
 device); a dynamic result is heap-owned (host only).
 
 ```cpp
-auto c = a + b;    auto d = a.add(b);   // tensor+tensor (broadcasts) or +scalar
-auto e = a * 2.0;  auto f = 2.0 * a;    // + and * commute
-auto g = 2.0 - a;  auto h = 1.0 / a;    // scalar on the left: reversed op
-auto n = -a;                            // unary minus
-auto p = a.pow(b);                      // elementwise power
+auto c = a + b;    auto d = a.add(b);  // tensor+tensor (broadcasts) or +scalar
+auto e = a * 2.0;  auto f = 2.0 * a;   // + and * commute
+auto g = 2.0 - a;  auto h = 1.0 / a;   // scalar on the left: reversed op
+auto n = -a;                           // unary minus
+auto p = a.pow(b);                     // elementwise power
 
-auto e1 = exp(a); auto s1 = sqrt(a);    // unary free functions:
-//   neg abs exp log sin cos sqrt tanh floor ceil round trunc sign
+auto e1 = exp(a); auto s1 = sqrt(a);  // unary free functions:
+// neg abs exp log sin cos sqrt tanh floor ceil round trunc sign
 
-auto mn = minimum(a, b);   auto mx = maximum(a, 2.0);   // elementwise binary min/max
-auto cl = clamp(a, lo, hi);                             // elementwise clamp
+auto mn = minimum(a, b);   auto mx = maximum(a, 2.0);  // elementwise binary min/max
+auto cl = clamp(a, lo, hi);                            // elementwise clamp
 ```
 
 ### Type promotion
@@ -96,7 +96,7 @@ pytorch-style), so the compact type survives a chain of ops.
 half   + float  -> half
 float  + double -> float
 int    + double -> double
-int8   + int8   -> int8    // numpy-like, not C++'s int-promoted result
+int8   + int8   -> int8  // numpy-like, not C++'s int-promoted result
 ```
 
 Opt back to standard (wider-float-wins) promotion with `-DTNY_STD_PROMOTION`.
@@ -113,8 +113,8 @@ Over named axes → a lower-rank **tensor** (the named axes are removed; negativ
 wrap):
 
 ```cpp
-sum<0>(a);      // remove axis 0
-mean<0,2>(a);   // remove axes 0 and 2
+sum<0>(a);     // remove axis 0
+mean<0,2>(a);  // remove axes 0 and 2
 max<1>(a);  min<-1>(a);  prod<0>(a);
 ```
 
@@ -132,16 +132,16 @@ and cast back, so summing many 16-bit values doesn't stall. See
 `bool` tensor. A scalar may be on either side (`s < a` is `a > s`).
 
 ```cpp
-auto m = a < b;      // bool tensor, broadcast
-auto p = a >= 2.0;   auto q = 3.0 < a;   // scalar either side
+auto m = a < b;                         // bool tensor, broadcast
+auto p = a >= 2.0;   auto q = 3.0 < a;  // scalar either side
 ```
 
 Reduce a mask with `.all()` / `.any()` — **members**, because `all` is the slice
 keyword. They chain after a comparison:
 
 ```cpp
-if ((a < b).all())  ...   // every element a < b
-if ((a > 0).any())  ...   // some element positive
+if ((a < b).all())  ...  // every element a < b
+if ((a > 0).any())  ...  // some element positive
 ```
 
 `sum()` preserves dtype, so `sum(mask)` is a saturating `bool`, not a count — use

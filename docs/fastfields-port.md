@@ -77,12 +77,12 @@ host ndarray (numpy/cupy/torch/dlpack)  ──as_anyrank(data,shape,stride,ndim)
    ▼
 dispatch_rank / dispatch_value on TOTAL rank  ──►  fixed<R>()  (static rank R)
    ▼
-dispatch_value<1,2,3>(spatial_ndim, [&](auto D){ ... })      // spatial rank -> static
-dispatch_value<0,1,2,3,...>(order,  [&](auto O){ ... })      // interp order -> static
-dispatch_value on boundary mode(s) if you specialise them    // bound -> static (optional)
+dispatch_value<1,2,3>(spatial_ndim, [&](auto D){ ... })    // spatial rank -> static
+dispatch_value<0,1,2,3,...>(order,  [&](auto O){ ... })    // interp order -> static
+dispatch_value on boundary mode(s) if you specialise them  // bound -> static (optional)
    ▼
-Nbatch = R - D.value - 1;   // batch dims = everything before spatial+channel
-for (auto cell : peel_front<Nbatch>(t))    // cell is (*spatial, C); parallelise this
+Nbatch = R - D.value - 1;                // batch dims = everything before spatial+channel
+for (auto cell : peel_front<Nbatch>(t))  // cell is (*spatial, C); parallelise this
     kernel<D.value, O.value>(cell, grid_cell, ...);
 ```
 

@@ -22,7 +22,7 @@ using namespace tny;
 // invert one static C×C matrix (Gauss–Jordan). A, out: (C,C) views of any stride.
 template <class MatA, class MatO>
 _TNY_API void invert(const MatA & A, MatO & out) {
-    constexpr int C = (int)decltype(A.extent(Int<0>()))::value;   // static extent, folds
+    constexpr int C = (int)decltype(A.extent(Int<0>()))::value;  // static extent, folds
     double m[C][C], inv[C][C];
     for (int i=0;i<C;++i) for (int j=0;j<C;++j){ m[i][j]=A(i,j); inv[i][j]=(i==j); }
     for (int c=0;c<C;++c){
@@ -93,9 +93,9 @@ static type** so the inner `C×C` folds:
 static void invert_dlpack(double* in, double* out, const int64_t* shape,
                           const int64_t* strides, bool on_device) {
     const long n = shape[0];
-    const int  C = (int)shape[1];                 // known only at run time
+    const int  C = (int)shape[1];  // known only at run time
 
-    dispatch_value<2,3,4>(C, [&](auto CC) {       // runtime C -> compile-time c
+    dispatch_value<2,3,4>(C, [&](auto CC) {  // runtime C -> compile-time c
         constexpr long c = CC.value;
         // static inner dims, dynamic batch; strides<...> if non-contiguous.
         auto vin  = view(in,  shape<dynamic_extent, c, c>{n});
@@ -136,7 +136,7 @@ Any framework that speaks DLPack (`np.from_dlpack`, `torch.from_dlpack`,
 namespace py = pybind11;
 
 py::object invert(py::object x) {
-    py::capsule cap = x.attr("__dlpack__")();          // zero-copy DLPack handle
+    py::capsule cap = x.attr("__dlpack__")();  // zero-copy DLPack handle
     DLManagedTensor* t = cap.get_pointer<DLManagedTensor>();
     const DLTensor& a = t->dl_tensor;
 
@@ -145,7 +145,7 @@ py::object invert(py::object x) {
     invert_dlpack((double*)a.data, (double*)out_data, a.shape, a.strides,
                   a.device.device_type == kDLCUDA);
 
-    return py::reinterpret_steal<py::object>(                // hand it back as DLPack
+    return py::reinterpret_steal<py::object>(  // hand it back as DLPack
         PyCapsule_New(outmanaged, "dltensor", nullptr));
 }
 

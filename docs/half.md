@@ -11,7 +11,7 @@ They are ordinary element types: use them anywhere a `float`/`double` goes.
 auto a = local<half, shape<64,64>>();
 a.fill_(half(1.5));
 a.mul_(2.0);
-auto s = sum(a);         // accumulated in float, then cast back to half
+auto s = sum(a);  // accumulated in float, then cast back to half
 ```
 
 ## Native under nvcc, portable elsewhere
@@ -36,7 +36,7 @@ the engines never depend on native half *host* operators.
 // 2049 halves of 1.0: fp16 can't represent 2049 (gap > 1 above 2048), but the
 // float accumulator sums correctly, then rounds to fp16 2048 — not ~1024.
 auto big = local<half, shape<2049>>(); big.fill_(half(1.0));
-float s = sum(big);   // ~2048
+float s = sum(big);  // ~2048
 ```
 
 ## Type promotion with half

@@ -36,9 +36,9 @@ using namespace tny;
 
 // one tensor type, ownership as a parameter (view / stack / heap / device / ...).
 // `shape<...>` is the python-friendly extents type (int64 index, matches DLPack):
-auto v = view(ptr, shape<2,3,4>{});         // non-owning, kernel-passable
-auto m = local<double, shape<3,3>>();       // stack-owned (static shape)
-auto h = owned<double, shape<dynamic_extent,3>>(shape<dynamic_extent,3>{n});  // heap-owned (host)
+auto v = view(ptr, shape<2,3,4>{});                           // non-owning, kernel-passable
+auto m = local<double, shape<3,3>>();                         // stack-owned (static shape)
+auto h = owned<double, shape<-1,3>>(shape<-1,3>{n});   // heap-owned (host); -1 == dynamic
 
 // static / dynamic sizes mix per dimension, plus a per-dim static-stride layout:
 auto s = view_strided<16,3,1>(ptr, shape<dynamic_extent,3,3>{n});
@@ -46,20 +46,20 @@ auto s = view_strided<16,3,1>(ptr, shape<dynamic_extent,3,3>{n});
 // geometry: t.shape() / t.shape(d) (or t.extents() / t.extent(d)); t.rank(); t.numel();
 
 // valarray-like math (broadcasting, numpy-style; float16 > float32 > float64):
-m.add_(other); m.mul_(2.0);                 // in-place, any tensor/view
-auto c = a + b;           // out-of-place: static -> stack (host+device),
-auto d = a.add(b);        //               dynamic -> heap (host only)
-auto e = exp(a); a.sqrt_();                  // unary math (out-/in-place)
+m.add_(other); m.mul_(2.0);  // in-place, any tensor/view
+auto c = a + b;              // out-of-place: static -> stack (host+device),
+auto d = a.add(b);           // dynamic -> heap (host only)
+auto e = exp(a); a.sqrt_();  // unary math (out-/in-place)
 sum(m); prod(m); max(m); min(m); dot(a,b);
 
 // indexing / slicing (python-like: negatives wrap; none = open end; 3rd arg = step):
-t(0, -1, slice(1,4));      // element, or a sub-view
-t(all, slice(none,4), slice(1,none,2));      // keep axis / open ends / strided
-t.take_along<0,2>(i, all); // bind named axes, keep the rest
-t.permute<2,0,1>();        // reorder axes
-t.unsqueeze<2>();          // insert a size-1 axis (numpy newaxis)
-for (auto line : peel<0,1>(t)) work(line);   // nd-peel: iterate a subset of axes
-for (auto v : peel_front<Nbatch>(t)) work(v);// peel arbitrary leading batch dims
+t(0, -1, slice(1,4));                                // element, or a sub-view
+t(all, slice(none,4), slice(1,none,2));              // keep axis / open ends / strided
+t.take_along<0,2>(i, all);                           // bind named axes, keep the rest
+t.permute<2,0,1>();                                  // reorder axes
+t.unsqueeze<2>();                                    // insert a size-1 axis (numpy newaxis)
+for (auto line : peel<0,1>(t)) work(line);           // nd-peel: iterate a subset of axes
+for (auto v : peel_front<Nbatch>(t)) work(v);        // peel arbitrary leading batch dims
 dispatch_value<1,2,3>(D, [&](auto d){ kernel<d.value>(v); });  // runtime -> static
 
 // half precision: `half` / `bfloat16` element types (native CUDA types under nvcc)

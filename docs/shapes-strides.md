@@ -29,13 +29,13 @@ auto c = view(ptr, shape<-1,-1>{r, k});  // supply both
 Query sizes with `extent` / `shape` (a python-friendly alias):
 
 ```cpp
-t.rank();             // number of dimensions (static)
-t.numel();            // total element count
-t.extent(0);          // RUNTIME lookup -> index_type
-t.extent(Int<0>());   // STATIC lookup -> integral_constant when that extent is
-                      //   static (folds into later arithmetic)
-t.shape(1); t.shape(); // aliases of extent(1) / extents()
-t.extent(Int<-1>());  // negative axis: the last dimension
+t.rank();            // number of dimensions (static)
+t.numel();           // total element count
+t.extent(0);         // RUNTIME lookup -> index_type
+t.extent(Int<0>());  // STATIC lookup -> integral_constant when that extent is
+                     //   static (folds into later arithmetic)
+t.shape(1); t.shape();  // aliases of extent(1) / extents()
+t.extent(Int<-1>());    // negative axis: the last dimension
 ```
 
 ## `strides<...>` — the strides
@@ -45,7 +45,7 @@ For specific strides — a padded row, a channel-last view, a reversed axis — 
 `strides<...>`, the stride analogue of `shape<...>`:
 
 ```cpp
-tensor<float, shape<3,4>, strides<4,1>>(ptr);   // row stride 4 (padding), col 1
+tensor<float, shape<3,4>, strides<4,1>>(ptr);               // row stride 4 (padding), col 1
 tensor<float, shape<-1,4>, strides<dynamic_stride,1>>(ptr, {n});  // outer runtime, inner 1
 ```
 
@@ -59,10 +59,10 @@ tensor<float, shape<-1,4>, strides<dynamic_stride,1>>(ptr, {n});  // outer runti
 Query a stride, static when derivable:
 
 ```cpp
-t.stride(0);          // runtime
-t.stride(Int<1>());   // static integral_constant for a strides<> layout, a
-                      //   contiguous static shape, or a contiguous layout's
-                      //   always-unit stride (even under a dynamic shape)
+t.stride(0);         // runtime
+t.stride(Int<1>());  // static integral_constant for a strides<> layout, a
+                     //   contiguous static shape, or a contiguous layout's
+                     //   always-unit stride (even under a dynamic shape)
 ```
 
 A `strides<...>` tensor is **fully sliceable**. Every view op — `operator()`

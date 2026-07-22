@@ -45,8 +45,8 @@ make CXX=clang++ run-test    # pick a compiler
 ## One include, one namespace
 
 ```cpp
-#include <teeny/teeny.h>   // the whole library
-using namespace tny;       // the public namespace
+#include <teeny/teeny.h>  // the whole library
+using namespace tny;      // the public namespace
 ```
 
 `teeny/teeny.h` pulls in everything, including `teeny/cuda.h`. That header adds

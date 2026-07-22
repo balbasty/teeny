@@ -20,11 +20,11 @@ using namespace tny;
 auto img = view(ptr, shape<480, 640>{});   // non-owning view; static 480×640
 auto vol = view(ptr, shape<-1, 3, 3>{n});  // dynamic batch, static 3×3
 
-img(0, -1);                 // element access -> T& ; negative index wraps
-img(all, slice(0, 32, 2));  // strided sub-view (no copy)
-auto m = local<double, shape<3,3>>{};      // stack-owned, exactly 9 doubles
-m.fill_(0.0); m.add_(other);               // in-place math, broadcasting
-auto c = a + b;                            // out-of-place (promotes types)
+img(0, -1);                            // element access -> T& ; negative index wraps
+img(all, slice(0, 32, 2));             // strided sub-view (no copy)
+auto m = local<double, shape<3,3>>{};  // stack-owned, exactly 9 doubles
+m.fill_(0.0); m.add_(other);           // in-place math, broadcasting
+auto c = a + b;                        // out-of-place (promotes types)
 ```
 
 ## Properties

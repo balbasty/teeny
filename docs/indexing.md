@@ -47,10 +47,10 @@ view into the same memory:
 | `none` | an open end inside a `slice` |
 
 ```cpp
-t(1, all, all);                // fix axis 0 -> lower-rank view
-t(0, slice(1, 4));             // axis 1 range [1,4)
-t(all, slice(none, 8, 2));     // every other element up to 8
-t(all, slice(none, none, -1)); // reverse an axis (numpy a[:, ::-1])
+t(1, all, all);                 // fix axis 0 -> lower-rank view
+t(0, slice(1, 4));              // axis 1 range [1,4)
+t(all, slice(none, 8, 2));      // every other element up to 8
+t(all, slice(none, none, -1));  // reverse an axis (numpy a[:, ::-1])
 ```
 
 `none` is python's `None`: `slice(none, k)` starts at 0, `slice(m, none)` runs to
@@ -58,8 +58,8 @@ the end, and `slice(none, none)` keeps the whole axis (it *is* `all`, and folds
 to a static extent). Negative bounds wrap.
 
 ```cpp
-t(slice(-2, none));   // last two rows
-t(slice(3, 0, -1));   // rows 3,2,1  (stop excluded, like python)
+t(slice(-2, none));  // last two rows
+t(slice(3, 0, -1));  // rows 3,2,1  (stop excluded, like python)
 ```
 
 Axes kept with `all` keep their static extent; a ranged axis becomes dynamic
@@ -72,9 +72,9 @@ into the type, so a ranged axis keeps a static extent and stride (folds like
 `all`):
 
 ```cpp
-t(0, slice<1,4>());        // [1,4), static
-t(all, slice<0,8,2>());    // static stride 2
-t(0, slice<Int<1>, Int<4>>());   // type form (the only way to bake `none`)
+t(0, slice<1,4>());             // [1,4), static
+t(all, slice<0,8,2>());         // static stride 2
+t(0, slice<Int<1>, Int<4>>());  // type form (the only way to bake `none`)
 ```
 
 ## `take_along<Axes...>` — bind named axes
