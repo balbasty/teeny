@@ -102,9 +102,18 @@ namespace _detail {
 // source (view/stack/heap/pinned/mapped) is read + converted directly, gathering
 // only the viewed extent. A DEVICE source (`gpu` owning OR `gpu_view` — a
 // slice/permute of a gpu tensor) is downloaded via one `cudaMemcpy` of its device
-// SPAN (base..last element), re-imposing `x`'s mapping (so any layout — C, F, or
-// strided — is preserved, not transposed), then densified on the host. `Force=true`
-// on the inner `.to` guarantees an OWNING dense buffer, never a borrow of the local.
+// SPAN (lowest..highest addressed element), re-imposing `x`'s mapping (so any layout
+// — C, F, or strided — is preserved, not transposed), then densified on the host.
+// `Force=true` on the inner `.to` guarantees an OWNING dense buffer, never a borrow
+// of the local.
+//
+// The span is computed over SIGNED strides: a reversed/flipped device view has a
+// negative stride, so `x.data()` points INTO the region (at the axis's last element),
+// not at its start. We walk each axis to find the lowest (`lo <= 0`) and highest
+// (`hi >= 0`) byte offset from `x.data()`, copy `[data()+lo .. data()+hi]`, and place
+// the logical origin at `raw.data() - lo` — so a flip downloads correctly instead of
+// reading past the end. (Can't lean on `required_span_size()`: it assumes
+// non-negative strides — see layout.h.)
 //
 // NOTE the span == numel for a CONTIGUOUS device view (so it copies exactly the
 // viewed extent — optimal), but span > numel for a STRIDED device view (e.g. a
@@ -113,12 +122,22 @@ namespace _detail {
 // contiguous-then-copy gather is the follow-up (#50).
 template <class E2, class T, class Shape, class Layout, own O>
 _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
-    using Ts = cs::remove_cv_t<T>;
+    using Ts  = cs::remove_cv_t<T>;
+    using Idx = typename tensor<T, Shape, Layout, O>::index_type;
     if constexpr (own_is_device(O)) {
-        const cs::size_t span = static_cast<cs::size_t>(x.mapping().required_span_size());
+        // Signed extent of the addressed region relative to x.data(): [lo, hi].
+        Idx lo = 0, hi = 0;
+        bool empty = false;
+        for (cs::size_t r = 0; r < x.rank(); ++r) {
+            const Idx e = static_cast<Idx>(x.extent(r));
+            if (e == 0) { empty = true; break; }         // an empty axis -> nothing to copy
+            const Idx reach = static_cast<Idx>(x.stride(r)) * (e - 1);   // signed
+            if (reach < 0) lo += reach; else hi += reach;
+        }
+        const cs::size_t span = empty ? 0 : static_cast<cs::size_t>(hi - lo + 1);
         auto raw = make_heap<Ts>(cs::dextents<cs::int64_t, 1>{ static_cast<cs::int64_t>(span) });   // 1-D host span buffer
-        cudaMemcpy(raw.data(), x.data(), span * sizeof(Ts), cudaMemcpyDeviceToHost);
-        tensor<Ts, Shape, Layout, own::view> hv(raw.data(), x.mapping());        // re-impose x's layout on host
+        if (span) cudaMemcpy(raw.data(), x.data() + lo, span * sizeof(Ts), cudaMemcpyDeviceToHost);
+        tensor<Ts, Shape, Layout, own::view> hv(raw.data() - lo, x.mapping());   // re-impose x's layout; origin at -lo
         return hv.template to<E2, true>();               // densify to row-major (owns its buffer; raw can die)
     } else {
         return x.template to<E2, true>();                // host-accessible: read + convert into a dense OWNING copy

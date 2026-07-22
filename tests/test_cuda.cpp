@@ -138,13 +138,21 @@ int main()
     static_assert(decltype(dslice)::ownership == own::heap, "download -> heap");
     if (dslice(0,0) != 0.f || dslice(1,1) != 4.f) return 10;   // strided device view downloaded correctly
 
+    // a FLIPPED (negative-stride) device view: x.data() points at the axis's LAST
+    // element, so the download must walk back to the region start (not read past
+    // the end). gu is 2x3 = [[0,1,2],[3,4,5]]; flip<0> -> rows reversed.
+    auto gflip = gu.flip<0>();                           // gpu_view, row 0 <-> row 1
+    static_assert(decltype(gflip)::ownership == own::gpu_view, "flipped gpu view");
+    auto dflip = to<own::heap>(gflip);
+    if (dflip(0,0) != 3.f || dflip(0,2) != 5.f || dflip(1,0) != 0.f || dflip(1,2) != 2.f) return 16;
+
     // const-element source composes: x.to<>() borrows as tensor<const T>, and
     // to<Space>(that) must strip the const (else it fails to compile / write const).
     auto cb = host.to<>();                         // tensor<const float, ...> borrow
     static_assert(cs::is_same<decltype(cb)::element_type, const float>::value, "borrow is const");
     auto gcb = to<own::gpu>(cb);
     static_assert(cs::is_same<decltype(gcb)::element_type, float>::value, "to<gpu> strips const");
-    if (to<own::heap>(gcb)(1,2) != 5.f) return 10;
+    if (to<own::heap>(gcb)(1,2) != 5.f) return 17;
 
     // an F-order (column-major) gpu source must NOT be silently transposed on
     // download: stage into a layout-matching host buffer, then densify.
