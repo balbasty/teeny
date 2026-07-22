@@ -97,5 +97,38 @@ int main()
     if (dmp->dl_tensor.device.device_type != kDLCUDAHost) return 15;   // NOT kDLCUDAManaged
     dmp->deleter(dmp);
 
+    // ---- memory-backend to<Space, ET, Force>(x) ------------------------------
+    // (fake gpu memory is malloc-backed, so a download round-trips the values.)
+    auto host = local<float, shape<2,3>>{}; host.iota_(0.f, 1.f);   // 0..5
+
+    // host -> gpu (upload), then gpu -> heap (download): values survive.
+    auto gu = to<own::gpu>(host);
+    static_assert(decltype(gu)::ownership == own::gpu, "to<gpu> -> gpu");
+    static_assert(cs::is_same<decltype(gu)::element_type, float>::value, "dtype kept");
+    auto back = to<own::heap>(gu);
+    static_assert(decltype(back)::ownership == own::heap, "to<heap> -> heap");
+    if (back(1,2) != 5.f) return 5;
+
+    // convert dtype AND upload in one call.
+    auto gd = to<own::gpu, double>(host);
+    static_assert(cs::is_same<decltype(gd)::element_type, double>::value, "to<gpu,double> converts");
+    auto backd = to<own::heap>(gd);
+    if (backd(0,1) != 1.0) return 6;
+
+    // no-copy: source already gpu<float>, no Force -> a DEVICE view (gpu_view) borrow.
+    auto vv = to<own::gpu>(gu);
+    static_assert(decltype(vv)::ownership == own::gpu_view, "already there -> gpu_view, no copy");
+    if (vv.data() != gu.data()) return 7;
+
+    // Force a fresh gpu copy even though it already is gpu<float>.
+    auto fg = to<own::gpu, void, true>(gu);
+    static_assert(decltype(fg)::ownership == own::gpu, "forced -> owning gpu");
+    if (fg.data() == gu.data()) return 8;                // distinct storage
+
+    // download into a stack tensor (static shape).
+    auto sstk = to<own::stack>(gu);
+    static_assert(decltype(sstk)::ownership == own::stack, "to<stack> -> stack");
+    if (sstk(1,1) != 4.f) return 9;
+
     return 0;
 }

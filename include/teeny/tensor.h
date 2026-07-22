@@ -496,16 +496,30 @@ public:
     template <bool S = is_static, cs::enable_if_t<!S, int> = 0>
     _TNY_HOST auto clone() const { tensor<T, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
 
-    /** @brief pytorch-like `.to<T2>()`: a dense, row-major OWNING copy converted
-     *         to element type `T2` (which defaults to the current element type —
-     *         so `x.to<>()` is a plain clone, and `x.to<double>()` converts). The
-     *         values are cast elementwise (via `copy_`). Static shape -> stack
-     *         (host+device); dynamic -> heap (host only). To also move across
-     *         memory spaces (host <-> CUDA) use the `to<T2, own::gpu>(x)` free
-     *         functions from `<teeny/cuda.h>`. */
-    template <class T2 = element_type, bool S = is_static, cs::enable_if_t<S, int> = 0>
+    /** @brief pytorch-like `.to<T2>()`: convert the element type to `T2`.
+     *
+     *  **No copy when it already matches** — if `T2` is the current element type
+     *  and `Force` is false, this returns a (read-only) *view* of `*this`, no
+     *  allocation, keeping the source layout. So `x.to<>()` is a zero-cost borrow,
+     *  not a clone. Pass `Force = true` to always materialise a fresh owning copy
+     *  even when the dtype already matches (`x.to<float, true>()` force-clones a
+     *  `float` tensor); `x.clone()` is the unconditional-copy spelling.
+     *
+     *  When a conversion IS needed (`T2` differs, or `Force`), the result is a
+     *  dense, row-major OWNING copy cast elementwise (via `copy_`): static shape
+     *  -> stack (host+device), dynamic -> heap (host only). To also move across
+     *  memory spaces (host <-> CUDA) use the `to<own::gpu, T2, Force>(x)` free
+     *  functions from `<teeny/cuda.h>`. */
+    template <class T2 = element_type, bool Force = false,
+              cs::enable_if_t<!Force && cs::is_same<T2, element_type>::value, int> = 0>
+    _TNY_API auto to() const {
+        return tensor<const element_type, Shape, Layout, own::view>(data(), mapping());  // already that dtype -> borrow
+    }
+    template <class T2 = element_type, bool Force = false, bool S = is_static,
+              cs::enable_if_t<(Force || !cs::is_same<T2, element_type>::value) && S, int> = 0>
     _TNY_API auto to() const { tensor<T2, Shape, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
-    template <class T2 = element_type, bool S = is_static, cs::enable_if_t<!S, int> = 0>
+    template <class T2 = element_type, bool Force = false, bool S = is_static,
+              cs::enable_if_t<(Force || !cs::is_same<T2, element_type>::value) && !S, int> = 0>
     _TNY_HOST auto to() const { tensor<T2, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
 
 private:

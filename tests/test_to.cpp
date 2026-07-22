@@ -17,10 +17,18 @@ int main()
     d(0,0) = 99.0;                                             // it's an independent copy
     if (x(0,0) != 0.f) return 2;
 
-    // .to<>() with no dtype == a clone (same element type)
+    // .to<>() with a matching dtype (and no Force) is a NO-COPY borrow: a
+    // read-only view over the same storage, keeping the source layout.
     auto c = x.to<>();
-    static_assert(cs::is_same<decltype(c)::element_type, float>::value, "to<> keeps dtype");
-    if (c(1,2) != 5.f || c.data() == x.data()) return 3;      // distinct storage
+    static_assert(cs::is_same<decltype(c)::element_type, const float>::value, "to<> borrows (const view)");
+    static_assert(decltype(c)::ownership == own::view, "to<> matching dtype -> view, no copy");
+    if (c(1,2) != 5.f || c.data() != x.data()) return 3;      // SAME storage (borrow)
+    x(1,2) = 42.f; if (c(1,2) != 42.f) return 8; x(1,2) = 5.f;  // borrow reflects the source
+
+    // Force a copy even when the dtype already matches.
+    auto fc = x.to<float, true>();
+    static_assert(decltype(fc)::ownership == own::stack, "to<float,true> -> owning copy");
+    if (fc(1,2) != 5.f || fc.data() == x.data()) return 9;   // distinct storage
 
     // ---- dynamic shape: .to<T2>() -> a heap copy -----------------------------
     double buf[6]; auto v = wrap(buf, shape<-1,3>{2}); v.iota_(0.0, 1.0);
