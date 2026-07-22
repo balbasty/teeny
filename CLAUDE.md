@@ -184,11 +184,15 @@ auto c = minimum(a,b); maximum(a,2.0); clamp(a,lo,hi);   // elementwise binary m
 auto m = a < b; a == 2.0; 3.0 < a;    // ==,!=,<,<=,>,>= ; scalar either side
 (a > 0).all(); (a > 3).any();         // bool reductions (MEMBERS: `all` is the slice kw)
 
-// --- reductions -> scalar (all axes) ---
+// --- reductions -> scalar (all axes). Accumulate in + RETURN the "reduce type":
+//   double for small floats (float/double/half), item type for ints (reduce_type_t<T>).
+//   Override with a leading TYPE arg: sum<float>(a), mean<double>(a), dot<float>(a,b).
 sum(a); prod(a); max(a); min(a); mean(a); dot(a,b);
 allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
-// --- axis reductions -> a lower-rank TENSOR (named axes removed; negatives wrap) ---
-sum<0>(a); mean<0,2>(a); max<1>(a); min<-1>(a); prod<0>(a);
+// --- axis reductions -> a lower-rank TENSOR (named axes removed; negatives wrap).
+//   Accumulator = result element type. sum<Acc,Axes...>(a) forces it (leading TYPE =
+//   accumulator, leading int = axis -> never collide). Default acc = reduce_type_t<T>.
+sum<0>(a); mean<0,2>(a); max<1>(a); min<-1>(a); prod<0>(a); sum<float,0>(a);
 //   static result -> stack (host+device); any dynamic -> heap (HOST ONLY: allocates)
 
 // --- nd-peel: iterate a SUBSET of axes, each yielding a lower-rank view ---

@@ -126,11 +126,35 @@ A fully-static result is stack-owned (host and device); any dynamic extent makes
 it heap-owned (host only — it allocates, so it is not callable on the device
 path). Reducing over every axis is the scalar form above.
 
-For `half`/`bfloat16`, reductions accumulate in `float` (via `compute_type<T>`)
-and cast back, so summing many 16-bit values doesn't stall. See
-[Half precision](half.md). Note `compute_type` only widens the 16-bit floats —
-an `int8` sum still accumulates in `int8` and can overflow; cast to a wider type
-first if that matters.
+### Accumulator type
+
+Reductions accumulate in — and return — a **reduce type**, not the element type:
+
+| element type | accumulator (default) |
+|---|---|
+| `float`, `double`, `half`, `bfloat16` (≤ 8-byte floats) | `double` |
+| a wider float (`long double`) | itself |
+| integers, everything else | the item type |
+
+So `sum(float_tensor)` returns `double` and summing many low-precision values
+holds precision. The trait is `reduce_type_t<T>`. Override the accumulator with a
+leading **type** argument:
+
+```cpp
+sum<float>(a);       // accumulate and return float, not double
+mean<double>(a);     // force double
+dot<float>(a, b);    // float accumulator
+sum<int>(int8_view);  // widen an int8 sum to avoid overflow (item type would overflow)
+```
+
+For axis reductions the accumulator is the **result element type**; a leading
+type is the accumulator, a leading integer is an axis, so the two never collide:
+
+```cpp
+sum<0>(a);          // default accumulator (double for floats) -> double result
+sum<float, 0>(a);   // float accumulator -> float result
+mean<double, 1>(a); // force the accumulator on an axis mean
+```
 
 ## Comparisons → a bool tensor
 
