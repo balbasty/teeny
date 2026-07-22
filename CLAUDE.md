@@ -151,6 +151,7 @@ a.neg_(); a.abs_(); a.exp_(); a.log_();       // unary in-place
 a.sin_(); a.cos_(); a.sqrt_(); a.tanh_(); a.pow_(3.0);
 a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_(); a.clamp_(lo,hi);
 ++a; --a; auto old = a++;                      // prefix in place; postfix (static shape) -> stack copy
+a & b; a | b; a ^ b; ~a; a &= b; a |= 1;       // bitwise (INTEGER element types only)
 
 // --- assignment / scatter / generic (kernel prologue/epilogue) ---
 a.fill_(0.0); a.zero_(); a.copy_(b);          // b broadcasts into a

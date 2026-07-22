@@ -114,6 +114,12 @@ struct b_min  { template <class X, class Y> _TNY_API X operator()(X x, Y y) cons
 struct b_max  { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { X yy = static_cast<X>(y); return yy > x ? yy : x; } };
 struct u_clamp{ double lo, hi; template <class X> _TNY_API X operator()(X x) const { X l = static_cast<X>(lo), h = static_cast<X>(hi); return x < l ? l : (x > h ? h : x); } };
 
+/* ---- bitwise (integer element types only) ------------------------ */
+struct b_and { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x & static_cast<X>(y); } };
+struct b_or  { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x | static_cast<X>(y); } };
+struct b_xor { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x ^ static_cast<X>(y); } };
+struct u_bnot{ template <class X> _TNY_API X operator()(X x) const { return ~x; } };
+
 /* ---- reduce ops (acc = op(acc, x)) ------------------------------- */
 struct r_add { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a + static_cast<A>(x); } };
 struct r_mul { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a * static_cast<A>(x); } };
@@ -523,6 +529,33 @@ _TNY_API auto operator/(S s, const tensor<T,E,L,O> & a) { return _md::oops(a, s,
 // unary minus -> a fresh negated tensor.
 template <class T,class E,class L,own O>
 _TNY_API auto operator-(const tensor<T,E,L,O> & a) { return _md::uop_out(a, _md::u_neg{}); }
+
+/* --- bitwise operators (INTEGER element types only) --------------- *
+ * Out-of-place & | ^ (tensor or scalar rhs), unary ~, and in-place
+ * &= |= ^= (free compound-assignment; tensor rhs broadcasts).         */
+#define _TNY_MD_BITOP(SYM, OP)                                                                     \
+template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob,                    \
+          cs::enable_if_t<cs::is_integral<Ta>::value && cs::is_integral<Tb>::value, int> = 0>      \
+_TNY_API auto operator SYM (const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b)         \
+{ return _md::oop(a, b, _md::OP{}); }                                                              \
+template <class T,class E,class L,own O, class S,                                                  \
+          cs::enable_if_t<cs::is_integral<T>::value && cs::is_integral<S>::value, int> = 0>        \
+_TNY_API auto operator SYM (const tensor<T,E,L,O> & a, S s) { return _md::oops(a, s, _md::OP{}); } \
+template <class T,class E,class L,own O, class B,                                                  \
+          cs::enable_if_t<cs::is_integral<T>::value && !cs::is_arithmetic<B>::value, int> = 0>     \
+_TNY_API tensor<T,E,L,O> & operator SYM##= (tensor<T,E,L,O> & a, const B & b)                      \
+{ _md::bzip(a, a, b, _md::OP{}); return a; }                                                       \
+template <class T,class E,class L,own O, class S,                                                  \
+          cs::enable_if_t<cs::is_integral<T>::value && cs::is_integral<S>::value, int> = 0>        \
+_TNY_API tensor<T,E,L,O> & operator SYM##= (tensor<T,E,L,O> & a, S s)                              \
+{ _md::scal(a, static_cast<T>(s), _md::OP{}); return a; }
+_TNY_MD_BITOP(&, b_and)
+_TNY_MD_BITOP(|, b_or)
+_TNY_MD_BITOP(^, b_xor)
+#undef _TNY_MD_BITOP
+// unary bitwise NOT -> a fresh tensor.
+template <class T,class E,class L,own O, cs::enable_if_t<cs::is_integral<T>::value, int> = 0>
+_TNY_API auto operator~(const tensor<T,E,L,O> & a) { return _md::uop_out(a, _md::u_bnot{}); }
 
 /* --- in-place unary methods --------------------------------------- */
 #define _TNY_MD_UNARY_(NAME, F)                                                                   \

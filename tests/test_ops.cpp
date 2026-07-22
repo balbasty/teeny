@@ -73,5 +73,15 @@ int main() {
     auto pre = p++;                 // postfix returns pre-value (4), p becomes 5
     if (pre(0)!=4.0 || p(0)!=5.0) return 20;
 
+    // ---- bitwise (integer element types) ------------------------------
+    auto bi = local<int, extents<long,2>>(); bi(0)=0xC; bi(1)=0x6;   // 1100, 0110
+    auto bj = local<int, extents<long,2>>(); bj(0)=0xA; bj(1)=0xF;   // 1010, 1111
+    auto ba = bi & bj; if (ba(0)!=0x8 || ba(1)!=0x6) return 21;
+    auto bo = bi | bj; if (bo(0)!=0xE) return 22;
+    auto bx = bi ^ bj; if (bx(0)!=0x6) return 23;
+    auto bn = ~bi;     if (bn(0)!=~0xC) return 24;
+    bi &= bj;          if (bi(0)!=0x8) return 25;
+    bi |= 0x1;         if (bi(0)!=0x9) return 26;
+
     return 0;
 }
