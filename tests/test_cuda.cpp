@@ -3,6 +3,7 @@
 // gpu / pinned / mapped owning modes. Not a GPU test.
 #include <teeny/cuda.h>
 #include <teeny/teeny.h>
+#include <teeny/dlpack.h>
 #include <cuda/std/type_traits>
 
 using namespace tny;
@@ -57,9 +58,27 @@ int main()
     auto gv = g(all, slice(0,3));
     static_assert(decltype(gv.permute<1,0>())::ownership == own::gpu_view, "gpu_view chain stays gpu_view");
 
+    // ...and the rest of the view ops too (take_along / squeeze / reshape /
+    // recast / flatten / peel range) — a contiguous gpu source, so all are valid.
+    static_assert(decltype(g.take_along<0>(1))::ownership == own::gpu_view, "gpu take_along -> gpu_view");
+    static_assert(decltype(g.unsqueeze<0>().squeeze<0>())::ownership == own::gpu_view, "gpu squeeze -> gpu_view");
+    static_assert(decltype(g.reshape<2,10>())::ownership == own::gpu_view, "gpu reshape -> gpu_view");
+    static_assert(decltype(g.recast<shape<4,5>>())::ownership == own::gpu_view, "gpu recast -> gpu_view");
+    static_assert(decltype(g.flatten())::ownership     == own::gpu_view, "gpu flatten -> gpu_view");
+    static_assert(decltype(peel<0>(g)[0])::ownership   == own::gpu_view, "gpu peel range -> gpu_view");
+
+    // DLPack export of a device view now works and is labeled kDLCUDA (before #15
+    // a gpu slice was own::view and exported as kDLCPU — a silent mislabel).
+    auto * dl = to_dlpack(g(1, all));
+    if (dl->dl_tensor.device.device_type != kDLCUDA) return 12;
+    dl->deleter(dl);
+
     // contrast: a view of host-accessible owning memory (pinned) is a plain view.
     auto pm = pinned<float, shape<4,5>>(shape<4,5>{});
     static_assert(decltype(pm(1, all))::ownership == own::view, "pinned slice -> host view");
+    auto * dlp = to_dlpack(pm(1, all));
+    if (dlp->dl_tensor.device.device_type != kDLCPU) return 13;   // pinned view is host
+    dlp->deleter(dlp);
 
     return 0;
 }
