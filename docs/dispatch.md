@@ -85,5 +85,5 @@ DLPack / ndarray  ──as_anyrank(data, shape, stride, ndim)──►  anyrank
    }
 ```
 
-The worked-through version, with CPU-thread and CUDA drivers and a pybind11
-wrapper, is the [DLPack → Python tutorial](tutorials/dlpack-python.md).
+The worked-through version, with CPU-thread and CUDA drivers and a nanobind
+wrapper (native DLPack), is the [DLPack → Python tutorial](tutorials/dlpack-python.md).
