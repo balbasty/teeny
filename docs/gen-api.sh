@@ -7,6 +7,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo ">> doxygen -> XML"
+# doxygen won't create a missing PARENT of XML_OUTPUT (build/doxyxml), and a
+# clean CI checkout has no build/ dir — so make it first (mkdir -p is recursive).
+mkdir -p build/doxyxml
 doxygen Doxyfile
 
 echo ">> moxygen -> docs/api/index.md"
