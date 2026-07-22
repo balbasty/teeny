@@ -12,7 +12,7 @@ Everything is in `namespace tny`. `namespace cs = cuda::std`. Include
 ## The tensor type
 
 ```cpp
-template <class T, class Shape, class Layout = layout_right, own O = own::view>
+template <class T, class Shape, class Layout = corder, own O = own::view>
 struct tensor;  // Shape = any cuda::std::extents (spell it shape<...>); Layout: corder/forder/...
 ```
 
@@ -23,9 +23,9 @@ below. See [Tensors & ownership](tensors.md).
 ### Ownership aliases
 
 ```cpp
-view_t<T, E, L = layout_right>       // non-owning view (default; the bare `tensor` is this)
-local<T, E, L = layout_right>        // stack-owned (requires a fully static shape)
-owned<T, E, L = layout_right>        // heap-owned, host, move-only
+view_t<T, E, L = corder>       // non-owning view (default; the bare `tensor` is this)
+local<T, E, L = corder>        // stack-owned (requires a fully static shape)
+owned<T, E, L = corder>        // heap-owned, host, move-only
 gpu<T, E, L>  pinned<T, E, L>  mapped<T, E, L>  // CUDA memory (from <teeny/cuda.h>)
 ```
 
@@ -33,11 +33,11 @@ gpu<T, E, L>  pinned<T, E, L>  mapped<T, E, L>  // CUDA memory (from <teeny/cuda
 
 ```cpp
 wrap(ptr, shape);  wrap<Layout>(ptr, shape);  // a view (C-order / chosen layout)
-wrap(ptr, shape, {s0, s1, ...});              // view with RUNTIME strides (layout_stride)
-wrap_strided<S...>(ptr, shape);               // view with COMPILE-TIME strides
+wrap(ptr, shape, {s0, s1, ...});              // view with RUNTIME strides (dynamic_strides)
+wrap(ptr, shape, strides<S...>{});           // view with COMPILE-TIME strides (fold into type)
 as_tensor(any_mdspan);                        // wrap an mdspan/submdspan result
 
-make_view(ptr, shape);           // deduce the extents type
+make_view(ptr, shape);           // alias of wrap that deduces the extents type
 make_local<T>(shape);  make_heap<T>(shape);            // T defaults to float
 make_gpu<T>(shape); make_pinned<T>(shape); make_mapped<T>(shape);   // T defaults to float
 
