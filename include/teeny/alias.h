@@ -79,9 +79,6 @@ template <cs::uint16_t V> using U2 = Uint16<V>;
 template <cs::uint32_t V> using U4 = Uint32<V>;
 template <cs::uint64_t V> using U8 = Uint64<V>;
 
-/** @brief Alias of `Long`; a compile-time index value. */
-template <long V> using ic = cs::integral_constant<long, V>;
-
 /* ------------------------------------------------------------------ *
  *   Element dtype aliases (numpy short codes; width in BYTES)         *
  *                                                                    *

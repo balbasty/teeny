@@ -8,7 +8,7 @@ Everything is in `namespace tny`. `namespace cs = cuda::std`. Include
 ## The tensor type
 
 ```cpp
-template <class T, class Extents, class Layout = layout_right, own O = own::view>
+template <class T, class Shape, class Layout = layout_right, own O = own::view>
 struct tensor;
 ```
 
@@ -16,12 +16,13 @@ One tensor type parameterised by element type, **shape**, an mdspan layout, and
 ownership. Rarely named directly — use the aliases and factories below. See
 [Tensors & ownership](tensors.md).
 
-!!! note "`Extents` is the shape"
-    The `Extents` parameter is the tensor's **shape** — the per-dimension sizes.
-    It is a `cuda::std::extents<int64_t, ...>`; spell it with the `shape<...>`
-    alias (`shape<2,3>`, a dynamic dim is `-1`). C++ readers: `shape` *is*
-    `cuda::std::extents`, nothing new. Layout is the memory order (`corder`/C or
-    `forder`/F), a separate axis from the shape.
+!!! note "`Shape` is any extents"
+    The `Shape` parameter is the tensor's per-dimension sizes — **any**
+    `cuda::std::extents<int64_t, ...>`. Spell it with the `shape<...>` alias
+    (`shape<2,3>`, a dynamic dim is `-1`); C++ readers, `shape` *is*
+    `cuda::std::extents`, nothing new. It is exposed as both `shape_type` and
+    `extents_type`. Layout is the memory order (`corder`/C or `forder`/F), a
+    separate axis from the shape.
 
 ### Ownership aliases
 
@@ -65,7 +66,7 @@ using forder = layout_left;    // F-order (column-major)
 Static-integer aliases (each converts to a runtime integer and carries `::value`):
 
 ```cpp
-Int<V> Long<V> Size<V> Uint<V> Diff<V> Bool<V> ic<V>          // classic
+Int<V> Long<V> Size<V> Uint<V> Diff<V> Bool<V>          // classic
 Int8/16/32/64<V>  Uint8/16/32/64<V>                          // fixed-width
 I1 I2 I4 I8  U1 U2 U4 U8   // numpy short forms (BYTES): I4<V> == Int32<V>
 ```

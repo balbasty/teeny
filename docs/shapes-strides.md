@@ -76,7 +76,7 @@ Slicing a contiguous static tensor keeps folded compile-time strides.
 The API accepts runtime integers, static integers (`integral_constant`), and
 slices of either, and returns the matching output type. `alias.h` provides short
 names — `Int<V>`, `Long<V>`, `Size<V>`, `Uint<V>`, `Int32<V>`, `Int64<V>`,
-`Diff<V>`, `Bool<V>`, `ic<V>` — each converting implicitly to a runtime integer
+`Diff<V>`, `Bool<V>` — each converting implicitly to a runtime integer
 and carrying `::value`.
 
 Rule of thumb: pass `Int<k>()` to make the compiler fold; pass a plain
