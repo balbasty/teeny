@@ -21,7 +21,7 @@ Use it for anything that's a small runtime value you want static: a spatial
 rank, an interpolation order, a matrix size `C`. It replaces the giant `switch`
 statements hand-written kernels use.
 
-## `any_tensor` + `dispatch_rank` — runtime rank → static
+## `anyrank` + `dispatch_rank` — runtime rank → static
 
 A rank-erased, bounded tensor for the host boundary. It carries a pointer plus
 bounded shape/stride arrays and a runtime `ndim`. You don't compute on it — you
@@ -43,7 +43,7 @@ auto v3 = at.fixed<3>();                        // or force a known rank
 For a `(*batch, *spatial, C)` array from numpy / torch / cupy / DLPack:
 
 ```
-DLPack / ndarray  ──any(data, shape, stride, ndim)──►  any_tensor
+DLPack / ndarray  ──any(data, shape, stride, ndim)──►  anyrank
    │  (DLPack strides are in ELEMENTS; numpy's __array_interface__ is in BYTES)
    ▼  dispatch_rank / dispatch_value on total rank -> fixed<R>()
    ▼  dispatch_value<1,2,3>(spatial_ndim) -> static spatial rank D

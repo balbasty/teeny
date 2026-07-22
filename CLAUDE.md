@@ -46,7 +46,7 @@ include/teeny/
                    + reductions (sum/prod/max/min/dot). Members declared in
                    tensor.h, DEFINED here.
   iterate.h        nd-peel: peel/peel_at/peel_front + batch_offset/channel
-  dynamic.h        any_tensor + dispatch_rank (runtime-rank host boundary)
+  dynamic.h        anyrank (rank-erased carrier) + peel_front<Sr> + dispatch_rank
   cuda.h           OPT-IN device/host/pinned memory (needs <cuda_runtime.h>);
                    NOT included by teeny.h
   teeny.h          umbrella (everything except cuda.h)
@@ -178,11 +178,15 @@ auto s = peel_at<0,1>(t, i);               // the i-th peeled sub-view (grid-str
 for (auto v : peel_front<N>(t)) f(v);      // v is (*spatial, C); N = #batch dims
 auto v = peel_front_at<N>(t, i);            // the i-th (grid-stride style)
 
-// --- dynamic-rank / dynamic-value host boundary ---
-auto at = any(data, shape, stride, ndim);    // rank-erased, bounded MaxRank (default 8)
-dispatch_rank(at, [&](auto v){ kernel(v); });  // instantiates kernel once per rank
+// --- dynamic-rank / dynamic-value host boundary (dynamic.h) ---
+auto at = any(data, shape, stride, ndim);    // -> anyrank: rank-erased, bounded MaxRank (default 8)
+dispatch_rank(at, [&](auto v){ kernel(v); });  // instantiates kernel once per TOTAL rank
 auto v3 = at.fixed<3>();                      // or force a known rank
 dispatch_value<1,2,3>(D, [&](auto d){ kern<d.value>(v); });  // runtime value -> static
+// BATCH idiom (one kernel per Sr, not per total rank): peel the runtime batch
+// dims, keep the trailing Sr "interesting" dims static.
+for (auto cell : at.peel_front<Sr>()) kernel<Sr>(cell);   // each cell is rank-Sr
+auto cell = at.peel_front_at<Sr>(i);          // i-th (grid-stride); .recast<shape<-1,c,c>>() folds inner dims
 ```
 
 ### Static vs runtime values (important idiom)

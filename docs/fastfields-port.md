@@ -54,7 +54,7 @@ surface:
 | peel named axes | `peel<Axes...>(t)`, `take_along<Axes...>(...)`, `permute<...>()` |
 | add/drop size-1 axis | `unsqueeze<Ax>()`, `squeeze<Ax>()` |
 | **runtime→static dispatch** | `dispatch_value<1,2,3>(D, f)` (spatial rank / order / bound); `dispatch_rank(any(...), f)` (total rank at the ndarray boundary) |
-| host ndarray boundary | `any(data, shape, stride, ndim)` → `any_tensor`; `.fixed<R>()` |
+| host ndarray boundary | `any(data, shape, stride, ndim)` → `anyrank`; `.fixed<R>()` |
 | owning buffers | `local<T,E>` (stack, static), `owned<T,E>(e)` (heap host), `device/host/pinned<T,E>(e)` (from `teeny/cuda.h`) |
 
 What teeny deliberately does **not** do (kept out to stay tiny) and therefore
@@ -72,7 +72,7 @@ with hand-written `index2offset` batch plumbing and giant per-rank switch
 statements. On teeny it becomes three nested dispatches:
 
 ```
-host ndarray (numpy/cupy/torch/dlpack)  ──any(data,shape,stride,ndim)──►  any_tensor
+host ndarray (numpy/cupy/torch/dlpack)  ──any(data,shape,stride,ndim)──►  anyrank
    │  strides are in ELEMENTS (dlpack); numpy gives BYTES — divide by itemsize first
    ▼
 dispatch_rank / dispatch_value on TOTAL rank  ──►  fixed<R>()  (static rank R)
@@ -251,7 +251,7 @@ reading each repo:
 | `fastfields-cpu-impl`, `fastfields-cuda-impl` | backend implementations / instantiations | wire the teeny kernels to CPU parallel-for and CUDA launch; the two share one kernel source |
 | `fastfields-cpu-lib`, `fastfields-cuda-lib`, `fastfields-lib` | packaged libraries | build/packaging over the impls |
 | `fastfields-bind-py`, `fastfields-csrc-*` | binding glue | the `any(...)`/`dispatch_rank` host boundary lives here (element vs byte strides!) |
-| `fastfields-numpy/-cupy/-torch` | python bindings (the goal) | consume the built lib; pass `ndarray_like` → `any_tensor` |
+| `fastfields-numpy/-cupy/-torch` | python bindings (the goal) | consume the built lib; pass `ndarray_like` → `anyrank` |
 | `fastfields`, `.github` | umbrella / org profile | docs only |
 
 Vendor teeny (`include/teeny/` + `examples/fastfields/{bounds,spline}.hpp`) into

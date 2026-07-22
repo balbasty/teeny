@@ -9,9 +9,9 @@ int main()
     double buf[24];
     for (long i = 0; i < 24; ++i) buf[i] = i;
 
-    // any_tensor is a trivially-copyable rank-erased carrier.
-    static_assert(cs::is_trivially_copyable<any_tensor<double,long>>::value, "trivially copyable");
-    static_assert(any_tensor<double,long>::max_rank == 8, "default MaxRank");
+    // anyrank is a trivially-copyable rank-erased carrier.
+    static_assert(cs::is_trivially_copyable<anyrank<double,long>>::value, "trivially copyable");
+    static_assert(anyrank<double,long>::max_rank == 8, "default MaxRank");
 
     long shape[3]  = {2,3,4};
     long stride[3] = {12,4,1};
@@ -41,6 +41,25 @@ int main()
     // an out-of-range ndim (here 0) is reported, not dispatched.
     auto zero = any(buf, shape, stride, 0);      // ndim 0 -> no fixed rank matches
     if (dispatch_rank(zero, [](auto){}) != false) return 7;
+
+    // ---- peel_front<Sr>: peel the runtime batch dims, keep Sr static ---------
+    // shape (2,3,4): treat the last Sr=2 as "interesting", the first as batch.
+    long acc = 0;
+    long cells = 0;
+    for (auto cell : at.peel_front<2>()) {       // 2 batch cells, each a (3,4) view
+        static_assert(decltype(cell)::rank() == 2, "peel_front keeps Sr=2 static");
+        acc += (long)sum(cell); ++cells;
+    }
+    if (cells != 2 || acc != (long)expect) return 8;
+
+    // grid-stride form: the i-th cell directly, and its offset is baked in.
+    auto c1 = at.peel_front_at<2>(1);            // batch index 1 -> buf + 12
+    if (c1(2,3) != buf[12 + 2*4 + 3]) return 9;
+
+    // recast the dynamic inner dims back to static so they fold.
+    auto cs2 = c1.recast<tny::shape<3,4>>();     // (local `shape` array shadows tny::shape)
+    static_assert(decltype(cs2.stride(Int<1>()))::value == 1, "inner stride folds after recast");
+    if (cs2(2,3) != buf[12 + 2*4 + 3]) return 10;
 
     return 0;
 }

@@ -155,9 +155,9 @@ See [Half precision](half.md).
 
 ```cpp
 dispatch_value<Vs...>(v, f);              // runtime value -> integral_constant
-any(data, shape, stride, ndim);           // -> any_tensor (rank-erased, bounded)
-dispatch_rank(any_tensor, f);             // runtime rank -> fixed-rank view
-any_tensor.fixed<R>();                    // force a known rank
+any(data, shape, stride, ndim);           // -> anyrank (rank-erased, bounded)
+dispatch_rank(anyrank, f);             // runtime rank -> fixed-rank view
+anyrank.fixed<R>();                    // force a known rank
 ```
 
 See [Dispatch & the ndarray boundary](dispatch.md).
