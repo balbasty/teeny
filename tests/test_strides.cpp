@@ -16,17 +16,22 @@ int main() {
     static_assert(cs::is_same<decltype(A.stride(Int<1>())), cs::integral_constant<long,1>>::value, "stride 1 folds to 1");
     if (A(2,1) != pad[2*4+1]) return 1;
 
-    // via wrap_strided (back-compat: layout_static_stride == strides)
-    auto A2 = wrap_strided<4,1>(pad, shape<3,3>{});
+    // via wrap(..., strides<S...>{}) — compile-time strides fold into the type
+    auto A2 = wrap(pad, shape<3,3>{}, strides<4,1>{});
     if (A2(2,1) != A(2,1)) return 2;
 
     // --- MIXED: outer stride dynamic, inner static 1 ---
-    using MixL = strides<dynamic_stride, 1>;               // outer runtime, inner static
-    MixL::mapping<shape<3,3>> m(shape<3,3>{}, cs::array<long,1>{4});
-    tensor<double, shape<3,3>, MixL> B(pad, m);
+    // The clean spelling (analogue of shape<-1,3>{2}): static pattern in the
+    // template, runtime strides for the dynamic_stride slots in braces.
+    auto B = wrap<dynamic_stride, 1>(pad, shape<3,3>{}, {4});   // outer runtime 4, inner static 1
     static_assert(cs::is_same<decltype(B.stride(Int<1>())), cs::integral_constant<long,1>>::value, "mixed: inner folds");
     static_assert(cs::is_same<decltype(B.stride(Int<0>())), long>::value, "mixed: outer is runtime");
     if (B.stride(0) != 4 || B(2,1) != pad[2*4+1]) return 3;
+    // it matches the explicit strides<dynamic_stride,1> mapping construction
+    using MixL = strides<dynamic_stride, 1>;
+    MixL::mapping<shape<3,3>> m(shape<3,3>{}, cs::array<long,1>{4});
+    tensor<double, shape<3,3>, MixL> B2(pad, m);
+    if (B2(2,1) != B(2,1)) return 30;
 
     // --- NEGATIVE static stride: -1 means stride -1, NOT dynamic ---
     static_assert(strides<-4,1>::S_[0] == -4, "strides<-4,1> is a real -4 stride");
@@ -60,6 +65,24 @@ int main() {
     if (dyn(2,3) != pad[2*4+3]) return 10;
     auto neg = wrap(pad + 8, shape<3,4>{}, {-4,1});         // reversed axis 0 (negative stride)
     if (neg(0,0) != pad[8] || neg(2,0) != pad[0]) return 11;
+
+    // --- every way of passing the same geometry AGREES on element access -------
+    // static tag folds to a strides<4,1> layout; the runtime {4,1} is layout_stride;
+    // plain wrap is C-order. Different TYPES, identical addressing.
+    auto c_ord  = wrap(pad, shape<3,4>{});                  // contiguous C-order
+    auto st_tag = wrap(pad, shape<3,4>{}, strides<4,1>{});  // compile-time strides (fold)
+    auto rt_arr = wrap(pad, shape<3,4>{}, {4,1});           // runtime strides (layout_stride)
+    static_assert(decltype(st_tag.stride(Int<0>()))::value == 4, "static tag folds the stride");
+    static_assert(cs::is_same<decltype(rt_arr.stride(Int<0>())), long>::value, "runtime array stays runtime");
+    for (long i = 0; i < 3; ++i)
+        for (long j = 0; j < 4; ++j)
+            if (c_ord(i,j) != st_tag(i,j) || st_tag(i,j) != rt_arr(i,j)) return 12;
+
+    // negative stride agrees between the static tag and the runtime array too
+    auto neg_tag = wrap(pad + 8, shape<3,4>{}, strides<-4,1>{});
+    for (long i = 0; i < 3; ++i)
+        for (long j = 0; j < 4; ++j)
+            if (neg_tag(i,j) != neg(i,j)) return 13;
 
     return 0;
 }

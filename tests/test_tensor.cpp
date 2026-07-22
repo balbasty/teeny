@@ -32,7 +32,7 @@ int main()
     // ---- per-dim compile-time NON-contiguous strides (posdef case) ----
     // batch of 3x3 with a padded batch stride 16 (not the contiguous 9).
     double pad[64]; for (int i=0;i<64;++i) pad[i]=i;
-    auto s = wrap_strided<16,3,1>(pad, extents<long,dynamic_extent,3,3>{4});
+    auto s = wrap(pad, extents<long,dynamic_extent,3,3>{4}, strides<16,3,1>{});
     if (s(2,1,0) != 2*16 + 1*3 + 0) return 4;
     static_assert(decltype(s)::rank() == 3, "strided rank");
 

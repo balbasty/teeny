@@ -3,7 +3,7 @@
 // posdef Pointer<T,S> pattern). Work tensors are stack-owned and exactly
 // sizeof their data.
 //
-// Shows: wrap_strided<S...> (folded non-contiguous strides), local<T,E> stack
+// Shows: wrap(ptr, shape, strides<S...>{}) (folded strides), local<T,E> stack
 // tensors, and layout-agnostic kernels (A and L can have different layouts).
 #include <teeny/teeny.h>
 #include <cmath>
@@ -46,7 +46,7 @@ int main() {
     double Av[3][3] = {{4,1,1},{1,3,0},{1,0,2}};
     for (int i=0;i<3;++i) for (int j=0;j<3;++j) pad[i*4 + j] = Av[i][j];
 
-    auto A = wrap_strided<4,1>(pad, extents<long,3,3>{});
+    auto A = wrap(pad, extents<long,3,3>{}, strides<4,1>{});
     auto L = local<double, extents<long,3,3>>();
     static_assert(sizeof(L) == 9*sizeof(double), "stack matrix is exactly its data");
     cholesky(A, L);

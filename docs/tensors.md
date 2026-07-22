@@ -44,7 +44,9 @@ Factories:
 |---|---|
 | `wrap(ptr, extents)` | C-order view |
 | `wrap<layout_left>(ptr, extents)` | F-order view |
-| `wrap_strided<Sx,Sy,...>(ptr, extents)` | view with compile-time strides (may be negative) |
+| `wrap(ptr, extents, strides<Sx,Sy,...>{})` | view with compile-time strides (may be negative) |
+| `wrap(ptr, extents, {s0,s1,...})` | view with runtime strides (layout_stride) |
+| `wrap<S...>(ptr, extents, {dyn...})` | mixed static/runtime strides (`dynamic_stride` slots) |
 | `as_tensor(any_mdspan)` | wrap an `mdspan`/`submdspan` result as a view |
 | `make_view(ptr, extents)` | same as `view`, deducing the extents type |
 

@@ -45,7 +45,7 @@ surface:
 
 | Need | teeny |
 |---|---|
-| kernel-passable strided view | `wrap(ptr, extents)`, `wrap<layout_left>(...)`, `wrap_strided<S...>(...)`, `as_tensor(submdspan_result)` |
+| kernel-passable strided view | `wrap(ptr, extents)`, `wrap<layout_left>(...)`, `wrap(ptr, ext, strides<S...>{})`, `as_tensor(submdspan_result)` |
 | element / folded stride | `t(i,j,k)`, `t.data()[off]`, `t.stride(Int<d>())` (static) / `t.stride(d)` (runtime) |
 | **scatter (push)** | `t.add_at(v, i...)` or `tny::fetch_add(ptr, v)` — **atomic on device** |
 | assign / init | `t.copy_(src)` (broadcasts), `t.fill_(v)`, `t.zero_()` |
@@ -168,7 +168,7 @@ Small dense/packed SPD systems per voxel. Storage types auto-detected from the
 element count: `Eye`(1), `Diag`(C), `ESTATICS`(2C-1), `Sym`(C(C+1)/2, packed
 diag-then-rows), `Full`(C²). Port:
 - `cholesky_solve.cpp` already implements dense Cholesky factor + solve on a
-  `wrap_strided` matrix with `local` work tensors — that is the `Full`/`Sym`
+  the `wrap(..., strides<S...>{})` matrix with `local` work tensors — that is the `Full`/`Sym`
   path once you expand the packed matrix `tofull` into a `local<T, shape<C,C>>`.
 - Add `Diag`/`Eye`/`ESTATICS` fast paths (trivial). Keep the `1e-40` pivot floor
   and the `1.000001` diagonal ridge for conditioning.
@@ -279,7 +279,7 @@ Vendor teeny (`include/teeny/` + `examples/fastfields/{bounds,spline}.hpp`) into
 - Delete `index2offset`/`sub2offset`/`index2sub` batch plumbing → `peel_front`.
 - Delete the per-rank hand-unrolled `1d/2d/3d/nd.h` gather trees → one separable
   recursion over static D (the reference `pull_rec`/`push_rec`).
-- Delete `Pointer<T,S>` static-stride pointer → `wrap_strided<S...>` /
+- Delete `Pointer<T,S>` static-stride pointer → `wrap(ptr, ext, strides<S...>{})` /
   `stride(Int<d>())`.
 - Replace the `has_atomic_add` fork with `fetch_add` (atomic on device, `+=` on
   host) — keep the batch-parallel/spatial-sequential path only for element types
