@@ -8,6 +8,7 @@
 #include <teeny/storage.h>
 #include <teeny/layout.h>
 #include <teeny/indexing.h>
+#include <teeny/axis.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
 
@@ -21,76 +22,6 @@ template <class MD>
 _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
                 typename MD::layout_type, own::view>
 as_tensor(const MD & m);
-
-/* --- detail: structural view builders on a raw mdspan ------------- */
-namespace _detail {
-template <class MD, cs::size_t... P>
-_TNY_API auto perm_md(const MD & v, cs::index_sequence<P...>) {
-    using El  = typename MD::element_type;
-    using Idx = typename MD::index_type;
-    using E   = typename MD::extents_type;
-    using PE  = cs::extents<Idx, E::static_extent(P)...>;
-    cs::layout_stride::mapping<PE> m(
-        PE(static_cast<Idx>(v.extent(P))...),
-        cs::array<Idx, sizeof...(P)>{ static_cast<Idx>(v.stride(P))... });
-    return cs::mdspan<El, PE, cs::layout_stride>(v.data_handle(), m);
-}
-// reverse axis AX: keep the extents, negate that axis' stride, and shift the
-// data handle to the last element along AX (so index 0 maps to the old last).
-template <cs::size_t AX, class MD, cs::size_t... D>
-_TNY_API auto flip_md(const MD & v, cs::index_sequence<D...>) {
-    using El  = typename MD::element_type;
-    using Idx = typename MD::index_type;
-    using E   = typename MD::extents_type;
-    static_assert(cs::is_signed<Idx>::value, "flip needs a signed index type (e.g. shape<...>)");
-    cs::layout_stride::mapping<E> m(
-        v.extents(),
-        cs::array<Idx, sizeof...(D)>{ static_cast<Idx>(D == AX ? -static_cast<Idx>(v.stride(D)) : static_cast<Idx>(v.stride(D)))... });
-    const Idx off = static_cast<Idx>((static_cast<Idx>(v.extent(AX)) - 1) * static_cast<Idx>(v.stride(AX)));
-    return cs::mdspan<El, E, cs::layout_stride>(v.data_handle() + off, m);
-}
-// insert a size-1 axis at position AX (output rank = N+1). The new axis gets
-// stride 1 (its index is always 0, so the value is irrelevant to the offset).
-// J... = 0..N ; input axis for output j is j (j<AX) or j-1 (j>AX).
-template <cs::size_t AX, class MD, cs::size_t... J>
-_TNY_API auto unsqueeze_md(const MD & v, cs::index_sequence<J...>) {
-    using El  = typename MD::element_type;
-    using Idx = typename MD::index_type;
-    using E   = typename MD::extents_type;
-    using OE  = cs::extents<Idx, (J == AX ? cs::size_t(1) : E::static_extent(J < AX ? J : J - 1))...>;
-    cs::layout_stride::mapping<OE> m(
-        OE(static_cast<Idx>(J == AX ? Idx(1) : v.extent(J < AX ? J : J - 1))...),
-        cs::array<Idx, sizeof...(J)>{ static_cast<Idx>(J == AX ? Idx(1) : v.stride(J < AX ? J : J - 1))... });
-    return cs::mdspan<El, OE, cs::layout_stride>(v.data_handle(), m);
-}
-// drop axis AX (must have extent 1) -> output rank = N-1. J... = 0..N-2 ;
-// input axis for output j is j (j<AX) or j+1 (j>=AX).
-template <cs::size_t AX, class MD, cs::size_t... J>
-_TNY_API auto squeeze_md(const MD & v, cs::index_sequence<J...>) {
-    using El  = typename MD::element_type;
-    using Idx = typename MD::index_type;
-    using E   = typename MD::extents_type;
-    using OE  = cs::extents<Idx, E::static_extent(J < AX ? J : J + 1)...>;
-    cs::layout_stride::mapping<OE> m(
-        OE(static_cast<Idx>(v.extent(J < AX ? J : J + 1))...),
-        cs::array<Idx, sizeof...(J)>{ static_cast<Idx>(v.stride(J < AX ? J : J + 1))... });
-    return cs::mdspan<El, OE, cs::layout_stride>(v.data_handle(), m);
-}
-} // namespace _detail
-
-// traits: layout classification for stride folding
-template <class L> struct _is_strides : cs::false_type {};       // teeny's strides<S...>
-template <cs::int64_t... S> struct _is_strides<strides<S...>> : cs::true_type {};
-template <class L> struct _strides_all_static : cs::false_type {};  // and every stride known?
-template <cs::int64_t... S> struct _strides_all_static<strides<S...>> : cs::integral_constant<bool, strides<S...>::all_static()> {};
-template <class L> struct _contiguous_layout : cs::false_type {};
-template <> struct _contiguous_layout<cs::layout_right> : cs::true_type {};
-template <> struct _contiguous_layout<cs::layout_left>  : cs::true_type {};
-
-// per-dim static stride from a strides<...> layout (signed; `dynamic_stride` if
-// runtime, or for any non-strides layout so callers fall through).
-template <cs::size_t D, class L> struct _static_stride_at { static constexpr cs::int64_t value = dynamic_stride; };
-template <cs::size_t D, cs::int64_t... S> struct _static_stride_at<D, strides<S...>> { static constexpr cs::int64_t value = strides<S...>::S_[D]; };
 
 /**
  * @brief Accumulate `v` into `*p`, **atomically on the device**.

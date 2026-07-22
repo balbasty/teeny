@@ -4,6 +4,7 @@
 #include <cuda/std/cstdint>
 #include <cuda/std/array>
 #include <cuda/std/limits>
+#include <cuda/std/mdspan>
 #include <cuda/std/type_traits>
 #include <teeny/defines.h>
 
@@ -124,6 +125,24 @@ struct strides {
 
 /** @brief Back-compat alias: the original all-static-stride layout name. */
 template <cs::int64_t... S> using layout_static_stride = strides<S...>;
+
+/* --- layout classification (stride folding) ----------------------- *
+ * Traits the tensor class uses to decide when a stride is a compile-time
+ * constant. Live here (with the strides<...> definition) rather than in
+ * tensor.h so the class body stays uncluttered.                        */
+
+template <class L> struct _is_strides : cs::false_type {};       // teeny's strides<S...>
+template <cs::int64_t... S> struct _is_strides<strides<S...>> : cs::true_type {};
+template <class L> struct _strides_all_static : cs::false_type {};  // and every stride known?
+template <cs::int64_t... S> struct _strides_all_static<strides<S...>> : cs::integral_constant<bool, strides<S...>::all_static()> {};
+template <class L> struct _contiguous_layout : cs::false_type {};
+template <> struct _contiguous_layout<cs::layout_right> : cs::true_type {};
+template <> struct _contiguous_layout<cs::layout_left>  : cs::true_type {};
+
+// per-dim static stride from a strides<...> layout (signed; `dynamic_stride` if
+// runtime, or for any non-strides layout so callers fall through).
+template <cs::size_t D, class L> struct _static_stride_at { static constexpr cs::int64_t value = dynamic_stride; };
+template <cs::size_t D, cs::int64_t... S> struct _static_stride_at<D, strides<S...>> { static constexpr cs::int64_t value = strides<S...>::S_[D]; };
 
 _TNY_NAMESPACE_END(tny)
 
