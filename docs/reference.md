@@ -123,6 +123,7 @@ t.unsqueeze<Ax>();  t.squeeze<Ax>();  // insert / drop a size-1 axis
 t.reshape<NewExt...>();               // contiguous-view reshape (one -1 inferred)
 t.flatten();                          // 1-D contiguous view
 t.clone();                            // dense row-major OWNING copy
+t.to<T2>();                           // dtype-converted dense copy (to<>() == clone; static->stack, dyn->heap)
 t.recast<NewExtents>();               // reinterpret with a more-static same-rank extents
 ```
 

@@ -476,6 +476,18 @@ public:
     template <bool S = is_static, cs::enable_if_t<!S, int> = 0>
     _TNY_HOST auto clone() const { tensor<T, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
 
+    /** @brief pytorch-like `.to<T2>()`: a dense, row-major OWNING copy converted
+     *         to element type `T2` (which defaults to the current element type —
+     *         so `x.to<>()` is a plain clone, and `x.to<double>()` converts). The
+     *         values are cast elementwise (via `copy_`). Static shape -> stack
+     *         (host+device); dynamic -> heap (host only). To also move across
+     *         memory spaces (host <-> CUDA) use the `to<T2, own::gpu>(x)` free
+     *         functions from `<teeny/cuda.h>`. */
+    template <class T2 = element_type, bool S = is_static, cs::enable_if_t<S, int> = 0>
+    _TNY_API auto to() const { tensor<T2, Shape, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
+    template <class T2 = element_type, bool S = is_static, cs::enable_if_t<!S, int> = 0>
+    _TNY_HOST auto to() const { tensor<T2, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
+
 private:
     // shared reshape body: one axis may be `-1` (numpy-style, inferred from numel).
     template <class El, long... NewExt>
