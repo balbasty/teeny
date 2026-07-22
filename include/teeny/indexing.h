@@ -151,23 +151,39 @@ template <class A, class B, class S> struct _slice_stop<_slice_spec<A,B,S>> { us
 template <class V> struct _static_bound
     : cs::integral_constant<bool, cs::is_same<V, none_t>::value || _is_ic<V>::value> {};
 
-// resolve a static bound to an index at compile time, mirroring _wrap_idx: `none`
-// -> the default, else a signed value with negative-wrap. (Static bounds come from
-// Int<> literals, so the signed path is the right one — matches _sl_bound.)
+// resolve a static bound to an index at compile time, mirroring _wrap_idx EXACTLY:
+// `none` -> the default; else a signed value with negative-wrap — but NOT under
+// TNY_NO_NEGATIVE_INDEX, where the runtime leaves it unwrapped (so the fold must
+// too, else static != runtime). Static bounds come from Int<> literals (signed).
 template <class V> _TNY_API constexpr long _bound_static(long dflt, long n) {
     if constexpr (cs::is_same<V, none_t>::value) { (void)n; return dflt; }
-    else { const long i = static_cast<long>(V::value); return i < 0 ? i + n : i; }
+    else {
+        const long i = static_cast<long>(V::value);
+#ifdef TNY_NO_NEGATIVE_INDEX
+        (void)n; return i;                       // no wrap — matches _wrap_idx
+#else
+        return i < 0 ? i + n : i;
+#endif
+    }
 }
 // negative-step stop default is -1 (go past index 0), mirroring _stop_neg.
 template <class V> _TNY_API constexpr long _stop_static(long n) {
     if constexpr (cs::is_same<V, none_t>::value) return -1;
-    else { const long i = static_cast<long>(V::value); return i < 0 ? i + n : i; }
+    else {
+        const long i = static_cast<long>(V::value);
+#ifdef TNY_NO_NEGATIVE_INDEX
+        (void)n; return i;                       // no wrap — matches _wrap_idx
+#else
+        return i < 0 ? i + n : i;
+#endif
+    }
 }
 // Compile-time length of slice<A,B,S> over a static source extent `n`. This MUST
 // reproduce the runtime _sl_axis count EXACTLY (else the folded static extent would
 // disagree with the runtime-filled value -> UB), so the clamps below mirror it 1:1.
 template <class A, class B, class S>
 _TNY_API constexpr cs::size_t _static_range_len(long n) {
+    static_assert(S::value != 0, "slice step cannot be 0");
     const long step = static_cast<long>(S::value), Z = 0;
     long st = 0, cnt = 0;
     if (step >= Z) {

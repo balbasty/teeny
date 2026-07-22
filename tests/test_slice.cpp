@@ -77,6 +77,16 @@ int main() {
     auto csd = t(0, slice(1,3), 0);
     static_assert(decltype(csd)::extents_type::static_extent(0) == cs::dynamic_extent, "runtime range stays dynamic");
 
+    // #46 safety: on an UNSIGNED index_type a negative step is not foldable — the
+    // runtime casts step to unsigned (forward branch, empty) while a signed fold
+    // would reverse. The fold must fall back to dynamic there (else static!=runtime
+    // -> UB); the runtime value then fills it. (Fable-review edge case.)
+    float ub[8] = {}; auto ut = wrap(ub, cs::extents<unsigned,8>{});
+    auto uneg = ut(slice<none_t, none_t, cs::integral_constant<long,-1>>());
+    static_assert(decltype(uneg)::extents_type::static_extent(0) == cs::dynamic_extent,
+                  "unsigned index + negative step -> not folded (stays dynamic)");
+    if ((long)uneg.extent(0) != 0) return 34;   // runtime: unsigned step-cast -> empty
+
     // slice also works through take_along (same resolution)
     auto g = t.take_along<2>(slice(1, none));         // keep axes 0,1; axis2 [1,4)
     static_assert(decltype(g)::rank() == 3, "take_along keeps unnamed axes");

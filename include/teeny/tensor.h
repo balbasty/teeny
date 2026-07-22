@@ -323,8 +323,13 @@ private:
         else if constexpr (cs::is_same<Arg, cs::full_extent_t>::value)  return Se;
         else if constexpr (_is_full_slice<Arg>::value)                  return Se;
         // a compile-time range folds its extent too: source static + static
-        // start/stop/step -> the length is computable now (mirrors _sl_axis).
+        // start/stop/step -> the length is computable now (mirrors _sl_axis, incl.
+        // the TNY_NO_NEGATIVE_INDEX no-wrap case in _bound_static). Gated to a
+        // SIGNED index_type: an unsigned one casts a negative STEP to a huge
+        // positive at runtime (forward branch, empty) while the fold reverses, so
+        // there we fall back to dynamic (correct, just unfolded).
         else if constexpr (_is_slice_spec<Arg>::value && Se != cs::dynamic_extent &&
+                           cs::is_signed<index_type>::value &&
                            _static_bound<typename _slice_start<Arg>::type>::value &&
                            _static_bound<typename _slice_stop<Arg>::type>::value &&
                            _is_ic<typename _slice_step<Arg>::type>::value)
