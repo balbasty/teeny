@@ -81,17 +81,18 @@ void invert_cuda(const In & in, Out & out) {
 
 ---
 
-## 3. The boundary: DLPack in, teeny view out
+## 3. The boundary: array metadata → teeny view
 
-A DLPack array arrives as a `DLTensor`: a `void* data`, an `int64_t* shape`, an
-`int64_t* strides` (in **elements**, or `null` = C-contiguous), an `int ndim`,
-and a device. Turn it into a teeny view, then **dispatch the runtime `C` to a
-static type** so the inner `C×C` folds:
+At the boundary you get plain array metadata — a `void* data`, an `int64_t* shape`,
+an `int64_t* strides` (in **elements**, or `null` = C-contiguous), and a device.
+(That's exactly what nanobind hands you in §4, and what DLPack carries on the wire.)
+Turn it into a teeny view, then **dispatch the runtime `C` to a static type** so the
+inner `C×C` folds:
 
 ```cpp
 // `shape` = {n, C, C}, `strides` in ELEMENTS (or contiguous if null).
-static void invert_dlpack(double* in, double* out, const int64_t* shape,
-                          const int64_t* strides, bool on_device) {
+static void invert_nd(double* in, double* out, const int64_t* shape,
+                      const int64_t* strides, bool on_device) {
     const long n = shape[0];
     const int  C = (int)shape[1];  // known only at run time
 
@@ -137,34 +138,50 @@ no `PyCapsule`/`__dlpack__()` dance on our side:
 ```cpp
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <cuda_runtime.h>          // cudaMalloc/cudaFree for the CUDA output
 namespace nb = nanobind;
 
-nb::ndarray<> invert(nb::ndarray<> x) {              // accepts any DLPack array
+// (`invert_nd` is the boundary function defined in §3, above in this file.)
+
+// Accepts any (N,C,C) float64 DLPack array — numpy / torch / cupy / jax, CPU or
+// CUDA — and returns one. The `ndarray<...>` parameter type enforces dtype/rank/
+// contiguity; nanobind fills it from the caller's DLPack capsule for us.
+nb::ndarray<> invert(nb::ndarray<double, nb::ndim<3>, nb::c_contig> x) {
+    const int  ndim    = (int) x.ndim();
     const bool on_cuda = x.device_type() == nb::device::cuda::value;
+    const long n = (long) x.shape(0), C = (long) x.shape(1);       // (N, C, C)
 
-    // rank-erased wrap of the BORROWED data + metadata (no copy); `recast` later
-    // folds the runtime (n, C, C) to shape<-1,c,c> so the c's become immediates.
-    // (nanobind's shape is size_t; teeny's index type is int64 — convert once.)
-    auto in = as_anyrank(static_cast<double*>(x.data()),
-                         shape_i64, stride_i64, (int)x.ndim());
-    // ... allocate `out` of the same shape on the same device (allocator elided) ...
-    invert_anyrank(in, out, on_cuda);
+    // DLPack strides are in ELEMENTS; copy nanobind's metadata into int64 arrays.
+    int64_t shape[3], stride[3];
+    for (int d = 0; d < ndim; ++d) { shape[d] = (int64_t) x.shape(d); stride[d] = (int64_t) x.stride(d); }
 
-    // hand the result back as an ndarray; nanobind exports it via DLPack, so
-    // np.from_dlpack / torch.from_dlpack pick it up zero-copy.
-    return nb::ndarray<>(out_data, x.ndim(), x.shape_ptr(), /*owner*/ {},
-                         x.stride_ptr(), nb::dtype<double>(),
+    // allocate the output on the SAME device; a (non-capturing) capsule deleter
+    // frees it when Python drops the returned array.
+    double* out = nullptr;
+    if (on_cuda) cudaMalloc((void**) &out, sizeof(double) * n * C * C);
+    else         out = new double[(size_t)(n * C * C)];
+    nb::capsule owner = on_cuda
+        ? nb::capsule(out, [](void* p) noexcept { cudaFree(p); })
+        : nb::capsule(out, [](void* p) noexcept { delete[] (double*) p; });
+
+    invert_nd(x.data(), out, shape, stride, on_cuda);              // teeny dispatch + kernel (§3)
+
+    const size_t oshape[3] = { (size_t) n, (size_t) C, (size_t) C };
+    return nb::ndarray<>(out, 3, oshape, owner, /*strides=dense*/ nullptr,
+                         nb::dtype<double>(),
                          on_cuda ? nb::device::cuda::value : nb::device::cpu::value);
 }
 
 NB_MODULE(fastinvert, m) { m.def("invert", &invert); }
 ```
 
-nanobind parses the DLPack capsule for you, so you work with `x.data()` /
-`x.shape(i)` / `x.stride(i)` / `x.device_type()` directly and feed them to teeny's
-`as_anyrank` + `dispatch_value`. (For a framework-agnostic C boundary that ISN'T
-nanobind, teeny's own `from_dlpack` / `dispatch_dlpack` in `<teeny/dlpack.h>`
-consume a raw `DLManagedTensor*` the same way.)
+nanobind parses the DLPack capsule for you, so you read `x.data()` / `x.shape(i)` /
+`x.stride(i)` / `x.device_type()` and hand them straight to §3's `invert_nd` (which
+does the `dispatch_value` + `recast` inside). The return `ndarray` is auto-exported
+via `__dlpack__`, so `np.from_dlpack` / `torch.from_dlpack` pick it up zero-copy.
+**With nanobind you never touch a `DLManagedTensor` — nor teeny's `from_dlpack`/
+`to_dlpack`** (those in `<teeny/dlpack.h>` are for a raw-C boundary that isn't
+nanobind).
 
 ```python
 import numpy as np, torch, fastinvert
