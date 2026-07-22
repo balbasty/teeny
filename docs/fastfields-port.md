@@ -158,7 +158,7 @@ so the target axis is innermost, or peel a different axis each pass).
 - **L1** (`examples/distance_transform.cpp` already implements this): forward
   `tmp=min(tmp+w, f[i])` then backward. Two passes, in place.
 - **Euclidean (squared):** lower-envelope-of-parabolas (Felzenszwalb–Huttenlocher).
-  Needs 3 scratch buffers of length `n` per worker (`local<double,extents<long,N>>`
+  Needs 3 scratch buffers of length `n` per worker (`local<double, shape<N>>`
   if N static, else `owned`). Vertices `v`, breakpoints `z`, copy `d`; intersection
   `s = (f[q]-f[v]+w²(q²-v²)) / (2w²(q-v))`; then fill `f[q]=d[v]+w²(q-v)²`.
 
@@ -169,7 +169,7 @@ element count: `Eye`(1), `Diag`(C), `ESTATICS`(2C-1), `Sym`(C(C+1)/2, packed
 diag-then-rows), `Full`(C²). Port:
 - `cholesky_solve.cpp` already implements dense Cholesky factor + solve on a
   `view_strided` matrix with `local` work tensors — that is the `Full`/`Sym`
-  path once you expand the packed matrix `tofull` into a `local<T,extents<C,C>>`.
+  path once you expand the packed matrix `tofull` into a `local<T, shape<C,C>>`.
 - Add `Diag`/`Eye`/`ESTATICS` fast paths (trivial). Keep the `1e-40` pivot floor
   and the `1.000001` diagonal ridge for conditioning.
 - Static-C specialisation via `dispatch_value<1,2,3,4,...>(C, …)`; the 2×2/3×3

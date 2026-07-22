@@ -90,7 +90,7 @@ fully-static stack tensor is *exactly* `sizeof` its data.
 
 ```cpp
 view_t<T,E,L>   // non-owning view type
-local<T,E,L>    // stack-owned (static shape)     e.g. local<double, extents<long,3,3>>{}
+local<T,E,L>    // stack-owned (static shape)     e.g. local<double, shape<3,3>>{}
 owned<T,E,L>    // heap-owned (host, move-only)    e.g. owned<double, DynE>(DynE{2,3})
 device/host/pinned<T,E,L>   // from cuda.h
 ```

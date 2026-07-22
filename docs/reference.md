@@ -28,15 +28,15 @@ device<T, E, L>  host<T, E, L>  pinned<T, E, L>   // CUDA memory (from <teeny/cu
 ### Factories
 
 ```cpp
-view(ptr, extents);  view<Layout>(ptr, extents);   // a view (C-order / chosen layout)
-view_strided<S...>(ptr, extents);                  // view with compile-time strides
+view(ptr, shape);  view<Layout>(ptr, shape);       // a view (C-order / chosen layout)
+view_strided<S...>(ptr, shape);                    // view with compile-time strides
 as_tensor(any_mdspan);                             // wrap an mdspan/submdspan result
 
-make_view(ptr, extents);                           // deduce the extents type
-make_local<T>(extents);  make_heap<T>(extents);
-make_device<T>(extents); make_host<T>(extents); make_pinned<T>(extents);
+make_view(ptr, shape);                             // deduce the extents type
+make_local<T>(shape);  make_heap<T>(shape);
+make_device<T>(shape); make_host<T>(shape); make_pinned<T>(shape);
 
-zeros<T>(extents);  ones<T>(extents);  full<T>(extents, v);   // static->stack, dyn->heap
+zeros<T>(shape);  ones<T>(shape);  full<T>(shape, v);        // static->stack, dyn->heap
 arange<T>(n);                                                 // 1-D [0..n-1] (heap)
 ```
 
