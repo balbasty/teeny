@@ -55,6 +55,11 @@ int main()
     if (prod(R) != 24) return 20;                  // 1*2*3*4
     if (max(R) != 4)  return 21;
     if (min(R) != 1)  return 22;
+    // #56: dot's static gate now requires EXACT extent equality (not broadcast).
+    // A rectangular (non-square, extents != 1) shape must still be accepted.
+    auto rk = local<double, extents<long,2,3>>(); rk.iota_(1.0, 1.0);   // 1..6
+    if (dot(rk, rk) != 1+4+9+16+25+36) return 23;                       // 91
+    // (dot(shape<2,3>, shape<1,3>) is now a compile error — see test below.)
 
     // reduction over the (contiguous) view: buf[i] == 2*i + 199, i = 0..8
     double expect = 0; for (int i=0;i<9;++i) expect += 2*i + 199;
