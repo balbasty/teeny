@@ -25,12 +25,17 @@ _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
 as_tensor(const MD & m);
 
 /**
- * @brief Accumulate `v` into `*p`, **atomically on the device**.
+ * @brief Accumulate `v` into `*p`, atomic **on the device only**.
  *
- * The one primitive scatter/push kernels need that a plain `+=` cannot give:
- * on the device many threads accumulate into overlapping outputs, which races.
- * On the host this is a plain `+=`; on the device it is `atomicAdd` (which for
- * `double` needs `sm_60`+). Use via `t.add_at(v, i...)`.
+ * The scatter/"push" write: on the device many threads accumulate into
+ * overlapping outputs, which a plain `+=` would race. Device -> `atomicAdd`
+ * (`double` needs sm_60+, `__half` sm_70+; not all integer widths have an
+ * overload — that surfaces as an nvcc error at instantiation). Use via
+ * `t.add_at(v, i...)` / `t.add_<true>(...)`.
+ *
+ * WARNING: on the **host** this is a plain `*p += v` — NOT atomic. A push kernel
+ * parallelised with std::thread over overlapping outputs races; guard those
+ * writes yourself (per-thread partials, a mutex, or std::atomic_ref).
  */
 template <class T>
 _TNY_API void fetch_add(T * p, T v) noexcept {

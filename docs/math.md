@@ -43,6 +43,10 @@ a & b;  a | b;  a ^ b;  ~a;  // out-of-place (tensor or scalar rhs), unary NOT
 a &= b; a |= 1; a ^= b;      // in-place
 ```
 
+Broadcasting requires **equal rank** — teeny does not right-align shapes the way
+numpy does. Add the size-1 axes yourself with `unsqueeze` (that's why the
+`(C,1,1)` params below are rank 3, not rank 1).
+
 Broadcasting example — per-channel scale/bias over a `(C,H,W)` image with
 `(C,1,1)` parameters:
 
@@ -124,7 +128,9 @@ path). Reducing over every axis is the scalar form above.
 
 For `half`/`bfloat16`, reductions accumulate in `float` (via `compute_type<T>`)
 and cast back, so summing many 16-bit values doesn't stall. See
-[Half precision](half.md).
+[Half precision](half.md). Note `compute_type` only widens the 16-bit floats —
+an `int8` sum still accumulates in `int8` and can overflow; cast to a wider type
+first if that matters.
 
 ## Comparisons → a bool tensor
 

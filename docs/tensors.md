@@ -50,6 +50,12 @@ Factories:
 
 Copying a view copies the pointer, not the data; memory lifetime is the caller's.
 
+!!! warning "Assignment rebinds a view — it does not copy elements"
+    `a = b` on two views makes `a` point at `b`'s data (C++ value semantics); it
+    does **not** write `b`'s elements into `a`'s buffer. For the numpy `a[:] = b`
+    meaning (copy elements, broadcasting), use `a.copy_(b)`. (An *owning* tensor
+    `local`/`owned` does copy on assignment, as usual.)
+
 ## Owning variants
 
 Owning tensors have the same API as a view and also hold the storage, freeing it
