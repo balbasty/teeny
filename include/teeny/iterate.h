@@ -46,7 +46,7 @@ _TNY_API void peel_axis(const MD & v, const I * idx, I & off, I * ext, I * str, 
 
 // Build the peeled sub-view by hand (no submdspan -> works on ANY source layout,
 // incl. strides<...>) and fold kept strides to compile-time values where known.
-template <class MD, class I, class Seq, cs::size_t... A>
+template <own OW, class MD, class I, class Seq, cs::size_t... A>
 _TNY_API auto gather_peel(const MD & v, const I * idx, Seq, cs::index_sequence<A...>) {
     using El  = typename MD::element_type;
     using Idx = typename MD::index_type;
@@ -61,44 +61,53 @@ _TNY_API auto gather_peel(const MD & v, const I * idx, Seq, cs::index_sequence<A
     cs::array<Idx, Nk> ea{};
     for (cs::size_t i = 0; i < Nk; ++i) ea[i] = ext[i];
     El * base = v.data_handle() + off;
-    if constexpr (SF::ndyn() == 0) return tensor<El, OE, SF, own::view>(base, Map(OE(ea)));
+    if constexpr (SF::ndyn() == 0) return tensor<El, OE, SF, OW>(base, Map(OE(ea)));
     else {
         cs::array<Idx, SF::ndyn()> dyn{};
         for (cs::size_t i = 0; i < Nk; ++i) if (SF::S_[i] == dynamic_stride) dyn[SF::slot(i)] = str[i];
-        return tensor<El, OE, SF, own::view>(base, Map(OE(ea), dyn));
+        return tensor<El, OE, SF, OW>(base, Map(OE(ea), dyn));
     }
 }
 
-} // namespace _md
-
-/** @brief The `i`-th sub-view obtained by peeling `Axes...` (0 <= i < product
- *         of the peeled extents). Peeled axes vary in row-major order (the
- *         last listed axis fastest). Returns a `md::tensor` view. */
-template <cs::size_t... Axes, class MD>
-_TNY_API auto peel_at(const MD & src, typename MD::index_type i) {
+// Space-aware peel-at over an mdspan: `OW` is the view kind to tag the result
+// with (own::view for a host source, own::gpu_view for a device one).
+template <own OW, cs::size_t... Axes, class MD>
+_TNY_API auto peel_at_ow(const MD & src, typename MD::index_type i) {
     using I = typename MD::index_type;
     constexpr cs::size_t nd = sizeof...(Axes);
     const I e[nd ? nd : 1]   = { static_cast<I>(src.extent(Axes))... };
     I       idx[nd ? nd : 1] = {};
     I rem = i;
     for (int p = static_cast<int>(nd) - 1; p >= 0; --p) { idx[p] = rem % e[p]; rem /= e[p]; }
-    return _md::gather_peel(src, idx, cs::index_sequence<Axes...>{},
-                            cs::make_index_sequence<MD::rank()>{});
+    return gather_peel<OW>(src, idx, cs::index_sequence<Axes...>{},
+                           cs::make_index_sequence<MD::rank()>{});
+}
+
+} // namespace _md
+
+/** @brief The `i`-th sub-view obtained by peeling `Axes...` (0 <= i < product
+ *         of the peeled extents). Peeled axes vary in row-major order (the
+ *         last listed axis fastest). Returns a `md::tensor` view. A raw mdspan
+ *         carries no memory space, so this tags the result as a host `view`; the
+ *         `md::tensor` overloads below preserve the source's space. */
+template <cs::size_t... Axes, class MD>
+_TNY_API auto peel_at(const MD & src, typename MD::index_type i) {
+    return _md::peel_at_ow<own::view, Axes...>(src, i);
 }
 // convenience: peel from a md::tensor (uses its view). Non-const -> mutable
-// peel; const -> read-only peel.
+// peel; const -> read-only peel. A device source (gpu/gpu_view) yields gpu_view.
 template <long... Axes, class T, class E, class L, own O>
 _TNY_API auto peel_at(tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i) {
-    return peel_at<_norm_axis(Axes, tensor<T,E,L,O>::rank())...>(t.view(), i);
+    return _md::peel_at_ow<own_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>(t.view(), i);
 }
 template <long... Axes, class T, class E, class L, own O>
 _TNY_API auto peel_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i) {
-    return peel_at<_norm_axis(Axes, tensor<T,E,L,O>::rank())...>(t.view(), i);
+    return _md::peel_at_ow<own_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>(t.view(), i);
 }
 
 /** @brief A range of sub-views obtained by peeling `Axes...`. Supports
  *         `size()`, `operator[]`, and range-for. */
-template <class MD, cs::size_t... Axes>
+template <class MD, own OW, cs::size_t... Axes>
 struct peel_range {
     using index_type = typename MD::index_type;
     MD src;
@@ -109,7 +118,7 @@ struct peel_range {
         for (cs::size_t p = 0; p < sizeof...(Axes); ++p) n *= e[p];
         return n;
     }
-    _TNY_API auto operator[](index_type i) const { return peel_at<Axes...>(src, i); }
+    _TNY_API auto operator[](index_type i) const { return _md::peel_at_ow<OW, Axes...>(src, i); }
 
     struct iterator {
         peel_range r;                 // by value (a single view) -> no dangle if the range is a temporary
@@ -127,15 +136,15 @@ struct peel_range {
  *         yields mutable peel; const `t` yields read-only peel. */
 template <long... Axes, class T, class E, class L, own O>
 _TNY_API auto peel(tensor<T,E,L,O> & t) {
-    return peel_range<decltype(t.view()), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>{ t.view() };
+    return peel_range<decltype(t.view()), own_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>{ t.view() };
 }
 template <long... Axes, class T, class E, class L, own O>
 _TNY_API auto peel(const tensor<T,E,L,O> & t) {
-    return peel_range<decltype(t.view()), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>{ t.view() };
+    return peel_range<decltype(t.view()), own_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>{ t.view() };
 }
 /** @brief Build a range of sub-views over a raw mdspan. */
 template <cs::size_t... Axes, class MD>
-_TNY_API peel_range<MD, Axes...> peel_of(const MD & m) { return { m }; }
+_TNY_API peel_range<MD, own::view, Axes...> peel_of(const MD & m) { return { m }; }
 
 namespace _md {
 template <class T, cs::size_t... A> _TNY_API auto sfront(T & t, cs::index_sequence<A...>) { return peel<A...>(t); }

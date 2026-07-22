@@ -26,16 +26,23 @@ struct tensor;
 | `T` | element type | any arithmetic type, `half`, `bfloat16` |
 | `Extents` | the **shape** | `shape<2,3>` (a `cs::extents<int64_t,…>`; `-1` = dynamic) |
 | `Layout` | memory order | `layout_right`/`corder` (default), `layout_left`/`forder`, `layout_stride`, `strides<S...>` |
-| `O` | ownership | `own::view` (default), `own::stack`, `own::heap`, `own::gpu`/`pinned`/`mapped` |
+| `O` | ownership | `own::view` (default), `own::stack`, `own::heap`, `own::gpu`/`pinned`/`mapped`, `own::gpu_view` |
+
+Slicing / permuting / peeling / `.at()` of a `gpu` tensor yields an `own::gpu_view`
+(a non-owning view of *device* memory), so a device pointer is never mistaken for
+a host one in the type. Helpers: `own_is_device` (gpu/gpu_view),
+`own_is_host_accessible`, `own_is_view` (view/gpu_view), `own_view_of(O)` (the
+view kind that preserves a source's space). `pinned`/`mapped` are host-accessible,
+so their views are plain `view`.
 
 ### Ownership aliases
 
 | Alias | Ownership | Notes |
 |---|---|---|
-| `view_t<T,E,L=layout_right>` | none (view) | trivially copyable, kernel-passable; the bare `tensor` is this |
+| `view_t<T,E,L=layout_right>` | none (host view) | trivially copyable, kernel-passable; the bare `tensor` is this |
 | `local<T,E,L>` | stack | requires a fully static shape; `sizeof` == its data |
 | `owned<T,E,L>` | heap (host) | move-only |
-| `gpu<T,E,L>` / `pinned<T,E,L>` / `mapped<T,E,L>` | CUDA | from `<teeny/cuda.h>` |
+| `gpu<T,E,L>` / `pinned<T,E,L>` / `mapped<T,E,L>` | CUDA | from `<teeny/cuda.h>`; a view of a `gpu` is `own::gpu_view` |
 
 ---
 

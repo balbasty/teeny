@@ -19,9 +19,9 @@ namespace cs = cuda::std;
 // (its argument is a cuda::std::mdspan, so ADL would not find it).
 template <class T, class Shape, class Layout = cs::layout_right, own O = own::view>
 struct tensor;
-template <class MD>
+template <own OW = own::view, class MD>
 _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
-                typename MD::layout_type, own::view>
+                typename MD::layout_type, OW>
 as_tensor(const MD & m);
 
 /**
@@ -75,6 +75,11 @@ struct tensor : private Layout::template mapping<Shape> {
 
     static constexpr own  ownership = O;
     static constexpr bool is_static = (Shape::rank_dynamic() == 0);
+    // memory-space flags (mirror the own_* helpers, as compile-time constants):
+    static constexpr bool is_view            = own_is_view(O);             // view or gpu_view
+    static constexpr bool is_owning          = own_is_owning(O);           // heap/gpu/pinned/mapped
+    static constexpr bool is_device          = own_is_device(O);           // gpu or gpu_view
+    static constexpr bool is_host_accessible = own_is_host_accessible(O);  // dereferenceable on the host
     static constexpr cs::size_t buffer_size = storage_size<mapping_type, O == own::stack>::value;
     static_assert(O != own::stack || is_static, "stack tensor needs a fully static shape");
 
@@ -84,18 +89,18 @@ struct tensor : private Layout::template mapping<Shape> {
     tensor() = default;
 
     /** @brief View constructor: wrap `p` with the given mapping. */
-    template <own OO = O, cs::enable_if_t<OO == own::view, int> = 0>
+    template <own OO = O, cs::enable_if_t<own_is_view(OO), int> = 0>
     _TNY_API tensor(T * p, mapping_type m) : mapping_type(m), store_(p) {}
 
     /** @brief View constructor from a pointer alone — for a fully-static geometry
      *         (static extents AND a fully determined layout: contiguous, or an
      *         all-static `strides<...>`). e.g. `tensor<float, shape<3,4>, strides<4,1>>(ptr)`. */
-    template <own OO = O, cs::enable_if_t<OO == own::view && is_static &&
+    template <own OO = O, cs::enable_if_t<own_is_view(OO) && is_static &&
               (_contiguous_layout<Layout>::value || _strides_all_static<Layout>::value), int> = 0>
     _TNY_API explicit tensor(T * p) : mapping_type(), store_(p) {}   // explicit: no silent T* -> tensor
 
     /** @brief View constructor from a pointer + extents (contiguous / static-stride layouts). */
-    template <own OO = O, cs::enable_if_t<OO == own::view && cs::is_constructible<mapping_type, Shape>::value, int> = 0>
+    template <own OO = O, cs::enable_if_t<own_is_view(OO) && cs::is_constructible<mapping_type, Shape>::value, int> = 0>
     _TNY_API tensor(T * p, Shape e) : mapping_type(e), store_(p) {}
 
     // Allocation size from a mapping, guarded: a negative required_span_size
@@ -301,11 +306,11 @@ private:
         cs::array<index_type, Nk> ea{};
         for (cs::size_t i = 0; i < Nk; ++i) ea[i] = ext[i];
         if constexpr (SF::ndyn() == 0) {   // every kept stride folded -> EBO mapping
-            return tensor<Vt, OE, SF, own::view>(p + off, Map(OE(ea)));
+            return tensor<Vt, OE, SF, own_view_of(O)>(p + off, Map(OE(ea)));
         } else {                           // supply the runtime strides for the dynamic slots
             cs::array<index_type, SF::ndyn()> dyn{};
             for (cs::size_t i = 0; i < Nk; ++i) if (SF::S_[i] == dynamic_stride) dyn[SF::slot(i)] = str[i];
-            return tensor<Vt, OE, SF, own::view>(p + off, Map(OE(ea), dyn));
+            return tensor<Vt, OE, SF, own_view_of(O)>(p + off, Map(OE(ea), dyn));
         }
     }
     // ellipsis expansion: for output axis O, pick the front arg, an inserted
@@ -356,12 +361,12 @@ public:
     template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
     _TNY_API auto at(Args... a) noexcept {
         using E0 = cs::extents<index_type>;   // rank 0
-        return tensor<T, E0, cs::layout_right, own::view>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
+        return tensor<T, E0, cs::layout_right, own_view_of(O)>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
     }
     template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
     _TNY_API auto at(Args... a) const noexcept {
         using E0 = cs::extents<index_type>;
-        return tensor<const T, E0, cs::layout_right, own::view>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
+        return tensor<const T, E0, cs::layout_right, own_view_of(O)>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
     }
 
     /** @brief Scatter-accumulate: `(*this)(i...) += v`, atomic on the device —
@@ -454,19 +459,19 @@ public:
     /** @brief Reorder the axes (a permutation of 0..N-1; negatives wrap) -> a rank-N view. */
     template <long... Perm>
     _TNY_API auto permute() noexcept
-    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor(_detail::perm_md(view(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
+    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor<own_view_of(O)>(_detail::perm_md(view(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
     template <long... Perm>
     _TNY_API auto permute() const noexcept
-    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor(_detail::perm_md(view(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
+    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor<own_view_of(O)>(_detail::perm_md(view(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
 
     /** @brief Reverse axis `Ax` (negatives wrap) -> a view (numpy `flip`). Uses a
      *         negative stride, so the index type must be signed (`shape<...>` is). */
     template <long Ax = 0>
     _TNY_API auto flip() noexcept
-    { return as_tensor(_detail::flip_md<_norm_axis(Ax, rank())>(view(), cs::make_index_sequence<rank()>{})); }
+    { return as_tensor<own_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(view(), cs::make_index_sequence<rank()>{})); }
     template <long Ax = 0>
     _TNY_API auto flip() const noexcept
-    { return as_tensor(_detail::flip_md<_norm_axis(Ax, rank())>(view(), cs::make_index_sequence<rank()>{})); }
+    { return as_tensor<own_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(view(), cs::make_index_sequence<rank()>{})); }
 
     /** @brief A dense, row-major OWNING copy of this tensor (materialise a view /
      *         non-contiguous / permuted / flipped tensor). Static shape -> stack
@@ -499,7 +504,7 @@ private:
         _TNY_CHECK(known != 0 && numel() % known == 0, "reshape: numel not divisible by given extents");
         const index_type inferred = numel() / (known ? known : index_type(1));
         cs::array<index_type, sizeof...(NewExt)> ea{ (NewExt < 0 ? inferred : index_type(NewExt))... };
-        return tensor<El, NE, cs::layout_right, own::view>(p, typename cs::layout_right::template mapping<NE>(NE(ea)));
+        return tensor<El, NE, cs::layout_right, own_view_of(O)>(p, typename cs::layout_right::template mapping<NE>(NE(ea)));
     }
 public:
     /** @brief View this tensor as a new shape — requires it be C-contiguous
@@ -521,7 +526,7 @@ private:
         ( _TNY_CHECK(NewE::static_extent(D) == cs::dynamic_extent ||
                      static_cast<index_type>(NewE::static_extent(D)) == static_cast<index_type>(extent(D)),
                      "recast: a static dim does not match the actual extent"), ... );
-        return tensor<El, NewE, cs::layout_right, own::view>(
+        return tensor<El, NewE, cs::layout_right, own_view_of(O)>(
             p, typename cs::layout_right::template mapping<NewE>(NewE(cs::array<index_type, rank()>{ static_cast<index_type>(extent(D))... })));
     }
 public:
@@ -538,12 +543,12 @@ public:
     _TNY_API auto flatten() noexcept {
         using NE = cs::dextents<index_type, 1>;
         _TNY_CHECK(is_contiguous<cs::layout_right>(), "flatten: needs a C-contiguous tensor (clone() first)");
-        return tensor<T, NE, cs::layout_right, own::view>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{ numel() }));
+        return tensor<T, NE, cs::layout_right, own_view_of(O)>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{ numel() }));
     }
     _TNY_API auto flatten() const noexcept {
         using NE = cs::dextents<index_type, 1>;
         _TNY_CHECK(is_contiguous<cs::layout_right>(), "flatten: needs a C-contiguous tensor (clone() first)");
-        return tensor<const T, NE, cs::layout_right, own::view>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{ numel() }));
+        return tensor<const T, NE, cs::layout_right, own_view_of(O)>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{ numel() }));
     }
 
     /** @brief Insert a size-1 axis at position `Ax` (numpy `newaxis`/`unsqueeze`)
@@ -551,10 +556,10 @@ public:
      *         `.unsqueeze<-1>()` appends a trailing axis: `(H,W)` -> `(H,W,1)`. */
     template <long Ax = 0>
     _TNY_API auto unsqueeze() noexcept
-    { constexpr cs::size_t A = _norm_axis(Ax, rank() + 1); static_assert(A <= rank(), "unsqueeze: axis out of range"); return as_tensor(_detail::unsqueeze_md<A>(view(), cs::make_index_sequence<rank() + 1>{})); }
+    { constexpr cs::size_t A = _norm_axis(Ax, rank() + 1); static_assert(A <= rank(), "unsqueeze: axis out of range"); return as_tensor<own_view_of(O)>(_detail::unsqueeze_md<A>(view(), cs::make_index_sequence<rank() + 1>{})); }
     template <long Ax = 0>
     _TNY_API auto unsqueeze() const noexcept
-    { constexpr cs::size_t A = _norm_axis(Ax, rank() + 1); static_assert(A <= rank(), "unsqueeze: axis out of range"); return as_tensor(_detail::unsqueeze_md<A>(view(), cs::make_index_sequence<rank() + 1>{})); }
+    { constexpr cs::size_t A = _norm_axis(Ax, rank() + 1); static_assert(A <= rank(), "unsqueeze: axis out of range"); return as_tensor<own_view_of(O)>(_detail::unsqueeze_md<A>(view(), cs::make_index_sequence<rank() + 1>{})); }
 
 private:
     static constexpr long _ax_all = cs::numeric_limits<long>::min();   // squeeze() sentinel: "all singletons"
@@ -575,13 +580,13 @@ public:
     _TNY_API auto squeeze() noexcept {
         if constexpr (Ax == _ax_all) return _squeeze_all(store_.data(), cs::make_index_sequence<rank()>{});
         else { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range");
-               return as_tensor(_detail::squeeze_md<A>(view(), cs::make_index_sequence<rank() - 1>{})); }
+               return as_tensor<own_view_of(O)>(_detail::squeeze_md<A>(view(), cs::make_index_sequence<rank() - 1>{})); }
     }
     template <long Ax = _ax_all>
     _TNY_API auto squeeze() const noexcept {
         if constexpr (Ax == _ax_all) return _squeeze_all(store_.data(), cs::make_index_sequence<rank()>{});
         else { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range");
-               return as_tensor(_detail::squeeze_md<A>(view(), cs::make_index_sequence<rank() - 1>{})); }
+               return as_tensor<own_view_of(O)>(_detail::squeeze_md<A>(view(), cs::make_index_sequence<rank() - 1>{})); }
     }
 
     /* --- value-form axis args: x.squeeze(Int<1>()) == x.squeeze<1>() ---- *
@@ -736,6 +741,13 @@ wrap(T * p, Shape e, cs::array<typename Shape::index_type, strides<S0, Srest...>
     return Tn(p, typename Tn::mapping_type(e, dyn));
 }
 
+/** @brief Compile-time memory-space traits (SFINAE-friendly free forms of the
+ *         tensor's `is_view`/`is_device`/… members): `is_view_v<decltype(x)>`. */
+template <class Tn> inline constexpr bool is_view_v            = Tn::is_view;
+template <class Tn> inline constexpr bool is_owning_v          = Tn::is_owning;
+template <class Tn> inline constexpr bool is_device_v          = Tn::is_device;
+template <class Tn> inline constexpr bool is_host_accessible_v = Tn::is_host_accessible;
+
 /** @brief A non-owning view type. Construct as `view_t<T,E>(ptr, extents)`. */
 template <class T, class Shape, class Layout = cs::layout_right>
 using view_t = tensor<T, Shape, Layout, own::view>;
@@ -813,12 +825,12 @@ _TNY_API auto arange(cs::integral_constant<V, N>) { return arange<T, static_cast
 
 /** @brief Wrap any `cuda::std::mdspan` (e.g. a `submdspan` result) as a
  *         non-owning `md::tensor` view, so the tensor API applies to it. */
-template <class MD>
+template <own OW, class MD>
 _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
-                typename MD::layout_type, own::view>
+                typename MD::layout_type, OW>
 as_tensor(const MD & m) {
     using Tn = tensor<typename MD::element_type, typename MD::extents_type,
-                      typename MD::layout_type, own::view>;
+                      typename MD::layout_type, OW>;
     return Tn(m.data_handle(), m.mapping());
 }
 

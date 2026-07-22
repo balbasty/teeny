@@ -72,13 +72,15 @@ template <class T> _TNY_HOST bool dtype_matches(const DLDataType & d) {
     return d.code == e.code && d.bits == e.bits && d.lanes == e.lanes;
 }
 
-// teeny ownership -> DLDevice type. A plain view is space-agnostic -> kDLCPU by
-// default (override with the explicit-device to_dlpack overload).
+// teeny ownership -> DLDevice type. A device tensor/view (gpu/gpu_view) is CUDA;
+// a plain host view is kDLCPU by default (override with the explicit-device
+// to_dlpack overload).
 template <own O> _TNY_HOST constexpr DLDeviceType device_of() {
-    return O == own::gpu    ? kDLCUDA
+    return own_is_device(O) ? kDLCUDA          // gpu OR gpu_view
          : O == own::pinned ? kDLCUDAHost
-         : O == own::mapped ? kDLCUDAManaged
-                            : kDLCPU;   // view / stack / heap
+         : O == own::mapped ? kDLCUDAHost   // cudaHostAllocMapped = page-locked HOST memory (zero-copy),
+                                            //   NOT managed/UVM — kDLCUDAHost is the honest label
+                            : kDLCPU;   // host view / stack / heap
 }
 
 // The heap block that backs an exported DLManagedTensor: the managed struct, the
@@ -128,13 +130,14 @@ _TNY_HOST DLManagedTensor * make_managed(const tensor<T, Shape, Layout, O> & t, 
 
 /* ============================ export (teeny -> DLPack) ============================ */
 
-/** @brief Export a **view** to a `DLManagedTensor` (borrows the data — the caller
- *         must keep the underlying memory alive; only the metadata is owned by the
- *         capsule). The device defaults to the tensor's memory space (CPU for a
- *         plain view; pass `dev` to override). The consumer owns the returned
- *         pointer and MUST call `m->deleter(m)` exactly once when done. */
+/** @brief Export a **view** (host `view` or device `gpu_view`) to a
+ *         `DLManagedTensor` (borrows the data — the caller must keep the
+ *         underlying memory alive; only the metadata is owned by the capsule).
+ *         The device defaults to the tensor's memory space (`kDLCPU` for a host
+ *         view, `kDLCUDA` for a `gpu_view`; pass `dev` to override). The consumer
+ *         owns the returned pointer and MUST call `m->deleter(m)` exactly once. */
 template <class T, class Shape, class Layout, own O,
-          cs::enable_if_t<O == own::view, int> = 0>
+          cs::enable_if_t<own_is_view(O), int> = 0>
 _TNY_HOST DLManagedTensor * to_dlpack(const tensor<T, Shape, Layout, O> & t,
                                       DLDevice dev = { _dl::device_of<O>(), 0 }) {
     return _dl::make_managed(t, dev, _dl::no_owner{});
@@ -159,9 +162,12 @@ _TNY_HOST DLManagedTensor * to_dlpack(tensor<T, Shape, Layout, O> && t) {
  *         `m` alive while the view is used, then calls `m->deleter(m)`. A null
  *         `strides` (DLPack's C-contiguous shorthand) is expanded to row-major.
  *         `byte_offset` is folded into the data pointer. NB the `device` field is
- *         not inspected — teeny views are memory-space-agnostic, so a `kDLCUDA`
- *         capsule yields a view over the (device) pointer; consult
- *         `m->dl_tensor.device` yourself if you need to know where it lives. */
+ *         not inspected: the imported carrier is currently HOST-tagged
+ *         (`anyrank`/`dyn_tensor` have no memory-space parameter yet), so a
+ *         `kDLCUDA` capsule yields a host-tagged view over a device pointer —
+ *         consult `m->dl_tensor.device` yourself before dereferencing on the host.
+ *         (Tagging the rank-erased boundary with its space is tracked as
+ *         follow-up on #15.) */
 template <class T>
 _TNY_HOST anyrank<T, cs::int64_t> from_dlpack(const DLManagedTensor * m) {
     const DLTensor & dt = m->dl_tensor;
