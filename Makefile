@@ -50,6 +50,7 @@ TESTS = \
 	$(BUILDDIR)/test_distance_l1 \
 	$(BUILDDIR)/test_pull \
 	$(BUILDDIR)/test_posdef \
+	$(BUILDDIR)/test_dlpack \
 	$(BUILDDIR)/test_cuda
 
 EXAMPLES = \
