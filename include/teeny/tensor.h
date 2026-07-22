@@ -3,6 +3,7 @@
 #include <cuda/std/mdspan>
 #include <cuda/std/tuple>
 #include <cuda/std/utility>
+#include <cuda/std/limits>
 #include <cuda/std/type_traits>
 #include <teeny/defines.h>
 #include <teeny/storage.h>
@@ -427,13 +428,50 @@ public:
     _TNY_API auto unsqueeze() const noexcept
     { constexpr cs::size_t A = _norm_axis(Ax, rank() + 1); static_assert(A <= rank(), "unsqueeze: axis out of range"); return as_tensor(_detail::unsqueeze_md<A>(view(), cs::make_index_sequence<rank() + 1>{})); }
 
-    /** @brief Drop axis `Ax` (extent 1; negatives wrap) -> a rank-(N-1) view. */
-    template <long Ax>
-    _TNY_API auto squeeze() noexcept
-    { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range"); return as_tensor(_detail::squeeze_md<A>(view(), cs::make_index_sequence<rank() - 1>{})); }
-    template <long Ax>
-    _TNY_API auto squeeze() const noexcept
-    { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range"); return as_tensor(_detail::squeeze_md<A>(view(), cs::make_index_sequence<rank() - 1>{})); }
+private:
+    static constexpr long _ax_all = cs::numeric_limits<long>::min();   // squeeze() sentinel: "all singletons"
+    // gather arg for axis D when squeezing all singletons: drop a STATIC size-1
+    // axis (index 0), keep the rest. (A dynamic axis that is 1 only at run time
+    // can't be dropped — the rank must stay static.)
+    template <cs::size_t D> static _TNY_API auto _sq_arg() noexcept {
+        if constexpr (Extents::static_extent(D) == 1) return cs::integral_constant<index_type, 0>{};
+        else                                          return cs::full_extent;
+    }
+    template <class P, cs::size_t... D>
+    _TNY_API auto _squeeze_all(P p, cs::index_sequence<D...>) const noexcept
+    { return _slice_range(p, cs::make_index_sequence<rank()>{}, _sq_arg<D>()...); }
+public:
+    /** @brief Drop a size-1 axis `Ax` (negatives wrap) -> a rank-(N-1) view.
+     *         `squeeze()` (no axis) drops EVERY statically-size-1 axis. */
+    template <long Ax = _ax_all>
+    _TNY_API auto squeeze() noexcept {
+        if constexpr (Ax == _ax_all) return _squeeze_all(store_.data(), cs::make_index_sequence<rank()>{});
+        else { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range");
+               return as_tensor(_detail::squeeze_md<A>(view(), cs::make_index_sequence<rank() - 1>{})); }
+    }
+    template <long Ax = _ax_all>
+    _TNY_API auto squeeze() const noexcept {
+        if constexpr (Ax == _ax_all) return _squeeze_all(store_.data(), cs::make_index_sequence<rank()>{});
+        else { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range");
+               return as_tensor(_detail::squeeze_md<A>(view(), cs::make_index_sequence<rank() - 1>{})); }
+    }
+
+    /* --- value-form axis args: x.squeeze(Int<1>()) == x.squeeze<1>() ---- *
+     * Accept a static integer (`integral_constant`, e.g. `Int<k>()`) in place
+     * of the `<k>` template argument, for call sites that prefer the value
+     * spelling. `recast(shape<...>{})` deduces the target extents from a value. */
+    template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0> _TNY_API auto flip(I)            noexcept { return flip<static_cast<long>(I::value)>(); }
+    template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0> _TNY_API auto flip(I)      const noexcept { return flip<static_cast<long>(I::value)>(); }
+    template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0> _TNY_API auto squeeze(I)         noexcept { return squeeze<static_cast<long>(I::value)>(); }
+    template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0> _TNY_API auto squeeze(I)   const noexcept { return squeeze<static_cast<long>(I::value)>(); }
+    template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0> _TNY_API auto unsqueeze(I)       noexcept { return unsqueeze<static_cast<long>(I::value)>(); }
+    template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0> _TNY_API auto unsqueeze(I) const noexcept { return unsqueeze<static_cast<long>(I::value)>(); }
+    template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && (_is_ic<I>::value && ...), int> = 0> _TNY_API auto permute(I...)       noexcept { return permute<static_cast<long>(I::value)...>(); }
+    template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && (_is_ic<I>::value && ...), int> = 0> _TNY_API auto permute(I...) const noexcept { return permute<static_cast<long>(I::value)...>(); }
+    template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && (_is_ic<I>::value && ...), int> = 0> _TNY_API auto reshape(I...)       noexcept { return reshape<static_cast<long>(I::value)...>(); }
+    template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && (_is_ic<I>::value && ...), int> = 0> _TNY_API auto reshape(I...) const noexcept { return reshape<static_cast<long>(I::value)...>(); }
+    template <class NewE> _TNY_API auto recast(NewE)       { return recast<NewE>(); }
+    template <class NewE> _TNY_API auto recast(NewE) const { return recast<NewE>(); }
 
     /* --- in-place elementwise math (declared here, defined in math.h) --- *
      * tensor rhs broadcasts; a scalar rhs applies to all. add_/sub_ take a
