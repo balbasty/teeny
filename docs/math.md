@@ -125,3 +125,24 @@ path). Reducing over every axis is the scalar form above.
 For `half`/`bfloat16`, reductions accumulate in `float` (via `compute_type<T>`)
 and cast back, so summing many 16-bit values doesn't stall. See
 [Half precision](half.md).
+
+## Comparisons → a bool tensor
+
+`==`, `!=`, `<`, `<=`, `>`, `>=` broadcast like the arithmetic and return a
+`bool` tensor. A scalar may be on either side (`s < a` is `a > s`).
+
+```cpp
+auto m = a < b;      // bool tensor, broadcast
+auto p = a >= 2.0;   auto q = 3.0 < a;   // scalar either side
+```
+
+Reduce a mask with `.all()` / `.any()` — **members**, because `all` is the slice
+keyword. They chain after a comparison:
+
+```cpp
+if ((a < b).all())  ...   // every element a < b
+if ((a > 0).any())  ...   // some element positive
+```
+
+`sum()` preserves dtype, so `sum(mask)` is a saturating `bool`, not a count — use
+`.all()`/`.any()`, or cast the mask, to reduce a comparison.

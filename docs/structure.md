@@ -3,11 +3,16 @@
 These return **views** (no copy) that rearrange, reshape, or iterate a tensor.
 Axis template arguments are signed — **negatives count from the back**.
 
+Every axis argument has a **value form** too: pass a static integer
+(`Int<k>()`) instead of the `<k>` template argument — `t.squeeze(Int<1>())` ==
+`t.squeeze<1>()`. Both spellings are equivalent.
+
 ## Rearrange axes
 
 ```cpp
 t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1)
 t.permute<-1,0,1>();  // negatives allowed
+t.permute(Int<2>(), Int<0>(), Int<1>());   // value form
 t.flip<1>();          // reverse an axis (a negative-stride view; needs a signed
                       //   index type, which shape<...> is)
 ```
@@ -17,7 +22,8 @@ t.flip<1>();          // reverse an axis (a negative-stride view; needs a signed
 ```cpp
 t.unsqueeze<2>();     // insert a size-1 axis (numpy newaxis) -> rank+1
 t.unsqueeze<-1>();    // append a trailing axis, e.g. (H,W) -> (H,W,1)
-t.squeeze<3>();       // drop a size-1 axis -> rank-1
+t.squeeze<3>();       // drop a specific size-1 axis -> rank-1
+t.squeeze();          // drop EVERY statically-size-1 axis
 t.reshape<6,4>();     // view as a new shape (needs C-contiguous, same numel)
 t.reshape<6,-1>();    // one -1 dimension is inferred from numel
 t.flatten();          // view as 1-D (ravel)
