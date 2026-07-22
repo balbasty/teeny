@@ -120,7 +120,9 @@ t.stride(Int<1>());   // static when derivable (static-stride layout; contiguous
 t.data();  t.view();  t.extents();  t.shape();  t.mapping();
 
 // --- indexing / slicing (python-like) ---
-t(1, 2, 3);           // element access; negative indices wrap (count from the back)
+t(1, 2, 3);           // element access -> T& ; negative indices wrap (count from the back)
+t.at(1, 2, 3);        // same element as a rank-0 VIEW (has add_/etc.); rank-0 <-> scalar
+                      //   (implicit to/from T, `.item()`). add_at(v,i...) == at(i...).add_<true>(v)
 t(0, all, slice(1,4));  // any slice arg -> a lower-/same-rank VIEW. all = keep axis,
                       //   slice(a,b) = half-open [a,b). Integer args drop that axis.
 t(0, slice(none,4), slice(1,none,2));  // python-like: none = open end, 3rd arg = step.
@@ -142,6 +144,8 @@ t(all, slice(none,none,-1));    // reverse a range (negative step; a[::-1])
 // --- math (in-place: any tensor/view; mutates *this) ---
 a.add_(b); a.sub_(b); a.mul_(b); a.div_(b);   // tensor rhs BROADCASTS numpy-style
 a.add_(2.0); a.mul_(0.5);                     // scalar rhs
+a += b; a -= 2.0; a *= b; a /= 2.0;           // compound-assign sugar (scalar or tensor)
+a.add_<true>(b); a.sub_<true>(2.0);           // ATOMIC accumulate (device scatter/push)
 a.neg_(); a.abs_(); a.exp_(); a.log_();       // unary in-place
 a.sin_(); a.cos_(); a.sqrt_(); a.tanh_(); a.pow_(3.0);
 
@@ -157,7 +161,8 @@ auto z = zeros<T>(shape); ones<T>(sh); full<T>(sh,v); arange<T>(n);  // creation
 // result type = promote(A,B): C++ rules, but among floats the LOWER width wins
 //   (half>float>double, pytorch-style). Opt out with -DTNY_STD_PROMOTION.
 auto c = a + b;  auto c = a.add(b);   // tensor+tensor (broadcasts) or tensor+scalar
-auto c = a * 2.0;  auto c = 2.0 * a;  // scalar ops (+ and * are commutative)
+auto c = a * 2.0;  auto c = 2.0 * a;  // scalar ops (+ and * commute; 2.0-a and 1.0/a reversed)
+auto c = -a;                          // unary minus -> new tensor
 auto c = a.pow(b);                    // element-wise power
 auto e = exp(a); auto e = sqrt(a);    // unary free functions (neg/abs/exp/log/sin/cos/sqrt/tanh)
 

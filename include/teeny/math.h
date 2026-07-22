@@ -77,9 +77,21 @@ struct sub { template <class X, class Y> _TNY_API X operator()(X x, Y y) const {
 struct mul { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x * static_cast<X>(y); } };
 struct div { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x / static_cast<X>(y); } };
 
+/* ---- reversed scalar ops (out = scalar OP x, for scalar-on-the-left) */
+struct rsub { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return static_cast<X>(y) - x; } };  // s - x
+struct rdiv { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return static_cast<X>(y) / x; } };  // s / x
+
 /* ---- assignment functors ----------------------------------------- */
 struct rhs  { template <class X, class Y> _TNY_API X operator()(X, Y y) const { return static_cast<X>(y); } };  // c = b
+struct nrhs { template <class X, class Y> _TNY_API X operator()(X, Y y) const { return -static_cast<X>(y); } }; // c += (-b) atomic sub
 struct setc { template <class X> _TNY_API X operator()(X, X s) const { return s; } };                          // c = s
+
+/* ---- write policies: how an engine commits op(...) to c ---------- *
+ * `w_set` overwrites; `w_add` accumulates ATOMICALLY on device (the   *
+ * scatter/push write). In-place add_/sub_ pick the policy via their   *
+ * `Atomic` flag; every other engine defaults to w_set.                */
+struct w_set { template <class P, class V> _TNY_API void operator()(P * p, V v) const { *p = static_cast<P>(v); } };
+struct w_add { template <class P, class V> _TNY_API void operator()(P * p, V v) const { fetch_add(p, static_cast<P>(v)); } };
 
 /* ---- unary functors (cuda::std math -> device-callable) ---------- */
 struct u_neg  { template <class X> _TNY_API X operator()(X x) const { return -x; } };
@@ -140,7 +152,7 @@ _TNY_API constexpr bool bc_static_ok(cs::index_sequence<D...>) {
     return ok;
 }
 
-template <class C, class A, class B, class Op, cs::size_t... D>
+template <class W, class C, class A, class B, class Op, cs::size_t... D>
 _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
     using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
     const I ce[] = { c.extent(D)... }, sc[] = { c.stride(D)... };
@@ -161,20 +173,20 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
             oa += (ae[d] == 1 ? I(0) : k) * sa[d];
             ob += (be[d] == 1 ? I(0) : k) * sb[d];
         }
-        c.data()[oc] = op(static_cast<Cv>(a.data()[oa]), static_cast<Cv>(b.data()[ob]));
+        W{}(&c.data()[oc], op(static_cast<Cv>(a.data()[oa]), static_cast<Cv>(b.data()[ob])));
     }
 }
-template <class C, class A, class B, class Op>
+template <class W = w_set, class C, class A, class B, class Op>
 _TNY_API void bzip(C & c, const A & a, const B & b, Op op) {
     static_assert(A::rank() == C::rank() && B::rank() == C::rank(), "broadcast: rank mismatch");
     static_assert(bc_static_ok<typename A::extents_type, typename B::extents_type>(
                       cs::make_index_sequence<C::rank()>{}),
                   "broadcast: incompatible static extents");
-    bzip_(c, a, b, op, cs::make_index_sequence<C::rank()>{});
+    bzip_<W>(c, a, b, op, cs::make_index_sequence<C::rank()>{});
 }
 
 /* ---- c = op(c, scalar), elementwise ------------------------------ */
-template <class C, class Op, cs::size_t... D>
+template <class W, class C, class Op, cs::size_t... D>
 _TNY_API void scal_(C & c, typename C::element_type s, Op op, cs::index_sequence<D...>) {
     using I  = typename C::index_type;
     using Cv = compute_type_t<typename C::element_type>;   // compute in float for half types
@@ -188,12 +200,12 @@ _TNY_API void scal_(C & c, typename C::element_type s, Op op, cs::index_sequence
         for (int d = static_cast<int>(sizeof...(D)) - 1; d >= 0; --d) {
             I k = rem % e[d]; rem /= e[d]; oc += k * sc[d];
         }
-        c.data()[oc] = op(static_cast<Cv>(c.data()[oc]), sv);
+        W{}(&c.data()[oc], op(static_cast<Cv>(c.data()[oc]), sv));
     }
 }
-template <class C, class Op>
+template <class W = w_set, class C, class Op>
 _TNY_API void scal(C & c, typename C::element_type s, Op op) {
-    scal_(c, s, op, cs::make_index_sequence<C::rank()>{});
+    scal_<W>(c, s, op, cs::make_index_sequence<C::rank()>{});
 }
 
 /* ---- c = start, start+step, ... in row-major logical order -------- */
@@ -347,16 +359,37 @@ _TNY_API R reduce_(const A & a, R init, Op op, cs::index_sequence<D...>) {
  *     In-place members                                               *
  * ------------------------------------------------------------------ */
 
-template <class T,class E,class L,own O> template <class B>
-_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::add_(const B & b) { _md::bzip(*this,*this,b,_md::add{}); return *this; }
-template <class T,class E,class L,own O> template <class B>
-_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::sub_(const B & b) { _md::bzip(*this,*this,b,_md::sub{}); return *this; }
-template <class T,class E,class L,own O> template <class B>
+// tensor rhs (broadcasts). add_/sub_ take an `Atomic` flag: when true the write
+// is `fetch_add` (atomic on device) — the scatter/"push" accumulate — so the op
+// commits a DELTA (rhs, or -rhs for sub) rather than a read-modify-write.
+template <class T,class E,class L,own O> template <bool Atomic, class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::add_(const B & b) {
+    if constexpr (Atomic) _md::bzip<_md::w_add>(*this,*this,b,_md::rhs{});
+    else                  _md::bzip(*this,*this,b,_md::add{});
+    return *this;
+}
+template <class T,class E,class L,own O> template <bool Atomic, class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::sub_(const B & b) {
+    if constexpr (Atomic) _md::bzip<_md::w_add>(*this,*this,b,_md::nrhs{});
+    else                  _md::bzip(*this,*this,b,_md::sub{});
+    return *this;
+}
+template <class T,class E,class L,own O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::mul_(const B & b) { _md::bzip(*this,*this,b,_md::mul{}); return *this; }
-template <class T,class E,class L,own O> template <class B>
+template <class T,class E,class L,own O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::div_(const B & b) { _md::bzip(*this,*this,b,_md::div{}); return *this; }
-template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::add_(T s) { _md::scal(*this,s,_md::add{}); return *this; }
-template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::sub_(T s) { _md::scal(*this,s,_md::sub{}); return *this; }
+template <class T,class E,class L,own O> template <bool Atomic>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::add_(T s) {
+    if constexpr (Atomic) _md::scal<_md::w_add>(*this,s,_md::rhs{});
+    else                  _md::scal(*this,s,_md::add{});
+    return *this;
+}
+template <class T,class E,class L,own O> template <bool Atomic>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::sub_(T s) {
+    if constexpr (Atomic) _md::scal<_md::w_add>(*this,s,_md::nrhs{});
+    else                  _md::scal(*this,s,_md::sub{});
+    return *this;
+}
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::mul_(T s) { _md::scal(*this,s,_md::mul{}); return *this; }
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::div_(T s) { _md::scal(*this,s,_md::div{}); return *this; }
 template <class T,class E,class L,own O> template <class B>
@@ -407,11 +440,20 @@ _TNY_MD_SCALOP(-, _md::sub)
 _TNY_MD_SCALOP(*, _md::mul)
 _TNY_MD_SCALOP(/, _md::div)
 #undef _TNY_MD_SCALOP
-// scalar (+)/(*) tensor  (commutative)
+// scalar (op) tensor. + and * are commutative; - and / need the reversed op
+// (s - a, s / a) so `2.0 - a` and `1.0 / a` do the right thing.
 template <class S, class T,class E,class L,own O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
 _TNY_API auto operator+(S s, const tensor<T,E,L,O> & a) { return _md::oops(a, s, _md::add{}); }
 template <class S, class T,class E,class L,own O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
 _TNY_API auto operator*(S s, const tensor<T,E,L,O> & a) { return _md::oops(a, s, _md::mul{}); }
+template <class S, class T,class E,class L,own O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
+_TNY_API auto operator-(S s, const tensor<T,E,L,O> & a) { return _md::oops(a, s, _md::rsub{}); }
+template <class S, class T,class E,class L,own O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
+_TNY_API auto operator/(S s, const tensor<T,E,L,O> & a) { return _md::oops(a, s, _md::rdiv{}); }
+
+// unary minus -> a fresh negated tensor.
+template <class T,class E,class L,own O>
+_TNY_API auto operator-(const tensor<T,E,L,O> & a) { return _md::uop_out(a, _md::u_neg{}); }
 
 /* --- in-place unary methods --------------------------------------- */
 #define _TNY_MD_UNARY_(NAME, F)                                                                   \

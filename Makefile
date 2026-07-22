@@ -26,6 +26,7 @@ TESTS = \
 	$(BUILDDIR)/test_tensor \
 	$(BUILDDIR)/test_math \
 	$(BUILDDIR)/test_mathops \
+	$(BUILDDIR)/test_ops \
 	$(BUILDDIR)/test_iterate \
 	$(BUILDDIR)/test_subperm \
 	$(BUILDDIR)/test_takealong \

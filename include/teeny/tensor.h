@@ -264,12 +264,29 @@ public:
     _TNY_API const T & operator()(Args... a) const noexcept
     { return store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]; }
 
-    /** @brief Scatter-accumulate: `(*this)(i...) += v`, atomic on the device.
-     *         The write half of a "push"/splat kernel. Integer indices only
-     *         (negatives wrap, like `operator()`). */
+    /** @brief `at(i...)` — a single element as a **rank-0 VIEW** (all-integer
+     *         args; negatives wrap). Unlike `operator()`, which returns a plain
+     *         `T&`, this is a view, so the whole tensor API applies to one
+     *         element: `x.at(i,j) = 3` writes it, `float v = x.at(i,j)` reads it
+     *         (rank-0 tensors convert to/from `T`), and `x.at(i,j).add_<true>(v)`
+     *         is an atomic scatter. */
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API auto at(Args... a) noexcept {
+        using E0 = cs::extents<index_type>;   // rank 0
+        return tensor<T, E0, cs::layout_right, own::view>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
+    }
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API auto at(Args... a) const noexcept {
+        using E0 = cs::extents<index_type>;
+        return tensor<const T, E0, cs::layout_right, own::view>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
+    }
+
+    /** @brief Scatter-accumulate: `(*this)(i...) += v`, atomic on the device —
+     *         the write half of a "push"/splat kernel. Shorthand for
+     *         `at(i...).add_<true>(v)` (integer indices only; negatives wrap). */
     template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
     _TNY_API void add_at(T v, Args... a) noexcept
-    { fetch_add(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)], v); }
+    { at(a...).template add_<true>(v); }
 
     /** @brief Sub-view when any argument is a slice (`all`, `slice(a,b[,step])`).
      *         A real range (with an optional negative step) builds a layout_stride
@@ -284,6 +301,18 @@ public:
         if constexpr (_any_range<Args...>::value) return _slice_range(store_.data(), cs::make_index_sequence<rank()>{}, a...);
         else                                      return _slice(view(), cs::make_index_sequence<rank()>{}, a...);
     }
+
+    /* --- rank-0 <-> scalar interop -------------------------------- *
+     * A rank-0 tensor holds exactly one element, so it acts like a scalar:
+     * it converts to `T` (read) and is assignable from `T` (write). Together
+     * with the math API this makes `at(i...)` a drop-in for a scalar lvalue. */
+    template <cs::size_t R = rank(), cs::enable_if_t<R == 0, int> = 0>
+    _TNY_API operator T() const noexcept { return store_.data()[0]; }
+    template <cs::size_t R = rank(), cs::enable_if_t<R == 0, int> = 0>
+    _TNY_API tensor & operator=(T v) noexcept { store_.data()[0] = v; return *this; }
+    /** @brief The single element of a rank-0 tensor (explicit reader). */
+    template <cs::size_t R = rank(), cs::enable_if_t<R == 0, int> = 0>
+    _TNY_API T item() const noexcept { return store_.data()[0]; }
 
     /* --- structural views (return md::tensor views) --------------- */
 
@@ -425,15 +454,25 @@ public:
     _TNY_API auto squeeze() const noexcept
     { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range"); return as_tensor(_detail::squeeze_md<A>(view(), cs::make_index_sequence<rank() - 1>{})); }
 
-    /* --- in-place elementwise math (declared here, defined in math.h) --- */
-    template <class B> _TNY_API tensor & add_(const B & b);
-    template <class B> _TNY_API tensor & sub_(const B & b);
-    template <class B> _TNY_API tensor & mul_(const B & b);
-    template <class B> _TNY_API tensor & div_(const B & b);
-    _TNY_API tensor & add_(T s);
-    _TNY_API tensor & sub_(T s);
+    /* --- in-place elementwise math (declared here, defined in math.h) --- *
+     * tensor rhs broadcasts; a scalar rhs applies to all. add_/sub_ take a
+     * bool `Atomic` flag (default false): `a.add_<true>(b)` commits with
+     * fetch_add — the atomic-on-device scatter/"push" write. */
+    template <bool Atomic = false, class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & add_(const B & b);
+    template <bool Atomic = false, class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & sub_(const B & b);
+    template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & mul_(const B & b);
+    template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & div_(const B & b);
+    template <bool Atomic = false> _TNY_API tensor & add_(T s);
+    template <bool Atomic = false> _TNY_API tensor & sub_(T s);
     _TNY_API tensor & mul_(T s);
     _TNY_API tensor & div_(T s);
+
+    /* --- compound assignment (sugar over the in-place ops; broadcasts a
+     *     tensor rhs, applies a scalar rhs) ------------------------------- */
+    template <class B> _TNY_API tensor & operator+=(const B & b) { if constexpr (cs::is_arithmetic<B>::value) add_(static_cast<T>(b)); else add_(b); return *this; }
+    template <class B> _TNY_API tensor & operator-=(const B & b) { if constexpr (cs::is_arithmetic<B>::value) sub_(static_cast<T>(b)); else sub_(b); return *this; }
+    template <class B> _TNY_API tensor & operator*=(const B & b) { if constexpr (cs::is_arithmetic<B>::value) mul_(static_cast<T>(b)); else mul_(b); return *this; }
+    template <class B> _TNY_API tensor & operator/=(const B & b) { if constexpr (cs::is_arithmetic<B>::value) div_(static_cast<T>(b)); else div_(b); return *this; }
 
     /* --- assignment / fill (broadcasting) ------------------------- */
     template <class B> _TNY_API tensor & copy_(const B & b);   // *this = b (broadcasts)
