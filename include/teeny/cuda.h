@@ -126,13 +126,17 @@ _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
     using Idx = typename tensor<T, Shape, Layout, O>::index_type;
     if constexpr (own_is_device(O)) {
         // Signed extent of the addressed region relative to x.data(): [lo, hi].
+        // Guard rank-0 (a single element, span 1): CCCL constrains the runtime
+        // stride(r) to rank > 0, so the loop body must not instantiate for rank 0.
         Idx lo = 0, hi = 0;
         bool empty = false;
-        for (cs::size_t r = 0; r < x.rank(); ++r) {
-            const Idx e = static_cast<Idx>(x.extent(r));
-            if (e == 0) { empty = true; break; }         // an empty axis -> nothing to copy
-            const Idx reach = static_cast<Idx>(x.stride(r)) * (e - 1);   // signed
-            if (reach < 0) lo += reach; else hi += reach;
+        if constexpr (Shape::rank() > 0) {
+            for (cs::size_t r = 0; r < x.rank(); ++r) {
+                const Idx e = static_cast<Idx>(x.extent(r));
+                if (e == 0) { empty = true; break; }     // an empty axis -> nothing to copy
+                const Idx reach = static_cast<Idx>(x.stride(r)) * (e - 1);   // signed
+                if (reach < 0) lo += reach; else hi += reach;
+            }
         }
         const cs::size_t span = empty ? 0 : static_cast<cs::size_t>(hi - lo + 1);
         auto raw = make_heap<Ts>(cs::dextents<cs::int64_t, 1>{ static_cast<cs::int64_t>(span) });   // 1-D host span buffer

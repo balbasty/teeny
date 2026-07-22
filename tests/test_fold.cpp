@@ -89,5 +89,16 @@ int main() {
     if (cc.is_contiguous(layout_left{}))    return 28;
     if (!ff.is_contiguous(layout_left{}))   return 29;
 
+    // rank-0 (an at() result): a single element is trivially dense and matches
+    // any layout — must COMPILE (was a hard error before #55) and be true.
+    auto r0 = cc.at(0,0,0);                             // cc is rank-3 -> bind all axes
+    static_assert(decltype(r0)::rank() == 0, "at() -> rank-0");
+    if (!r0.is_contiguous())               return 30;
+    if (!r0.is_contiguous<layout_right>()) return 31;
+    if (!r0.is_contiguous<layout_left>())  return 32;
+    // and a rank-0 result flows through clone() (it gates on is_contiguous<corder>())
+    auto r0c = r0.clone();
+    if (r0c.item() != cc(0,0,0))           return 33;
+
     return 0;
 }
