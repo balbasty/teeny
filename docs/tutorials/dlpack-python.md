@@ -113,7 +113,7 @@ static void invert_dlpack(double* in, double* out, const int64_t* shape,
     - **DLPack strides are in elements**, NumPy's `__array_interface__` strides
       are in **bytes** — divide by the itemsize before handing them to teeny.
     - If the input is non-contiguous, build the view with a strided layout:
-      `wrap_strided<...>` for compile-time strides, or pass the runtime strides
+      `wrap(ptr, shape, strides<S...>{})` for compile-time strides, or pass the runtime strides
       to a `strides<dynamic_stride,...>` mapping. For a *fully* runtime-strided,
       runtime-rank input use `as_anyrank(data, shape, stride, ndim)` +
       [`dispatch_rank`](../dispatch.md), then `recast<shape<-1,c,c>>()` to

@@ -25,7 +25,7 @@ int main() {
     if (d.extent(Int<0>()) != 2) return 3;
 
     // static-stride layout -> static stride even with dynamic extents
-    auto vs = wrap_strided<16,3,1>(buf, extents<long,dynamic_extent,3,3>{2});
+    auto vs = wrap(buf, extents<long,dynamic_extent,3,3>{2}, strides<16,3,1>{});
     static_assert(vs.stride(Int<0>()) == 16, "static-stride layout");
 
     // the UNIT stride of a contiguous layout is static 1 even with a dynamic shape:

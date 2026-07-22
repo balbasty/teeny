@@ -679,22 +679,49 @@ _TNY_API tensor<T, Shape, Layout, own::view> wrap(T * p, Shape e) {
  *         braced list — in ELEMENTS; strides may be negative (a reversed view).
  *
  *         `wrap(p, shape<2,3>{}, {3, 1})` is the row-major view; `{1, 2}` the
- *         column-major one. For strides known at compile time prefer
- *         `wrap_strided<S...>` (they fold into the type). */
-template <class T, class Extents>
-_TNY_API tensor<T, Extents, cs::layout_stride, own::view>
-wrap(T * p, Extents e, cs::array<typename Extents::index_type, Extents::rank()> st) {
-    using Tn = tensor<T, Extents, cs::layout_stride, own::view>;
+ *         column-major one. For strides known at compile time pass a
+ *         `strides<S...>{}` instead (overload below) so they fold into the type. */
+template <class T, class Shape>
+_TNY_API tensor<T, Shape, cs::layout_stride, own::view>
+wrap(T * p, Shape e, cs::array<typename Shape::index_type, Shape::rank()> st) {
+    using Tn = tensor<T, Shape, cs::layout_stride, own::view>;
     return Tn(p, typename Tn::mapping_type(e, st));
 }
 
-/** @brief Wrap `p` as a non-owning view with per-dimension compile-time strides
- *         (may be negative). */
+/** @brief Wrap `p` as a non-owning view with per-dimension **compile-time
+ *         strides** (may be negative): pass a `strides<S...>{}` as the third
+ *         argument. `wrap(p, shape<3,3>{}, strides<4,1>{})` folds the strides into
+ *         the type (`strides<S...>` layout, EBO). Every stride must be a
+ *         compile-time value — a `strides<...>` tag is a *stateless* layout, so it
+ *         cannot carry runtime strides. For a **mix** of static and runtime
+ *         strides, use the template form below; for all-runtime strides the
+ *         `{s...}` overload above (a `layout_stride` view) is simplest. */
 template <cs::int64_t... Strides, class T, class Shape>
 _TNY_API tensor<T, Shape, strides<Strides...>, own::view>
-wrap_strided(T * p, Shape e) {
+wrap(T * p, Shape e, strides<Strides...>) {
+    static_assert(strides<Strides...>::all_static(),
+        "wrap(ptr, shape, strides<...>{}): a strides<> tag carries only COMPILE-TIME "
+        "strides; for mixed strides use wrap<S...>(ptr, shape, {runtime slots}), or "
+        "for all-runtime strides pass the values as `{s0, s1, ...}`");
     using Tn = tensor<T, Shape, strides<Strides...>, own::view>;
     return Tn(p, typename Tn::mapping_type(e));
+}
+
+/** @brief Wrap `p` with a **mix of static and runtime strides** — the exact
+ *         analogue of `shape<-1,2,3,-1>{d0,d1}` for strides. Give the per-dim
+ *         pattern as template args (a compile-time stride, or `dynamic_stride`
+ *         for a runtime one) and the runtime strides for the `dynamic_stride`
+ *         slots as a braced list, in order:
+ *
+ *             wrap<dynamic_stride, 1>(ptr, shape<3,3>{}, {4});   // outer=4 (runtime), inner=1 (folds)
+ *             wrap<dynamic_stride, dynamic_stride>(ptr, sh, {4,1}); // both runtime (a strides<> layout)
+ *
+ *         The static slots fold into the type; only the runtime ones are stored. */
+template <cs::int64_t S0, cs::int64_t... Srest, class T, class Shape>   // S0 forces explicit <...>
+_TNY_API tensor<T, Shape, strides<S0, Srest...>, own::view>
+wrap(T * p, Shape e, cs::array<typename Shape::index_type, strides<S0, Srest...>::ndyn()> dyn) {
+    using Tn = tensor<T, Shape, strides<S0, Srest...>, own::view>;
+    return Tn(p, typename Tn::mapping_type(e, dyn));
 }
 
 /** @brief A non-owning view type. Construct as `view_t<T,E>(ptr, extents)`. */

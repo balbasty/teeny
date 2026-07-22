@@ -43,7 +43,7 @@ int main()
     double Avals[3][3] = {{4,1,1},{1,3,0},{1,0,2}};
     for (int i=0;i<3;++i) for (int j=0;j<3;++j) pad[i*4 + j] = Avals[i][j];
 
-    auto A = wrap_strided<4,1>(pad, extents<long,3,3>{});   // compile-time strides (4,1)
+    auto A = wrap(pad, extents<long,3,3>{}, strides<4,1>{});   // compile-time strides (4,1)
     static_assert(decltype(A)::rank() == 2, "matrix");
 
     // factor + solve, with stack-owned L and x (fully static shape)
