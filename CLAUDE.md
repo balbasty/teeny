@@ -47,9 +47,10 @@ include/teeny/
                    tensor.h, DEFINED here.
   iterate.h        nd-peel: peel / peel_at / peel_front / peel_front_at
   dynamic.h        anyrank (rank-erased carrier) + peel_front<Sr> + dispatch_rank
-  cuda.h           OPT-IN device/host/pinned memory (needs <cuda_runtime.h>);
-                   NOT included by teeny.h
-  teeny.h          umbrella (everything except cuda.h)
+  cuda.h           device/host/pinned memory. Self-guarded (__has_include /
+                   __CUDACC__): a no-op unless the CUDA runtime is reachable, so
+                   teeny.h includes it unconditionally. TNY_NO_CUDA forces it off.
+  teeny.h          umbrella (includes everything, cuda.h included + self-guarded)
 tests/             one file per feature; `make run-test` builds + runs all
 examples/          standalone example algorithms (see examples/README.md)
 external/cccl/     vendored CCCL 3.3.0 (libcudacxx). -I external/cccl/libcudacxx/include

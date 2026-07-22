@@ -14,5 +14,6 @@
 #include <teeny/math.h>
 #include <teeny/iterate.h>
 #include <teeny/dynamic.h>
+#include <teeny/cuda.h>   // self-guarded: no-op unless the CUDA runtime is reachable
 
 #endif // TNY_TEENY

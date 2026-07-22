@@ -1,5 +1,9 @@
 # teeny
 
+!!! warning "Vibe-coded"
+    teeny was written by an AI coding assistant and reviewed by a human. Treat it
+    as experimental — expect rough edges, and pin a commit if you depend on it.
+
 Header-only C++17 tensor library for host and CUDA device, built on NVIDIA
 CCCL's `cuda::std::mdspan`.
 

@@ -1,5 +1,9 @@
 # teeny
 
+> ⚠️ **Vibe-coded.** teeny was written by an AI coding assistant and reviewed by a
+> human. Treat it as experimental — expect rough edges, and pin a commit if you
+> depend on it.
+
 A teeny-tiny, header-only tensor library that works on host _and_ device (CUDA),
 built on NVIDIA CCCL's `cuda::std::mdspan`.
 

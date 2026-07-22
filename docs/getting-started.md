@@ -45,13 +45,15 @@ make CXX=clang++ run-test    # pick a compiler
 ## One include, one namespace
 
 ```cpp
-#include <teeny/teeny.h>   // everything except CUDA memory (opt-in via <teeny/cuda.h>)
+#include <teeny/teeny.h>   // the whole library
 using namespace tny;       // the public namespace
 ```
 
-`teeny/teeny.h` pulls in the whole library. CUDA **memory** (device / pinned
-tensors) is opt-in — `#include <teeny/cuda.h>` — because it needs the CUDA
-runtime; you do **not** need it just to pass `view`s into your own kernels.
+`teeny/teeny.h` pulls in everything, including `teeny/cuda.h`. That header adds
+CUDA **memory** (device / pinned owning tensors) and self-detects the CUDA
+runtime (`__has_include` / `__CUDACC__`): it is a no-op on a host compiler with
+no CUDA toolkit, so you never have to include or guard it yourself. Define
+`TNY_NO_CUDA` to force it off.
 
 !!! tip "Compile flags worth knowing"
     - `-DTNY_STD_PROMOTION` — use standard C++ float promotion instead of teeny's
