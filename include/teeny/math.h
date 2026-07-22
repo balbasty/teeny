@@ -465,7 +465,8 @@ _TNY_API void reduce_axes_(Out & out, const A & a, R init, Op op, const bool * r
 }
 
 // fully static result -> stack (host+device). Output element type = R (the
-// accumulator), so `sum<0>(float_tensor)` yields a double result by default.
+// accumulator), so accumulation runs in full `R` precision; the public reduction
+// (`sum<0>` etc.) then casts this down to the tensor's element type via reduce_to.
 template <long... Axes, class R, class Op, class T,class E,class L,own O,
           class OE = reduced_extents<E, Axes...>, cs::enable_if_t<OE::rank_dynamic() == 0, int> = 0>
 _TNY_API auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
@@ -486,6 +487,21 @@ _TNY_HOST auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
     tensor<R, OE, cs::layout_right, own::heap> out(oe);
     reduce_axes_<R>(out, a, init, op, red, cs::make_index_sequence<E::rank()>{});
     return out;
+}
+
+// Cast an axis-reduction RESULT (accumulated in element type `RE`) down to the
+// public result element type `Ret`, preserving shape + ownership; a no-op move
+// when `Ret == RE`. Two overloads keep the stack path _TNY_API (host+device) and
+// the heap path _TNY_HOST, mirroring the `axreduce` overload that produced `r`.
+template <class Ret, class RE, class OE>
+_TNY_API auto reduce_to(tensor<RE, OE, cs::layout_right, own::stack> && r) {
+    if constexpr (cs::is_same<Ret, RE>::value) return static_cast<tensor<RE,OE,cs::layout_right,own::stack>&&>(r);
+    else { tensor<Ret, OE, cs::layout_right, own::stack> o{}; o.copy_(r); return o; }
+}
+template <class Ret, class RE, class OE>
+_TNY_HOST auto reduce_to(tensor<RE, OE, cs::layout_right, own::heap> && r) {
+    if constexpr (cs::is_same<Ret, RE>::value) return static_cast<tensor<RE,OE,cs::layout_right,own::heap>&&>(r);
+    else { tensor<Ret, OE, cs::layout_right, own::heap> o(r.extents()); o.copy_(r); return o; }
 }
 
 /* ---- allclose: |a-b| <= atol + rtol*|b| for every (broadcast) element ---- */
@@ -716,35 +732,49 @@ using reduce_type_t = cs::conditional_t<
 // resolve an explicitly-requested accumulator (`void` -> the default above).
 template <class Acc, class T>
 using _acc_t = cs::conditional_t<cs::is_same<Acc, void>::value, reduce_type_t<T>, Acc>;
+// the RESULT element type of a reduction: the tensor's own element type `T` by
+// default (accumulate wide, then cast back down — pytorch-like), or the explicit
+// accumulator `Acc` when one is given (that IS the requested output dtype).
+template <class Acc, class T>
+using _reduce_result_t = cs::conditional_t<cs::is_same<Acc, void>::value, T, Acc>;
 
-// Reductions accumulate in (and RETURN) the accumulator type — `double` by
-// default for small floats (see reduce_type_t), so precision holds. Pass an
-// explicit accumulator to override: `sum<float>(a)`, `mean<double, 0>(a)`.
+// Reductions ACCUMULATE in the accumulator type (`double` by default for small
+// floats — see reduce_type_t, so precision holds), then CAST the result back to
+// the tensor's element type `T`. Pass an explicit accumulator to make it BOTH the
+// accumulation and the result dtype: `sum<float>(a)`, `mean<double, 0>(a)`.
 
-/** @brief Sum of all elements (empty -> 0). Accumulates in `Acc` (default: the
- *         reduce type — `double` for small floats). */
+/** @brief Sum of all elements (empty -> 0). Accumulates in the reduce type
+ *         (`double` for small floats), result cast to `T`; `sum<Acc>(a)` returns
+ *         `Acc`. */
 template <class Acc = void, class T, class E, class L, own O>
 _TNY_API auto sum(const tensor<T,E,L,O> & a) {
     using R = _acc_t<Acc, T>;
-    return _md::reduce_<R>(a, R(0), _md::r_add{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{});
+    return static_cast<_reduce_result_t<Acc,T>>(
+        _md::reduce_<R>(a, R(0), _md::r_add{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
 }
-/** @brief Product of all elements (empty -> 1). Accumulates in `Acc`. */
+/** @brief Product of all elements (empty -> 1). Accumulates in the reduce type,
+ *         result cast to `T`; `prod<Acc>(a)` returns `Acc`. */
 template <class Acc = void, class T, class E, class L, own O>
 _TNY_API auto prod(const tensor<T,E,L,O> & a) {
     using R = _acc_t<Acc, T>;
-    return _md::reduce_<R>(a, R(1), _md::r_mul{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{});
+    return static_cast<_reduce_result_t<Acc,T>>(
+        _md::reduce_<R>(a, R(1), _md::r_mul{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
 }
-/** @brief Maximum element. Requires a non-empty tensor. Computed in `Acc`. */
+/** @brief Maximum element. Requires a non-empty tensor. Result type `T`
+ *         (`max<Acc>(a)` returns `Acc`). */
 template <class Acc = void, class T, class E, class L, own O>
 _TNY_API auto max(const tensor<T,E,L,O> & a) {
     using R = _acc_t<Acc, T>;
-    return _md::reduce_<R>(a, cs::numeric_limits<R>::lowest(), _md::r_max{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{});
+    return static_cast<_reduce_result_t<Acc,T>>(
+        _md::reduce_<R>(a, cs::numeric_limits<R>::lowest(), _md::r_max{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
 }
-/** @brief Minimum element. Requires a non-empty tensor. Computed in `Acc`. */
+/** @brief Minimum element. Requires a non-empty tensor. Result type `T`
+ *         (`min<Acc>(a)` returns `Acc`). */
 template <class Acc = void, class T, class E, class L, own O>
 _TNY_API auto min(const tensor<T,E,L,O> & a) {
     using R = _acc_t<Acc, T>;
-    return _md::reduce_<R>(a, cs::numeric_limits<R>::max(), _md::r_min{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{});
+    return static_cast<_reduce_result_t<Acc,T>>(
+        _md::reduce_<R>(a, cs::numeric_limits<R>::max(), _md::r_min{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
 }
 
 /* --- boolean reductions (members; chain after a comparison) -------- */
@@ -761,24 +791,26 @@ template <class T,class E,class L,own O> _TNY_API bool tensor<T,E,L,O>::any() co
 // the wrapper is _TNY_API; a dynamic result is heap-owned (host only) so it is
 // _TNY_HOST — matching the `axreduce` overload each resolves to (else nvcc would
 // see a _TNY_API wrapper call a __host__ allocator).
-// Axis reductions: `NAME<Axes...>(a)` uses the default accumulator (double for
-// small floats); `NAME<Acc, Axes...>(a)` forces the accumulator/result element
-// type. The two are told apart by template-arg KIND: a leading non-type (`0`) is
-// an axis, a leading type (`double`) is the accumulator. Each splits static
-// (stack, host+device) / dynamic (heap, host-only) to match `axreduce`.
+// Axis reductions: `NAME<Axes...>(a)` accumulates in the reduce type (double for
+// small floats) and returns the tensor's element type `T`; `NAME<Acc, Axes...>(a)`
+// makes `Acc` both the accumulator AND the result element type. The two forms are
+// told apart by template-arg KIND: a leading non-type (`0`) is an axis, a leading
+// type (`double`) is the accumulator. Each splits static (stack, host+device) /
+// dynamic (heap, host-only) to match `axreduce`; the result is accumulated in `R`
+// then cast to the public element type by `reduce_to`.
 #define _TNY_MD_AXRED(NAME, INIT, OP)                                                              \
 template <long... Axes, class T,class E,class L,own O, class R = reduce_type_t<T>,                 \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto NAME(const tensor<T,E,L,O> & a) { return _md::axreduce<Axes...>(a, INIT, _md::OP{}); } \
+_TNY_API  auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<T>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); } \
 template <long... Axes, class T,class E,class L,own O, class R = reduce_type_t<T>,                 \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto NAME(const tensor<T,E,L,O> & a) { return _md::axreduce<Axes...>(a, INIT, _md::OP{}); } \
+_TNY_HOST auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<T>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); } \
 template <class Acc, long... Axes, class T,class E,class L,own O, class R = Acc,                   \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto NAME(const tensor<T,E,L,O> & a) { return _md::axreduce<Axes...>(a, INIT, _md::OP{}); } \
+_TNY_API  auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); } \
 template <class Acc, long... Axes, class T,class E,class L,own O, class R = Acc,                   \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto NAME(const tensor<T,E,L,O> & a) { return _md::axreduce<Axes...>(a, INIT, _md::OP{}); }
+_TNY_HOST auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); }
 _TNY_MD_AXRED(sum,  R(0),                          r_add)
 _TNY_MD_AXRED(prod, R(1),                          r_mul)
 _TNY_MD_AXRED(max,  cs::numeric_limits<R>::lowest(), r_max)
@@ -786,17 +818,19 @@ _TNY_MD_AXRED(min,  cs::numeric_limits<R>::max(),  r_min)
 #undef _TNY_MD_AXRED
 
 /** @brief Mean over the named axes -> a lower-rank tensor (sum / reduced count).
- *         Accumulates in the reduce type by default; `mean<Acc, Axes...>(a)`
- *         overrides. */
+ *         Accumulates in the reduce type, result cast to `T`; `mean<Acc,
+ *         Axes...>(a)` makes `Acc` both the accumulator and result type. */
 template <long... Axes, class T,class E,class L,own O, class R = reduce_type_t<T>,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
 _TNY_API  auto mean(const tensor<T,E,L,O> & a) {
-    auto s = sum<R, Axes...>(a); s.div_(static_cast<R>(a.numel() / s.numel())); return s;
+    auto s = sum<R, Axes...>(a); s.div_(static_cast<R>(a.numel() / s.numel()));
+    return _md::reduce_to<T>(static_cast<decltype(s)&&>(s));   // accumulate in R, cast result to T
 }
 template <long... Axes, class T,class E,class L,own O, class R = reduce_type_t<T>,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
 _TNY_HOST auto mean(const tensor<T,E,L,O> & a) {
-    auto s = sum<R, Axes...>(a); s.div_(static_cast<R>(a.numel() / s.numel())); return s;
+    auto s = sum<R, Axes...>(a); s.div_(static_cast<R>(a.numel() / s.numel()));
+    return _md::reduce_to<T>(static_cast<decltype(s)&&>(s));   // accumulate in R, cast result to T
 }
 template <class Acc, long... Axes, class T,class E,class L,own O,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
@@ -809,16 +843,17 @@ _TNY_HOST auto mean(const tensor<T,E,L,O> & a) {
     auto s = sum<Acc, Axes...>(a); s.div_(static_cast<Acc>(a.numel() / s.numel())); return s;
 }
 
-/** @brief Inner product over matching extents. Accumulates in `Acc` (default:
- *         the reduce type of the promoted element type — `double` for small
- *         floats); `dot<float>(a, b)` overrides. */
+/** @brief Inner product over matching extents. Accumulates in the reduce type of
+ *         the promoted element type (`double` for small floats), result cast to
+ *         `promote(Ta,Tb)`; `dot<Acc>(a, b)` returns `Acc`. */
 template <class Acc = void, class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>
 _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
     static_assert(tensor<Ta,Ea,La,Oa>::rank() == tensor<Tb,Eb,Lb,Ob>::rank(), "dot: rank mismatch");
     static_assert(_md::bc_static_ok<Ea, Eb>(cs::make_index_sequence<Ea::rank()>{}),
                   "dot: incompatible static extents");   // both-static, unequal -> caught at compile time
     using R = _acc_t<Acc, promote_t<Ta,Tb>>;
-    return _md::zipreduce_<R>(a, b, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{});
+    return static_cast<_reduce_result_t<Acc, promote_t<Ta,Tb>>>(
+        _md::zipreduce_<R>(a, b, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
 }
 
 /** @brief True if every element satisfies `|a-b| <= atol + rtol*|b|` (numpy
@@ -865,12 +900,14 @@ _TNY_API auto maximum(const tensor<T,E,L,O> & a, S s) { return _md::oops(a, s, _
 template <class T,class E,class L,own O>
 _TNY_API auto clamp(const tensor<T,E,L,O> & a, T lo, T hi) { return a.map(_md::u_clamp{ static_cast<double>(lo), static_cast<double>(hi) }); }
 
-/** @brief Arithmetic mean of all elements. Accumulates in `Acc` (default: the
- *         reduce type — `double` for small floats); `mean<float>(a)` overrides. */
+/** @brief Arithmetic mean of all elements. Accumulates in the reduce type
+ *         (`double` for small floats), result cast to `T`; `mean<Acc>(a)` makes
+ *         `Acc` both the accumulator and the result type. */
 template <class Acc = void, class T, class E, class L, own O>
 _TNY_API auto mean(const tensor<T,E,L,O> & a) {
     using R = _acc_t<Acc, T>;
-    return static_cast<R>(sum<R>(a)) / static_cast<R>(a.numel());
+    const R m = static_cast<R>(sum<R>(a)) / static_cast<R>(a.numel());
+    return static_cast<_reduce_result_t<Acc,T>>(m);
 }
 
 _TNY_NAMESPACE_END(tny)

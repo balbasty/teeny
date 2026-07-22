@@ -126,9 +126,10 @@ A fully-static result is stack-owned (host and device); any dynamic extent makes
 it heap-owned (host only — it allocates, so it is not callable on the device
 path). Reducing over every axis is the scalar form above.
 
-### Accumulator type
+### Accumulator type vs result type
 
-Reductions accumulate in — and return — a **reduce type**, not the element type:
+A reduction **accumulates** in a wide **reduce type** for precision, then **casts
+the result back to the tensor's element type** (pytorch-like):
 
 | element type | accumulator (default) |
 |---|---|
@@ -136,24 +137,27 @@ Reductions accumulate in — and return — a **reduce type**, not the element t
 | a wider float (`long double`) | itself |
 | integers, everything else | the item type |
 
-So `sum(float_tensor)` returns `double` and summing many low-precision values
-holds precision. The trait is `reduce_type_t<T>`. Override the accumulator with a
-leading **type** argument:
+So `sum(float_tensor)` **returns `float`** — but the summation runs in `double`,
+so many low-precision values still add up accurately before the final cast. The
+accumulator trait is `reduce_type_t<T>`. A leading **type** argument makes that
+type BOTH the accumulator and the result (like torch's `dtype=`):
 
 ```cpp
-sum<float>(a);       // accumulate and return float, not double
-mean<double>(a);     // force double
-dot<float>(a, b);    // float accumulator
+sum(a);               // float tensor -> float result (accumulated in double)
+sum<double>(a);       // accumulate AND return double
+mean<double>(a);      // force double throughout
+dot<float>(a, b);     // float accumulator and result
 sum<int>(int8_view);  // widen an int8 sum to avoid overflow (item type would overflow)
 ```
 
-For axis reductions the accumulator is the **result element type**; a leading
-type is the accumulator, a leading integer is an axis, so the two never collide:
+Axis reductions follow the same rule — default result element type = the tensor's
+type (accumulated wide); a leading type is the accumulator+result, a leading
+integer is an axis, so the two never collide:
 
 ```cpp
-sum<0>(a);          // default accumulator (double for floats) -> double result
-sum<float, 0>(a);   // float accumulator -> float result
-mean<double, 1>(a); // force the accumulator on an axis mean
+sum<0>(a);          // float tensor -> float result (accumulated in double)
+sum<double, 0>(a);  // double accumulator -> double result
+mean<double, 1>(a); // force the accumulator+result on an axis mean
 ```
 
 ## Comparisons → a bool tensor
