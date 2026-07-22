@@ -26,6 +26,11 @@ using cs::full_extent_t;
 using cs::layout_right;
 using cs::layout_left;
 using cs::layout_stride;
+/** @brief numpy-style spellings of the contiguous layouts: `corder` is C-order
+ *         (row-major, `layout_right`), `forder` is Fortran-order (column-major,
+ *         `layout_left`). Use wherever a `Layout` is expected. */
+using corder = cs::layout_right;
+using forder = cs::layout_left;
 using cs::mdspan;
 using cs::submdspan;
 

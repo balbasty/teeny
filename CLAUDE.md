@@ -76,9 +76,9 @@ struct tensor;
   size or `dynamic_extent`. Mix freely per dimension. Prefer the `shape<...>`
   alias (`= extents<int64_t, ...>`, DLPack's index type); a dynamic dim is
   `dynamic_extent` or numpy-style **`-1`** (`shape<-1,3>` == `shape<dynamic_extent,3>`).
-- **`Layout`** = `layout_right` (default, C-order), `layout_left` (F-order),
-  `layout_stride` (runtime strides), or teeny's `layout_static_stride<S...>`
-  (compile-time strides).
+- **`Layout`** = `layout_right` (default, C-order; alias `corder`), `layout_left`
+  (F-order; alias `forder`), `layout_stride` (runtime strides), or teeny's
+  `layout_static_stride<S...>` (compile-time strides).
 - **`O`** ownership: `view` (non-owning, trivially copyable, kernel-passable),
   `stack` (inline array, requires fully static shape), `heap` (host `new[]`,
   move-only), or CUDA `gpu`/`pinned`/`mapped` (from `cuda.h`).

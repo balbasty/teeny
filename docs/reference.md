@@ -12,9 +12,16 @@ template <class T, class Extents, class Layout = layout_right, own O = own::view
 struct tensor;
 ```
 
-One tensor type parameterised by element type, `cuda::std::extents`, an mdspan
-layout, and ownership. Rarely named directly — use the aliases and factories
-below. See [Tensors & ownership](tensors.md).
+One tensor type parameterised by element type, **shape**, an mdspan layout, and
+ownership. Rarely named directly — use the aliases and factories below. See
+[Tensors & ownership](tensors.md).
+
+!!! note "`Extents` is the shape"
+    The `Extents` parameter is the tensor's **shape** — the per-dimension sizes.
+    It is a `cuda::std::extents<int64_t, ...>`; spell it with the `shape<...>`
+    alias (`shape<2,3>`, a dynamic dim is `-1`). C++ readers: `shape` *is*
+    `cuda::std::extents`, nothing new. Layout is the memory order (`corder`/C or
+    `forder`/F), a separate axis from the shape.
 
 ### Ownership aliases
 
@@ -51,6 +58,8 @@ template <auto... E>       using shape   = cs::extents<int64_t, E...>;  // -1 ==
 template <int64_t... S>    struct strides;                // signed; dynamic_stride sentinel
 template <int64_t... S>    using layout_static_stride = strides<S...>;  // back-compat alias
 constexpr int64_t dynamic_stride;                         // a runtime stride
+using corder = layout_right;   // C-order (row-major); numpy-style spelling
+using forder = layout_left;    // F-order (column-major)
 ```
 
 Static-integer aliases (each converts to a runtime integer and carries `::value`):
