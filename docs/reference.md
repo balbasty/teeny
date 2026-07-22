@@ -140,6 +140,7 @@ auto c = minimum(a, b); maximum(a, s); clamp(a, lo, hi);
 
 // reductions -> scalar (all axes)
 sum(a); prod(a); max(a); min(a); mean(a); dot(a, b);
+allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
 // axis reductions -> lower-rank tensor (named axes removed; negatives wrap)
 sum<Axes...>(a); prod<...>(a); max<...>(a); min<...>(a); mean<...>(a);
 ```

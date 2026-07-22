@@ -180,6 +180,7 @@ auto m = a < b; a == 2.0; 3.0 < a;    // ==,!=,<,<=,>,>= ; scalar either side
 
 // --- reductions -> scalar (all axes) ---
 sum(a); prod(a); max(a); min(a); mean(a); dot(a,b);
+allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
 // --- axis reductions -> a lower-rank TENSOR (named axes removed; negatives wrap) ---
 sum<0>(a); mean<0,2>(a); max<1>(a); min<-1>(a); prod<0>(a);
 //   static result -> stack (host+device); any dynamic -> heap (HOST ONLY: allocates)

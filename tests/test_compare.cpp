@@ -48,5 +48,17 @@ int main() {
     static_assert(decltype(ss.stride(Int<0>()))::value == 2, "static step folds to stride 2");
     if (ss(1)!=t(0,2)) return 13;
 
+    // ---- allclose ----------------------------------------------------
+    auto u = local<double, shape<3>>(); u(0)=1; u(1)=2; u(2)=3;
+    auto w = local<double, shape<3>>(); w(0)=1; w(1)=2; w(2)=3 + 1e-9;   // within tol
+    if (!allclose(u, w)) return 14;
+    auto far = local<double, shape<3>>(); far(0)=1; far(1)=2; far(2)=3.1;
+    if (allclose(u, far)) return 15;
+    if (!allclose(u, far, /*rtol*/0.1)) return 16;                       // loose tol -> close
+    // broadcasts a scalar-shaped operand
+    auto ones3 = local<double, shape<3>>(); ones3.fill_(1.0);
+    auto one1  = local<double, shape<1>>(); one1(0)=1.0;
+    if (!allclose(ones3, one1)) return 17;
+
     return 0;
 }

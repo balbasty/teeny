@@ -487,6 +487,33 @@ _TNY_HOST auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
     return out;
 }
 
+/* ---- allclose: |a-b| <= atol + rtol*|b| for every (broadcast) element ---- */
+template <class R, class A, class B, cs::size_t... D>
+_TNY_API bool allclose_(const A & a, const B & b, R rtol, R atol, cs::index_sequence<D...>) {
+    using I = typename A::index_type;
+    const I ae[] = { static_cast<I>(a.extent(D))... }, sa[] = { static_cast<I>(a.stride(D))... };
+    const I be[] = { static_cast<I>(b.extent(D))... }, sb[] = { static_cast<I>(b.stride(D))... };
+    I ce[sizeof...(D) ? sizeof...(D) : 1], n = 1;
+    for (cs::size_t r = 0; r < sizeof...(D); ++r) {
+        ce[r] = ae[r] == 1 ? be[r] : ae[r];
+        _TNY_CHECK(ae[r] == ce[r] || ae[r] == 1, "allclose: lhs extent mismatch");
+        _TNY_CHECK(be[r] == ce[r] || be[r] == 1, "allclose: rhs extent mismatch");
+        n *= ce[r];
+    }
+    for (I lin = 0; lin < n; ++lin) {
+        I rem = lin, oa = 0, ob = 0;
+        for (int d = (int)sizeof...(D)-1; d >= 0; --d) {
+            I k = rem % ce[d]; rem /= ce[d];
+            oa += (ae[d] == 1 ? I(0) : k) * sa[d]; ob += (be[d] == 1 ? I(0) : k) * sb[d];
+        }
+        const R av = static_cast<R>(a.data()[oa]), bv = static_cast<R>(b.data()[ob]);
+        R diff = av - bv; diff = diff < R(0) ? -diff : diff;
+        R mag  = bv < R(0) ? -bv : bv;
+        if (diff > atol + rtol * mag) return false;
+    }
+    return true;
+}
+
 } // namespace _md
 
 /* ------------------------------------------------------------------ *
@@ -745,6 +772,18 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) 
                   "dot: incompatible static extents");   // both-static, unequal -> caught at compile time
     using R = compute_type_t<promote_t<Ta,Tb>>;
     return _md::zipreduce_<R>(a, b, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{});
+}
+
+/** @brief True if every element satisfies `|a-b| <= atol + rtol*|b|` (numpy
+ *         `allclose`; broadcasts, computes in the compute type). */
+template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>
+_TNY_API bool allclose(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b,
+                       double rtol = 1e-5, double atol = 1e-8) {
+    static_assert(tensor<Ta,Ea,La,Oa>::rank() == tensor<Tb,Eb,Lb,Ob>::rank(), "allclose: rank mismatch");
+    static_assert(_md::bc_static_ok<Ea, Eb>(cs::make_index_sequence<Ea::rank()>{}), "allclose: incompatible static extents");
+    using R = compute_type_t<promote_t<Ta,Tb>>;
+    return _md::allclose_<R>(a, b, static_cast<R>(rtol), static_cast<R>(atol),
+                            cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{});
 }
 
 /* --- out-of-place unary free functions ---------------------------- */
