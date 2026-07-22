@@ -27,6 +27,7 @@ TESTS = \
 	$(BUILDDIR)/test_math \
 	$(BUILDDIR)/test_mathops \
 	$(BUILDDIR)/test_ops \
+	$(BUILDDIR)/test_fold \
 	$(BUILDDIR)/test_iterate \
 	$(BUILDDIR)/test_subperm \
 	$(BUILDDIR)/test_takealong \

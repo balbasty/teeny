@@ -105,8 +105,9 @@ folding known strides to immediates and storing only the dynamic ones (EBO when
 all static): `tensor<float, shape<3,4>, strides<4,1>>(ptr)`. Strides are SIGNED,
 so `-1` means a real stride of −1 (reversed view), NOT dynamic — a runtime
 stride is spelled `dynamic_stride` (`strides<dynamic_stride,1>`, constructed with
-the runtime strides). NB `submdspan` does not apply to it — slice on a standard
-layout instead.
+the runtime strides). NB CCCL's `submdspan` does not apply to it, but teeny's own
+slicing/take_along/permute/flip/peel DO (they build views by hand and fold the
+output strides), so a strides<...> tensor is fully sliceable.
 
 ## API cheat-sheet
 
@@ -210,14 +211,20 @@ fold**, a plain `int`/`long` when the value is only known at run time.
   result → `own::stack` (host+device); any dynamic → `own::heap` (host only). The
   SFINAE keys on `bcast_extents<...>::rank_dynamic()`, **not** on instantiating a
   stack tensor (that would fire the "stack needs static shape" `static_assert`).
-- **nd-peel** (`iterate.h`): a linear index over the peeled axes is decoded to a
-  multi-index, then `submdspan` binds those axes and keeps the rest with
-  `full_extent`. This replaces jitfields' hand-written `index2offset`.
+- **The gather** (`tensor.h` `_slice_range`, `iterate.h` `gather_peel`): ALL
+  view-making ops — `operator()` slicing, `take_along`, `peel` — route through
+  one hand-built gather (NO `cs::submdspan`). Per axis: an integer drops it (into
+  the base offset), `all` keeps it, a range keeps a strided window. The output
+  layout is teeny's `strides<Sfold...>`, folding each kept stride to a
+  compile-time value where derivable (`_out_sstride`/`_str_compact` in
+  `indexing.h`, `_src_sstride` in `layout.h`: source-static-stride × static-step).
+  So slicing a static tensor keeps folded strides, and every op works on ANY
+  source layout — including a `strides<...>` tensor. `permute`/`flip`/`unsqueeze`/
+  `squeeze` (`axis.h`) likewise build views by hand.
 - **layout_static_stride** (`layout.h`): the one thing mdspan lacks — strides
-  baked into the type. NOTE: `submdspan` (and therefore `peel`/`take_along`/
-  `permute`) is only defined by CCCL for the *standard* layouts, so it does NOT
-  work on `layout_static_stride`. Use it for whole-tensor access with folded
-  strides; use `layout_right`/`left`/`stride` when you need to slice.
+  baked into the type. It is now the OUTPUT layout of every slice/peel (folded),
+  and a fully sliceable source. CCCL's `cs::submdspan` doesn't accept it, but
+  teeny never calls `cs::submdspan` anymore.
 - **EBO**: `tensor : private Layout::mapping<Extents>`. `mapping()` returns
   `*this`. Do not add non-static data members besides `store_`.
 

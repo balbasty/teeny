@@ -25,25 +25,48 @@ namespace cs = cuda::std;
 
 namespace _md {
 
-_TNY_API constexpr int pos_of(cs::size_t a, const cs::size_t * d, cs::size_t n) {
-    for (cs::size_t p = 0; p < n; ++p) if (d[p] == a) return static_cast<int>(p);
-    return -1;
+// position of source axis A within the peeled set (as an index_sequence), <0 if kept.
+template <cs::size_t A, class Seq> struct peel_pos;
+template <cs::size_t A, cs::size_t... Axes> struct peel_pos<A, cs::index_sequence<Axes...>>
+{ static constexpr int value = _pos_in<A, Axes...>(); };
+
+// per source axis A: static output extent / stride (drop sentinels if peeled).
+template <cs::size_t A, class E, class Seq>
+_TNY_API constexpr cs::size_t peel_ext() { return peel_pos<A, Seq>::value >= 0 ? _drop_axis : E::static_extent(A); }
+template <cs::size_t A, class L, class E, class Seq>
+_TNY_API constexpr cs::int64_t peel_str() { return peel_pos<A, Seq>::value >= 0 ? _sdrop : _src_sstride<A, L, E>(); }
+
+template <cs::size_t A, class Seq, class MD, class I>
+_TNY_API void peel_axis(const MD & v, const I * idx, I & off, I * ext, I * str, cs::size_t & k) {
+    constexpr int p = peel_pos<A, Seq>::value;
+    const I sd = static_cast<I>(v.stride(A));
+    if constexpr (p >= 0) off += idx[p] * sd;                         // peeled: bind decoded index
+    else { ext[k] = static_cast<I>(v.extent(A)); str[k] = sd; ++k; }  // kept axis
 }
 
-// Argument for axis A of the submdspan call: the decoded index if A is peeled,
-// otherwise `full_extent` (keep the axis).
-template <cs::size_t A, class I, cs::size_t... Axes>
-_TNY_API auto axis_arg(const I * idx, cs::index_sequence<Axes...>) {
-    constexpr cs::size_t dd[] = { Axes..., static_cast<cs::size_t>(-1) };
-    constexpr int p = pos_of(A, dd, sizeof...(Axes));
-    if constexpr (p < 0) return cs::full_extent;
-    else                 return idx[p];
-}
-
-template <class MD, class I, cs::size_t... Axes, cs::size_t... A>
-_TNY_API auto submd(const MD & src, const I * idx,
-                    cs::index_sequence<Axes...> axes, cs::index_sequence<A...>) {
-    return cs::submdspan(src, axis_arg<A>(idx, axes)...);
+// Build the peeled sub-view by hand (no submdspan -> works on ANY source layout,
+// incl. strides<...>) and fold kept strides to compile-time values where known.
+template <class MD, class I, class Seq, cs::size_t... A>
+_TNY_API auto gather_peel(const MD & v, const I * idx, Seq, cs::index_sequence<A...>) {
+    using El  = typename MD::element_type;
+    using Idx = typename MD::index_type;
+    using E   = typename MD::extents_type;
+    using L   = typename MD::layout_type;
+    using OE  = typename _compact<Idx, peel_ext<A, E, Seq>()...>::type;
+    using SF  = typename _str_compact<peel_str<A, L, E, Seq>()...>::type;
+    using Map = typename SF::template mapping<OE>;
+    constexpr cs::size_t Nk = sizeof...(A) - Seq::size();
+    Idx ext[Nk ? Nk : 1] = {}, str[Nk ? Nk : 1] = {}, off = 0; cs::size_t k = 0;
+    ( peel_axis<A, Seq>(v, idx, off, ext, str, k), ... );
+    cs::array<Idx, Nk> ea{};
+    for (cs::size_t i = 0; i < Nk; ++i) ea[i] = ext[i];
+    El * base = v.data_handle() + off;
+    if constexpr (SF::ndyn() == 0) return tensor<El, OE, SF, own::view>(base, Map(OE(ea)));
+    else {
+        cs::array<Idx, SF::ndyn()> dyn{};
+        for (cs::size_t i = 0; i < Nk; ++i) if (SF::S_[i] == dynamic_stride) dyn[SF::slot(i)] = str[i];
+        return tensor<El, OE, SF, own::view>(base, Map(OE(ea), dyn));
+    }
 }
 
 } // namespace _md
@@ -59,8 +82,8 @@ _TNY_API auto peel_at(const MD & src, typename MD::index_type i) {
     I       idx[nd ? nd : 1] = {};
     I rem = i;
     for (int p = static_cast<int>(nd) - 1; p >= 0; --p) { idx[p] = rem % e[p]; rem /= e[p]; }
-    return as_tensor(_md::submd(src, idx, cs::index_sequence<Axes...>{},
-                                cs::make_index_sequence<MD::rank()>{}));
+    return _md::gather_peel(src, idx, cs::index_sequence<Axes...>{},
+                            cs::make_index_sequence<MD::rank()>{});
 }
 // convenience: peel from a md::tensor (uses its view). Non-const -> mutable
 // peel; const -> read-only peel.
@@ -155,15 +178,9 @@ _TNY_API auto batch_offset(const MD & a, typename MD::index_type lin) {
 }
 
 /** @brief Peel axis 0 (e.g. a channel axis) at index `c` -> a lower-rank view.
- *         Rank-generic `submdspan` wrapper (`peel_at<0>` for a teeny tensor). */
-template <class MD, cs::size_t... I>
-_TNY_API auto channel(const MD & a, typename MD::index_type c, cs::index_sequence<I...>) {
-    return cs::submdspan(a, c, ((void)I, cs::full_extent)...);
-}
+ *         Just `peel_at<0>` — works on any source layout and folds. */
 template <class MD>
-_TNY_API auto channel(const MD & a, typename MD::index_type c) {
-    return channel(a, c, cs::make_index_sequence<MD::rank() - 1>{});
-}
+_TNY_API auto channel(const MD & a, typename MD::index_type c) { return peel_at<0>(a, c); }
 
 _TNY_NAMESPACE_END(tny)
 

@@ -52,8 +52,10 @@ struct _dyn_strides<Index, 0> {
  * When every stride is static the mapping is empty (EBO), so a stack tensor is
  * still exactly `sizeof` its data. Only the *dynamic* strides are stored.
  *
- * Note: `submdspan` (and therefore `peel`/`take_along`/`permute`) is only
- * defined by CCCL for the standard layouts, so it does not apply here. And
+ * Note: CCCL's `cs::submdspan` is only defined for the standard layouts, so it
+ * does not apply here — but teeny's own slicing/`take_along`/`permute`/`flip`/
+ * `peel` build their views by hand (no submdspan), so they all work on a
+ * strides<...> source and in fact fold their output strides the same way. And
  * `required_span_size` assumes non-negative strides — negative strides are for
  * VIEWS into existing storage, not owning allocation.
  *
@@ -143,6 +145,33 @@ template <> struct _contiguous_layout<cs::layout_left>  : cs::true_type {};
 // runtime, or for any non-strides layout so callers fall through).
 template <cs::size_t D, class L> struct _static_stride_at { static constexpr cs::int64_t value = dynamic_stride; };
 template <cs::size_t D, cs::int64_t... S> struct _static_stride_at<D, strides<S...>> { static constexpr cs::int64_t value = strides<S...>::S_[D]; };
+
+// Compile-time stride of SOURCE axis Ax under layout L over extents E, or
+// `dynamic_stride` if only known at run time. Feeds the slice/gather stride
+// folding: a static source stride (×static step) yields a static output stride.
+//   - strides<...>       : the baked-in per-dim value.
+//   - layout_right/left  : the contiguous product of the trailing/leading static
+//                          extents (dynamic if any of them is dynamic).
+//   - layout_stride etc. : always dynamic.
+template <cs::size_t Ax, class L, class E>
+_TNY_API constexpr cs::int64_t _src_sstride() {
+    if constexpr (_is_strides<L>::value) return _static_stride_at<Ax, L>::value;
+    else if constexpr (cs::is_same<L, cs::layout_right>::value) {
+        cs::int64_t s = 1;
+        for (cs::size_t d = Ax + 1; d < E::rank(); ++d) {
+            if (E::static_extent(d) == cs::dynamic_extent) return dynamic_stride;
+            s *= static_cast<cs::int64_t>(E::static_extent(d));
+        }
+        return s;
+    } else if constexpr (cs::is_same<L, cs::layout_left>::value) {
+        cs::int64_t s = 1;
+        for (cs::size_t d = 0; d < Ax; ++d) {
+            if (E::static_extent(d) == cs::dynamic_extent) return dynamic_stride;
+            s *= static_cast<cs::int64_t>(E::static_extent(d));
+        }
+        return s;
+    } else return dynamic_stride;
+}
 
 _TNY_NAMESPACE_END(tny)
 

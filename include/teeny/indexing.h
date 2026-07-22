@@ -9,7 +9,10 @@
 #include <cuda/std/mdspan>
 #include <cuda/std/utility>
 #include <cuda/std/type_traits>
+#include <cuda/std/limits>
+#include <cuda/std/cstdint>
 #include <teeny/defines.h>
+#include <teeny/layout.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
 
@@ -73,6 +76,8 @@ template <class A, class B, class S>
 struct slice_spec { A start; B stop; S step; };
 template <class T> struct _is_slice_spec : cs::false_type {};
 template <class A, class B, class S> struct _is_slice_spec<slice_spec<A,B,S>> : cs::true_type {};
+template <class Arg> struct _slice_step { using type = void; };                 // step type of a slice arg
+template <class A, class B, class S> struct _slice_step<slice_spec<A,B,S>> { using type = S; };
 
 // step == 1 (as a static integral constant)?
 template <class S> _TNY_API constexpr bool _step1() {
@@ -82,6 +87,35 @@ template <class S> _TNY_API constexpr bool _step1() {
 // (keeps the whole axis, folds, preserves static extents). `all == slice(none,none)`.
 template <class Arg> struct _is_full_slice : cs::false_type {};
 template <class S> struct _is_full_slice<slice_spec<none_t,none_t,S>> : cs::integral_constant<bool, _step1<S>()> {};
+
+// ---- output STATIC STRIDES for the gather (companion to _compact) ----------
+// A gathered view's layout is teeny's strides<...>, folding each kept axis to a
+// compile-time stride when derivable: (source static stride) × (static step).
+// Per source axis we emit `_sdrop` (integer arg -> no output axis), that folded
+// value, or `dynamic_stride` (runtime). `_str_compact` drops the `_sdrop`s.
+inline constexpr cs::int64_t _sdrop = cs::numeric_limits<cs::int64_t>::min() + 1;  // != dynamic_stride
+template <cs::int64_t V, class S> struct _str_prepend;
+template <cs::int64_t V, cs::int64_t... S> struct _str_prepend<V, strides<S...>> { using type = strides<V, S...>; };
+template <cs::int64_t... V> struct _str_compact { using type = strides<>; };
+template <cs::int64_t V0, cs::int64_t... Vs>
+struct _str_compact<V0, Vs...> {
+    using rest = typename _str_compact<Vs...>::type;
+    using type = cs::conditional_t<V0 == _sdrop, rest, typename _str_prepend<V0, rest>::type>;
+};
+
+// static output stride for source axis Ax under (Layout, Extents), given the arg.
+template <class Arg, cs::size_t Ax, class Layout, class Extents>
+_TNY_API constexpr cs::int64_t _out_sstride() {
+    constexpr cs::int64_t ss = _src_sstride<Ax, Layout, Extents>();
+    if constexpr (_is_index<Arg>::value)          return _sdrop;                 // dropped
+    else if constexpr (_is_full_slice<Arg>::value) return ss;                    // slice(none,none) == all
+    else if constexpr (_is_slice_spec<Arg>::value) {                             // range: ss × step
+        using S = typename _slice_step<Arg>::type;
+        if constexpr (ss == dynamic_stride)       return dynamic_stride;
+        else if constexpr (_is_ic<S>::value)      return ss * static_cast<cs::int64_t>(S::value);
+        else                                       return dynamic_stride;
+    } else return ss;                                                            // full_extent (all): step 1
+}
 
 // a "real" range (needs the layout_stride path) is a slice that is not a full slice
 template <class Arg> struct _is_real_range
