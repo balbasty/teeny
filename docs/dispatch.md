@@ -22,25 +22,28 @@ interpolation order, a matrix size `C`. Replaces a hand-written `switch`.
 
 ## `anyrank` — the rank-erased carrier
 
-A fixed-size, rank-erased carrier for the host boundary: a pointer plus bounded
-shape/stride arrays and a runtime `ndim` (`MaxRank` defaults to 8). Trivially
-copyable, so it passes into a CUDA kernel by value.
+A rank-erased carrier for the host boundary: a pointer, 1-D shape/stride tensors,
+and a runtime `ndim`. By default (`as_anyrank(...)`) it **wraps** the caller's
+arrays with no copy and is **host-only**; built with the `copy_meta` tag it
+copies into an inline `TNY_MAX_RANK` store (default 32) and is then trivially
+copyable, so it passes into a CUDA kernel by value (`anyrank::device_passable`).
 
 `anyrank` has **no arithmetic** — it is a doorway, not a room. Turn it into a
 static view at the boundary and compute on that.
 
 ```cpp
-auto at = as_anyrank(data, shape, stride, ndim);  // -> anyrank (copies into inline store)
+auto at = as_anyrank(data, shape, stride, ndim);        // -> anyrank, WRAPS the arrays (no copy)
+auto ad = as_anyrank(data, shape, stride, ndim, copy_meta);  // -> anyrank, COPIES into an inline store
 ```
 
-`as_anyrank` **copies** shape/stride into an inline `TNY_MAX_RANK` store (default
-32; `-DTNY_MAX_RANK=N`), so the carrier is trivially copyable and can be passed
-into a CUDA kernel by value. `as_anyrank_view(data, shape, stride, ndim)` instead
-**wraps** the arrays with no copy — e.g. straight off a DLPack tensor — but is
-host-only (those pointers aren't valid in a device kernel; peel/dispatch on the
-host and pass the fixed-rank views to the device). DLPack strides are in
-**elements**; numpy `__array_interface__` strides are in **bytes** (divide by the
-itemsize first).
+By default `as_anyrank` **wraps** the caller's shape/stride arrays with no copy —
+e.g. straight off a DLPack tensor — which is host-only (those pointers aren't
+valid in a device kernel; peel/dispatch on the host and pass the fixed-rank views
+to the device). Pass the `copy_meta` tag to instead **copy** shape/stride into an
+inline `TNY_MAX_RANK` store (default 32; `-DTNY_MAX_RANK=N`, or per-call
+`as_anyrank<N>(..., copy_meta)`), making the carrier trivially copyable so it can be
+passed into a CUDA kernel by value. DLPack strides are in **elements**; numpy
+`__array_interface__` strides are in **bytes** (divide by the itemsize first).
 
 ### `peel_front<Sr>` — the batch pattern (preferred)
 
