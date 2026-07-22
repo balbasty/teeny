@@ -53,8 +53,8 @@ surface:
 | **peel arbitrary batch** | `peel_front<Nbatch>(t)` → range of `(*spatial, C)` views; `peel_front_at<Nbatch>(t, i)` for a grid-stride index |
 | peel named axes | `peel<Axes...>(t)`, `take_along<Axes...>(...)`, `permute<...>()` |
 | add/drop size-1 axis | `unsqueeze<Ax>()`, `squeeze<Ax>()` |
-| **runtime→static dispatch** | `dispatch_value<1,2,3>(D, f)` (spatial rank / order / bound); `dispatch_rank(any(...), f)` (total rank at the ndarray boundary) |
-| host ndarray boundary | `any(data, shape, stride, ndim)` → `anyrank`; `.fixed<R>()` |
+| **runtime→static dispatch** | `dispatch_value<1,2,3>(D, f)` (spatial rank / order / bound); `dispatch_rank(as_anyrank(...), f)` (total rank at the ndarray boundary) |
+| host ndarray boundary | `as_anyrank(data, shape, stride, ndim)` → `anyrank`; `.fixed<R>()` |
 | owning buffers | `local<T,E>` (stack, static), `owned<T,E>(e)` (heap host), `device/host/pinned<T,E>(e)` (from `teeny/cuda.h`) |
 
 What teeny deliberately does **not** do (kept out to stay tiny) and therefore
@@ -72,7 +72,7 @@ with hand-written `index2offset` batch plumbing and giant per-rank switch
 statements. On teeny it becomes three nested dispatches:
 
 ```
-host ndarray (numpy/cupy/torch/dlpack)  ──any(data,shape,stride,ndim)──►  anyrank
+host ndarray (numpy/cupy/torch/dlpack)  ──as_anyrank(data,shape,stride,ndim)──►  anyrank
    │  strides are in ELEMENTS (dlpack); numpy gives BYTES — divide by itemsize first
    ▼
 dispatch_rank / dispatch_value on TOTAL rank  ──►  fixed<R>()  (static rank R)

@@ -115,7 +115,7 @@ static void invert_dlpack(double* in, double* out, const int64_t* shape,
     - If the input is non-contiguous, build the view with a strided layout:
       `view_strided<...>` for compile-time strides, or pass the runtime strides
       to a `strides<dynamic_stride,...>` mapping. For a *fully* runtime-strided,
-      runtime-rank input use `any(data, shape, stride, ndim)` +
+      runtime-rank input use `as_anyrank(data, shape, stride, ndim)` +
       [`dispatch_rank`](../dispatch.md), then `recast<shape<-1,c,c>>()` to
       recover the static inner dims.
 

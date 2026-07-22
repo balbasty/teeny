@@ -193,7 +193,9 @@ for (auto v : peel_front<N>(t)) f(v);      // v is (*spatial, C); N = #batch dim
 auto v = peel_front_at<N>(t, i);            // the i-th (grid-stride style)
 
 // --- dynamic-rank / dynamic-value host boundary (dynamic.h) ---
-auto at = any(data, shape, stride, ndim);    // -> anyrank: rank-erased, bounded MaxRank (default 8)
+auto at = as_anyrank(data, shape, stride, ndim);    // -> anyrank: rank-erased carrier; COPIES into
+                                             //   an inline TNY_MAX_RANK (default 32) store -> device-passable
+auto av = as_anyrank_view(data, shape, stride, ndim);  // wraps the arrays (1-D tensor views), NO copy; HOST only
 dispatch_rank(at, [&](auto v){ kernel(v); });  // instantiates kernel once per TOTAL rank
 auto v3 = at.fixed<3>();                      // or force a known rank
 dispatch_value<1,2,3>(D, [&](auto d){ kern<d.value>(v); });  // runtime value -> static

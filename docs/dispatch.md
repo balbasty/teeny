@@ -30,12 +30,17 @@ copyable, so it passes into a CUDA kernel by value.
 static view at the boundary and compute on that.
 
 ```cpp
-auto at = any(data, shape, stride, ndim);   // -> anyrank (MaxRank default 8)
+auto at = as_anyrank(data, shape, stride, ndim);   // -> anyrank (copies shape/stride; TNY_MAX_RANK inline cap)
 ```
 
-`any` builds one from raw data + shape/stride + runtime rank. DLPack strides are
-in **elements**; numpy `__array_interface__` strides are in **bytes** (divide by
-the itemsize first).
+`as_anyrank` **copies** shape/stride into an inline `TNY_MAX_RANK` store (default
+32; `-DTNY_MAX_RANK=N`), so the carrier is trivially copyable and can be passed
+into a CUDA kernel by value. `as_anyrank_view(data, shape, stride, ndim)` instead
+**wraps** the arrays with no copy — e.g. straight off a DLPack tensor — but is
+host-only (those pointers aren't valid in a device kernel; peel/dispatch on the
+host and pass the fixed-rank views to the device). DLPack strides are in
+**elements**; numpy `__array_interface__` strides are in **bytes** (divide by the
+itemsize first).
 
 ### `peel_front<Sr>` — the batch pattern (preferred)
 
@@ -68,7 +73,7 @@ auto v3 = at.fixed<3>();                         // or force a known rank
 For a `(*batch, *spatial, C)` array from numpy / torch / cupy / DLPack:
 
 ```
-DLPack / ndarray  ──any(data, shape, stride, ndim)──►  anyrank
+DLPack / ndarray  ──as_anyrank(data, shape, stride, ndim)──►  anyrank
    │  (DLPack strides in ELEMENTS; numpy's __array_interface__ in BYTES)
    ▼  dispatch_value<1,2,3>(spatial_ndim)  -> static spatial rank D
    ▼  Sr = D + 1  (spatial + channel)

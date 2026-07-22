@@ -13,14 +13,27 @@ namespace cs = cuda::std;
 template <class T, class offset_t, cs::size_t R>
 using dyn_tensor = tensor<T, cs::dextents<offset_t, R>, cs::layout_stride, own::view>;
 
-template <class T, class offset_t, cs::size_t MaxRank, cs::size_t Sr> struct anyrank_front;  // fwd
+// The shape/stride store of an `anyrank` is itself a 1-D teeny tensor:
+//   - `_meta_store` : an INLINE stack tensor of `TNY_MAX_RANK` (default) — the
+//     sizes travel WITH the carrier, so it stays trivially copyable and can be
+//     passed into a CUDA kernel by value (peel on device).
+//   - `_meta_view`  : a non-owning VIEW of external size/stride arrays (e.g. a
+//     DLPack tensor's), so the carrier wraps them with NO copy. HOST use only —
+//     those pointers are not valid inside a device kernel.
+template <class offset_t, cs::size_t N>
+using _meta_store = tensor<offset_t, cs::extents<offset_t, N>, cs::layout_right, own::stack>;
+template <class offset_t>
+using _meta_view = tensor<offset_t, cs::dextents<offset_t, 1>, cs::layout_right, own::view>;
+
+template <class T, class offset_t, class Meta, cs::size_t Sr> struct anyrank_front;  // fwd
 
 /**
  * @brief A rank-erased tensor for the host/ndarray dispatch boundary.
  *
- * Carries a pointer plus bounded shape/stride arrays and a runtime `ndim`
- * (numpy/torch/cupy tensors have a small maximum rank; `MaxRank` defaults to 8).
- * Trivially copyable, so it passes into a CUDA kernel by value.
+ * Holds a data pointer, a runtime `ndim`, and 1-D `shape`/`stride` tensors
+ * (`Meta`). By default those are INLINE (a `TNY_MAX_RANK` stack store), so the
+ * carrier is trivially copyable and passes into a CUDA kernel by value; wrap a
+ * DLPack tensor with NO copy via `as_anyrank_view` (a `_meta_view` store).
  *
  * You do NOT compute on it — it is a *doorway*, not a room. Turn it into a
  * statically-typed view at the boundary and compute on that:
@@ -30,64 +43,70 @@ template <class T, class offset_t, cs::size_t MaxRank, cs::size_t Sr> struct any
  *                               leading batch dims, keep the trailing `Sr`
  *                               "interesting" dims STATIC. One kernel per Sr.
  *
- * Deliberately no `add_`/`mul_`/etc. here. A runtime-rank arithmetic path would
- * either loop over `ndim` (killing the compile-time folding teeny exists for) or
- * dispatch internally to every rank (the binary bloat `peel_front<Sr>` avoids) —
- * so host-side setup math should go through `fixed<R>()`/`peel_front<Sr>()` onto
- * a static view, not onto the carrier. (See the dynamic-rank design notes.)
+ * Deliberately no `add_`/`mul_`/etc.: a runtime-rank arithmetic path would loop
+ * over `ndim` (killing folding) or dispatch to every rank (the bloat
+ * `peel_front<Sr>` avoids). Do host-side math on a `fixed<R>()`/`peel_front<Sr>()`
+ * view instead.
  */
-template <class T, class offset_t, cs::size_t MaxRank = 8>
+template <class T, class offset_t = cs::int64_t, class Meta = _meta_store<offset_t, TNY_MAX_RANK>>
 struct anyrank {
-    T *      data = nullptr;
-    offset_t shape [MaxRank] = {};
-    offset_t stride[MaxRank] = {};
-    int      ndim = 0;
+    T *  data = nullptr;
+    Meta shape{};      // 1-D tensor of sizes   (inline, or a view of external memory)
+    Meta stride{};     // 1-D tensor of strides
+    int  ndim = 0;
 
-    static constexpr cs::size_t max_rank = MaxRank;
+    // Largest rank the store can hold: the inline store's static length, else
+    // (a view store) the compile-time dispatch bound TNY_MAX_RANK.
+    static constexpr cs::size_t max_rank =
+        Meta::extents_type::static_extent(0) != cs::dynamic_extent
+            ? Meta::extents_type::static_extent(0) : cs::size_t(TNY_MAX_RANK);
+
+    _TNY_API offset_t size(int i)  const noexcept { return shape(i); }   // size of dim i
+    _TNY_API offset_t step(int i)  const noexcept { return stride(i); }  // stride of dim i
 
     /** @brief View this tensor as a fixed rank `R` (requires `ndim == R`). */
     template <cs::size_t R>
     _TNY_API dyn_tensor<T, offset_t, R> fixed() const {
         using E = cs::dextents<offset_t, R>;
-        cs::array<offset_t, R> ext{}, str{};
-        for (cs::size_t i = 0; i < R; ++i) { ext[i] = shape[i]; str[i] = stride[i]; }
-        cs::layout_stride::mapping<E> m(E(ext), str);
+        cs::array<offset_t, R> ext{}, st{};
+        for (cs::size_t i = 0; i < R; ++i) { ext[i] = shape(i); st[i] = stride(i); }
+        cs::layout_stride::mapping<E> m(E(ext), st);
         return dyn_tensor<T, offset_t, R>(data, m);
     }
 
     /** @brief The `lin`-th sub-view obtained by peeling the leading `ndim - Sr`
      *         BATCH axes (runtime count) -> a fixed-rank-`Sr` view over the
-     *         trailing "interesting" axes. Grid-stride friendly (device-safe).
-     *         Follow with `recast<shape<-1,...>>()` to fold known inner dims. */
+     *         trailing "interesting" axes. Grid-stride friendly (device-safe
+     *         with the inline store). Follow with `recast<shape<-1,...>>()`. */
     template <cs::size_t Sr>
     _TNY_API dyn_tensor<T, offset_t, Sr> peel_front_at(offset_t lin) const {
         const int nb = ndim - static_cast<int>(Sr);          // # batch dims (runtime)
         _TNY_CHECK(nb >= 0, "peel_front: Sr exceeds ndim");
         offset_t off = 0, rem = lin;                          // decode lin over batch axes
-        for (int d = nb - 1; d >= 0; --d) { offset_t k = rem % shape[d]; rem /= shape[d]; off += k * stride[d]; }
+        for (int d = nb - 1; d >= 0; --d) { offset_t k = rem % shape(d); rem /= shape(d); off += k * stride(d); }
         using E = cs::dextents<offset_t, Sr>;
-        cs::array<offset_t, Sr> ext{}, str{};
-        for (cs::size_t i = 0; i < Sr; ++i) { ext[i] = shape[nb + i]; str[i] = stride[nb + i]; }
-        cs::layout_stride::mapping<E> m(E(ext), str);
+        cs::array<offset_t, Sr> ext{}, st{};
+        for (cs::size_t i = 0; i < Sr; ++i) { ext[i] = shape(nb + i); st[i] = stride(nb + i); }
+        cs::layout_stride::mapping<E> m(E(ext), st);
         return dyn_tensor<T, offset_t, Sr>(data + off, m);
     }
 
     /** @brief Peel the leading batch axes -> an iterable of fixed-rank-`Sr`
-     *         sub-views (range-for, `size()`, `operator[]`). This is the
+     *         sub-views (range-for, `size()`, `operator[]`). The
      *         `(*batch, *spatial, C)` boundary with `Sr = spatial + channels`:
      *         the kernel instantiates ONCE for `Sr`, not once per total rank. */
     template <cs::size_t Sr>
-    _TNY_API anyrank_front<T, offset_t, MaxRank, Sr> peel_front() const { return { *this }; }
+    _TNY_API anyrank_front<T, offset_t, Meta, Sr> peel_front() const { return { *this }; }
 };
 
 /** @brief A range of fixed-rank-`Sr` sub-views over an `anyrank`'s batch axes. */
-template <class T, class offset_t, cs::size_t MaxRank, cs::size_t Sr>
+template <class T, class offset_t, class Meta, cs::size_t Sr>
 struct anyrank_front {
-    anyrank<T, offset_t, MaxRank> src;
+    anyrank<T, offset_t, Meta> src;
 
     _TNY_API offset_t size() const noexcept {
         offset_t n = 1;
-        for (int d = 0; d < src.ndim - static_cast<int>(Sr); ++d) n *= src.shape[d];
+        for (int d = 0; d < src.ndim - static_cast<int>(Sr); ++d) n *= src.shape(d);
         return n;
     }
     _TNY_API auto operator[](offset_t i) const { return src.template peel_front_at<Sr>(i); }
@@ -102,25 +121,43 @@ struct anyrank_front {
     _TNY_API iterator end()   const { return { this, size() }; }
 };
 
-/** @brief Build an `anyrank` from raw data + shape/stride + runtime rank.
- *         (DLPack strides are in ELEMENTS; numpy `__array_interface__` in BYTES.) */
-template <cs::size_t MaxRank = 8, class T, class offset_t>
-_TNY_HOST anyrank<T, offset_t, MaxRank>
-any(T * data, const offset_t * shape, const offset_t * stride, int ndim) {
-    anyrank<T, offset_t, MaxRank> t;
+/** @brief Build an `anyrank` that COPIES shape/stride into its inline store
+ *         (device-passable). `MaxRank` sets the inline capacity (default
+ *         `TNY_MAX_RANK`). DLPack strides are in ELEMENTS; numpy
+ *         `__array_interface__` in BYTES (divide by the itemsize first). */
+template <cs::size_t MaxRank = TNY_MAX_RANK, class T, class offset_t>
+_TNY_HOST anyrank<T, offset_t, _meta_store<offset_t, MaxRank>>
+as_anyrank(T * data, const offset_t * shape, const offset_t * stride, int ndim) {
+    anyrank<T, offset_t, _meta_store<offset_t, MaxRank>> t;
     t.data = data; t.ndim = ndim;
-    for (int i = 0; i < ndim; ++i) { t.shape[i] = shape[i]; t.stride[i] = stride[i]; }
+    for (int i = 0; i < ndim; ++i) { t.shape(i) = shape[i]; t.stride(i) = stride[i]; }
+    return t;
+}
+
+/** @brief Build an `anyrank` that WRAPS external shape/stride arrays with no
+ *         copy (a view store) — e.g. straight off a DLPack tensor. The arrays
+ *         must outlive the carrier. HOST only: the pointers are not valid inside
+ *         a device kernel, so peel/dispatch on the host and pass the resulting
+ *         fixed-rank views to the device. */
+template <class T, class offset_t>
+_TNY_HOST anyrank<T, offset_t, _meta_view<offset_t>>
+as_anyrank_view(T * data, offset_t * shape, offset_t * stride, int ndim) {
+    anyrank<T, offset_t, _meta_view<offset_t>> t;
+    t.data = data; t.ndim = ndim;
+    cs::dextents<offset_t, 1> e{ static_cast<offset_t>(ndim) };
+    t.shape  = _meta_view<offset_t>(shape,  e);
+    t.stride = _meta_view<offset_t>(stride, e);
     return t;
 }
 
 namespace _detail {
-template <cs::size_t R, class T, class offset_t, cs::size_t MaxRank, class F>
-_TNY_HOST bool dispatch_from(const anyrank<T, offset_t, MaxRank> & t, F & f) {
-    if constexpr (R <= MaxRank) {
+template <cs::size_t R, class T, class offset_t, class Meta, class F>
+_TNY_HOST bool dispatch_from(const anyrank<T, offset_t, Meta> & t, F & f) {
+    if constexpr (R <= anyrank<T, offset_t, Meta>::max_rank) {
         if (t.ndim == static_cast<int>(R)) { f(t.template fixed<R>()); return true; }
         return dispatch_from<R + 1>(t, f);
     } else {
-        (void)t; (void)f; return false;   // ndim > MaxRank
+        (void)t; (void)f; return false;   // ndim > max_rank
     }
 }
 } // namespace _detail
@@ -129,14 +166,14 @@ _TNY_HOST bool dispatch_from(const anyrank<T, offset_t, MaxRank> & t, F & f) {
  * @brief Call `f` with a fixed-rank view of `t` chosen by its runtime `ndim`.
  *
  * `f` is a generic callable instantiated once per possible rank; the kernel it
- * launches is fully static. Returns false if `ndim` exceeds `MaxRank`. Prefer
- * `peel_front<Sr>` when only the trailing dims need to be static — it costs one
+ * launches is fully static. Returns false if `ndim` exceeds `max_rank`. Prefer
+ * `peel_front<Sr>` when only the trailing dims need to be static — one
  * instantiation instead of one per total rank.
  *
- *     dispatch_rank(any(data, size, stride, ndim), [&](auto v){ my_kernel(v); });
+ *     dispatch_rank(as_anyrank(data, size, stride, ndim), [&](auto v){ kernel(v); });
  */
-template <class T, class offset_t, cs::size_t MaxRank, class F>
-_TNY_HOST bool dispatch_rank(const anyrank<T, offset_t, MaxRank> & t, F && f) {
+template <class T, class offset_t, class Meta, class F>
+_TNY_HOST bool dispatch_rank(const anyrank<T, offset_t, Meta> & t, F && f) {
     return _detail::dispatch_from<1>(t, f);
 }
 
@@ -145,9 +182,7 @@ _TNY_HOST bool dispatch_rank(const anyrank<T, offset_t, MaxRank> & t, F && f) {
  *
  * `dispatch_value<1,2,3>(D, f)` calls `f(Int<k>{})` for the matching candidate
  * `k == D` (so `f` receives a static `integral_constant` it can use as a
- * template argument), and returns whether any matched. This is how a kernel
- * turns a runtime spatial rank / interpolation order / boundary mode into a
- * template parameter *early*, then dispatches to fully-static code.
+ * template argument), and returns whether any matched.
  *
  *     dispatch_value<1,2,3>(ndim_spatial, [&](auto d){ kernel<d.value>(view); });
  */

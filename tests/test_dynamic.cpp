@@ -9,13 +9,13 @@ int main()
     double buf[24];
     for (long i = 0; i < 24; ++i) buf[i] = i;
 
-    // anyrank is a trivially-copyable rank-erased carrier.
+    // anyrank is a trivially-copyable rank-erased carrier (inline store).
     static_assert(cs::is_trivially_copyable<anyrank<double,long>>::value, "trivially copyable");
-    static_assert(anyrank<double,long>::max_rank == 8, "default MaxRank");
+    static_assert(anyrank<double,long>::max_rank == TNY_MAX_RANK, "default max_rank = TNY_MAX_RANK");
 
     long shape[3]  = {2,3,4};
     long stride[3] = {12,4,1};
-    auto at = any(buf, shape, stride, 3);        // runtime rank 3
+    auto at = as_anyrank(buf, shape, stride, 3);  // runtime rank 3 (copies shape/stride)
     if (at.ndim != 3) return 1;
 
     // fixed<R>() -> a concrete rank-R md::tensor view.
@@ -33,13 +33,13 @@ int main()
 
     // works for other ranks through the SAME call site.
     long sh2[2] = {4,6}, st2[2] = {6,1};
-    auto at2 = any(buf, sh2, st2, 2);
+    auto at2 = as_anyrank(buf, sh2, st2, 2);
     double t2 = 0;
     dispatch_rank(at2, [&](auto view){ t2 = sum(view); });
     if (t2 != expect) return 6;                  // same 24 elements, contiguous
 
     // an out-of-range ndim (here 0) is reported, not dispatched.
-    auto zero = any(buf, shape, stride, 0);      // ndim 0 -> no fixed rank matches
+    auto zero = as_anyrank(buf, shape, stride, 0);      // ndim 0 -> no fixed rank matches
     if (dispatch_rank(zero, [](auto){}) != false) return 7;
 
     // ---- peel_front<Sr>: peel the runtime batch dims, keep Sr static ---------
@@ -60,6 +60,18 @@ int main()
     auto cs2 = c1.recast<tny::shape<3,4>>();     // (local `shape` array shadows tny::shape)
     static_assert(decltype(cs2.stride(Int<1>()))::value == 1, "inner stride folds after recast");
     if (cs2(2,3) != buf[12 + 2*4 + 3]) return 10;
+
+    // ---- as_anyrank_view: wrap the shape/stride arrays with NO copy ----------
+    auto av = as_anyrank_view(buf, shape, stride, 3);   // shape/stride point at the arrays
+    if (av.ndim != 3 || av.size(1) != 3 || av.step(0) != 12) return 11;
+    auto vv = av.fixed<3>();
+    if (vv(1,2,3) != buf[1*12+2*4+3]) return 12;
+    long vacc = 0; for (auto cell : av.peel_front<2>()) vacc += (long)sum(cell);
+    if (vacc != (long)expect) return 13;
+    // it really is a view: mutating the source stride array changes the wrapper.
+    stride[0] = 0;                                       // collapse axis 0 onto row 0
+    if (av.step(0) != 0) return 14;
+    stride[0] = 12;                                      // restore
 
     return 0;
 }

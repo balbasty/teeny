@@ -33,4 +33,11 @@
 #define _TNY_NAMESPACE_BEGIN(NAME) namespace NAME {
 #define _TNY_NAMESPACE_END(NAME)   }
 
+// Max rank of the rank-erased `anyrank` carrier's inline shape/stride store.
+// Default 32 = numpy's classic NPY_MAXDIMS (PyTorch allows up to 64); override
+// with -DTNY_MAX_RANK=N. Larger = a bigger inline carrier (2*N*sizeof(offset_t)).
+#ifndef TNY_MAX_RANK
+#   define TNY_MAX_RANK 32
+#endif
+
 #endif // TNY__CORE_DEFINES
