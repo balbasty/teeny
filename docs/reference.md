@@ -143,6 +143,8 @@ and every op folds output strides, so they work on any source layout (incl.
 | `t.flatten()` | → 1-D view | ravel; needs C-contiguous |
 | `t.recast<NewExtents>()` | → view | reinterpret with a more-static same-rank extents |
 | `t.clone()` | owning (stack/heap) | materialise a dense row-major copy |
+| `t.to<T2>()` | view (no-copy) or owning | **dtype** convert. Matching dtype (no `Force`) → a read-only borrow (`gpu_view` if `t` is on the device, else `view`); differing dtype or `t.to<T2,true>()` → a dense owning copy (static→stack, dyn→heap) |
+| `to<Space>(t)` (`cuda.h`) | view (no-copy) or owning | **memory-space** move: `to<Space, ET, Force>(t)` — `Space` ∈ `own::gpu`/`pinned`/`mapped`/`heap`/`stack`. Same no-copy/`Force` rule; a device source (gpu/`gpu_view`) downloads via `cudaMemcpy`. rvalue source → always copies |
 
 `reshape`/`flatten`/`recast` need exact C-contiguity (`is_contiguous<corder>()`);
 `clone()` first if the source isn't.

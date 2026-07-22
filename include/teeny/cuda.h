@@ -99,20 +99,22 @@ _TNY_HOST auto make_mapped(Shape e) { return tensor<T, Shape, Layout, own::mappe
  * ------------------------------------------------------------------ */
 namespace _detail {
 // A dense, row-major HOST copy of `x` with element type `E2`. A host-accessible
-// source (view/stack/heap/pinned/mapped) is read + converted directly; an owning
-// `gpu` source is downloaded raw into a host buffer that mirrors its LAYOUT (so
-// F-order / strided gpu tensors are not silently transposed), then densified on
-// the host. `Force=true` on the inner `.to` guarantees an OWNING dense buffer,
-// never a borrow of the local (which would dangle at return).
+// source (view/stack/heap/pinned/mapped) is read + converted directly. A DEVICE
+// source (`gpu` owning OR `gpu_view` — e.g. a slice/permute of a gpu tensor) is
+// downloaded raw into a host buffer spanning the SAME device span, re-imposing
+// `x`'s mapping (so any layout — C, F, or a strided view — is preserved, not
+// transposed), then densified on the host. `Force=true` on the inner `.to`
+// guarantees an OWNING dense buffer, never a borrow of the local (which would
+// dangle at return).
 template <class E2, class T, class Shape, class Layout, own O>
 _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
     using Ts = cs::remove_cv_t<T>;
-    if constexpr (O == own::gpu) {
-        auto tmp = make_heap<Ts, Layout>(x.extents());   // host heap mirroring x's layout (C/F/strided)
-        cudaMemcpy(tmp.data(), x.data(),
-                   static_cast<cs::size_t>(tmp.mapping().required_span_size()) * sizeof(Ts),
-                   cudaMemcpyDeviceToHost);              // copy the full device span, layout preserved
-        return tmp.template to<E2, true>();              // densify to row-major on the host
+    if constexpr (own_is_device(O)) {
+        const cs::size_t span = static_cast<cs::size_t>(x.mapping().required_span_size());
+        auto raw = make_heap<Ts>(cs::dextents<cs::int64_t, 1>{ static_cast<cs::int64_t>(span) });   // 1-D host span buffer
+        cudaMemcpy(raw.data(), x.data(), span * sizeof(Ts), cudaMemcpyDeviceToHost);
+        tensor<Ts, Shape, Layout, own::view> hv(raw.data(), x.mapping());        // re-impose x's layout on host
+        return hv.template to<E2, true>();               // densify to row-major (owns its buffer; raw can die)
     } else {
         return x.template to<E2, true>();                // host-accessible: read + convert into a dense OWNING copy
     }
@@ -136,29 +138,25 @@ _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
  *            auto v = to<own::gpu>(g);           // g is already gpu<T> -> a view, no copy
  *            auto k = to<own::gpu, void, true>(g);  // forced: a fresh gpu copy
  *
- * An **owning** `gpu` source is downloaded via `cudaMemcpy` (any dense layout —
- * C, F, or strided — is preserved and densified on the host). `Space == stack`
- * needs a static shape.
+ * Any **device** source — an owning `gpu` OR a `gpu_view` (a slice/permute/peel
+ * of a gpu tensor) — is downloaded via `cudaMemcpy` (any layout, C/F/strided, is
+ * preserved and densified on the host); a host-accessible source is read directly.
+ * `Space == stack` needs a static shape. Since #15, a device view is correctly
+ * *typed* (`gpu_view`), so it takes the download path instead of being
+ * host-dereferenced — the hazard the earlier version warned about is closed.
  *
- * @warning **A view carries no memory space.** Every source that is not `own::gpu`
- * — including a *view obtained by slicing/permuting a `gpu` tensor* (those are
- * `own::view`, not `own::gpu`) — is treated as **host-accessible** and read on the
- * host. Passing a device-memory view therefore dereferences a device pointer on
- * the host (UB / segfault on real CUDA). Materialise or `clone()` such a view on
- * the device first, or pass the owning `gpu` tensor. Distinguishing host vs device
- * views in the type system is tracked by #15.
- *
- * @note The no-copy branch returns a **borrow** of `x`, so it must outlive the
- * result — same lifetime rule as `view()`/`permute()`/slicing. Calling it on a
- * temporary lvalue would dangle; the rvalue overload below forces a copy instead.
+ * @note The no-copy branch returns a **borrow** of `x` (a `gpu_view` when `x` is a
+ * gpu tensor, else a host `view`), so it must outlive the result — same lifetime
+ * rule as `view()`/`permute()`/slicing. Calling it on a temporary lvalue would
+ * dangle; the rvalue overload below forces a copy instead.
  */
 template <own Space, class ET = void, bool Force = false, class T, class Shape, class Layout, own O>
 _TNY_HOST auto to(const tensor<T, Shape, Layout, O> & x) {
-    static_assert(Space != own::view, "to<Space>: Space must be an owning memory space, not own::view");
+    static_assert(!own_is_view(Space), "to<Space>: Space must be an owning space or stack, not a view kind");
     using Tb = cs::remove_cv_t<T>;
     using E2 = cs::conditional_t<cs::is_same<ET, void>::value, Tb, ET>;
     if constexpr (!Force && cs::is_same<E2, Tb>::value && O == Space) {
-        return tensor<const Tb, Shape, Layout, own::view>(x.data(), x.mapping());  // already there -> borrow
+        return tensor<const Tb, Shape, Layout, own_view_of(O)>(x.data(), x.mapping());  // already there -> borrow (gpu_view if device)
     } else if constexpr (Space == own::stack) {
         auto host = _detail::dense_host<E2>(x);
         tensor<E2, Shape, cs::layout_right, own::stack> dst{};   // static shape

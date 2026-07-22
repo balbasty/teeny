@@ -130,6 +130,14 @@ int main()
     static_assert(decltype(sstk)::ownership == own::stack, "to<stack> -> stack");
     if (sstk(1,1) != 4.f) return 9;
 
+    // #15+#29 integration: downloading a device VIEW (a strided gpu_view slice)
+    // now takes the download path (own_is_device) instead of host-dereferencing.
+    auto gslice = gu(all, slice(0,2));                   // gpu_view, 2x2 window of gu (2x3)
+    static_assert(decltype(gslice)::ownership == own::gpu_view, "gpu slice is a device view");
+    auto dslice = to<own::heap>(gslice);
+    static_assert(decltype(dslice)::ownership == own::heap, "download -> heap");
+    if (dslice(0,0) != 0.f || dslice(1,1) != 4.f) return 10;   // strided device view downloaded correctly
+
     // const-element source composes: x.to<>() borrows as tensor<const T>, and
     // to<Space>(that) must strip the const (else it fails to compile / write const).
     auto cb = host.to<>();                         // tensor<const float, ...> borrow

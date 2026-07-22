@@ -516,7 +516,7 @@ public:
     template <class T2 = element_type, bool Force = false,
               cs::enable_if_t<!Force && cs::is_same<T2, element_type>::value, int> = 0>
     _TNY_API auto to() const {
-        return tensor<const element_type, Shape, Layout, own::view>(data(), mapping());  // already that dtype -> borrow
+        return tensor<const element_type, Shape, Layout, own_view_of(O)>(data(), mapping());  // already that dtype -> borrow (gpu_view if device)
     }
     template <class T2 = element_type, bool Force = false, bool S = is_static,
               cs::enable_if_t<(Force || !cs::is_same<T2, element_type>::value) && S, int> = 0>
