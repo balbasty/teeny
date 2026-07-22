@@ -98,14 +98,14 @@ $(BUILDDIR)/ex_batched_inverse: examples/batched_inverse.cpp | $(BUILDDIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -pthread $(TESTFLAGS) -o $@ $<
 
 runex-%: $(BUILDDIR)/ex_%
-	@ $(BUILDDIR)/ex_$* >/dev/null && echo "  PASS  ex_$*" || echo "  FAIL  ex_$*"
+	@ $(BUILDDIR)/ex_$* >/dev/null && echo "  PASS  ex_$*" || { echo "  FAIL  ex_$*"; exit 1; }
 
 # test_cuda needs the fake CUDA runtime on the include path.
 $(BUILDDIR)/test_cuda: tests/test_cuda.cpp | $(BUILDDIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -Itests/fakecuda $(TESTFLAGS) -o $@ $<
 
 run-%: $(BUILDDIR)/test_%
-	@ $(BUILDDIR)/test_$* && echo "  PASS  test_$*" || echo "  FAIL  test_$*"
+	@ $(BUILDDIR)/test_$* && echo "  PASS  test_$*" || { echo "  FAIL  test_$*"; exit 1; }
 
 ########################################################################
 # 	Messages
