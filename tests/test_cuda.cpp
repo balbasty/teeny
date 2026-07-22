@@ -44,8 +44,16 @@ int main()
     static_assert(own_view_of(own::heap) == own::view && own_view_of(own::stack) == own::view, "host source -> host view");
     static_assert(own_view_of(own::pinned) == own::view && own_view_of(own::mapped) == own::view, "pinned/mapped are host -> view");
 
+    // compile-time memory-space flags (members + free trait forms).
+    static_assert(gpu<float, shape<2>>::is_device && !gpu<float, shape<2>>::is_host_accessible, "gpu is device");
+    static_assert(gpu<float, shape<2>>::is_owning && !gpu<float, shape<2>>::is_view, "gpu owns");
+    static_assert(local<float, shape<2>>::is_host_accessible && !local<float, shape<2>>::is_device, "stack host");
+    static_assert(is_device_v<gpu<float, shape<2>>> && !is_view_v<gpu<float, shape<2>>>, "free traits");
+
     // slicing / structure / peel of a gpu tensor all yield gpu_view, not view.
     auto g = gpu<float, shape<4,5>>(shape<4,5>{});
+    static_assert(decltype(g(1, all))::is_device && decltype(g(1, all))::is_view, "gpu slice is a device view");
+    static_assert(!decltype(g(1, all))::is_host_accessible, "gpu view not host-accessible");
     static_assert(decltype(g(1, all))::ownership       == own::gpu_view, "gpu slice -> gpu_view");
     static_assert(decltype(g(all, slice(1,4)))::ownership == own::gpu_view, "gpu range slice -> gpu_view");
     static_assert(decltype(g.at(0,0))::ownership       == own::gpu_view, "gpu .at -> gpu_view");

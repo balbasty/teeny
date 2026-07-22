@@ -75,6 +75,11 @@ struct tensor : private Layout::template mapping<Shape> {
 
     static constexpr own  ownership = O;
     static constexpr bool is_static = (Shape::rank_dynamic() == 0);
+    // memory-space flags (mirror the own_* helpers, as compile-time constants):
+    static constexpr bool is_view            = own_is_view(O);             // view or gpu_view
+    static constexpr bool is_owning          = own_is_owning(O);           // heap/gpu/pinned/mapped
+    static constexpr bool is_device          = own_is_device(O);           // gpu or gpu_view
+    static constexpr bool is_host_accessible = own_is_host_accessible(O);  // dereferenceable on the host
     static constexpr cs::size_t buffer_size = storage_size<mapping_type, O == own::stack>::value;
     static_assert(O != own::stack || is_static, "stack tensor needs a fully static shape");
 
@@ -735,6 +740,13 @@ wrap(T * p, Shape e, cs::array<typename Shape::index_type, strides<S0, Srest...>
     using Tn = tensor<T, Shape, strides<S0, Srest...>, own::view>;
     return Tn(p, typename Tn::mapping_type(e, dyn));
 }
+
+/** @brief Compile-time memory-space traits (SFINAE-friendly free forms of the
+ *         tensor's `is_view`/`is_device`/… members): `is_view_v<decltype(x)>`. */
+template <class Tn> inline constexpr bool is_view_v            = Tn::is_view;
+template <class Tn> inline constexpr bool is_owning_v          = Tn::is_owning;
+template <class Tn> inline constexpr bool is_device_v          = Tn::is_device;
+template <class Tn> inline constexpr bool is_host_accessible_v = Tn::is_host_accessible;
 
 /** @brief A non-owning view type. Construct as `view_t<T,E>(ptr, extents)`. */
 template <class T, class Shape, class Layout = cs::layout_right>
