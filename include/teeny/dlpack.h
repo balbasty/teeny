@@ -78,7 +78,8 @@ template <class T> _TNY_HOST bool dtype_matches(const DLDataType & d) {
 template <own O> _TNY_HOST constexpr DLDeviceType device_of() {
     return own_is_device(O) ? kDLCUDA          // gpu OR gpu_view
          : O == own::pinned ? kDLCUDAHost
-         : O == own::mapped ? kDLCUDAManaged
+         : O == own::mapped ? kDLCUDAHost   // cudaHostAllocMapped = page-locked HOST memory (zero-copy),
+                                            //   NOT managed/UVM — kDLCUDAHost is the honest label
                             : kDLCPU;   // host view / stack / heap
 }
 

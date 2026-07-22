@@ -88,5 +88,14 @@ int main()
     if (dlp->dl_tensor.device.device_type != kDLCPU) return 13;   // pinned view is host
     dlp->deleter(dlp);
 
+    // an OWNING pinned/mapped export keeps its space label: both are page-locked
+    // HOST memory -> kDLCUDAHost (mapped is zero-copy host, NOT managed/UVM).
+    auto * dpn = to_dlpack(pinned<float, shape<3>>(shape<3>{}));
+    if (dpn->dl_tensor.device.device_type != kDLCUDAHost) return 14;
+    dpn->deleter(dpn);
+    auto * dmp = to_dlpack(mapped<float, shape<3>>(shape<3>{}));
+    if (dmp->dl_tensor.device.device_type != kDLCUDAHost) return 15;   // NOT kDLCUDAManaged
+    dmp->deleter(dmp);
+
     return 0;
 }
