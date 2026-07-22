@@ -29,7 +29,8 @@ gpu<T, E, L>  pinned<T, E, L>  mapped<T, E, L>  // CUDA memory (from <teeny/cuda
 
 ```cpp
 wrap(ptr, shape);  wrap<Layout>(ptr, shape);  // a view (C-order / chosen layout)
-wrap_strided<S...>(ptr, shape);               // view with compile-time strides
+wrap(ptr, shape, {s0, s1, ...});              // view with RUNTIME strides (layout_stride)
+wrap_strided<S...>(ptr, shape);               // view with COMPILE-TIME strides
 as_tensor(any_mdspan);                        // wrap an mdspan/submdspan result
 
 make_view(ptr, shape);           // deduce the extents type

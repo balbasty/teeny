@@ -96,6 +96,7 @@ gpu/pinned/mapped<T,E,L>   // from cuda.h
 ```
 
 Factories: `wrap(ptr, extents)` / `wrap<Layout>(ptr, extents)`,
+`wrap(ptr, extents, {s...})` (runtime strides -> layout_stride),
 `wrap_strided<S...>(ptr, extents)` (compile-time strides),
 `as_tensor(any_mdspan)` (wrap a submdspan/mdspan result as a view). Functional
 factories that deduce the extents type: `make_view(ptr,e)`, `make_local<T>(e)`,
