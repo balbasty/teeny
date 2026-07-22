@@ -144,7 +144,9 @@ template <class T, class Extents, class Layout = layout_right, own O = own::view
 struct tensor;
 ```
 
-`own` is `{ view, stack, heap, gpu, pinned, mapped }`. Rarely named directly —
+`own` is `{ view, stack, heap, gpu, pinned, mapped, gpu_view }` (`gpu_view` is a
+non-owning view of *device* memory — what slicing/permuting a `gpu` tensor
+yields). Rarely named directly —
 use the aliases (`view`/`local`/`owned`) and factories (`make_*`,
 `zeros`/`ones`/`full`) instead. The parameter lets one class and one set of
 algorithms cover every memory space.

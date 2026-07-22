@@ -130,9 +130,11 @@ Assignment **into** a slice copies (broadcasts); on a **named** view it rebinds:
 
 ## Structure (views)
 
-All return a view; axis template args are signed (negatives count from the back)
-and every op folds output strides, so they work on any source layout (incl.
-`strides<...>`).
+All return a view and work on any source layout (incl. `strides<...>`); axis
+template args are signed (negatives count from the back). `operator()` slicing,
+`take_along`, and `peel` fold their output strides into a static `strides<...>`
+layout (compile-time where derivable); `permute`/`flip`/`unsqueeze`/`squeeze`
+build a `dynamic_strides` (runtime `layout_stride`) view.
 
 | Call | Returns | Notes |
 |---|---|---|
@@ -206,14 +208,16 @@ scalar rhs applies to every element.
 
 ### Reductions
 
-Accumulate in — and **return** — the *reduce type*: `double` for small floats
+**Accumulate** in the *reduce type* — `double` for small floats
 (`float`/`double`/`half`; a wider float keeps its own type), the item type for
-integers. Override with a leading **type** argument.
+integers — then **cast the result back to the tensor's element type** `T`
+(`sum(float_tensor)` → `float`, computed in `double`). A leading **type** argument
+makes that type both the accumulator **and** the result.
 
 | Call | Returns | Notes |
 |---|---|---|
-| `sum(a)` `prod(a)` `max(a)` `min(a)` `mean(a)` | reduce type (scalar) | over all axes |
-| `dot(a, b)` | reduce type (scalar) | inner product (broadcasts) |
+| `sum(a)` `prod(a)` `max(a)` `min(a)` `mean(a)` | `T` (accumulated wide) | over all axes |
+| `dot(a, b)` | `promote(Ta,Tb)` (accumulated wide) | inner product; extents must match **exactly** (no broadcast) |
 | `sum<Acc>(a)`, `mean<Acc>(a)`, `dot<Acc>(a,b)` | `Acc` | force the accumulator/return type |
 | `allclose(a, b, rtol=1e-5, atol=1e-8)` | `bool` | `\|a−b\| ≤ atol+rtol·\|b\|` everywhere (broadcasts) |
 | `sum<Axes...>(a)` `mean<Axes...>` `max`/`min`/`prod<Axes...>` | lower-rank tensor | remove the named axes (negatives wrap) |

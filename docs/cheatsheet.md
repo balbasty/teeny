@@ -119,11 +119,14 @@ x.reshape<NewExt...>();               // contiguous-view reshape (one -1 inferre
 x.flatten();                          // 1-D contiguous view
 x.clone();                            // dense row-major OWNING copy
 x.recast<NewExtents>();               // reinterpret with a more-static same-rank extents
+x.to<T2>();                           // dtype convert (matching dtype -> no-copy borrow; else owning copy)
+to<own::gpu>(x);                      // memory-space move: to<Space,ET,Force>(x) (from <teeny/cuda.h>)
 ```
 
-Axis template arguments are signed (negatives count from the back). Every view op
-folds output strides and works on any source layout (incl. `strides<...>`). See
-[Views & structure](structure.md).
+Axis template arguments are signed (negatives count from the back). All view ops
+work on any source layout (incl. `strides<...>`); `operator()`/`take_along`/`peel`
+fold into a static `strides<...>`, while `permute`/`flip`/`unsqueeze`/`squeeze`
+build a `dynamic_strides` (runtime) view. See [Views & structure](structure.md).
 
 ---
 

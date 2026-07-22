@@ -152,8 +152,9 @@ t(ellipsis) = b; t(0,all) = 3.0;  // assign INTO a slice copies/fills (b broadca
 t(0, slice<1,4>()); t(0, slice<0,8,2>());  // compile-time slice (bounds fold like `all`);
                       //   slice<Int<1>,Int<4>>() is the type form (only way to bake `none`).
                       //   negative bounds wrap; all == slice(none,none) (folds).
-                      //   NB a range routes through layout_stride (ranged axis -> dynamic;
-                      //   `all`-kept axes stay static). See the CCCL note in tensor.h.
+                      //   NB a range outputs teeny's strides<...> layout (folding the
+                      //   stride where derivable); a COMPILE-TIME range folds its extent
+                      //   too (source static + static bounds), a runtime range's is dynamic.
 t.take_along<0,2>(i, slice(1,4));  // bind named axes only; keep every other axis
 t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1) -> view
 t.flip<1>();          // reverse an axis (negative-stride view; needs signed index)
