@@ -65,5 +65,24 @@ int main() {
     static_assert(decltype(rc.stride(Int<1>()))::value == 4, "recast folds inner stride");
     if (rc(1,2,3) != buf[12+8+3]) return 15;
 
+    // ---- is_contiguous: order-agnostic (dense) vs exact-layout check ---------
+    auto cc = wrap(buf, shape<2,3,4>{});               // C-contiguous
+    if (!cc.is_contiguous()) return 16;                // dense
+    if (!cc.is_contiguous<layout_right>()) return 17;  // exactly C
+    if (cc.is_contiguous<layout_left>())  return 18;   // not F
+    auto perm = cc.permute<2,0,1>();                   // permuted: still dense in memory
+    if (!perm.is_contiguous()) return 19;              // order-agnostic -> true
+    if (perm.is_contiguous<layout_right>()) return 20; // but not C-contiguous
+    auto ff = wrap<layout_left>(buf, shape<2,3,4>{});  // F-contiguous
+    if (!ff.is_contiguous()) return 21;                // dense
+    if (!ff.is_contiguous<layout_left>())  return 22;  // exactly F
+    if (ff.is_contiguous<layout_right>())  return 23;  // not C
+    auto gap = cc(all, slice(0,2), all);               // a hole along axis 1
+    if (gap.is_contiguous()) return 24;                // not dense
+    auto flp = cc.flip<0>();                           // negative stride
+    if (flp.is_contiguous()) return 25;                // flips are not "dense" here
+    auto sq  = wrap(buf, shape<3,1,4>{});              // size-1 axis is ignored
+    if (!sq.is_contiguous()) return 26;
+
     return 0;
 }
