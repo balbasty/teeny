@@ -11,7 +11,7 @@ They are ordinary element types: use them anywhere a `float`/`double` goes.
 auto a = local<half, shape<64,64>>();
 a.fill_(half(1.5));
 a.mul_(2.0);
-auto s = sum(a);  // accumulated in float, then cast back to half
+auto s = sum(a);  // accumulated in double (reduce type), then cast back to half
 ```
 
 ## Native under nvcc, portable elsewhere
@@ -25,16 +25,19 @@ auto s = sum(a);  // accumulated in float, then cast back to half
 Force the portable types even under nvcc with `-DTNY_PORTABLE_HALF`. The bit
 layout matches the CUDA types, so a `reinterpret_cast` between them is valid.
 
-## Precision: compute in float
+## Precision: compute wide, store narrow
 
-All elementwise and reduction math computes in **`float`** for half element
-types (`compute_type<half> == float`), then rounds the result back. This is
-why summing many 16-bit values doesn't stall at the 16-bit gap, and it means
-the engines never depend on native half *host* operators.
+**Elementwise** math computes in **`float`** for half element types
+(`compute_type<half> == float`), then rounds the result back — so the engines
+never depend on native half *host* operators. **Reductions** go a step wider:
+they accumulate in the **reduce type**, which is **`double`** for the small
+floats (`reduce_type<half/float/double> == double`), then cast the result back to
+the tensor's element type. Either way, summing many 16-bit values doesn't stall
+at the 16-bit gap.
 
 ```cpp
 // 2049 halves of 1.0: fp16 can't represent 2049 (gap > 1 above 2048), but the
-// float accumulator sums correctly, then rounds to fp16 2048 — not ~1024.
+// double accumulator sums correctly, then rounds to fp16 2048 — not ~1024.
 auto big = local<half, shape<2049>>(); big.fill_(half(1.0));
 float s = sum(big);  // ~2048
 ```

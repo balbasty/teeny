@@ -41,7 +41,7 @@ auto m = local<double, shape<3,3>>();                         // stack-owned (st
 auto h = owned<double, shape<-1,3>>(shape<-1,3>{n});   // heap-owned (host); -1 == dynamic
 
 // static / dynamic sizes mix per dimension, plus a per-dim static-stride layout:
-auto s = wrap_strided<16,3,1>(ptr, shape<dynamic_extent,3,3>{n});
+auto s = wrap(ptr, shape<dynamic_extent,3,3>{n}, strides<16,3,1>{});   // compile-time strides
 
 // geometry: t.shape() / t.shape(d) (or t.extents() / t.extent(d)); t.rank(); t.numel();
 
@@ -70,7 +70,7 @@ auto hh = local<half, shape<64,64>>();
 
 | Header | Contents |
 |---|---|
-| `teeny.h` | umbrella (everything except `cuda.h`) |
+| `teeny.h` | umbrella (includes everything; `cuda.h` is pulled in, self-guarded — a no-op without the CUDA runtime). `dlpack.h` is the one opt-in extra |
 | `alias.h` | `shape<...>`, `Int<V>`/… static ints, `all`, mdspan vocabulary in `tny::` |
 | `half.h` | `half` (binary16) + `bfloat16` element types + `compute_type` |
 | `storage.h` | `own` modes + storage policies (`owning_storage<T,Alloc>`) |

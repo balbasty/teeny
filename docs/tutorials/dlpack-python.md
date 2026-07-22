@@ -73,8 +73,14 @@ __global__ void invert_kernel(In in, Out out) {
 }
 template <class In, class Out>
 void invert_cuda(const In & in, Out & out) {
-    int b=256, g=(int)((in.extent(0)+b-1)/b);
+    const long n = in.extent(0);
+    if (n == 0) return;                       // a 0-block launch is a CUDA error
+    int b=256, g=(int)((n+b-1)/b);
     invert_kernel<<<g,b>>>(in, out);
+    // NB: the kernel is async on the default stream. nanobind hands the result
+    // back to Python without synchronizing — call cudaDeviceSynchronize() (or
+    // sync the stream) before the caller reads it if you're not on a blocking
+    // stream. (torch.from_dlpack consumers that touch the data will sync anyway.)
 }
 #endif
 ```
