@@ -24,7 +24,7 @@ using namespace tny;
 // invert one static C×C matrix (Gauss–Jordan). A, out: (C,C) views of any stride.
 template <class MatA, class MatO>
 _TNY_API void invert(const MatA & A, MatO & out) {
-    constexpr int C = (int)MatA::extents_type::static_extent(0);
+    constexpr int C = (int)decltype(A.extent(Int<0>()))::value;   // static extent, folds
     double m[C][C], inv[C][C];
     for (int i=0;i<C;++i) for (int j=0;j<C;++j){ m[i][j]=A(i,j); inv[i][j]=(i==j); }
     for (int c=0;c<C;++c){

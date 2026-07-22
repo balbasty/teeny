@@ -26,7 +26,7 @@ namespace cs = cuda::std;
 // whole thing unrolls and the strides fold to immediates.
 template <class MatA, class MatO>
 _TNY_API void invert(const MatA & A, MatO & out) {
-    constexpr int C = static_cast<int>(MatA::extents_type::static_extent(0));
+    constexpr int C = static_cast<int>(decltype(A.extent(Int<0>()))::value);   // static extent, friendly
     double m[C][C], inv[C][C];
     for (int i=0;i<C;++i) for (int j=0;j<C;++j) { m[i][j]=A(i,j); inv[i][j]=(i==j)?1.0:0.0; }
     for (int col=0; col<C; ++col) {

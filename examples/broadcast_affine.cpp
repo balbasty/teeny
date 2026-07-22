@@ -40,8 +40,8 @@ int main() {
 
     auto out = col + plane;
     static_assert(decltype(out)::rank()==3 && decltype(out)::is_static, "static broadcast -> stack");
-    static_assert(decltype(out)::extents_type::static_extent(0)==C, "result C");
-    static_assert(decltype(out)::extents_type::static_extent(1)==H, "result H");
+    static_assert(decltype(out.extent(Int<0>()))::value==C, "result C");   // friendly static extent
+    static_assert(decltype(out.extent(Int<1>()))::value==H, "result H");
     for (long c=0;c<C;++c) for (long h=0;h<H;++h) for (long w=0;w<W;++w)
         if (!close(out(c,h,w), col(c,0,0)+plane(0,h,w))) { std::printf("oop mismatch\n"); return 2; }
 
