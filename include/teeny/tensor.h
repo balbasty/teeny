@@ -664,41 +664,59 @@ using owned = tensor<T, Extents, Layout, own::heap>;
 template <class Layout = cs::layout_right, class T, class Extents>
 _TNY_API auto make_view(T * p, Extents e) { return view<Layout>(p, e); }
 
-/** @brief `make_local<T>(extents)` — a stack-owned tensor (static shape). */
-template <class T, class Layout = cs::layout_right, class Extents>
+/** @brief `make_local<T>(extents)` — a stack-owned tensor (static shape).
+ *         `T` defaults to `float` (numpy's default float dtype). */
+template <class T = float, class Layout = cs::layout_right, class Extents>
 _TNY_API auto make_local(Extents = Extents{}) { return tensor<T, Extents, Layout, own::stack>{}; }
 
-/** @brief `make_heap<T>(extents)` — a heap-owned tensor (host, move-only). */
-template <class T, class Layout = cs::layout_right, class Extents>
+/** @brief `make_heap<T>(extents)` — a heap-owned tensor (host, move-only).
+ *         `T` defaults to `float`. */
+template <class T = float, class Layout = cs::layout_right, class Extents>
 _TNY_HOST auto make_heap(Extents e) { return tensor<T, Extents, Layout, own::heap>(e); }
 
 /* --- numpy-style creation factories: static shape -> stack (host+device),   *
  *     dynamic shape -> heap (host only), mirroring the out-of-place ops.       */
 
-/** @brief `full<T>(extents, v)` — a new tensor filled with `v`. */
-template <class T, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() == 0, int> = 0>
-_TNY_API auto full(Extents, T v) { tensor<T, Extents, Layout, own::stack> t{}; t.fill_(v); return t; }
-template <class T, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() != 0, int> = 0>
-_TNY_HOST auto full(Extents e, T v) { tensor<T, Extents, Layout, own::heap> t(e); t.fill_(v); return t; }
+/** @brief `full(extents, v)` — a new tensor filled with `v`. The element type
+ *         defaults to the **value's** type (numpy/pytorch: `full(s, 3)` is int,
+ *         `full(s, 3.0)` is float); pass `full<T>(...)` to override. Unlike the
+ *         value-less `zeros`/`ones` (which default to `float`), there is a value
+ *         here to infer from, so we do. */
+template <class T = void, class Layout = cs::layout_right, class Extents, class V,
+          class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
+          cs::enable_if_t<Extents::rank_dynamic() == 0, int> = 0>
+_TNY_API auto full(Extents, V v) { tensor<ET, Extents, Layout, own::stack> t{}; t.fill_(static_cast<ET>(v)); return t; }
+template <class T = void, class Layout = cs::layout_right, class Extents, class V,
+          class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
+          cs::enable_if_t<Extents::rank_dynamic() != 0, int> = 0>
+_TNY_HOST auto full(Extents e, V v) { tensor<ET, Extents, Layout, own::heap> t(e); t.fill_(static_cast<ET>(v)); return t; }
 
 /** @brief `zeros<T>(extents)` / `ones<T>(extents)` — a new tensor of 0s / 1s.
- *         Static shape -> stack (host+device); dynamic -> heap (host only). The
- *         annotation is split so it matches the overload `full` resolves to. */
-template <class T, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() == 0, int> = 0>
+ *         `T` defaults to `float`. Static shape -> stack (host+device); dynamic
+ *         -> heap (host only). The annotation is split so it matches the overload
+ *         `full` resolves to. */
+template <class T = float, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() == 0, int> = 0>
 _TNY_API  auto zeros(Extents e) { return full<T, Layout>(e, T(0)); }
-template <class T, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() != 0, int> = 0>
+template <class T = float, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() != 0, int> = 0>
 _TNY_HOST auto zeros(Extents e) { return full<T, Layout>(e, T(0)); }
-template <class T, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() == 0, int> = 0>
+template <class T = float, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() == 0, int> = 0>
 _TNY_API  auto ones(Extents e) { return full<T, Layout>(e, T(1)); }
-template <class T, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() != 0, int> = 0>
+template <class T = float, class Layout = cs::layout_right, class Extents, cs::enable_if_t<Extents::rank_dynamic() != 0, int> = 0>
 _TNY_HOST auto ones(Extents e) { return full<T, Layout>(e, T(1)); }
 
-/** @brief `arange<T>(n)` — a 1-D tensor `[0, 1, ..., n-1]` (heap, host). */
-template <class T>
+/** @brief `arange<T>(n)` — a 1-D tensor `[0, 1, ..., n-1]` (heap, host). `T`
+ *         defaults to `int64_t` (an integer range, like numpy `arange(n)`). */
+template <class T = cs::int64_t>
 _TNY_HOST auto arange(long n) {
     using E = cs::dextents<cs::int64_t, 1>;
     tensor<T, E, cs::layout_right, own::heap> t(E{n}); t.iota_(); return t;
 }
+/** @brief Static `arange<T, N>()` — a stack `[0..N-1]` (host+device, folds). */
+template <class T = cs::int64_t, long N>
+_TNY_API auto arange() { tensor<T, shape<N>, cs::layout_right, own::stack> t{}; t.iota_(); return t; }
+/** @brief `arange<T>(Int<N>())` — the static form spelled with a static integer. */
+template <class T = cs::int64_t, class V, V N>
+_TNY_API auto arange(cs::integral_constant<V, N>) { return arange<T, static_cast<long>(N)>(); }
 
 /** @brief Wrap any `cuda::std::mdspan` (e.g. a `submdspan` result) as a
  *         non-owning `md::tensor` view, so the tensor API applies to it. */

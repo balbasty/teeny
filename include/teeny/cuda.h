@@ -80,12 +80,13 @@ using host = tensor<T, Extents, Layout, own::host>;
 template <class T, class Extents, class Layout = cs::layout_right>
 using pinned = tensor<T, Extents, Layout, own::pinned>;
 
-/* --- functional factories (deduce the Extents type from the argument) --- */
-template <class T, class Layout = cs::layout_right, class Extents>
+/* --- functional factories (deduce the Extents type from the argument;
+ *     `T` defaults to `float`, like the host factories) --- */
+template <class T = float, class Layout = cs::layout_right, class Extents>
 _TNY_HOST auto make_device(Extents e) { return tensor<T, Extents, Layout, own::device>(e); }
-template <class T, class Layout = cs::layout_right, class Extents>
+template <class T = float, class Layout = cs::layout_right, class Extents>
 _TNY_HOST auto make_host(Extents e)   { return tensor<T, Extents, Layout, own::host>(e); }
-template <class T, class Layout = cs::layout_right, class Extents>
+template <class T = float, class Layout = cs::layout_right, class Extents>
 _TNY_HOST auto make_pinned(Extents e) { return tensor<T, Extents, Layout, own::pinned>(e); }
 
 _TNY_NAMESPACE_END(tny)

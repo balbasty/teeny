@@ -32,12 +32,14 @@ view(ptr, shape);  view<Layout>(ptr, shape);  // a view (C-order / chosen layout
 view_strided<S...>(ptr, shape);               // view with compile-time strides
 as_tensor(any_mdspan);                        // wrap an mdspan/submdspan result
 
-make_view(ptr, shape);  // deduce the extents type
-make_local<T>(shape);  make_heap<T>(shape);
-make_device<T>(shape); make_host<T>(shape); make_pinned<T>(shape);
+make_view(ptr, shape);           // deduce the extents type
+make_local<T>(shape);  make_heap<T>(shape);            // T defaults to float
+make_device<T>(shape); make_host<T>(shape); make_pinned<T>(shape);   // T defaults to float
 
-zeros<T>(shape);  ones<T>(shape);  full<T>(shape, v);  // static->stack, dyn->heap
-arange<T>(n);                                          // 1-D [0..n-1] (heap)
+zeros<T>(shape);  ones<T>(shape);   // T defaults to float; static->stack, dyn->heap
+full(shape, v);                     // element type = the VALUE's type (full<T>(...) to force)
+arange<T>(n);                       // 1-D [0..n-1] (heap); T defaults to int64
+arange<T, N>();  arange<T>(Int<N>());  // static 1-D [0..N-1] (stack, folds)
 ```
 
 ---

@@ -99,7 +99,8 @@ Factories: `view(ptr, extents)` / `view<Layout>(ptr, extents)`,
 `view_strided<S...>(ptr, extents)` (compile-time strides),
 `as_tensor(any_mdspan)` (wrap a submdspan/mdspan result as a view). Functional
 factories that deduce the extents type: `make_view(ptr,e)`, `make_local<T>(e)`,
-`make_heap<T>(e)`, `make_device/host/pinned<T>(e)` (T explicit, E deduced).
+`make_heap<T>(e)`, `make_device/host/pinned<T>(e)` (E deduced; **T defaults to
+`float`**, override explicitly).
 
 Custom strided layout: `strides<Sx, Sy, ...>` is the stride analogue of `shape`,
 folding known strides to immediates and storing only the dynamic ones (EBO when
@@ -165,7 +166,9 @@ a.iota_(start, step);                         // 0,1,2,... (row-major)
 a.map_(f); a.zip_with_(g, b); auto c = a.map(f);  // user functor (device-safe struct)
 a.add_at(v, i, j);                            // scatter-accumulate: a(i,j) += v,
                                               //   ATOMIC on device (push/splat write)
-auto z = zeros<T>(shape); ones<T>(sh); full<T>(sh,v); arange<T>(n);  // creation
+auto z = zeros<T>(shape); ones<T>(sh); full(sh,v); arange<T>(n);  // creation. zeros/ones
+                      //   default T=float; full's T = value type; arange defaults T=int64.
+                      //   Static: arange<T,N>() / arange<T>(Int<N>()) -> stack [0..N-1].
 
 // --- math (out-of-place -> NEW tensor; static shape -> stack, else heap/host) ---
 // result type = promote(A,B): C++ rules, but among floats the LOWER width wins
