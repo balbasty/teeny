@@ -120,6 +120,16 @@ struct b_or  { template <class X, class Y> _TNY_API X operator()(X x, Y y) const
 struct b_xor { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x ^ static_cast<X>(y); } };
 struct u_bnot{ template <class X> _TNY_API X operator()(X x) const { return ~x; } };
 
+/* ---- comparisons (-> bool) and boolean reductions ---------------- */
+struct c_eq { template <class X> _TNY_API bool operator()(X x, X y) const { return x == y; } };
+struct c_ne { template <class X> _TNY_API bool operator()(X x, X y) const { return x != y; } };
+struct c_lt { template <class X> _TNY_API bool operator()(X x, X y) const { return x <  y; } };
+struct c_le { template <class X> _TNY_API bool operator()(X x, X y) const { return x <= y; } };
+struct c_gt { template <class X> _TNY_API bool operator()(X x, X y) const { return x >  y; } };
+struct c_ge { template <class X> _TNY_API bool operator()(X x, X y) const { return x >= y; } };
+struct r_all { template <class X> _TNY_API bool operator()(bool a, X x) const { return a && (x != X(0)); } };
+struct r_any { template <class X> _TNY_API bool operator()(bool a, X x) const { return a || (x != X(0)); } };
+
 /* ---- reduce ops (acc = op(acc, x)) ------------------------------- */
 struct r_add { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a + static_cast<A>(x); } };
 struct r_mul { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a * static_cast<A>(x); } };
@@ -316,6 +326,77 @@ template <class Op, class A, class S, cs::enable_if_t<!A::is_static, int> = 0>
 _TNY_HOST auto oops(const A & a, S s, Op op) {
     tensor<promote_t<typename A::element_type, S>, typename A::extents_type, cs::layout_right, own::heap> c(a.extents());
     scalo(c, a, s, op); return c;
+}
+
+/* ---- comparisons -> a bool tensor (broadcast; computed in Rc) ----- *
+ * Like bzip_/scalo_ but the output element type is bool and the compare runs in
+ * the INPUTS' compute type (not bool), so `a < b` gives a boolean mask.         */
+template <class Rc, class C, class A, class B, class Op, cs::size_t... D>
+_TNY_API void bcmp_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
+    using I = typename C::index_type;
+    const I ce[] = { c.extent(D)... }, sc[] = { c.stride(D)... };
+    const I ae[] = { a.extent(D)... }, sa[] = { a.stride(D)... };
+    const I be[] = { b.extent(D)... }, sb[] = { b.stride(D)... };
+    for (cs::size_t r = 0; r < sizeof...(D); ++r) {
+        _TNY_CHECK(ae[r] == ce[r] || ae[r] == 1, "compare: lhs extent mismatch");
+        _TNY_CHECK(be[r] == ce[r] || be[r] == 1, "compare: rhs extent mismatch");
+    }
+    I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= ce[r];
+    for (I lin = 0; lin < n; ++lin) {
+        I rem = lin, oa = 0, ob = 0, oc = 0;
+        for (int d = (int)sizeof...(D)-1; d >= 0; --d) {
+            I k = rem % ce[d]; rem /= ce[d];
+            oc += k * sc[d]; oa += (ae[d] == 1 ? I(0) : k) * sa[d]; ob += (be[d] == 1 ? I(0) : k) * sb[d];
+        }
+        c.data()[oc] = op(static_cast<Rc>(a.data()[oa]), static_cast<Rc>(b.data()[ob]));
+    }
+}
+template <class Rc, class C, class A, class B, class Op>
+_TNY_API void bcmp(C & c, const A & a, const B & b, Op op) {
+    static_assert(A::rank() == C::rank() && B::rank() == C::rank(), "compare: rank mismatch");
+    static_assert(bc_static_ok<typename A::extents_type, typename B::extents_type>(cs::make_index_sequence<C::rank()>{}), "compare: incompatible static extents");
+    bcmp_<Rc>(c, a, b, op, cs::make_index_sequence<C::rank()>{});
+}
+template <class Rc, class C, class A, class S, class Op, cs::size_t... D>
+_TNY_API void scmp_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
+    using I = typename C::index_type; const Rc sv = static_cast<Rc>(s);
+    const I e[] = { a.extent(D)... }, sa[] = { a.stride(D)... }, sc[] = { c.stride(D)... };
+    I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
+    for (I lin = 0; lin < n; ++lin) {
+        I rem = lin, oa = 0, oc = 0;
+        for (int d = (int)sizeof...(D)-1; d >= 0; --d) { I k = rem % e[d]; rem /= e[d]; oa += k * sa[d]; oc += k * sc[d]; }
+        c.data()[oc] = op(static_cast<Rc>(a.data()[oa]), sv);
+    }
+}
+template <class Rc, class C, class A, class S, class Op> _TNY_API void scmp(C & c, const A & a, S s, Op op)
+{ scmp_<Rc>(c, a, s, op, cs::make_index_sequence<C::rank()>{}); }
+
+// tensor (cmp) tensor -> bool tensor (static -> stack, dynamic -> heap)
+template <class Op, class A, class B,
+          cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() == 0, int> = 0>
+_TNY_API auto oop_cmp(const A & a, const B & b, Op op) {
+    using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
+    using Rc = compute_type_t<promote_t<typename A::element_type, typename B::element_type>>;
+    tensor<bool, RE, cs::layout_right, own::stack> c{}; bcmp<Rc>(c, a, b, op); return c;
+}
+template <class Op, class A, class B,
+          cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() != 0, int> = 0>
+_TNY_HOST auto oop_cmp(const A & a, const B & b, Op op) {
+    using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
+    using Rc = compute_type_t<promote_t<typename A::element_type, typename B::element_type>>;
+    tensor<bool, RE, cs::layout_right, own::heap> c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<A::rank()>{}));
+    bcmp<Rc>(c, a, b, op); return c;
+}
+// tensor (cmp) scalar -> bool tensor
+template <class Op, class A, class S, cs::enable_if_t<A::is_static, int> = 0>
+_TNY_API auto oops_cmp(const A & a, S s, Op op) {
+    using Rc = compute_type_t<promote_t<typename A::element_type, S>>;
+    tensor<bool, typename A::extents_type, cs::layout_right, own::stack> c{}; scmp<Rc>(c, a, s, op); return c;
+}
+template <class Op, class A, class S, cs::enable_if_t<!A::is_static, int> = 0>
+_TNY_HOST auto oops_cmp(const A & a, S s, Op op) {
+    using Rc = compute_type_t<promote_t<typename A::element_type, S>>;
+    tensor<bool, typename A::extents_type, cs::layout_right, own::heap> c(a.extents()); scmp<Rc>(c, a, s, op); return c;
 }
 
 /* ---- out-of-place unary : static -> stack, dynamic -> heap ------- */
@@ -557,6 +638,25 @@ _TNY_MD_BITOP(^, b_xor)
 template <class T,class E,class L,own O, cs::enable_if_t<cs::is_integral<T>::value, int> = 0>
 _TNY_API auto operator~(const tensor<T,E,L,O> & a) { return _md::uop_out(a, _md::u_bnot{}); }
 
+/* --- comparison operators -> a bool tensor (broadcast) ------------- *
+ * tensor cmp tensor, tensor cmp scalar, and scalar cmp tensor (the last via the
+ * reversed op: `s < a` == `a > s`). == and != are their own reverse.            */
+#define _TNY_MD_CMPOP(SYM, OP, ROP)                                                               \
+template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>                   \
+_TNY_API auto operator SYM (const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b)        \
+{ return _md::oop_cmp(a, b, _md::OP{}); }                                                         \
+template <class T,class E,class L,own O, class S, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0> \
+_TNY_API auto operator SYM (const tensor<T,E,L,O> & a, S s) { return _md::oops_cmp(a, s, _md::OP{}); }   \
+template <class S, class T,class E,class L,own O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0> \
+_TNY_API auto operator SYM (S s, const tensor<T,E,L,O> & a) { return _md::oops_cmp(a, s, _md::ROP{}); }
+_TNY_MD_CMPOP(==, c_eq, c_eq)
+_TNY_MD_CMPOP(!=, c_ne, c_ne)
+_TNY_MD_CMPOP(<,  c_lt, c_gt)
+_TNY_MD_CMPOP(<=, c_le, c_ge)
+_TNY_MD_CMPOP(>,  c_gt, c_lt)
+_TNY_MD_CMPOP(>=, c_ge, c_le)
+#undef _TNY_MD_CMPOP
+
 /* --- in-place unary methods --------------------------------------- */
 #define _TNY_MD_UNARY_(NAME, F)                                                                   \
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::NAME()        \
@@ -619,6 +719,12 @@ _TNY_API T min(const tensor<T,E,L,O> & a) {
     using R = compute_type_t<T>;
     return static_cast<T>(_md::reduce_<R>(a, cs::numeric_limits<R>::max(), _md::r_min{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
 }
+
+/* --- boolean reductions (members; chain after a comparison) -------- */
+template <class T,class E,class L,own O> _TNY_API bool tensor<T,E,L,O>::all() const
+{ return _md::reduce_<bool>(*this, true,  _md::r_all{}, cs::make_index_sequence<rank()>{}); }
+template <class T,class E,class L,own O> _TNY_API bool tensor<T,E,L,O>::any() const
+{ return _md::reduce_<bool>(*this, false, _md::r_any{}, cs::make_index_sequence<rank()>{}); }
 
 /* --- axis reductions: reduce over the named axes -> a lower-rank tensor ---- *
  * `sum<0>(a)`, `mean<0,2>(a)`, ... remove those axes. Static result -> stack

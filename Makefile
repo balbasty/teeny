@@ -30,6 +30,7 @@ TESTS = \
 	$(BUILDDIR)/test_fold \
 	$(BUILDDIR)/test_axred \
 	$(BUILDDIR)/test_valueform \
+	$(BUILDDIR)/test_compare \
 	$(BUILDDIR)/test_iterate \
 	$(BUILDDIR)/test_subperm \
 	$(BUILDDIR)/test_takealong \

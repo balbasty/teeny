@@ -73,11 +73,11 @@ struct _compact<Idx, V0, Vs...> {
 
 // a python-like slice spec `[start : stop : step]`; start/stop may be `none`.
 template <class A, class B, class S>
-struct slice_spec { A start; B stop; S step; };
+struct _slice_spec { A start; B stop; S step; };
 template <class T> struct _is_slice_spec : cs::false_type {};
-template <class A, class B, class S> struct _is_slice_spec<slice_spec<A,B,S>> : cs::true_type {};
+template <class A, class B, class S> struct _is_slice_spec<_slice_spec<A,B,S>> : cs::true_type {};
 template <class Arg> struct _slice_step { using type = void; };                 // step type of a slice arg
-template <class A, class B, class S> struct _slice_step<slice_spec<A,B,S>> { using type = S; };
+template <class A, class B, class S> struct _slice_step<_slice_spec<A,B,S>> { using type = S; };
 
 // step == 1 (as a static integral constant)?
 template <class S> _TNY_API constexpr bool _step1() {
@@ -86,7 +86,7 @@ template <class S> _TNY_API constexpr bool _step1() {
 // a "full" slice is `slice(none, none)` with unit step: it is exactly `all`
 // (keeps the whole axis, folds, preserves static extents). `all == slice(none,none)`.
 template <class Arg> struct _is_full_slice : cs::false_type {};
-template <class S> struct _is_full_slice<slice_spec<none_t,none_t,S>> : cs::integral_constant<bool, _step1<S>()> {};
+template <class S> struct _is_full_slice<_slice_spec<none_t,none_t,S>> : cs::integral_constant<bool, _step1<S>()> {};
 
 // ---- output STATIC STRIDES for the gather (companion to _compact) ----------
 // A gathered view's layout is teeny's strides<...>, folding each kept axis to a
@@ -134,9 +134,18 @@ template <class... Args> struct _any_range : cs::integral_constant<bool, (_is_re
  * run time (its extent becomes dynamic); axes kept with `all` stay static.
  */
 template <class A, class B>
-_TNY_API auto slice(A start, B stop) { return slice_spec<A, B, cs::integral_constant<long,1>>{ start, stop, {} }; }
+_TNY_API auto slice(A start, B stop) { return _slice_spec<A, B, cs::integral_constant<long,1>>{ start, stop, {} }; }
 template <class A, class B, class S>
-_TNY_API auto slice(A start, B stop, S step) { return slice_spec<A, B, S>{ start, stop, step }; }
+_TNY_API auto slice(A start, B stop, S step) { return _slice_spec<A, B, S>{ start, stop, step }; }
+
+// Compile-time slice forms (bounds baked into the type so they fold like `all`):
+//   slice<1,4>()  slice<0,10,2>()                (value form; longs, step default 1)
+//   slice<Int<1>, Int<4>>()                       (type form; integral_constant/none_t
+//                                                  bounds — the only way to bake `none`)
+template <long Start, long Stop, long Step = 1>
+_TNY_API auto slice() { return slice(cs::integral_constant<long, Start>{}, cs::integral_constant<long, Stop>{}, cs::integral_constant<long, Step>{}); }
+template <class Start, class Stop, class Step = cs::integral_constant<long, 1>>
+_TNY_API auto slice() { return _slice_spec<Start, Stop, Step>{ Start{}, Stop{}, Step{} }; }
 
 // position of axis A within the pack Axes... (-1 if absent)
 template <cs::size_t A, cs::size_t... Axes>

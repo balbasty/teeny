@@ -511,6 +511,11 @@ public:
     template <class G, class B> _TNY_API tensor & zip_with_(G g, const B & b);  // *this = g(*this, b) (broadcasts)
     template <class F> _TNY_API auto map(F f) const;                   // -> new tensor = f(*this)
 
+    /* --- boolean reductions (numpy-style; `all` is the slice keyword, so
+     *     these are members, and chain after a comparison: (a<b).all()) ---- */
+    _TNY_API bool all() const;   // true iff every element is nonzero
+    _TNY_API bool any() const;   // true iff any element is nonzero
+
     /* --- in-place unary math (element-wise) ----------------------- */
     _TNY_API tensor & neg_();
     _TNY_API tensor & abs_();

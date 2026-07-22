@@ -127,6 +127,8 @@ t.at(1, 2, 3);        // same element as a rank-0 VIEW (has add_/etc.); rank-0 <
 t(0, all, slice(1,4));  // any slice arg -> a lower-/same-rank VIEW. all = keep axis,
                       //   slice(a,b) = half-open [a,b). Integer args drop that axis.
 t(0, slice(none,4), slice(1,none,2));  // python-like: none = open end, 3rd arg = step.
+t(0, slice<1,4>()); t(0, slice<0,8,2>());  // compile-time slice (bounds fold like `all`);
+                      //   slice<Int<1>,Int<4>>() is the type form (only way to bake `none`).
                       //   negative bounds wrap; all == slice(none,none) (folds).
                       //   NB a range routes through layout_stride (ranged axis -> dynamic;
                       //   `all`-kept axes stay static). See the CCCL note in tensor.h.
@@ -170,6 +172,10 @@ auto c = -a;                          // unary minus -> new tensor
 auto c = a.pow(b);                    // element-wise power
 auto e = exp(a); auto e = sqrt(a);    // unary free (neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign)
 auto c = minimum(a,b); maximum(a,2.0); clamp(a,lo,hi);   // elementwise binary min/max, clamp
+
+// --- comparisons -> a bool tensor (broadcast); reduce with .all()/.any() ---
+auto m = a < b; a == 2.0; 3.0 < a;    // ==,!=,<,<=,>,>= ; scalar either side
+(a > 0).all(); (a > 3).any();         // bool reductions (MEMBERS: `all` is the slice kw)
 
 // --- reductions -> scalar (all axes) ---
 sum(a); prod(a); max(a); min(a); mean(a); dot(a,b);
