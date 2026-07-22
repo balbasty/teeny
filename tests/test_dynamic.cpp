@@ -38,22 +38,24 @@ int main()
     dispatch_rank(at2, [&](auto view){ t2 = sum(view); });
     if (t2 != expect) return 6;                  // same 24 elements, contiguous
 
-    // an out-of-range ndim (here 0) is reported, not dispatched.
-    auto zero = as_anyrank(buf, shape, stride, 0);      // ndim 0 -> no fixed rank matches
-    if (dispatch_rank(zero, [](auto){}) != false) return 7;
+    // ndim 0 (a scalar ndarray) dispatches to a rank-0 view.
+    auto zero = as_anyrank(buf, shape, stride, 0);
+    long r0 = -1;
+    bool ok0 = dispatch_rank(zero, [&](auto v){ r0 = decltype(v)::rank(); });
+    if (!ok0 || r0 != 0) return 7;
 
     // ---- peel_front<Sr>: peel the runtime batch dims, keep Sr static ---------
     // shape (2,3,4): treat the last Sr=2 as "interesting", the first as batch.
     long acc = 0;
     long cells = 0;
-    for (auto cell : at.peel_front<2>()) {       // 2 batch cells, each a (3,4) view
+    for (auto cell : at.peel_front<-2>()) {       // 2 batch cells, each a (3,4) view
         static_assert(decltype(cell)::rank() == 2, "peel_front keeps Sr=2 static");
         acc += (long)sum(cell); ++cells;
     }
     if (cells != 2 || acc != (long)expect) return 8;
 
     // grid-stride form: the i-th cell directly, and its offset is baked in.
-    auto c1 = at.peel_front_at<2>(1);            // batch index 1 -> buf + 12
+    auto c1 = at.peel_front_at<-2>(1);            // batch index 1 -> buf + 12
     if (c1(2,3) != buf[12 + 2*4 + 3]) return 9;
 
     // recast the dynamic inner dims back to static so they fold.
@@ -66,7 +68,7 @@ int main()
     if (av.ndim != 3 || av.size(1) != 3 || av.step(0) != 12) return 11;
     auto vv = av.fixed<3>();
     if (vv(1,2,3) != buf[1*12+2*4+3]) return 12;
-    long vacc = 0; for (auto cell : av.peel_front<2>()) vacc += (long)sum(cell);
+    long vacc = 0; for (auto cell : av.peel_front<-2>()) vacc += (long)sum(cell);
     if (vacc != (long)expect) return 13;
     // it really is a view: mutating the source stride array changes the wrapper.
     stride[0] = 0;                                       // collapse axis 0 onto row 0

@@ -74,14 +74,12 @@ struct anyrank {
         return dyn_tensor<T, offset_t, R>(data, m);
     }
 
-    /** @brief The `lin`-th sub-view obtained by peeling the leading `ndim - Sr`
-     *         BATCH axes (runtime count) -> a fixed-rank-`Sr` view over the
-     *         trailing "interesting" axes. Grid-stride friendly (device-safe
-     *         with the inline store). Follow with `recast<shape<-1,...>>()`. */
+    // internal: the lin-th sub-view keeping the last `Sr` axes static (peeling
+    // the leading `ndim - Sr` runtime batch axes into the pointer offset).
     template <cs::size_t Sr>
-    _TNY_API dyn_tensor<T, offset_t, Sr> peel_front_at(offset_t lin) const {
+    _TNY_API dyn_tensor<T, offset_t, Sr> _keep_last(offset_t lin) const {
         const int nb = ndim - static_cast<int>(Sr);          // # batch dims (runtime)
-        _TNY_CHECK(nb >= 0, "peel_front: Sr exceeds ndim");
+        _TNY_CHECK(nb >= 0, "peel_front: keep-count exceeds ndim");
         offset_t off = 0, rem = lin;                          // decode lin over batch axes
         for (int d = nb - 1; d >= 0; --d) { offset_t k = rem % shape(d); rem /= shape(d); off += k * stride(d); }
         using E = cs::dextents<offset_t, Sr>;
@@ -91,12 +89,27 @@ struct anyrank {
         return dyn_tensor<T, offset_t, Sr>(data + off, m);
     }
 
-    /** @brief Peel the leading batch axes -> an iterable of fixed-rank-`Sr`
+    /** @brief The `lin`-th sub-view keeping the last `|N|` axes static (grid-stride
+     *         style). `N` is **negative** — matching the tensor's `peel_front`,
+     *         negative means "keep the last |N| dims". (A positive front-count
+     *         would leave a runtime rank, which can't be a static view — hence
+     *         the assert.) Follow with `recast<shape<-1,...>>()`. */
+    template <long N>
+    _TNY_API auto peel_front_at(offset_t lin) const {
+        static_assert(N < 0, "anyrank::peel_front_at needs a NEGATIVE index (keep the last |N| dims)");
+        return _keep_last<static_cast<cs::size_t>(-N)>(lin);
+    }
+
+    /** @brief Peel the leading batch axes -> an iterable of fixed-rank-`|N|`
      *         sub-views (range-for, `size()`, `operator[]`). The
-     *         `(*batch, *spatial, C)` boundary with `Sr = spatial + channels`:
-     *         the kernel instantiates ONCE for `Sr`, not once per total rank. */
-    template <cs::size_t Sr>
-    _TNY_API anyrank_front<T, offset_t, Meta, Sr> peel_front() const { return { *this }; }
+     *         `(*batch, *spatial, C)` boundary with `|N| = spatial + channels`:
+     *         one kernel instantiation for `|N|`, not one per total rank.
+     *         `N` is negative (keep the last |N| dims), as on the tensor. */
+    template <long N>
+    _TNY_API anyrank_front<T, offset_t, Meta, static_cast<cs::size_t>(N < 0 ? -N : 0)> peel_front() const {
+        static_assert(N < 0, "anyrank::peel_front needs a NEGATIVE index (keep the last |N| dims)");
+        return { *this };
+    }
 };
 
 /** @brief A range of fixed-rank-`Sr` sub-views over an `anyrank`'s batch axes. */
@@ -109,7 +122,7 @@ struct anyrank_front {
         for (int d = 0; d < src.ndim - static_cast<int>(Sr); ++d) n *= src.shape(d);
         return n;
     }
-    _TNY_API auto operator[](offset_t i) const { return src.template peel_front_at<Sr>(i); }
+    _TNY_API auto operator[](offset_t i) const { return src.template _keep_last<Sr>(i); }
 
     struct iterator {
         anyrank_front r; offset_t i;   // by value (POD carrier) -> no dangle on a temporary range

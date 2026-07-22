@@ -142,22 +142,27 @@ template <class T, cs::size_t... A> _TNY_API auto sfront(T & t, cs::index_sequen
 template <class T, cs::size_t... A> _TNY_API auto sfront_at(T & t, typename T::index_type i, cs::index_sequence<A...>) { return peel_at<A...>(t, i); }
 } // namespace _md
 
-/** @brief Peel the FIRST `N` axes (e.g. an arbitrary number of leading batch
- *         dims) -> a range of sub-views over the remaining axes. The
- *         runtime-batch-rank half of the `(*batch, *spatial, C)` pattern: pick
- *         `N` = number of batch dims and each sub-view is `(*spatial, C)`. */
-template <cs::size_t N, class T, class E, class L, own O>
-_TNY_API auto peel_front(tensor<T,E,L,O> & t)       { return _md::sfront(t, cs::make_index_sequence<N>{}); }
-template <cs::size_t N, class T, class E, class L, own O>
-_TNY_API auto peel_front(const tensor<T,E,L,O> & t) { return _md::sfront(t, cs::make_index_sequence<N>{}); }
+// # of FRONT axes to peel for a peel_front index N over a rank-R tensor:
+//   N >= 0 -> peel the first N axes;  N < 0 -> keep the last |N| (peel R - |N|).
+template <long N, cs::size_t R> constexpr cs::size_t _front_count()
+{ return N >= 0 ? static_cast<cs::size_t>(N) : R - static_cast<cs::size_t>(-N); }
+
+/** @brief Peel the FIRST `N` axes -> a range of sub-views over the rest — the
+ *         runtime-batch-rank half of `(*batch, *spatial, C)`. `N` is **signed**:
+ *         `peel_front<3>` peels 3 leading dims; `peel_front<-1>` keeps the last
+ *         axis (peels all but it), so negative = "keep the last |N|". */
+template <long N, class T, class E, class L, own O>
+_TNY_API auto peel_front(tensor<T,E,L,O> & t)       { return _md::sfront(t, cs::make_index_sequence<_front_count<N, tensor<T,E,L,O>::rank()>()>{}); }
+template <long N, class T, class E, class L, own O>
+_TNY_API auto peel_front(const tensor<T,E,L,O> & t) { return _md::sfront(t, cs::make_index_sequence<_front_count<N, tensor<T,E,L,O>::rank()>()>{}); }
 
 /** @brief The `i`-th sub-view obtained by peeling the first `N` axes (grid-stride style). */
-template <cs::size_t N, class T, class E, class L, own O>
+template <long N, class T, class E, class L, own O>
 _TNY_API auto peel_front_at(tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i)
-{ return _md::sfront_at(t, i, cs::make_index_sequence<N>{}); }
-template <cs::size_t N, class T, class E, class L, own O>
+{ return _md::sfront_at(t, i, cs::make_index_sequence<_front_count<N, tensor<T,E,L,O>::rank()>()>{}); }
+template <long N, class T, class E, class L, own O>
 _TNY_API auto peel_front_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i)
-{ return _md::sfront_at(t, i, cs::make_index_sequence<N>{}); }
+{ return _md::sfront_at(t, i, cs::make_index_sequence<_front_count<N, tensor<T,E,L,O>::rank()>()>{}); }
 
 // (removed: `channel(md,c)` was just `peel_at<0>(md,c)`, and `batch_offset` — a
 //  raw F-order offset helper — was unused by any kernel. Use peel/peel_at.)
