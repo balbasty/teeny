@@ -153,6 +153,20 @@ _TNY_API constexpr bool bc_static_ok(cs::index_sequence<D...>) {
     return ok;
 }
 
+// exact-match static check for contractions (dot) — NO broadcast: each axis must
+// be EQUAL, unless either extent is dynamic (then a runtime _TNY_CHECK guards it).
+// Distinct from bc_axis_ok, which also accepts extent 1 (stretch) — wrong for dot,
+// where a smaller operand would be indexed past its end (OOB under NDEBUG).
+_TNY_API constexpr bool ext_axis_eq(cs::size_t a, cs::size_t b) {
+    return a == cs::dynamic_extent || b == cs::dynamic_extent || a == b;
+}
+template <class Ea, class Eb, cs::size_t... D>
+_TNY_API constexpr bool ext_static_eq(cs::index_sequence<D...>) {
+    bool ok = true;
+    ( (ok = ok && ext_axis_eq(Ea::static_extent(D), Eb::static_extent(D))), ... );
+    return ok;
+}
+
 template <class W, class C, class A, class B, class Op, cs::size_t... D>
 _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
     using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
@@ -849,8 +863,8 @@ _TNY_HOST auto mean(const tensor<T,E,L,O> & a) {
 template <class Acc = void, class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>
 _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
     static_assert(tensor<Ta,Ea,La,Oa>::rank() == tensor<Tb,Eb,Lb,Ob>::rank(), "dot: rank mismatch");
-    static_assert(_md::bc_static_ok<Ea, Eb>(cs::make_index_sequence<Ea::rank()>{}),
-                  "dot: incompatible static extents");   // both-static, unequal -> caught at compile time
+    static_assert(_md::ext_static_eq<Ea, Eb>(cs::make_index_sequence<Ea::rank()>{}),
+                  "dot: operand extents must match exactly (no broadcast)");   // both-static, unequal -> compile error
     using R = _acc_t<Acc, promote_t<Ta,Tb>>;
     return static_cast<_reduce_result_t<Acc, promote_t<Ta,Tb>>>(
         _md::zipreduce_<R>(a, b, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
