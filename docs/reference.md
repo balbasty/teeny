@@ -56,7 +56,15 @@ constexpr int64_t dynamic_stride;                         // a runtime stride
 Static-integer aliases (each converts to a runtime integer and carries `::value`):
 
 ```cpp
-Int<V> Long<V> Size<V> Uint<V> Int32<V> Int64<V> Diff<V> Bool<V> ic<V>
+Int<V> Long<V> Size<V> Uint<V> Diff<V> Bool<V> ic<V>          // classic
+Int8/16/32/64<V>  Uint8/16/32/64<V>                          // fixed-width
+I1 I2 I4 I8  U1 U2 U4 U8   // numpy short forms (BYTES): I4<V> == Int32<V>
+```
+
+Element **dtype** aliases (numpy short codes; width in bytes, `local<f4, shape<3>>`):
+
+```cpp
+i1 i2 i4 i8   u1 u2 u4 u8   f4(float) f8(double)   f2(half) bf16(bfloat16)
 ```
 
 See [Shapes & strides](shapes-strides.md).

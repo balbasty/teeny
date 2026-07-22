@@ -138,6 +138,11 @@ template <>        struct compute_type<half>     { using type = float; };
 template <>        struct compute_type<bfloat16> { using type = float; };
 template <class T> using compute_type_t = typename compute_type<T>::type;
 
+// numpy-style dtype aliases for the 16-bit floats (companions to alias.h's
+// i1/f4/...): `f2` is IEEE binary16, `bf16` is bfloat16.
+using f2   = half;
+using bf16 = bfloat16;
+
 _TNY_NAMESPACE_END(tny)
 
 #endif // TNY_HALF

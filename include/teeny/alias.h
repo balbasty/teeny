@@ -50,13 +50,45 @@ template <int            V> using Int    = cs::integral_constant<int, V>;
 template <long           V> using Long   = cs::integral_constant<long, V>;
 template <cs::size_t     V> using Size   = cs::integral_constant<cs::size_t, V>;
 template <unsigned       V> using Uint   = cs::integral_constant<unsigned, V>;
-template <cs::int32_t    V> using Int32  = cs::integral_constant<cs::int32_t, V>;
-template <cs::int64_t    V> using Int64  = cs::integral_constant<cs::int64_t, V>;
 template <cs::ptrdiff_t  V> using Diff   = cs::integral_constant<cs::ptrdiff_t, V>;
 template <bool           V> using Bool   = cs::integral_constant<bool, V>;
+// fixed-width integer value forms
+template <cs::int8_t     V> using Int8   = cs::integral_constant<cs::int8_t, V>;
+template <cs::int16_t    V> using Int16  = cs::integral_constant<cs::int16_t, V>;
+template <cs::int32_t    V> using Int32  = cs::integral_constant<cs::int32_t, V>;
+template <cs::int64_t    V> using Int64  = cs::integral_constant<cs::int64_t, V>;
+template <cs::uint8_t    V> using Uint8  = cs::integral_constant<cs::uint8_t, V>;
+template <cs::uint16_t   V> using Uint16 = cs::integral_constant<cs::uint16_t, V>;
+template <cs::uint32_t   V> using Uint32 = cs::integral_constant<cs::uint32_t, V>;
+template <cs::uint64_t   V> using Uint64 = cs::integral_constant<cs::uint64_t, V>;
+
+// numpy short spellings of the fixed-width value forms (width in BYTES, like
+// numpy: `I4` is a 4-byte int32 value — NOT Rust's bit-width `i4`). So
+// `shape<I4<3>::value>` etc.; `I4<3>` is `Int32<3>`.
+template <cs::int8_t   V> using I1 = Int8<V>;
+template <cs::int16_t  V> using I2 = Int16<V>;
+template <cs::int32_t  V> using I4 = Int32<V>;
+template <cs::int64_t  V> using I8 = Int64<V>;
+template <cs::uint8_t  V> using U1 = Uint8<V>;
+template <cs::uint16_t V> using U2 = Uint16<V>;
+template <cs::uint32_t V> using U4 = Uint32<V>;
+template <cs::uint64_t V> using U8 = Uint64<V>;
 
 /** @brief Alias of `Long`; a compile-time index value. */
 template <long V> using ic = cs::integral_constant<long, V>;
+
+/* ------------------------------------------------------------------ *
+ *   Element dtype aliases (numpy short codes; width in BYTES)         *
+ *                                                                    *
+ *  Convenience TYPE names for the element type `T`, matching numpy's  *
+ *  dtype codes (`i4` == int32, `f4` == float) — the width is the BYTE *
+ *  count (numpy), not Rust's bit count. Use where you'd name a type:  *
+ *  `local<f4, shape<3>>`, `zeros<i4>(sh)`. The floats `f2`/`bf16`     *
+ *  live in half.h (where those types are defined).                    *
+ * ------------------------------------------------------------------ */
+using i1 = cs::int8_t;   using i2 = cs::int16_t;   using i4 = cs::int32_t;   using i8 = cs::int64_t;
+using u1 = cs::uint8_t;  using u2 = cs::uint16_t;  using u4 = cs::uint32_t;  using u8 = cs::uint64_t;
+using f4 = float;        using f8 = double;
 
 // fold a per-dim size to an mdspan extent: any NEGATIVE value (numpy's -1) means
 // dynamic; `dynamic_extent` itself passes through.
