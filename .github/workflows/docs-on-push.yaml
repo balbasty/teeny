@@ -9,6 +9,8 @@ on:
       - main
     paths:
       - docs/**
+      - include/**          # header doc comments feed the Autodoc page
+      - Doxyfile
       - zensical.toml
       - .github/workflows/docs*.yaml
 

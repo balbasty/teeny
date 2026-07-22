@@ -1,0 +1,42 @@
+# Doxygen config for teeny's autodoc page.
+#
+# Emits XML from the public headers; `docs/gen-api.sh` feeds that XML to moxygen
+# to produce docs/api/index.md. HTML/LaTeX are off — the Zensical site renders
+# the generated Markdown. See docs/gen-api.sh and .github/workflows/docs.yaml.
+
+PROJECT_NAME           = teeny
+INPUT                  = include/teeny
+FILE_PATTERNS          = *.h
+RECURSIVE              = YES
+
+# XML only (moxygen consumes it); no HTML/LaTeX.
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_XML           = YES
+XML_OUTPUT             = build/doxyxml
+XML_PROGRAMLISTING     = NO
+
+# Document everything, brief-first (the headers use @brief).
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+JAVADOC_AUTOBRIEF      = YES
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+
+# teeny hides host/device annotations and opens its namespace behind macros;
+# expand them away so Doxygen parses the declarations as plain C++.
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = "_TNY_API=" \
+                         "_TNY_HOST=" \
+                         "_TNY_NAMESPACE_BEGIN(x)=namespace x {" \
+                         "_TNY_NAMESPACE_END(x)=}" \
+                         "_TNY_CHECK(x)=" \
+                         "__CUDACC__" \
+                         "TNY_HAS_CUDA=1"
+
+# Skip the internal namespaces AND every underscore-prefixed helper (teeny's
+# convention for internals: _md, _detail, _compact, _meta_store, _keep_last, …)
+# from the public autodoc.
+EXCLUDE_SYMBOLS        = _* *::_*
