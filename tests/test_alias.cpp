@@ -39,6 +39,15 @@ int main()
     auto fw = wrap<forder>(lb, shape<2,3>{});   // col-major: strides (1,2)
     if (cw(0,1) != 1 || fw(1,0) != 1) return 2;
 
+    // ---- rank<N>: fully-dynamic shape of a given rank ----------------------
+    static_assert(rank<3>::rank() == 3, "rank<3> is rank 3");
+    static_assert(cs::is_same<rank<3>, shape<-1,-1,-1>>::value, "rank<3> == shape<-1,-1,-1>");
+    static_assert(rank<3>::rank_dynamic() == 3, "rank<3> is all-dynamic");
+    static_assert(rank<0>::rank() == 0, "rank<0> is the scalar shape");
+    double rb[6] = {0,1,2,3,4,5};
+    auto rv = wrap(rb, rank<2>{2,3});           // runtime 2x3 view spelled with rank<2>
+    if (rv.extent(0) != 2 || rv.extent(1) != 3 || rv(1,2) != 5) return 3;
+
     // usable as an element type in a factory
     auto z = zeros<i4>(shape<2,2>{});
     static_assert(cs::is_same<decltype(z)::element_type, cs::int32_t>::value, "zeros<i4>");

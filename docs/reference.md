@@ -58,6 +58,7 @@ arange<T, N>();  arange<T>(Int<N>());  // static 1-D [0..N-1] (stack, folds)
 
 ```cpp
 template <auto... E>       using shape   = cs::extents<int64_t, E...>;  // -1 == dynamic
+template <size_t N>        using rank    = shape<-1 ...N times>;        // fully-dynamic rank-N shape
 template <int64_t... S>    struct strides;                // signed; dynamic_stride sentinel
 template <int64_t... S>    using layout_static_stride = strides<S...>;  // back-compat alias
 constexpr int64_t dynamic_stride;                         // a runtime stride

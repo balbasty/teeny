@@ -80,7 +80,8 @@ struct tensor;
   compile-time size or `dynamic_extent`. Mix freely per dimension. Prefer the
   `shape<...>` alias (`= extents<int64_t, ...>`, DLPack's index type); a dynamic
   dim is `dynamic_extent` or numpy-style **`-1`** (`shape<-1,3>` ==
-  `shape<dynamic_extent,3>`).
+  `shape<dynamic_extent,3>`). `rank<N>` is the fully-dynamic rank-N shape
+  (`rank<3>` == `shape<-1,-1,-1>`).
 - **`Layout`** = `layout_right` (default, C-order; alias `corder`), `layout_left`
   (F-order; alias `forder`), `layout_stride` (runtime strides), or teeny's
   `layout_static_stride<S...>` (compile-time strides).
