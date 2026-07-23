@@ -2,6 +2,7 @@
 #define TNY_MD_STORAGE
 #include <cuda/std/array>
 #include <cuda/std/cstddef>
+#include <cuda/std/type_traits>
 #include <teeny/defines.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
@@ -49,6 +50,20 @@ _TNY_API constexpr bool own_is_host_accessible(own o) noexcept {
  *         result with this so a device view is never mistaken for a host one. */
 _TNY_API constexpr own own_view_of(own o) noexcept {
     return own_is_device(o) ? own::gpu_view : own::view;
+}
+
+/** @brief Factory sentinel meaning "deduce the ownership from the shape" — a fully
+ *         static shape -> `stack` (host+device), any dynamic extent -> `heap`
+ *         (host). It is the default backend of `empty` (and the creation
+ *         factories), out of the enum's normal range so it never names storage. */
+inline constexpr own own_deduce = static_cast<own>(-1);
+/** @brief Value-tag carrier for an ownership mode, for the factories' value-tag
+ *         backend form, e.g. `empty<T>(shape, own_c<own::gpu>{})`. */
+template <own O> using own_c = cs::integral_constant<own, O>;
+/** @brief Resolve a factory's ownership: an explicitly named mode passes through,
+ *         `own_deduce` becomes `stack` for a static shape / `heap` for a dynamic one. */
+_TNY_API constexpr own own_resolve(own o, bool static_shape) noexcept {
+    return o != own_deduce ? o : (static_shape ? own::stack : own::heap);
 }
 
 /* ------------------------------------------------------------------ *

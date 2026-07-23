@@ -81,14 +81,15 @@ using pinned = tensor<T, Shape, Layout, own::pinned>;
 template <class T, class Shape, class Layout = cs::layout_right>
 using mapped = tensor<T, Shape, Layout, own::mapped>;
 
-/* --- functional factories (deduce the Shape type from the argument;
- *     `T` defaults to `float`, like the host factories) --- */
+/* --- functional factories (deduce the Shape type from the argument; `T` defaults
+ *     to `float`, like the host factories). Thin spellings of the unified
+ *     `empty<T, own::gpu/pinned/mapped>` factory (tensor.h). --- */
 template <class T = float, class Layout = cs::layout_right, class Shape>
-_TNY_HOST auto make_gpu(Shape e)    { return tensor<T, Shape, Layout, own::gpu>(e); }
+_TNY_HOST auto make_gpu(Shape e)    { return empty<T, own::gpu,    Layout>(e); }
 template <class T = float, class Layout = cs::layout_right, class Shape>
-_TNY_HOST auto make_pinned(Shape e) { return tensor<T, Shape, Layout, own::pinned>(e); }
+_TNY_HOST auto make_pinned(Shape e) { return empty<T, own::pinned, Layout>(e); }
 template <class T = float, class Layout = cs::layout_right, class Shape>
-_TNY_HOST auto make_mapped(Shape e) { return tensor<T, Shape, Layout, own::mapped>(e); }
+_TNY_HOST auto make_mapped(Shape e) { return empty<T, own::mapped, Layout>(e); }
 
 /* ------------------------------------------------------------------ *
  *     Memory-backend `to` — the CUDA half of pytorch's `.to`         *

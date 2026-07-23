@@ -115,7 +115,11 @@ Factories: `wrap(ptr, extents)` / `wrap<Layout>(ptr, extents)`,
 `as_tensor(any_mdspan)` (wrap a submdspan/mdspan result as a view). Functional
 factories that deduce the extents type: `make_view(ptr,e)`, `make_local<T>(e)`,
 `make_heap<T>(e)`, `make_gpu/pinned/mapped<T>(e)` (E deduced; **T defaults to
-`float`**, override explicitly).
+`float`**, override explicitly). The `make_*` owning factories are thin spellings
+of one **`empty<T[, own::Space]>(e)`** factory: ownership is deduced from the
+shape (static→stack, dynamic→heap) unless a backend is named as a template arg
+(`empty<T, own::gpu>(e)`) or a value-tag (`empty<T>(e, own_c<own::gpu>{})`);
+gpu/pinned/mapped need `<teeny/cuda.h>`.
 
 Custom strided layout: `strides<Sx, Sy, ...>` is the stride analogue of `shape`,
 folding known strides to immediates and storing only the dynamic ones (EBO when

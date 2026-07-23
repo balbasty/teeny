@@ -860,15 +860,40 @@ using owned = tensor<T, Shape, Layout, own::heap>;
 template <class Layout = cs::layout_right, class T, class Shape>
 _TNY_API auto make_view(T * p, Shape e) { return wrap<Layout>(p, e); }
 
+/** @brief `empty<T>(extents)` — a new UNINITIALISED tensor. The one factory the
+ *  `make_*` family fuses into: ownership is **deduced** from the shape (fully
+ *  static -> `stack` (host+device); any dynamic extent -> `heap` (host)) unless a
+ *  backend is named — `empty<T, own::gpu>(extents)`, or the value-tag spelling
+ *  `empty<T>(extents, own_c<own::gpu>{})`. `gpu`/`pinned`/`mapped` require
+ *  `<teeny/cuda.h>` (their storage lives there). `T` defaults to `float`. Split
+ *  by the resolved ownership so the `stack` case stays `_TNY_API` (host+device)
+ *  while the allocating cases are `_TNY_HOST`. */
+template <class T = float, own O = own_deduce, class Layout = cs::layout_right, class Shape,
+          cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) == own::stack, int> = 0>
+_TNY_API auto empty(Shape = Shape{}) { return tensor<T, Shape, Layout, own::stack>{}; }
+template <class T = float, own O = own_deduce, class Layout = cs::layout_right, class Shape,
+          cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) != own::stack, int> = 0>
+_TNY_HOST auto empty(Shape e) {
+    constexpr own R = own_resolve(O, Shape::rank_dynamic() == 0);
+    static_assert(!own_is_view(R), "empty(): a non-owning view kind (view/gpu_view) has no storage to allocate — use wrap()/make_view() for a view.");
+    return tensor<T, Shape, Layout, R>(e);
+}
+/** @brief Value-tag backend form: `empty<T>(extents, own_c<own::gpu>{})`. Always
+ *  `_TNY_HOST` (a host-side convenience); for a device-usable static-shape build
+ *  spell the backend as a template arg — `empty<T, own::stack>(extents)`. */
+template <class T = float, class Layout = cs::layout_right, class Shape, own O>
+_TNY_HOST auto empty(Shape e, own_c<O>) { return empty<T, O, Layout>(e); }
+
 /** @brief `make_local<T>(extents)` — a stack-owned tensor (static shape).
- *         `T` defaults to `float` (numpy's default float dtype). */
+ *         `T` defaults to `float` (numpy's default float dtype). Thin spelling of
+ *         `empty<T, own::stack>`. */
 template <class T = float, class Layout = cs::layout_right, class Shape>
-_TNY_API auto make_local(Shape = Shape{}) { return tensor<T, Shape, Layout, own::stack>{}; }
+_TNY_API auto make_local(Shape = Shape{}) { return empty<T, own::stack, Layout>(Shape{}); }
 
 /** @brief `make_heap<T>(extents)` — a heap-owned tensor (host, move-only).
- *         `T` defaults to `float`. */
+ *         `T` defaults to `float`. Thin spelling of `empty<T, own::heap>`. */
 template <class T = float, class Layout = cs::layout_right, class Shape>
-_TNY_HOST auto make_heap(Shape e) { return tensor<T, Shape, Layout, own::heap>(e); }
+_TNY_HOST auto make_heap(Shape e) { return empty<T, own::heap, Layout>(e); }
 
 /* --- numpy-style creation factories: static shape -> stack (host+device),   *
  *     dynamic shape -> heap (host only), mirroring the out-of-place ops.       */
