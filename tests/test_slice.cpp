@@ -141,5 +141,16 @@ int main() {
     if (s5(slice<-8,-8,-1>()).extent(0) != 0) return 30;      // runtime matches the fold
     if (s5(slice<1,-100,-1>()).extent(0) != 2) return 31;
 
+    // ---- #80: a multi-axis EMPTY slice keeps its base pointer in bounds -------
+    // Each empty axis's offset is zeroed, so the summed base never runs past the
+    // buffer (buf+3*4 + buf+4*1 = +16 on a 12-elt buffer would be UB to form).
+    auto M3 = wrap(buf, shape<3,4>{});
+    auto em2 = M3(slice(3,3), slice(4,4));            // both axes empty (positive step)
+    if (em2.numel() != 0) return 32;
+    if (em2.data() < &buf[0] || em2.data() > &buf[12]) return 33;   // base pointer in [buf, buf+numel]
+    auto emn = M3(slice(-100,none,-1), all);          // empty NEGATIVE axis + full axis
+    if (emn.extent(0) != 0 || emn.extent(1) != 4) return 34;
+    if (emn.data() < &buf[0] || emn.data() > &buf[12]) return 35;
+
     return 0;
 }
