@@ -45,15 +45,22 @@ inline `TNY_MAX_RANK` store (default 32; `-DTNY_MAX_RANK=N`, or per-call
 passed into a CUDA kernel by value. DLPack strides are in **elements**; numpy
 `__array_interface__` strides are in **bytes** (divide by the itemsize first).
 
-### `peel_front<Sr>` — the batch pattern (preferred)
+### `peel_front<-Sr>` — the batch pattern (preferred)
 
 For `(*batch, *spatial, C)` data, peel the runtime number of leading batch dims
 and keep the trailing `Sr` "interesting" dims static. The kernel instantiates
 **once per `Sr`**, not once per total rank.
 
+The template argument is **negative** — you pass `-Sr` (`peel_front<-2>()` keeps
+the last two dims), the same "negative = keep the last `|N|`" sign rule as the
+tensor's [`peel_front`](structure.md#nd-peel--iterate-a-subset-of-axes). On
+`anyrank` it must be negative: a
+positive front-count would leave a *runtime* rank, which can't be a static view
+(it's a `static_assert`).
+
 ```cpp
-for (auto cell : at.peel_front<Sr>()) kernel<Sr>(cell);  // each cell is rank-Sr
-auto cell = at.peel_front_at<Sr>(i);                     // i-th (grid-stride)
+for (auto cell : at.peel_front<-Sr>()) kernel<Sr>(cell);  // Sr=2 -> peel_front<-2>; cell is rank-Sr
+auto cell = at.peel_front_at<-Sr>(i);                     // i-th (grid-stride)
 ```
 
 Each `cell` is a `dextents<_,Sr>` view (inner extents dynamic). Follow with
@@ -64,7 +71,7 @@ inner dims.
 
 When the whole rank must be static, dispatch on the runtime `ndim`. `f` is
 instantiated once per possible total rank. Returns false if `ndim` exceeds
-`MaxRank`. Prefer `peel_front<Sr>` when only the trailing dims need to be static.
+`MaxRank`. Prefer `peel_front<-Sr>` when only the trailing dims need to be static.
 
 ```cpp
 dispatch_rank(at, [&](auto v) { kernel(v); });  // once per total rank
@@ -80,7 +87,7 @@ DLPack / ndarray  ──as_anyrank(data, shape, stride, ndim)──►  anyrank
    │  (DLPack strides in ELEMENTS; numpy's __array_interface__ in BYTES)
    ▼  dispatch_value<1,2,3>(spatial_ndim)  -> static spatial rank D
    ▼  Sr = D + 1  (spatial + channel)
-   for (auto cell : at.peel_front<Sr>()) {
+   for (auto cell : at.peel_front<-Sr>()) {   // negative: keep the last Sr dims
        kernel<D>(cell.recast<shape<-1,…static inner…>>(), …);  // parallelise this
    }
 ```

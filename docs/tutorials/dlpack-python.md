@@ -140,8 +140,9 @@ axis and one static `c×c` tile.
     - **The flatten above assumes the batch is contiguous.** For a *non-contiguous*
       or fully runtime-strided input you can't collapse the batch axes, so keep them
       dynamic: `as_anyrank(data, shape, stride, ndim)` wraps the metadata with no
-      copy, and `at.peel_front<2>()` yields one rank-2 cell per matrix over *any*
-      batch rank — the exact anyrank mirror of `peel_front<-2>` above. Fold the inner
+      copy, and `at.peel_front<-2>()` yields one rank-2 cell per matrix over *any*
+      batch rank — the exact anyrank mirror of `peel_front<-2>` above (same negative
+      sign: keep the last two dims; `anyrank` asserts the arg is `< 0`). Fold the inner
       dims with `cell.recast<shape<-1,c,c>>()` (or the single matrix with
       `.recast<shape<c,c>>()`) so the `c`s become immediates. A single fixed inner
       stride pair can instead be baked into the type with
