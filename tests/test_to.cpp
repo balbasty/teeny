@@ -30,6 +30,14 @@ int main()
     static_assert(decltype(fc)::ownership == own::stack, "to<float,true> -> owning copy");
     if (fc(1,2) != 5.f || fc.data() == x.data()) return 9;   // distinct storage
 
+    // A forced copy strips const from the destination dtype: `c` has a const
+    // element type (it's a borrow), and the natural T2 to spell is that same
+    // const type -> the owning copy must materialise a MUTABLE tensor, not fail.
+    auto csym = c.to<const float, true>();
+    static_assert(cs::is_same<decltype(csym)::element_type, float>::value, "forced copy dest is mutable");
+    static_assert(decltype(csym)::ownership == own::stack, "forced copy of a view lvalue -> stack");
+    if (csym(1,2) != 5.f) return 12;
+
     // ---- dynamic shape: .to<T2>() -> a heap copy -----------------------------
     double buf[6]; auto v = wrap(buf, shape<-1,3>{2}); v.iota_(0.0, 1.0);
     auto h = v.to<int>();
@@ -48,6 +56,22 @@ int main()
     auto hf = x.to<half>();
     static_assert(cs::is_same<decltype(hf)::element_type, half>::value, "to<half>");
     if ((float)hf(1,2) != 5.f) return 7;
+
+    // ---- rvalue .to<>() : an OWNING temporary can't be borrowed (would dangle) ->
+    //      it forces a copy; a VIEW temporary borrows external storage safely ------
+    auto rc = local<float, shape<2,2>>{}.to<>();              // owning stack rvalue -> copy
+    static_assert(decltype(rc)::ownership == own::stack, "owning rvalue .to<>() -> owning copy, not a borrow");
+    static_assert(cs::is_same<decltype(rc)::element_type, float>::value, "rvalue .to<>() keeps the dtype");
+    auto rh = full(shape<-1,3>{2}, 1.0).to<>();               // owning heap (dynamic) rvalue -> heap copy
+    static_assert(decltype(rh)::ownership == own::heap, "owning dynamic rvalue .to<>() -> heap copy");
+    auto rv = wrap(buf, shape<-1,3>{2}).to<>();               // VIEW rvalue -> safe borrow (buf outlives it)
+    static_assert(decltype(rv)::ownership == own::view, "view rvalue .to<>() borrows (external storage, cannot dangle)");
+    if ((void*)rv.data() != (void*)buf) return 10;            // same storage (borrow, not a copy)
+    // borrow-of-a-borrow: chaining .to<>() on a (const-element) view temporary
+    // must compile and stay a borrow, never attempt a const-writing copy.
+    auto bob = x.to<>().to<>();
+    static_assert(decltype(bob)::ownership == own::view, "chained .to<>() on a view stays a borrow");
+    if (bob.data() != x.data()) return 11;
 
     return 0;
 }

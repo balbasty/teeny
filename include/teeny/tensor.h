@@ -532,12 +532,19 @@ public:
      *  **No copy when it already matches** — if `T2` is the current element type
      *  and `Force` is false, this returns a (read-only) *view* of `*this`, no
      *  allocation, keeping the source layout. So `x.to<>()` is a zero-cost borrow,
-     *  not a clone. Because it borrows, the result must not outlive `x` — the same
-     *  lifetime rule as `view()`/`permute()`/slicing (don't bind `.to<>()` of a
-     *  temporary to a longer-lived name). Pass `Force = true` to always materialise
-     *  a fresh owning copy even when the dtype already matches (`x.to<float,
-     *  true>()` force-clones a `float` tensor); `x.clone()` is the
-     *  unconditional-copy spelling.
+     *  not a clone. Because it borrows, the result must not outlive the storage it
+     *  points at — the same lifetime rule as `view()`/`permute()`/slicing. Pass
+     *  `Force = true` to always materialise a fresh owning copy even when the dtype
+     *  already matches (`x.to<float, true>()` force-clones a `float` tensor);
+     *  `x.clone()` is the unconditional-copy spelling.
+     *
+     *  **On a temporary** the borrow is only taken when it *cannot* dangle: a
+     *  non-owning **view** rvalue (`view`/`gpu_view` — e.g. a slice or `.to<>()`
+     *  result) points at storage owned elsewhere, so borrowing from it is safe and
+     *  stays zero-cost. An **owning** rvalue (`stack`/`heap`/`gpu`/`pinned`/
+     *  `mapped`) would carry its storage off, so its matching-dtype case forces a
+     *  fresh owning copy instead of a dangling borrow (mirroring the free
+     *  `to<Space>(tensor&&)`).
      *
      *  When a conversion IS needed (`T2` differs, or `Force`), the result is a
      *  dense, row-major OWNING copy cast elementwise (via `copy_`): static shape
@@ -546,15 +553,36 @@ public:
      *  functions from `<teeny/cuda.h>`. */
     template <class T2 = element_type, bool Force = false,
               cs::enable_if_t<!Force && cs::is_same<T2, element_type>::value, int> = 0>
-    _TNY_API auto to() const {
+    _TNY_API auto to() const & {
         return tensor<const element_type, Shape, Layout, own_view_of(O)>(data(), mapping());  // already that dtype -> borrow (gpu_view if device)
     }
     template <class T2 = element_type, bool Force = false, bool S = is_static,
               cs::enable_if_t<(Force || !cs::is_same<T2, element_type>::value) && S, int> = 0>
-    _TNY_API auto to() const { tensor<T2, Shape, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
+    _TNY_API auto to() const & { tensor<cs::remove_cv_t<T2>, Shape, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
     template <class T2 = element_type, bool Force = false, bool S = is_static,
               cs::enable_if_t<(Force || !cs::is_same<T2, element_type>::value) && !S, int> = 0>
-    _TNY_HOST auto to() const { tensor<T2, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
+    _TNY_HOST auto to() const & { tensor<cs::remove_cv_t<T2>, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
+    // Rvalue overloads. A non-owning VIEW temporary (view/gpu_view) borrows
+    // storage owned elsewhere, so a borrow from it is as safe as from an lvalue
+    // (and stays _TNY_API even for a dynamic shape — it carries only a pointer).
+    // An OWNING temporary (stack/heap/gpu/pinned/mapped) would take its storage
+    // with it, so its matching-dtype case must force a fresh owning copy instead
+    // of a dangling borrow. A differing dtype / Force copies either way. NB a
+    // gpu/pinned/mapped *owning* temporary copies via the host `copy_` path (which
+    // host-derefs the buffer) — the same host-oriented limitation the member
+    // `.to<>()` dtype-convert already has; use the free `to<Space>(x)` in
+    // <teeny/cuda.h> for a real memory-space move.
+    template <class T2 = element_type, bool Force = false,
+              cs::enable_if_t<own_is_view(O) && !Force && cs::is_same<T2, element_type>::value, int> = 0>
+    _TNY_API auto to() const && {
+        return tensor<const element_type, Shape, Layout, own_view_of(O)>(data(), mapping());  // view temp -> safe borrow (external storage)
+    }
+    template <class T2 = element_type, bool Force = false, bool S = is_static,
+              cs::enable_if_t<!(own_is_view(O) && !Force && cs::is_same<T2, element_type>::value) && S, int> = 0>
+    _TNY_API auto to() const && { tensor<cs::remove_cv_t<T2>, Shape, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
+    template <class T2 = element_type, bool Force = false, bool S = is_static,
+              cs::enable_if_t<!(own_is_view(O) && !Force && cs::is_same<T2, element_type>::value) && !S, int> = 0>
+    _TNY_HOST auto to() const && { tensor<cs::remove_cv_t<T2>, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
 
 private:
     // shared reshape body: one axis may be `-1` (numpy-style, inferred from numel).
