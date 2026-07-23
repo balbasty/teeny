@@ -153,9 +153,9 @@ t.data();  t.view();  t.mdspan();  t.extents();  t.shape();  t.mapping();
 // --- indexing / slicing (python-like) ---
 t(1, 2, 3);           // element access -> T& ; negative indices wrap (count from the back)
 t.at(1, 2, 3);        // same element as a rank-0 VIEW (has add_/etc.); rank-0 <-> scalar
-                      //   (implicit to/from T, `.item()`). add_at(v,i...) == at(i...).add_<true>(v)
-t.uget(1,2,3); t.uat(i...); t.uslice(0,slice(1,4)); t.uadd_at(v,i...);  // UNCHECKED twins of
-                      //   ()/at/slice/add_at: skip the negative-index wrap for known-non-negative
+                      //   (implicit to/from T, `.item()`). at(i...).add_<true>(v) = atomic scatter
+t.uget(1,2,3); t.uat(i...); t.uslice(0,slice(1,4));  // UNCHECKED twins of
+                      //   ()/at/slice: skip the negative-index wrap for known-non-negative
                       //   RUNTIME indices (per-call -DTNY_NO_NEGATIVE_INDEX). Same result type;
                       //   static bounds still fold; a negative runtime index is then UB.
 t(0, all, slice(1,4));  // any slice arg -> a lower-/same-rank VIEW. all = keep axis,
@@ -203,7 +203,7 @@ a & b; a | b; a ^ b; ~a; a &= b; a |= 1;       // bitwise (INTEGER element types
 a.fill_(0.0); a.zero_(); a.copy_(b);          // b broadcasts into a
 a.iota_(start, step);                         // 0,1,2,... (row-major)
 a.map_(f); a.zip_with_(g, b); auto c = a.map(f);  // user functor (device-safe struct)
-a.add_at(v, i, j);                            // scatter-accumulate: a(i,j) += v,
+a.at(i, j).add_<true>(v);                     // scatter-accumulate: a(i,j) += v,
                                               //   ATOMIC on device (push/splat write)
 auto z = zeros<T>(shape); ones<T>(sh); full(sh,v); arange<T>(n);  // creation. zeros/ones
                       //   default T=float; full's T = value type; arange defaults T=int64.

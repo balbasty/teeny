@@ -1,5 +1,5 @@
 // Coverage for the kernel-support primitives added after the API review:
-// fill_/zero_/copy_, add_at (atomic-on-device scatter), dispatch_value,
+// fill_/zero_/copy_, at().add_<true>() (atomic-on-device scatter), dispatch_value,
 // peel_front, and static-preserving slice.
 #include <teeny/teeny.h>
 #include <cuda/std/type_traits>
@@ -26,11 +26,11 @@ int main() {
     a.copy_(col);
     for (long j=0;j<3;++j) if (a(0,j)!=10 || a(1,j)!=20) return 4;
 
-    // ---- add_at: scatter-accumulate ------------------------------------
+    // ---- at().add_<true>(): scatter-accumulate -------------------------
     auto acc = local<double, extents<long,4>>(); acc.zero_();
-    acc.add_at(1.5, 2);
-    acc.add_at(2.5, 2);          // accumulates
-    acc.add_at(9.0, -1);         // negative index wraps -> index 3
+    acc.at(2).add_<true>(1.5);
+    acc.at(2).add_<true>(2.5);          // accumulates
+    acc.at(-1).add_<true>(9.0);         // negative index wraps -> index 3
     if (acc(2) != 4.0 || acc(3) != 9.0 || acc(0) != 0.0) return 5;
 
     // ---- dispatch_value: runtime value -> static ----------------------

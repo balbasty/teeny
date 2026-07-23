@@ -109,8 +109,8 @@ x(ellipsis) = b;  x(0, all) = v;  // assign INTO a slice copies/fills (a = b reb
 slice(start, stop);  slice(start, stop, step);  // half-open range, optional (neg) step
 none;  all;                     // open slice end (== python None); keep-axis marker
 x.take_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest
-x.uget(i, j, k);  x.uat(i...);  x.uslice(0, slice(1,4));  x.uadd_at(v, i...);
-                    // `u`-prefixed unchecked twins of ()/at/slice/add_at: skip the
+x.uget(i, j, k);  x.uat(i...);  x.uslice(0, slice(1,4));
+                    // `u`-prefixed unchecked twins of ()/at/slice: skip the
                     // negative-index wrap for known-non-negative RUNTIME indices
                     // (per-call -DTNY_NO_NEGATIVE_INDEX). Same result type; static
                     // bounds still fold. A negative runtime index is then UB.
@@ -165,7 +165,7 @@ a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_(); a.pow_(e); a.clamp_(lo
 a & b; a | b; a ^ b; ~a; a &= b; a |= s;  // bitwise (INTEGER element types only)
 a.fill_(v); a.zero_(); a.copy_(b); a.iota_(start, step);
 a.map_(f); a.zip_with_(g, b);  auto c = a.map(f);  // user functor (device-safe)
-a.add_at(v, i...);  fetch_add(ptr, v);             // scatter (atomic on device)
+a.at(i...).add_<true>(v);  fetch_add(ptr, v);      // scatter (atomic on device)
 
 // out-of-place -> new tensor (promotes types; static->stack, dyn->heap)
 auto c = a + b;  a.add(b);  a * 2.0;  2.0 - a;  1.0 / a;  -a;  a.pow(b);
