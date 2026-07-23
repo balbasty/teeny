@@ -46,8 +46,19 @@ Don't leave finished work untracked and don't leave merged issues open.
 
 ## Branches, commits, PRs
 
-- **Branch per task**: `claude/<short-name>` (or `<user>/<short-name>`). Never
-  commit straight to `main`.
+- **One branch and one PR per task — never bundle.** A branch fixes exactly ONE
+  thing (one issue, one feature, one refactor). If you notice an unrelated bug or
+  improvement while working, resist the urge to fix it here — file an issue or note
+  it, and give it its OWN branch. A PR that touches several unrelated concerns is
+  hard to review, hard to revert, hard to bisect, and hard to reason about; split
+  it. Do this even when a workflow hands you a shared branch: rebase each concern
+  onto its own branch rather than stacking them.
+- **Name the branch for the task** under your author prefix (`claude/…` for
+  Claude-authored work, `<user>/…` otherwise), descriptive and referencing the
+  issue where there is one: `claude/fix-59-anyrank-device-guard`,
+  `claude/hardened-bounds-checks`, `claude/docs-assignment-semantics`,
+  `claude/ci-nvcc-compile`. (The `fix:`/`feat:`/… prefix belongs on the commit
+  *subject*, below.) Never commit straight to `main`.
 - **Commit subjects** use a conventional prefix, then a concise imperative
   summary:
 
@@ -62,8 +73,10 @@ Don't leave finished work untracked and don't leave merged issues open.
   ```
 
   Explain the *why* in the body, not just the *what*. Reference the issue.
-- **One PR per issue.** Title mirrors the change; body says what changed, why, how
-  it was verified, and links the issue (`Closes #NN`).
+- **One PR per branch/task.** Title mirrors the single change; body says what
+  changed, why, how it was verified, and links the issue (`Closes #NN`). If you
+  catch yourself writing "and also…" in a PR body, that "also" belongs on its own
+  branch.
 - **Squash-merge**, then delete the branch.
 
 There is a PR template (`.github/pull_request_template.md`) — fill it in.
