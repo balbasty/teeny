@@ -30,6 +30,14 @@ int main()
     static_assert(decltype(fc)::ownership == own::stack, "to<float,true> -> owning copy");
     if (fc(1,2) != 5.f || fc.data() == x.data()) return 9;   // distinct storage
 
+    // A forced copy strips const from the destination dtype: `c` has a const
+    // element type (it's a borrow), and the natural T2 to spell is that same
+    // const type -> the owning copy must materialise a MUTABLE tensor, not fail.
+    auto csym = c.to<const float, true>();
+    static_assert(cs::is_same<decltype(csym)::element_type, float>::value, "forced copy dest is mutable");
+    static_assert(decltype(csym)::ownership == own::stack, "forced copy of a view lvalue -> stack");
+    if (csym(1,2) != 5.f) return 12;
+
     // ---- dynamic shape: .to<T2>() -> a heap copy -----------------------------
     double buf[6]; auto v = wrap(buf, shape<-1,3>{2}); v.iota_(0.0, 1.0);
     auto h = v.to<int>();

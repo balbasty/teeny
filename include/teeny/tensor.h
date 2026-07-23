@@ -558,10 +558,10 @@ public:
     }
     template <class T2 = element_type, bool Force = false, bool S = is_static,
               cs::enable_if_t<(Force || !cs::is_same<T2, element_type>::value) && S, int> = 0>
-    _TNY_API auto to() const & { tensor<T2, Shape, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
+    _TNY_API auto to() const & { tensor<cs::remove_cv_t<T2>, Shape, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
     template <class T2 = element_type, bool Force = false, bool S = is_static,
               cs::enable_if_t<(Force || !cs::is_same<T2, element_type>::value) && !S, int> = 0>
-    _TNY_HOST auto to() const & { tensor<T2, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
+    _TNY_HOST auto to() const & { tensor<cs::remove_cv_t<T2>, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
     // Rvalue overloads. A non-owning VIEW temporary (view/gpu_view) borrows
     // storage owned elsewhere, so a borrow from it is as safe as from an lvalue
     // (and stays _TNY_API even for a dynamic shape — it carries only a pointer).
