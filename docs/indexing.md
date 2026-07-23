@@ -12,7 +12,13 @@ indices count from the back:
 t(1, 2, 3);      // T& at (1,2,3)
 t(0, -1);        // row 0, last column
 t(Int<1>(), j);  // a static index folds; a runtime index is a value
+t[1, 2, 3];      // C++23 only: multidimensional subscript, an exact alias of t(1,2,3)
 ```
+
+`operator[]` is available when the compiler provides the C++23 multidimensional
+subscript (`__cpp_multidimensional_subscript`) — it forwards to `operator()`, so
+`t[i, j]`, `t[0, all, slice(1,4)]` and `t[ellipsis]` all behave identically
+(`mdspan`'s own spelling). On C++17/20 use `operator()`.
 
 The negative-index wrap is a signed compare that folds away for static
 (`Int<k>()`) and unsigned arguments. For runtime signed indices in a hot loop
