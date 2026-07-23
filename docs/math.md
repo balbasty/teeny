@@ -66,12 +66,13 @@ a.iota_(start, step);                 // start, start+step, … (row-major)
 a.map_(f);                            // *this = f(*this)      (user functor)
 a.zip_with_(g, b);                    // *this = g(*this, b)   (broadcasts)
 auto c = a.map(f);                    // out-of-place variant
-a.add_at(v, i, j);                    // scatter: a(i,j) += v — ATOMIC on device
+a.at(i, j).add_<true>(v);             // scatter: a(i,j) += v — ATOMIC on device
 ```
 
 `map_`/`zip_with_` take a functor **struct** (a lambda would need
-`--extended-lambda` under nvcc). `add_at` / the free `fetch_add(ptr, v)` are the
-write half of a scatter/"push" kernel (`atomicAdd` on device).
+`--extended-lambda` under nvcc). `at(i...).add_<true>(v)` / the free
+`fetch_add(ptr, v)` are the write half of a scatter/"push" kernel (`atomicAdd` on
+device).
 
 ## Out-of-place ops → a new tensor
 

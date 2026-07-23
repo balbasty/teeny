@@ -1,4 +1,4 @@
-// Unchecked accessors (#91): uget / uat / uadd_at / uslice skip the negative-index
+// Unchecked accessors (#91): uget / uat / uslice skip the negative-index
 // wrap for runtime signed args (the per-call form of -DTNY_NO_NEGATIVE_INDEX).
 // They must (a) agree byte-for-byte with the checked ops for NON-NEGATIVE indices,
 // (b) produce the SAME result TYPE (static bounds still fold), and (c) genuinely
@@ -36,9 +36,9 @@ int main()
     t.uat(0, 0) = 99.0; if (t(0, 0) != 99.0)             return 7;
     t.uat(0, 0) = 0.0;
 
-    // ---- uadd_at: scatter-accumulate ---------------------------------------
+    // ---- uat().add_<true>(): unchecked scatter-accumulate ------------------
     double before = t(3, 5);
-    t.uadd_at(4.0, 3, 5); if (t(3, 5) != before + 4.0)   return 8;
+    t.uat(3, 5).add_<true>(4.0); if (t(3, 5) != before + 4.0)   return 8;
 
     // ---- uslice: non-negative / none bounds == operator() ------------------
     {

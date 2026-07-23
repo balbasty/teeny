@@ -32,7 +32,7 @@ as_tensor(const MD & m);
  * overlapping outputs, which a plain `+=` would race. Device -> `atomicAdd`
  * (`double` needs sm_60+, `__half` sm_70+; not all integer widths have an
  * overload — that surfaces as an nvcc error at instantiation). Use via
- * `t.add_at(v, i...)` / `t.add_<true>(...)`.
+ * `t.at(i...).add_<true>(v)` (scatter into one cell) / `a.add_<true>(b)`.
  *
  * WARNING: on the **host** this is a plain `*p += v` — NOT atomic. A push kernel
  * parallelised with std::thread over overlapping outputs races; guard those
@@ -425,13 +425,6 @@ public:
         return tensor<const T, E0, ccontiguous, own_view_of(O)>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
     }
 
-    /** @brief Scatter-accumulate: `(*this)(i...) += v`, atomic on the device —
-     *         the write half of a "push"/splat kernel. Shorthand for
-     *         `at(i...).add_<true>(v)` (integer indices only; negatives wrap). */
-    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
-    _TNY_API void add_at(T v, Args... a) noexcept
-    { at(a...).template add_<true>(v); }
-
     /** @brief Sub-view when any argument is a slice (`all`, `slice(a,b[,step])`).
      *         Integer args drop their axis, `all` keeps it, a range keeps a strided
      *         window — all via the one gather (folds static strides into
@@ -444,8 +437,8 @@ public:
     { return _slice_range(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
 
     /* --- unchecked accessors: skip the negative-index wrap ------------------ *
-     * `uget`/`uat`/`uadd_at`/`uslice` are the `u`-prefixed twins of
-     * `operator()`/`at`/`add_at`/slice-`operator()` for the hot path where every
+     * `uget`/`uat`/`uslice` are the `u`-prefixed twins of
+     * `operator()`/`at`/slice-`operator()` for the hot path where every
      * runtime index is known non-negative: they take runtime signed indices
      * AS-IS (no `i < 0 ? i + n : i` branch per axis) — the per-call form of
      * `-DTNY_NO_NEGATIVE_INDEX`. Passing a negative runtime index is UB (the
@@ -471,11 +464,6 @@ public:
         using E0 = cs::extents<index_type>;
         return tensor<const T, E0, ccontiguous, own_view_of(O)>(&store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]);
     }
-
-    /** @brief Unchecked scatter-accumulate (no negative wrap): `uat(i...).add_<true>(v)`. */
-    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
-    _TNY_API void uadd_at(T v, Args... a) noexcept
-    { uat(a...).template add_<true>(v); }
 
     /** @brief Unchecked sub-view: like the slice `operator()` but with no negative
      *         wrap on runtime integer/bound args (static bounds still fold, so the

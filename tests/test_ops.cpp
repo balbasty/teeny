@@ -43,7 +43,7 @@ int main() {
     auto acc = local<double, extents<long,4>>(); acc.zero_();
     acc.at(2).add_<true>(1.5);
     acc.at(2).add_<true>(2.5);      // 4.0
-    acc.add_at(9.0, 3);             // add_at == at().add_<true>()
+    acc.at(3).add_<true>(9.0);      // scatter into one cell (atomic on device)
     if (acc(2) != 4.0 || acc(3) != 9.0) return 9;
 
     // atomic add_ over a whole view (region scatter), host path

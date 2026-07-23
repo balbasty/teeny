@@ -191,7 +191,7 @@ scalar rhs applies to every element.
 | `a & b` `a \| b` `a ^ b` `~a` `a &= b` … | bitwise (**integer** element types only) |
 | `a.fill_(v)` `a.zero_()` `a.copy_(b)` `a.iota_(start,step)` | assignment / init (`b` broadcasts) |
 | `a.map_(f)` `a.zip_with_(g, b)` | user functor (a device-safe struct, not a lambda) |
-| `a.add_at(v, i...)` | scatter-accumulate `a(i...) += v` (atomic on device) |
+| `a.at(i...).add_<true>(v)` | scatter-accumulate `a(i...) += v` (atomic on device) |
 | `fetch_add(ptr, v)` | raw-pointer atomic add (device); the primitive under the above |
 
 ### Out-of-place (→ new tensor; static shape → stack, else heap)

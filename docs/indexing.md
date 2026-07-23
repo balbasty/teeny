@@ -36,10 +36,9 @@ x.at(i,j) = 3;               // write
 float v = x.at(i,j);         // read (implicit conversion to T)
 float w = x.at(i,j).item();  // explicit read
 x.at(i,j).add_<true>(v);     // atomic scatter into one cell
-x.add_at(v, i, j);           // shorthand for at(i,j).add_<true>(v)
 ```
 
-## Unchecked accessors — `uget` / `uat` / `uslice` / `uadd_at`
+## Unchecked accessors — `uget` / `uat` / `uslice`
 
 The wrap that lets a negative index count from the back costs one compare-and-add
 per axis. In a hot kernel where every index is already known non-negative that is
@@ -50,7 +49,6 @@ with `-DTNY_NO_NEGATIVE_INDEX`:
 ```cpp
 x.uget(i, j, k);              // like x(i,j,k)      -> T&        (no wrap)
 x.uat(i, j);                  // like x.at(i,j)     -> rank-0 view
-x.uadd_at(v, i, j);           // like x.add_at(v,i,j)  scatter (atomic on device)
 x.uslice(0, slice(1, 4));     // like x(0, slice(1,4)) -> a VIEW (no wrap on runtime bounds)
 ```
 
