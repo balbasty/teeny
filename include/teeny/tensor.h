@@ -920,7 +920,7 @@ template <class T = void, own O = own_deduce, class Layout = cs::layout_right, c
           cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) != own::stack, int> = 0>
 _TNY_HOST auto full(Shape e, V v) {
     static_assert(own_is_host_accessible(own_resolve(O, Shape::rank_dynamic() == 0)),
-        "full<..., own::gpu>: a device fill needs a kernel launch; use to<own::gpu>(full<T>(shape, v)), or empty<T, own::gpu>(shape) then a memset.");
+        "zeros/ones/full<..., own::gpu>: a device fill needs a kernel launch; use to<own::gpu>(full<T>(shape, v)) (or to<own::gpu>(zeros<T>(shape))), or empty<T, own::gpu>(shape) then a memset.");
     auto t = empty<ET, O, Layout>(e); t.fill_(static_cast<ET>(v)); return t;
 }
 /** @brief Value-tag backend form: `full<T>(extents, v, own_c<own::pinned>{})`. */
