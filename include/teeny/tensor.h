@@ -353,18 +353,13 @@ private:
         // (static where source-stride × step is known) — folded into strides<...>.
         using OE = typename _compact<index_type, _out_static<Args, Shape::static_extent(Ax)>()...>::type;
         using SF = typename _str_compact<_out_sstride<Args, Ax, Layout, Shape>()...>::type;
-        using Map = typename SF::template mapping<OE>;
         index_type ext[Nk ? Nk : 1] = {}, str[Nk ? Nk : 1] = {}, off = 0; cs::size_t k = 0;
         ( _sl_axis<Ax>(a, off, ext, str, k), ... );
         cs::array<index_type, Nk> ea{};
         for (cs::size_t i = 0; i < Nk; ++i) ea[i] = ext[i];
-        if constexpr (SF::ndyn() == 0) {   // every kept stride folded -> EBO mapping
-            return tensor<Vt, OE, SF, own_view_of(O)>(p + off, Map(OE(ea)));
-        } else {                           // supply the runtime strides for the dynamic slots
-            cs::array<index_type, SF::ndyn()> dyn{};
-            for (cs::size_t i = 0; i < Nk; ++i) if (SF::S_[i] == dynamic_stride) dyn[SF::slot(i)] = str[i];
-            return tensor<Vt, OE, SF, own_view_of(O)>(p + off, Map(OE(ea), dyn));
-        }
+        // fold the kept strides into the strides<...> mapping (EBO when all static,
+        // else fill the dynamic slots from `str`); Nk == OE::rank().
+        return tensor<Vt, OE, SF, own_view_of(O)>(p + off, _detail::fold_mapping<SF>(OE(ea), str));
     }
     // For output axis `out_ax`: pick the front arg, one of the inserted `all`s,
     // or the back arg (shifted past the `fill` inserted `all`s). One ellipsis at
