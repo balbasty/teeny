@@ -167,56 +167,40 @@ template <class A, class B, class S> struct _slice_stop<_slice_spec<A,B,S>> { us
 template <class V> struct _static_bound
     : cs::integral_constant<bool, cs::is_same<V, none_t>::value || _is_ic<V>::value> {};
 
-// resolve a static bound to an index at compile time, mirroring _wrap_idx EXACTLY:
-// `none` -> the default; else a signed value with negative-wrap — but NOT under
-// TNY_NO_NEGATIVE_INDEX, where the runtime leaves it unwrapped (so the fold must
-// too, else static != runtime). Static bounds come from Int<> literals (signed).
-template <class V> _TNY_API constexpr long _bound_static(long dflt, long n) {
-    if constexpr (cs::is_same<V, none_t>::value) { (void)n; return dflt; }
-    else {
-        const long i = static_cast<long>(V::value);
-#ifdef TNY_NO_NEGATIVE_INDEX
-        (void)n; return i;                       // no wrap — matches _wrap_idx
-#else
-        return i < 0 ? i + n : i;
-#endif
+// Clamp a resolved (start, stop) to python bounds for `step` over extent `n` and
+// return the slice's element count. `st`/`sp` are clamped IN PLACE — the runtime
+// gather needs the clamped start for the base offset, the compile-time fold uses
+// only the count. This is the ONE shared body of the runtime `_sl_axis` and the
+// compile-time `_static_range_len`, so the folded static extent can never diverge
+// from the runtime one (that would be UB). Signed domain (`I` signed) — the
+// negative-step branch reaches -1; it is only ever run for a signed index type
+// (an unsigned step compares >= 0, taking the forward branch).
+template <class I>
+_TNY_API constexpr I _range_count(I & st, I & sp, I step, I n) noexcept {
+    const I Z = I(0);
+    if (step >= Z) {                                        // start, stop in [0, n]
+        st = st < Z ? Z : (st > n ? n : st);
+        sp = sp < Z ? Z : (sp > n ? n : sp);
+        const I w = sp - st;                   return w <= Z ? Z : (w + step - 1) / step;
+    } else {                                               // start, stop in [-1, n-1]
+        const I ns = -step, hi = n - 1;
+        st = st > hi ? hi : (st < I(-1) ? I(-1) : st);
+        sp = sp > hi ? hi : (sp < I(-1) ? I(-1) : sp);
+        const I w = (n <= Z) ? Z : (st - sp);  return w <= Z ? Z : (w + ns - 1) / ns;
     }
 }
-// negative-step stop default is -1 (go past index 0), mirroring _stop_neg.
-template <class V> _TNY_API constexpr long _stop_static(long n) {
-    if constexpr (cs::is_same<V, none_t>::value) return -1;
-    else {
-        const long i = static_cast<long>(V::value);
-#ifdef TNY_NO_NEGATIVE_INDEX
-        (void)n; return i;                       // no wrap — matches _wrap_idx
-#else
-        return i < 0 ? i + n : i;
-#endif
-    }
-}
-// Compile-time length of slice<A,B,S> over a static source extent `n`. This MUST
-// reproduce the runtime _sl_axis count EXACTLY (else the folded static extent would
-// disagree with the runtime-filled value -> UB), so the clamps below mirror it 1:1.
+// Compile-time length of slice<A,B,S> over a static source extent `n`. Resolves the
+// bounds with the SAME `_wrap_idx` the runtime uses (A/B are `none_t` or Int<>
+// literal types) and the SAME `_range_count`, so static == runtime by construction
+// (a divergence would make the folded extent disagree with the runtime one -> UB).
 template <class A, class B, class S>
 _TNY_API constexpr cs::size_t _static_range_len(long n) {
     static_assert(S::value != 0, "slice step cannot be 0");
-    const long step = static_cast<long>(S::value), Z = 0;
-    long st = 0, cnt = 0;
-    if (step >= Z) {
-        st = _bound_static<A>(Z, n);
-        long sp = _bound_static<B>(n, n);
-        st = st < Z ? Z : (st > n ? n : st);
-        sp = sp < Z ? Z : (sp > n ? n : sp);
-        const long w = sp - st; cnt = w <= Z ? Z : (w + step - 1) / step;
-    } else {
-        const long ns = -step, hi = n - 1;
-        st = _bound_static<A>(n - 1, n);
-        long sp = _stop_static<B>(n);
-        st = st > hi ? hi : (st < -1 ? -1 : st);   // start in [-1,n-1] (mirror of _sl_axis)
-        sp = sp > hi ? hi : (sp < -1 ? -1 : sp);
-        const long w = (n <= Z) ? Z : (st - sp); cnt = w <= Z ? Z : (w + ns - 1) / ns;
-    }
-    return static_cast<cs::size_t>(cnt);
+    const long step = static_cast<long>(S::value);
+    long st = 0, sp = 0;   // g++ requires constexpr locals initialised even though both branches assign
+    if (step >= 0) { st = _wrap_idx<long>(A{}, n, long(0));     sp = _wrap_idx<long>(B{}, n, n); }
+    else           { st = _wrap_idx<long>(A{}, n, n - 1);       sp = _wrap_idx<long>(B{}, n, long(-1)); }
+    return static_cast<cs::size_t>(_range_count(st, sp, step, n));
 }
 // a "real" range (needs the layout_stride path) is a slice that is not a full slice
 template <class Arg> struct _is_real_range
