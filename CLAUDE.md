@@ -154,8 +154,9 @@ t.data();  t.view();  t.mdspan();  t.extents();  t.shape();  t.mapping();
 t(1, 2, 3);           // element access -> T& ; negative indices wrap (count from the back)
 t.at(1, 2, 3);        // same element as a rank-0 VIEW (has add_/etc.); rank-0 <-> scalar
                       //   (implicit to/from T, `.item()`). at(i...).add_<true>(v) = atomic scatter
-t.uget(1,2,3); t.uat(i...); t.uslice(0,slice(1,4));  // UNCHECKED twins of
-                      //   ()/at/slice: skip the negative-index wrap for known-non-negative
+t.uget(1,2,3); t.uget(0,slice(1,4)); t.uget(1,ellipsis); t.uat(i...);  // UNCHECKED:
+                      //   uget = twin of operator() (element/slice/ellipsis, one entry point),
+                      //   uat = twin of at. Skip the negative-index wrap for known-non-negative
                       //   RUNTIME indices (per-call -DTNY_NO_NEGATIVE_INDEX). Same result type;
                       //   static bounds still fold; a negative runtime index is then UB.
 t(0, all, slice(1,4));  // any slice arg -> a lower-/same-rank VIEW. all = keep axis,

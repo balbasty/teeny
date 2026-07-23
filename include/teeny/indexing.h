@@ -96,7 +96,7 @@ template <class... Args> _TNY_API constexpr cs::size_t _ellipsis_count() {
 // and -DTNY_NO_NEGATIVE_INDEX drops the wrap entirely for runtime signed args
 // (kernels that guarantee non-negative indices, for the tightest codegen).
 //
-// `Wrap` is a PER-CALL version of that opt-out (the `uget`/`uat`/`uslice`
+// `Wrap` is a PER-CALL version of that opt-out (the `uget`/`uat`
 // unchecked accessors pass `Wrap=false`): it drops the wrap for RUNTIME SIGNED
 // args only. `none`/unsigned are unaffected, and a STATIC (`integral_constant`)
 // bound STILL wraps regardless of `Wrap` — the compile-time slice fold

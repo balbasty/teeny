@@ -274,7 +274,7 @@ public:
     /* --- element access / slicing -------------------------------- */
 private:
     // wrap a negative index python-style for axis Ax (see free `_wrap_idx`).
-    // `Wrap=false` (the unchecked `uget`/`uat`/`uslice` path) skips the wrap for
+    // `Wrap=false` (the unchecked `uget`/`uat` path) skips the wrap for
     // a runtime signed index — the caller promises it is already non-negative.
     template <cs::size_t Ax, bool Wrap = true, class Arg>
     _TNY_API constexpr index_type _wrap(Arg a) const {
@@ -383,21 +383,26 @@ private:
     _TNY_API static constexpr cs::size_t _tup_ellipsis_pos(cs::index_sequence<I...>) {
         return _ellipsis_pos<cs::tuple_element_t<I, Tup>...>();
     }
-    template <class Tup, cs::size_t... out_ax>
+    // `Wrap` re-dispatches the expanded args through the CHECKED `operator()`
+    // (Wrap=true) or the UNCHECKED `uget` (Wrap=false) — so `t.uget(1, ellipsis)`
+    // stays wrap-free after the ellipsis is filled with `all`s.
+    template <bool Wrap = true, class Tup, cs::size_t... out_ax>
     _TNY_API decltype(auto) _ellip_call(Tup t, cs::index_sequence<out_ax...>) {
         constexpr cs::size_t n_args   = cs::tuple_size<Tup>::value;
         static_assert(n_args - 1 <= rank(), "too many indices for ellipsis expansion");
         constexpr cs::size_t ell_pos  = _tup_ellipsis_pos<Tup>(cs::make_index_sequence<n_args>{});
         constexpr cs::size_t fill     = rank() - (n_args - 1);
-        return (*this)(_ellip_arg<out_ax, ell_pos, fill>(t)...);
+        if constexpr (Wrap) return (*this)(_ellip_arg<out_ax, ell_pos, fill>(t)...);
+        else                return uget(_ellip_arg<out_ax, ell_pos, fill>(t)...);
     }
-    template <class Tup, cs::size_t... out_ax>
+    template <bool Wrap = true, class Tup, cs::size_t... out_ax>
     _TNY_API decltype(auto) _ellip_call(Tup t, cs::index_sequence<out_ax...>) const {
         constexpr cs::size_t n_args   = cs::tuple_size<Tup>::value;
         static_assert(n_args - 1 <= rank(), "too many indices for ellipsis expansion");
         constexpr cs::size_t ell_pos  = _tup_ellipsis_pos<Tup>(cs::make_index_sequence<n_args>{});
         constexpr cs::size_t fill     = rank() - (n_args - 1);
-        return (*this)(_ellip_arg<out_ax, ell_pos, fill>(t)...);
+        if constexpr (Wrap) return (*this)(_ellip_arg<out_ax, ell_pos, fill>(t)...);
+        else                return uget(_ellip_arg<out_ax, ell_pos, fill>(t)...);
     }
 public:
     /** @brief Element access when every argument is an integer (negatives wrap). */
@@ -437,21 +442,48 @@ public:
     { return _slice_range(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
 
     /* --- unchecked accessors: skip the negative-index wrap ------------------ *
-     * `uget`/`uat`/`uslice` are the `u`-prefixed twins of
-     * `operator()`/`at`/slice-`operator()` for the hot path where every
-     * runtime index is known non-negative: they take runtime signed indices
-     * AS-IS (no `i < 0 ? i + n : i` branch per axis) — the per-call form of
-     * `-DTNY_NO_NEGATIVE_INDEX`. Passing a negative runtime index is UB (the
-     * caller's promise). Static (`Int<>`) bounds and `none` are unaffected, so a
-     * compile-time slice still folds identically; the result TYPE matches the
-     * checked op exactly. teeny has no element bounds check to skip, so `uget` is
-     * simply the wrap-free element read/write. */
+     * `uget` is the `u`-prefixed twin of `operator()`, and `uat` of `at`, for
+     * the hot path where every runtime index is known non-negative: they take
+     * runtime signed indices AS-IS (no `i < 0 ? i + n : i` branch per axis) —
+     * the per-call form of `-DTNY_NO_NEGATIVE_INDEX`. Passing a negative runtime
+     * index is UB (the caller's promise). Static (`Int<>`) bounds and `none` are
+     * unaffected, so a compile-time slice still folds identically; the result
+     * TYPE matches the checked op exactly.
+     *
+     * `uget` mirrors `operator()` in full — one entry point, three forms chosen
+     * by the argument types, exactly like `operator()`:
+     *   - all-integer args  -> element `T&` (teeny has no element bounds check,
+     *                          so this is simply the wrap-free read/write);
+     *   - any slice arg     -> a VIEW (ranges are still clamped to a valid
+     *                          extent — only the negative wrap is dropped);
+     *   - one `ellipsis`    -> expand to `all`s and re-dispatch through `uget`,
+     *                          so the filled call stays unchecked too.
+     * (A negative runtime slice bound is taken as-is and then clamped, so with a
+     * forward step a negative stop collapses to an empty axis — "no wrap", not
+     * "wrap then clamp".) */
+    // element: every arg is an index
     template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
     _TNY_API T & uget(Args... a) noexcept
     { return store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]; }
     template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
     _TNY_API const T & uget(Args... a) const noexcept
     { return store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]; }
+
+    // slice: at least one slice arg, no ellipsis -> a VIEW
+    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
+    _TNY_API auto uget(Args... a) noexcept
+    { return _slice_range<false>(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
+    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
+    _TNY_API auto uget(Args... a) const noexcept
+    { return _slice_range<false>(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
+
+    // ellipsis: expand to `all`s, then re-dispatch through `uget` (unchecked)
+    template <class... Args, cs::enable_if_t<_has_ellipsis<Args...>::value, int> = 0>
+    _TNY_API decltype(auto) uget(Args... a) noexcept
+    { return _ellip_call<false>(cs::make_tuple(a...), cs::make_index_sequence<rank()>{}); }
+    template <class... Args, cs::enable_if_t<_has_ellipsis<Args...>::value, int> = 0>
+    _TNY_API decltype(auto) uget(Args... a) const noexcept
+    { return _ellip_call<false>(cs::make_tuple(a...), cs::make_index_sequence<rank()>{}); }
 
     /** @brief Unchecked `at`: a single element as a rank-0 VIEW, no negative wrap. */
     template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
@@ -464,17 +496,6 @@ public:
         using E0 = cs::extents<index_type>;
         return tensor<const T, E0, ccontiguous, own_view_of(O)>(&store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]);
     }
-
-    /** @brief Unchecked sub-view: like the slice `operator()` but with no negative
-     *         wrap on runtime integer/bound args (static bounds still fold, so the
-     *         view type is identical). Slice ranges are still clamped for a valid
-     *         extent; only the wrap is dropped. */
-    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
-    _TNY_API auto uslice(Args... a) noexcept
-    { return _slice_range<false>(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
-    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
-    _TNY_API auto uslice(Args... a) const noexcept
-    { return _slice_range<false>(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
 
     /** @brief Ellipsis form: exactly one `ellipsis` in the args expands to
      *         `rank - (#other args)` copies of `all`, then the call re-runs — so
