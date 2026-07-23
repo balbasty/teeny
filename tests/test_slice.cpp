@@ -61,6 +61,32 @@ int main() {
     auto f = t(0, 0, slice(none, none, Int<2>()));    // whole axis, stride 2
     if (f.extent(0) != 2 || f(1) != t(0,0,2)) return 15;
 
+    // #46: a COMPILE-TIME range folds its output extent to a static value (was
+    // dynamic). Source static + static start/stop/step -> length known now.
+    auto cs0 = t(0, slice<1,3>(), 0);                 // axis1 [1,3) -> static 2
+    static_assert(decltype(cs0)::extents_type::static_extent(0) == 2, "slice<1,3> folds extent");
+    if (cs0.extent(0) != 2 || cs0(0) != t(0,1,0) || cs0(1) != t(0,2,0)) return 30;
+    auto cs1 = t(0, slice<0,4,2>(), 0);               // step 2 -> static 2
+    static_assert(decltype(cs1)::extents_type::static_extent(0) == 2, "slice<0,4,2> folds extent");
+    if (cs1.extent(0) != 2) return 31;
+    // reversed compile-time slice folds too (matches the runtime length exactly)
+    auto csr = t(0, 0, slice<none_t, none_t, cs::integral_constant<long,-1>>());
+    static_assert(decltype(csr)::extents_type::static_extent(0) == 4, "reversed folds to 4");
+    if (csr.extent(0) != 4 || csr(0) != t(0,0,3) || csr(3) != t(0,0,0)) return 32;
+    // a runtime range stays dynamic (only the compile-time form folds)
+    auto csd = t(0, slice(1,3), 0);
+    static_assert(decltype(csd)::extents_type::static_extent(0) == cs::dynamic_extent, "runtime range stays dynamic");
+
+    // #46 safety: on an UNSIGNED index_type a negative step is not foldable — the
+    // runtime casts step to unsigned (forward branch, empty) while a signed fold
+    // would reverse. The fold must fall back to dynamic there (else static!=runtime
+    // -> UB); the runtime value then fills it. (Fable-review edge case.)
+    float ub[8] = {}; auto ut = wrap(ub, cs::extents<unsigned,8>{});
+    auto uneg = ut(slice<none_t, none_t, cs::integral_constant<long,-1>>());
+    static_assert(decltype(uneg)::extents_type::static_extent(0) == cs::dynamic_extent,
+                  "unsigned index + negative step -> not folded (stays dynamic)");
+    if ((long)uneg.extent(0) != 0) return 34;   // runtime: unsigned step-cast -> empty
+
     // slice also works through take_along (same resolution)
     auto g = t.take_along<2>(slice(1, none));         // keep axes 0,1; axis2 [1,4)
     static_assert(decltype(g)::rank() == 3, "take_along keeps unnamed axes");
