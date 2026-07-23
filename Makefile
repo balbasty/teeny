@@ -44,6 +44,7 @@ TESTS = \
 	$(BUILDDIR)/test_slice \
 	$(BUILDDIR)/test_unchecked \
 	$(BUILDDIR)/test_assign \
+	$(BUILDDIR)/test_subscript \
 	$(BUILDDIR)/test_broadcast \
 	$(BUILDDIR)/test_api \
 	$(BUILDDIR)/test_half \
@@ -92,6 +93,13 @@ release:
 hardened:
 	$(MAKE) clean
 	$(MAKE) CXXFLAGS='$(CXXFLAGS) -O2 -DTNY_HARDENED' run-test
+
+# Build/run the suite at -std=c++23 (the later -std wins), which exercises the
+# C++23-only `operator[]` multidimensional subscript that the default c++17 CI
+# cannot reach. teeny targets c++17 but must stay forward-compatible.
+cxx23:
+	$(MAKE) clean
+	$(MAKE) CXXFLAGS='$(CXXFLAGS) -std=c++23' run-test
 
 clean:
 	$(DEL) $(TESTS) $(EXAMPLES)
