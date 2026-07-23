@@ -75,13 +75,23 @@ _TNY_API auto flip_md(const MD & v, cs::index_sequence<D...>) {
 template <cs::size_t AX, class MD, cs::size_t... J>
 _TNY_API auto unsqueeze_md(const MD & v, cs::index_sequence<J...>) {
     using El  = typename MD::element_type; using Idx = typename MD::index_type;
-    using E   = typename MD::extents_type; using L   = typename MD::layout_type;
-    using OE  = cs::extents<Idx, (J == AX ? cs::size_t(1) : E::static_extent(J < AX ? J : J - 1))...>;
-    using SF  = strides< (J == AX ? cs::int64_t(1) : _src_sstride<(J == AX ? cs::size_t(0) : (J < AX ? J : J - 1)), L, E>())... >;
-    OE oe(static_cast<Idx>(J == AX ? Idx(1) : v.extent(J < AX ? J : J - 1))...);
-    const Idx rstr[sizeof...(J) ? sizeof...(J) : 1] =
-        { static_cast<Idx>(J == AX ? Idx(1) : v.stride(J < AX ? J : J - 1))... };
-    return cs::mdspan<El, OE, SF>(v.data_handle(), fold_mapping<SF>(oe, rstr));
+    if constexpr (MD::extents_type::rank() == 0) {
+        // rank-0 -> rank-1 (AX is necessarily 0): one size-1 axis over the same
+        // element. A rank-0 source has no strides to read (CCCL constrains
+        // `stride()` to rank > 0, and `static_extent(0)` is out of range), so the
+        // general body below can't even instantiate for it — build the fixed
+        // `strides<1>` view directly. #71.
+        using OE = cs::extents<Idx, 1>; using SF = strides<1>;
+        return cs::mdspan<El, OE, SF>(v.data_handle(), typename SF::template mapping<OE>(OE{}));
+    } else {
+        using E   = typename MD::extents_type; using L   = typename MD::layout_type;
+        using OE  = cs::extents<Idx, (J == AX ? cs::size_t(1) : E::static_extent(J < AX ? J : J - 1))...>;
+        using SF  = strides< (J == AX ? cs::int64_t(1) : _src_sstride<(J == AX ? cs::size_t(0) : (J < AX ? J : J - 1)), L, E>())... >;
+        OE oe(static_cast<Idx>(J == AX ? Idx(1) : v.extent(J < AX ? J : J - 1))...);
+        const Idx rstr[sizeof...(J) ? sizeof...(J) : 1] =
+            { static_cast<Idx>(J == AX ? Idx(1) : v.stride(J < AX ? J : J - 1))... };
+        return cs::mdspan<El, OE, SF>(v.data_handle(), fold_mapping<SF>(oe, rstr));
+    }
 }
 // drop axis AX (must have extent 1) -> output rank = N-1. J... = 0..N-2 ;
 // input axis for output j is j (j<AX) or j+1 (j>=AX).
