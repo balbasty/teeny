@@ -306,10 +306,10 @@ private:
                 const index_type ns = -step, hi = n - 1;
                 st = _sl_bound(a.start, n - 1, n);                   // default start = last
                 index_type sp = _stop_neg(a.stop, n);               // default stop = before-0
-                st = st > hi ? hi : (st < Z ? Z : st);              // python clamp: start in [0,n-1]
+                st = st > hi ? hi : (st < index_type(-1) ? index_type(-1) : st);   // python clamp: start in [-1,n-1]
                 sp = sp > hi ? hi : (sp < index_type(-1) ? index_type(-1) : sp);   // stop in [-1,n-1]
                 const index_type w = (n <= Z) ? Z : (st - sp); cnt = w <= Z ? Z : (w + ns - 1) / ns;
-                if (n <= Z) st = Z;
+                if (st < Z) st = Z;   // start == -1 means an EMPTY slice (cnt==0); keep the base offset valid (no before-array pointer)
             }
             off += st * sd; ext[k] = cnt; str[k] = step * sd; ++k;  // stride may be negative
         } else {                                                    // full_extent (all)

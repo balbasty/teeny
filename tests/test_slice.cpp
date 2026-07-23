@@ -117,5 +117,29 @@ int main() {
     auto Mr = M2(slice(none,none,-1), all);
     for (long i=0;i<3;++i) for (long j=0;j<4;++j) if (Mr(i,j) != M2(2-i,j)) return 24;
 
+    // ---- #67: negative-step start clamps to [-1,n-1] like numpy (empty vs 1) --
+    // A negative-step start that wraps below -1 makes an EMPTY slice (numpy), not
+    // a spurious 1-element one. `line` has extent 4 here (restored above).
+    auto e0 = line(slice(-100, none, -1));            // start wraps below -1 -> empty
+    if (e0.extent(0) != 0) return 25;
+    auto e1 = line(slice(-100, -100, -1));            // both below -1 -> empty
+    if (e1.extent(0) != 0) return 26;
+    auto e2 = line(slice(0, 0, -1));                  // start==stop -> empty
+    if (e2.extent(0) != 0) return 27;
+    // unaffected cases still behave (start >= 0, or a real reverse):
+    auto k1 = line(slice(1, -100, -1));               // stop wraps below -1 -> [1,0]
+    if (k1.extent(0) != 2 || k1(0) != line(1) || k1(1) != line(0)) return 28;
+    auto k2 = line(slice(none, none, -1));            // full reverse still 4 elts
+    if (k2.extent(0) != 4) return 29;
+
+    // the compile-time fold agrees (static extent == runtime), over a static n=5:
+    double b5[5]; for (long i=0;i<5;++i) b5[i]=i;
+    auto s5 = wrap(b5, shape<5>{});
+    static_assert(decltype(s5(slice<-8,-8,-1>()))::extents_type::static_extent(0) == 0, "static: empty");
+    static_assert(decltype(s5(slice<-100,0,-1>()))::extents_type::static_extent(0) == 0, "static: start below -1 -> empty");
+    static_assert(decltype(s5(slice<1,-100,-1>()))::extents_type::static_extent(0) == 2, "static: [1,0]");
+    if (s5(slice<-8,-8,-1>()).extent(0) != 0) return 30;      // runtime matches the fold
+    if (s5(slice<1,-100,-1>()).extent(0) != 2) return 31;
+
     return 0;
 }
