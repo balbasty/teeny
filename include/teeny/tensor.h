@@ -499,6 +499,18 @@ public:
     _TNY_API decltype(auto) operator()(Args... a) const noexcept
     { return _ellip_call(cs::make_tuple(a...), cs::make_index_sequence<rank()>{}); }
 
+#if defined(__cpp_multidimensional_subscript)
+    /** @brief C++23 multidimensional subscript: `t[i, j, k]` / `t[0, all, slice(1,4)]`
+     *         — an exact alias of `operator()` (same element/view result, same
+     *         unchecked semantics, same `all`/range/ellipsis args). Available only
+     *         when the compiler provides the multidimensional subscript (C++23,
+     *         `mdspan`'s own spelling); use `operator()` on C++17/20. */
+    template <class... Args>
+    _TNY_API decltype(auto) operator[](Args... a)       noexcept { return (*this)(a...); }
+    template <class... Args>
+    _TNY_API decltype(auto) operator[](Args... a) const noexcept { return (*this)(a...); }
+#endif
+
     /* --- rank-0 <-> scalar interop -------------------------------- *
      * A rank-0 tensor holds exactly one element, so it acts like a scalar:
      * it converts to `T` (read) and is assignable from `T` (write). Together
