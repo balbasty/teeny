@@ -54,19 +54,14 @@ _TNY_API auto gather_peel(const MD & v, const I * idx, Seq, cs::index_sequence<A
     using L   = typename MD::layout_type;
     using OE  = typename _compact<Idx, peel_ext<A, E, Seq>()...>::type;
     using SF  = typename _str_compact<peel_str<A, L, E, Seq>()...>::type;
-    using Map = typename SF::template mapping<OE>;
     constexpr cs::size_t Nk = sizeof...(A) - Seq::size();
     Idx ext[Nk ? Nk : 1] = {}, str[Nk ? Nk : 1] = {}, off = 0; cs::size_t k = 0;
     ( peel_axis<A, Seq>(v, idx, off, ext, str, k), ... );
     cs::array<Idx, Nk> ea{};
     for (cs::size_t i = 0; i < Nk; ++i) ea[i] = ext[i];
-    El * base = v.data_handle() + off;
-    if constexpr (SF::ndyn() == 0) return tensor<El, OE, SF, OW>(base, Map(OE(ea)));
-    else {
-        cs::array<Idx, SF::ndyn()> dyn{};
-        for (cs::size_t i = 0; i < Nk; ++i) if (SF::S_[i] == dynamic_stride) dyn[SF::slot(i)] = str[i];
-        return tensor<El, OE, SF, OW>(base, Map(OE(ea), dyn));
-    }
+    // fold the kept strides into the strides<...> mapping (shared with the slice
+    // gather and axis builders); Nk == OE::rank().
+    return tensor<El, OE, SF, OW>(v.data_handle() + off, _detail::fold_mapping<SF>(OE(ea), str));
 }
 
 // Space-aware peel-at over an mdspan: `OW` is the view kind to tag the result
