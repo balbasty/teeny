@@ -112,5 +112,17 @@ int main()
     static_assert(_is_strides<decltype(ps2)::layout_type>::value, "permute of strides<> folds");
     if (ps2.stride(Int<0>()) != 4 || ps2.stride(Int<2>()) != 1) return 28;
 
+    // ---- #71: unsqueeze a RANK-0 (layout_right) view -> rank-1 ----------------
+    // t.at(...) is a rank-0 layout_right view; unsqueezing it used to hit CCCL's
+    // rank>0 constraint on mdspan::stride() inside unsqueeze_md.
+    auto r0 = t.at(1, 2, 3);                            // rank-0 layout_right view
+    static_assert(decltype(r0)::rank() == 0, "at() -> rank-0");
+    auto r1 = r0.unsqueeze<0>();                        // rank-0 -> rank-1
+    static_assert(decltype(r1)::rank() == 1, "unsqueeze rank-0 -> rank-1");
+    static_assert(decltype(r1)::extents_type::static_extent(0) == 1, "new axis is size 1");
+    if (r1(0) != t(1,2,3)) return 29;
+    r1(0) = 111.0;                                      // mutable view aliases the element
+    if (t(1,2,3) != 111.0) return 30;
+
     return 0;
 }
