@@ -902,36 +902,68 @@ _TNY_HOST auto make_heap(Shape e) { return empty<T, own::heap, Layout>(e); }
  *         defaults to the **value's** type (numpy/pytorch: `full(s, 3)` is int,
  *         `full(s, 3.0)` is float); pass `full<T>(...)` to override. Unlike the
  *         value-less `zeros`/`ones` (which default to `float`), there is a value
- *         here to infer from, so we do. */
-template <class T = void, class Layout = cs::layout_right, class Shape, class V,
+ *         here to infer from, so we do.
+ *
+ *  Ownership is deduced from the shape (static -> stack, dynamic -> heap) unless a
+ *  **backend** is named — `full<T, own::pinned>(s, v)` or the value-tag
+ *  `full<T>(s, v, own_c<own::pinned>{})`. Because it fills host-side, only
+ *  host-accessible backends (stack/heap/pinned/mapped) are allowed; a device
+ *  (`gpu`) fill needs a kernel launch, so it is a `static_assert` steering you to
+ *  `to<own::gpu>(full<T>(s, v))`. Split by resolved ownership for the
+ *  `_TNY_API`/`_TNY_HOST` annotation. */
+template <class T = void, own O = own_deduce, class Layout = cs::layout_right, class Shape, class V,
           class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
-          cs::enable_if_t<Shape::rank_dynamic() == 0, int> = 0>
-_TNY_API auto full(Shape, V v) { tensor<ET, Shape, Layout, own::stack> t{}; t.fill_(static_cast<ET>(v)); return t; }
-template <class T = void, class Layout = cs::layout_right, class Shape, class V,
+          cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) == own::stack, int> = 0>
+_TNY_API auto full(Shape e, V v) { auto t = empty<ET, O, Layout>(e); t.fill_(static_cast<ET>(v)); return t; }
+template <class T = void, own O = own_deduce, class Layout = cs::layout_right, class Shape, class V,
           class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
-          cs::enable_if_t<Shape::rank_dynamic() != 0, int> = 0>
-_TNY_HOST auto full(Shape e, V v) { tensor<ET, Shape, Layout, own::heap> t(e); t.fill_(static_cast<ET>(v)); return t; }
+          cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) != own::stack, int> = 0>
+_TNY_HOST auto full(Shape e, V v) {
+    static_assert(own_is_host_accessible(own_resolve(O, Shape::rank_dynamic() == 0)),
+        "zeros/ones/full<..., own::gpu>: a device fill needs a kernel launch; use to<own::gpu>(full<T>(shape, v)) (or to<own::gpu>(zeros<T>(shape))), or empty<T, own::gpu>(shape) then a memset.");
+    auto t = empty<ET, O, Layout>(e); t.fill_(static_cast<ET>(v)); return t;
+}
+/** @brief Value-tag backend form: `full<T>(extents, v, own_c<own::pinned>{})`. */
+template <class T = void, class Layout = cs::layout_right, class Shape, class V, own O>
+_TNY_HOST auto full(Shape e, V v, own_c<O>) { return full<T, O, Layout>(e, v); }
 
 /** @brief `zeros<T>(extents)` / `ones<T>(extents)` — a new tensor of 0s / 1s.
- *         `T` defaults to `float`. Static shape -> stack (host+device); dynamic
- *         -> heap (host only). The annotation is split so it matches the overload
- *         `full` resolves to. */
-template <class T = float, class Layout = cs::layout_right, class Shape, cs::enable_if_t<Shape::rank_dynamic() == 0, int> = 0>
-_TNY_API  auto zeros(Shape e) { return full<T, Layout>(e, T(0)); }
-template <class T = float, class Layout = cs::layout_right, class Shape, cs::enable_if_t<Shape::rank_dynamic() != 0, int> = 0>
-_TNY_HOST auto zeros(Shape e) { return full<T, Layout>(e, T(0)); }
-template <class T = float, class Layout = cs::layout_right, class Shape, cs::enable_if_t<Shape::rank_dynamic() == 0, int> = 0>
-_TNY_API  auto ones(Shape e) { return full<T, Layout>(e, T(1)); }
-template <class T = float, class Layout = cs::layout_right, class Shape, cs::enable_if_t<Shape::rank_dynamic() != 0, int> = 0>
-_TNY_HOST auto ones(Shape e) { return full<T, Layout>(e, T(1)); }
+ *         `T` defaults to `float`. Same ownership deduction and backend selector
+ *         as `full` (a device backend `static_assert`s — fill via
+ *         `to<own::gpu>(zeros<T>(shape))`); the annotation is split to match the
+ *         `full` overload each routes to. */
+template <class T = float, own O = own_deduce, class Layout = cs::layout_right, class Shape,
+          cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) == own::stack, int> = 0>
+_TNY_API  auto zeros(Shape e) { return full<T, O, Layout>(e, T(0)); }
+template <class T = float, own O = own_deduce, class Layout = cs::layout_right, class Shape,
+          cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) != own::stack, int> = 0>
+_TNY_HOST auto zeros(Shape e) { return full<T, O, Layout>(e, T(0)); }
+template <class T = float, class Layout = cs::layout_right, class Shape, own O>
+_TNY_HOST auto zeros(Shape e, own_c<O>) { return zeros<T, O, Layout>(e); }
+template <class T = float, own O = own_deduce, class Layout = cs::layout_right, class Shape,
+          cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) == own::stack, int> = 0>
+_TNY_API  auto ones(Shape e) { return full<T, O, Layout>(e, T(1)); }
+template <class T = float, own O = own_deduce, class Layout = cs::layout_right, class Shape,
+          cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) != own::stack, int> = 0>
+_TNY_HOST auto ones(Shape e) { return full<T, O, Layout>(e, T(1)); }
+template <class T = float, class Layout = cs::layout_right, class Shape, own O>
+_TNY_HOST auto ones(Shape e, own_c<O>) { return ones<T, O, Layout>(e); }
 
 /** @brief `arange<T>(n)` — a 1-D tensor `[0, 1, ..., n-1]` (heap, host). `T`
- *         defaults to `int64_t` (an integer range, like numpy `arange(n)`). */
-template <class T = cs::int64_t>
+ *         defaults to `int64_t` (an integer range, like numpy `arange(n)`). A
+ *         host-accessible backend may be named — `arange<T, own::pinned>(n)` or
+ *         `arange<T>(n, own_c<own::pinned>{})`; a device backend `static_assert`s
+ *         (use `to<own::gpu>(arange<T>(n))`). The static-N forms below stay stack. */
+template <class T = cs::int64_t, own O = own_deduce>
 _TNY_HOST auto arange(long n) {
     using E = cs::dextents<cs::int64_t, 1>;
-    tensor<T, E, cs::layout_right, own::heap> t(E{n}); t.iota_(); return t;
+    static_assert(own_is_host_accessible(own_resolve(O, false)),
+        "arange<..., own::gpu>: a device fill needs a kernel launch; use to<own::gpu>(arange<T>(n)).");
+    auto t = empty<T, O, cs::layout_right>(E{n}); t.iota_(); return t;
 }
+/** @brief Value-tag backend form: `arange<T>(n, own_c<own::pinned>{})`. */
+template <class T = cs::int64_t, own O>
+_TNY_HOST auto arange(long n, own_c<O>) { return arange<T, O>(n); }
 /** @brief Static `arange<T, N>()` — a stack `[0..N-1]` (host+device, folds). */
 template <class T = cs::int64_t, long N>
 _TNY_API auto arange() { tensor<T, cs::extents<cs::int64_t, static_cast<cs::size_t>(N)>, cs::layout_right, own::stack> t{}; t.iota_(); return t; }

@@ -197,6 +197,10 @@ a.add_at(v, i, j);                            // scatter-accumulate: a(i,j) += v
 auto z = zeros<T>(shape); ones<T>(sh); full(sh,v); arange<T>(n);  // creation. zeros/ones
                       //   default T=float; full's T = value type; arange defaults T=int64.
                       //   Static: arange<T,N>() / arange<T>(Int<N>()) -> stack [0..N-1].
+                      //   Backend selector (like empty): zeros<T,own::pinned>(sh),
+                      //   full<T>(sh,v,own_c<own::pinned>{}) — HOST-ACCESSIBLE only
+                      //   (stack/heap/pinned/mapped); a gpu fill static_asserts ->
+                      //   to<own::gpu>(zeros<T>(sh)).
 
 // --- math (out-of-place -> NEW tensor; static shape -> stack, else heap/host) ---
 // result type = promote(A,B): C++ rules, but among floats the LOWER width wins
