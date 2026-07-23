@@ -131,10 +131,12 @@ Assignment **into** a slice copies (broadcasts); on a **named** view it rebinds:
 ## Structure (views)
 
 All return a view and work on any source layout (incl. `strides<...>`); axis
-template args are signed (negatives count from the back). `operator()` slicing,
-`take_along`, and `peel` fold their output strides into a static `strides<...>`
-layout (compile-time where derivable); `permute`/`flip`/`unsqueeze`/`squeeze`
-build a `dynamic_strides` (runtime `layout_stride`) view.
+template args are signed (negatives count from the back). **Every** view op —
+`operator()` slicing, `take_along`, `peel`, and `permute`/`flip`/`unsqueeze`/
+`squeeze` — folds its output strides into a static `strides<...>` layout
+(compile-time where the source strides are static; permute reorders them, flip
+negates one, un/squeeze inserts/drops an axis), so a static source keeps its
+compile-time strides through these ops.
 
 | Call | Returns | Notes |
 |---|---|---|

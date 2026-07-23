@@ -123,10 +123,10 @@ x.to<T2>();                           // dtype convert (matching dtype -> no-cop
 to<own::gpu>(x);                      // memory-space move: to<Space,ET,Force>(x) (from <teeny/cuda.h>)
 ```
 
-Axis template arguments are signed (negatives count from the back). All view ops
-work on any source layout (incl. `strides<...>`); `operator()`/`take_along`/`peel`
-fold into a static `strides<...>`, while `permute`/`flip`/`unsqueeze`/`squeeze`
-build a `dynamic_strides` (runtime) view. See [Views & structure](structure.md).
+Axis template arguments are signed (negatives count from the back). **Every** view
+op — `operator()`/`take_along`/`peel` **and** `permute`/`flip`/`unsqueeze`/`squeeze`
+— folds its output strides into a static `strides<...>` (compile-time where the
+source strides are static), on any source layout. See [Views & structure](structure.md).
 
 ---
 

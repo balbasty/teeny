@@ -93,5 +93,24 @@ int main()
     rs(0,0) = 88.0;                                    // reshape is a view
     if (t(0,0,0) != 88.0) return 23;
 
+    // ---- #68: permute/flip/unsqueeze/squeeze FOLD to static strides<...> ----
+    // (a static source keeps compile-time strides, like the slice gather).
+    t(0,0,0) = 0.0;                                    // restore for value checks below
+    auto pf = t.permute<2,0,1>();                      // strides 12,4,1 -> 1,12,4 (static)
+    static_assert(_is_strides<decltype(pf)::layout_type>::value, "permute -> strides<>");
+    static_assert(_is_ic<decltype(pf.stride(Int<0>()))>::value, "permuted stride folds (static)");
+    if (pf.stride(Int<0>()) != 1 || pf.stride(Int<2>()) != 4) return 25;
+    auto ff = t.flip<0>();                             // axis0 stride -> -12 (static)
+    static_assert(_is_strides<decltype(ff)::layout_type>::value, "flip -> strides<>");
+    if (ff.stride(Int<0>()) != -12) return 26;
+    auto uf = t.unsqueeze<0>();
+    static_assert(_is_strides<decltype(uf)::layout_type>::value, "unsqueeze -> strides<>");
+    static_assert(_is_strides<decltype(t.unsqueeze<1>().squeeze<1>())::layout_type>::value, "squeeze -> strides<>");
+    if (uf(0,1,2,3) != t(1,2,3)) return 27;
+    // permute of a strides<...> source stays folded
+    auto ps2 = tensor<double, shape<2,3,4>, strides<12,4,1>>(buf).permute<1,0,2>();
+    static_assert(_is_strides<decltype(ps2)::layout_type>::value, "permute of strides<> folds");
+    if (ps2.stride(Int<0>()) != 4 || ps2.stride(Int<2>()) != 1) return 28;
+
     return 0;
 }
