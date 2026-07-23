@@ -64,9 +64,13 @@ int main()
     auto c1 = at.peel_front_at<-2>(1);            // batch index 1 -> buf + 12
     if (c1(2,3) != buf[12 + 2*4 + 3]) return 9;
 
-    // recast the dynamic inner dims back to static so they fold.
+    // recast the dynamic inner dims back to static: the EXTENTS fold (loops unroll),
+    // while the strides are PRESERVED from the source. `c1` is a dynamic_strides cell
+    // (its strides are only known at run time), so recast keeps them runtime — it does
+    // NOT assume contiguity and fold to a (possibly wrong) compile-time stride.
     auto cs2 = c1.recast<tny::shape<3,4>>();     // (local `shape` array shadows tny::shape)
-    static_assert(decltype(cs2.stride(Int<1>()))::value == 1, "inner stride folds after recast");
+    static_assert(decltype(cs2)::extents_type::static_extent(1) == 4, "inner extent folds after recast");
+    if (cs2.stride(1) != 1 || cs2.stride(0) != 4) return 30;   // strides preserved (this cell is contiguous)
     if (cs2(2,3) != buf[12 + 2*4 + 3]) return 10;
 
     // ---- default as_anyrank WRAPS the arrays (no copy) -----------------------

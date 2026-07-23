@@ -706,24 +706,35 @@ private:
     template <class El, class NewE, cs::size_t... D>
     _TNY_API auto _recast(El * p, cs::index_sequence<D...>) const {
         static_assert(NewE::rank() == rank(), "recast: rank must match");
-        // recast re-types the extents but reuses row-major strides, so it needs a
-        // C-contiguous source (else it would silently mis-address the data). And
-        // every static dim of NewE must equal the actual extent. Checked here
-        // (host-debug) because a non-contiguous ndarray is the norm at the boundary.
-        _TNY_CHECK(is_contiguous<ccontiguous>(), "recast: needs a C-contiguous tensor (clone() first)");
+        // recast re-types the EXTENTS (to recover statically-known dims) but
+        // PRESERVES the source's real strides — folded to a compile-time value
+        // where derivable from the source layout (contiguous / `strides<>`), else
+        // carried at run time (`dynamic_strides` source). Staticizing an extent is
+        // orthogonal to the strides, so there's no reason to touch them: this works
+        // for ANY source layout (contiguous, transposed, broadcast, arbitrarily
+        // strided) and can never mis-address. Each static dim of NewE must equal
+        // the runtime extent (a genuine mismatch is a bug — validated host-debug).
         ( _TNY_CHECK(NewE::static_extent(D) == cs::dynamic_extent ||
                      static_cast<index_type>(NewE::static_extent(D)) == static_cast<index_type>(extent(D)),
                      "recast: a static dim does not match the actual extent"), ... );
-        return tensor<El, NewE, ccontiguous, own_view_of(O)>(
-            p, typename ccontiguous::template mapping<NewE>(NewE(cs::array<index_type, rank()>{ static_cast<index_type>(extent(D))... })));
+        // Source strides, folded via NewE's (now richer) static extents where the
+        // source layout makes them derivable; the dynamic slots come from the
+        // actual runtime strides. (`_src_sstride` only folds for contiguous /
+        // `strides<>` layouts, so a `dynamic_strides` source stays runtime-strided.)
+        using SF = strides< _src_sstride<D, Layout, NewE>()... >;
+        const index_type rstr[rank() ? rank() : 1] = { static_cast<index_type>(stride(D))... };
+        return tensor<El, NewE, SF, own_view_of(O)>(
+            p, _detail::fold_mapping<SF>(NewE(cs::array<index_type, rank()>{ static_cast<index_type>(extent(D))... }), rstr));
     }
 public:
     /** @brief Reinterpret with a MORE-STATIC extents type of the same rank —
      *         recover statically-known inner dims at the dynamic (ndarray)
      *         boundary: a runtime `(n,3,3)` view -> `.recast<shape<-1,3,3>>()` so
-     *         the `3`s fold. **Requires a C-contiguous tensor** (`clone()` first
-     *         otherwise); each static dim of `NewE` is validated against the
-     *         actual extent. */
+     *         the `3`s (extents) fold. **Preserves the source strides and works on
+     *         ANY layout** (no copy, no contiguity requirement) — a strided /
+     *         transposed source keeps its strides; a `dynamic_strides` source keeps
+     *         them at run time (they can't fold to a constant). Each static dim of
+     *         `NewE` is validated against the actual extent. */
     template <class NewE> _TNY_API auto recast()       { return _recast<T,       NewE>(store_.data(), cs::make_index_sequence<rank()>{}); }
     template <class NewE> _TNY_API auto recast() const { return _recast<const T, NewE>(store_.data(), cs::make_index_sequence<rank()>{}); }
 
