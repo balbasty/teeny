@@ -296,28 +296,20 @@ private:
             off += _wrap<Ax>(a) * sd;                                // integer: drop this axis
         } else if constexpr (_is_slice_spec<Arg>::value) {
             const index_type step = static_cast<index_type>(a.step);
-            const index_type Z = index_type(0);
-            index_type st, cnt;
-            if (step >= Z) {
-                st = _sl_bound(a.start, Z, n);
-                index_type sp = _sl_bound(a.stop, n, n);
-                st = st < Z ? Z : (st > n ? n : st);                // python clamp: start,stop in [0,n]
-                sp = sp < Z ? Z : (sp > n ? n : sp);
-                const index_type w = sp - st; cnt = w <= Z ? Z : (w + step - 1) / step;
-            } else {
-                const index_type ns = -step, hi = n - 1;
-                st = _sl_bound(a.start, n - 1, n);                   // default start = last
-                index_type sp = _stop_neg(a.stop, n);               // default stop = before-0
-                st = st > hi ? hi : (st < index_type(-1) ? index_type(-1) : st);   // python clamp: start in [-1,n-1]
-                sp = sp > hi ? hi : (sp < index_type(-1) ? index_type(-1) : sp);   // stop in [-1,n-1]
-                const index_type w = (n <= Z) ? Z : (st - sp); cnt = w <= Z ? Z : (w + ns - 1) / ns;
-            }
+            // Resolve the (start, stop) defaults per step sign (forward: [0..n];
+            // backward: start at the last, stop before index 0), then clamp + count
+            // via the shared `_range_count` — the SAME body the compile-time fold
+            // `_static_range_len` uses, so the folded static extent can't diverge.
+            index_type st, sp;
+            if (step >= index_type(0)) { st = _sl_bound(a.start, index_type(0), n); sp = _sl_bound(a.stop, n, n); }
+            else                       { st = _sl_bound(a.start, n - 1, n);         sp = _stop_neg(a.stop, n); }
+            const index_type cnt = _range_count(st, sp, step, n);
             // An empty axis makes the whole view empty, so its offset is never read;
             // zero it so the accumulated base pointer stays in-bounds — a negative
             // start (step<0) would go BEFORE the buffer, and summed positive starts
             // (step>0, several empty axes) BEYOND one-past-the-end. Both are UB to
             // even form (#67 neg branch, #80 pos branch). #80.
-            if (cnt <= Z) st = Z;
+            if (cnt <= index_type(0)) st = index_type(0);
             off += st * sd; ext[k] = cnt; str[k] = step * sd; ++k;  // stride may be negative
         } else {                                                    // full_extent (all)
             ext[k] = n; str[k] = sd; ++k;
