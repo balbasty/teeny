@@ -123,16 +123,16 @@ struct storage;
  *     Share one storage so a tweak can't land in three copies and miss the fourth.
  *     Trivially copyable (single pointer, defaulted specials) -> kernel-passable. */
 template <class T>
-struct _ptr_storage {
+struct ptr_storage {
     T * p = nullptr;
-    _ptr_storage() = default;
-    _TNY_API constexpr _ptr_storage(T * q) noexcept : p(q) {}
+    ptr_storage() = default;
+    _TNY_API constexpr ptr_storage(T * q) noexcept : p(q) {}
     _TNY_API constexpr T * data() const noexcept { return p; }
 };
-template <class T, cs::size_t N> struct storage<T, own::view,        N> : _ptr_storage<T> { using _ptr_storage<T>::_ptr_storage; };
-template <class T, cs::size_t N> struct storage<T, own::gpu_view,    N> : _ptr_storage<T> { using _ptr_storage<T>::_ptr_storage; };
-template <class T, cs::size_t N> struct storage<T, own::pinned_view, N> : _ptr_storage<T> { using _ptr_storage<T>::_ptr_storage; };
-template <class T, cs::size_t N> struct storage<T, own::mapped_view, N> : _ptr_storage<T> { using _ptr_storage<T>::_ptr_storage; };
+template <class T, cs::size_t N> struct storage<T, own::view,        N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
+template <class T, cs::size_t N> struct storage<T, own::gpu_view,    N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
+template <class T, cs::size_t N> struct storage<T, own::pinned_view, N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
+template <class T, cs::size_t N> struct storage<T, own::mapped_view, N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
 
 /* --- stack: inline array (fully-static shape) --------------------- */
 template <class T, cs::size_t N>
