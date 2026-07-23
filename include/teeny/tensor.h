@@ -76,7 +76,7 @@ struct tensor : private Layout::template mapping<Shape> {
     static constexpr own  ownership = O;
     static constexpr bool is_static = (Shape::rank_dynamic() == 0);
     // memory-space flags (mirror the own_* helpers, as compile-time constants):
-    static constexpr bool is_view            = own_is_view(O);             // view or gpu_view
+    static constexpr bool is_view            = own_is_view(O);             // view / gpu_view / pinned_view / mapped_view
     static constexpr bool is_owning          = own_is_owning(O);           // heap/gpu/pinned/mapped
     static constexpr bool is_device          = own_is_device(O);           // gpu or gpu_view
     static constexpr bool is_host_accessible = own_is_host_accessible(O);  // dereferenceable on the host
@@ -875,7 +875,7 @@ template <class T = float, own O = own_deduce, class Layout = cs::layout_right, 
           cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) != own::stack, int> = 0>
 _TNY_HOST auto empty(Shape e) {
     constexpr own R = own_resolve(O, Shape::rank_dynamic() == 0);
-    static_assert(!own_is_view(R), "empty(): a non-owning view kind (view/gpu_view) has no storage to allocate — use wrap()/make_view() for a view.");
+    static_assert(!own_is_view(R), "empty(): a non-owning view kind (view/gpu_view/pinned_view/mapped_view) has no storage to allocate — use wrap()/make_view() for a view.");
     return tensor<T, Shape, Layout, R>(e);
 }
 /** @brief Value-tag backend form: `empty<T>(extents, own_c<own::gpu>{})`. Always
