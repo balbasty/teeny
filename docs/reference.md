@@ -166,6 +166,7 @@ compile-time strides through these ops.
 | `peel_at<Axes...>(t, i)` | → view | the `i`-th sub-view (grid-stride style) |
 | `peel_front<N>(t)` | a range of views | `N≥0`: peel the first `N` axes; `N<0`: keep the last `|N|` |
 | `peel_front_at<N>(t, i)` | → view | the `i`-th (grid-stride style) |
+| `size_front<N>(t)` | → index | # cells `peel_front<N>` yields (product of the peeled extents), no range built |
 
 ---
 
@@ -252,6 +253,7 @@ Axis reductions: a fully static result → stack (host+device); any dynamic resu
 | `at.fixed<R>()` | rank-`R` `dynamic_strides` view | requires `ndim == R` |
 | `dispatch_rank(at, f)` | `bool` | call `f` with a fixed-rank view chosen by runtime `ndim` (one instantiation per total rank) |
 | `at.peel_front<N>()` / `at.peel_front_at<N>(i)` | range / view | batch idiom: keep the last `\|N\|` dims static, peel the rest (one kernel per `\|N\|`) |
+| `at.size_front<N>()` | → offset | flattened batch count `peel_front<N>` yields (product of the peeled leading extents), no range built; `N < 0` |
 | `dispatch_value<Vs...>(v, f)` | `bool` | call `f(Int<k>{})` for the matching candidate `k == v` |
 
 DLPack strides are in **elements**; numpy `__array_interface__` in **bytes**

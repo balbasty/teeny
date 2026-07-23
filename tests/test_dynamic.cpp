@@ -55,6 +55,11 @@ int main()
     }
     if (cells != 2 || acc != (long)expect) return 8;
 
+    // size_front<-Sr>() = the batch-cell count, computed without the range.
+    if (at.size_front<-2>() != 2) return 30;                 // == at.peel_front<-2>().size()
+    if (at.size_front<-1>() != 6) return 31;                 // keep last 1 -> 2*3
+    if (at.size_front<-2>() != at.peel_front<-2>().size()) return 32;
+
     // grid-stride form: the i-th cell directly, and its offset is baked in.
     auto c1 = at.peel_front_at<-2>(1);            // batch index 1 -> buf + 12
     if (c1(2,3) != buf[12 + 2*4 + 3]) return 9;

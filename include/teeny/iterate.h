@@ -176,6 +176,27 @@ template <long N, class T, class E, class L, own O>
 _TNY_API auto peel_front_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i)
 { return _md::sfront_at(t, i, cs::make_index_sequence<_front_count<N, tensor<T,E,L,O>::rank()>()>{}); }
 
+namespace _md {
+// product of the peeled FRONT extents (axes 0..sizeof...(A)); empty pack -> 1.
+template <class MD, cs::size_t... A>
+_TNY_API typename MD::index_type sfront_size(const MD & m, cs::index_sequence<A...>) {
+    using I = typename MD::index_type;
+    I n = 1;
+    ( (n *= static_cast<I>(m.extent(A))), ... );
+    return n;
+}
+} // namespace _md
+
+/** @brief The number of sub-views `peel_front<N>(t)` would yield — the product of
+ *         the peeled leading extents — computed directly, without materialising
+ *         the range. Same signed `N` as `peel_front`: `size_front<3>(t)`
+ *         multiplies the first 3 extents; `size_front<-2>(t)` the all-but-last-two
+ *         (the flattened batch count of a `(*batch, C, C)` tensor). */
+template <long N, class T, class E, class L, own O>
+_TNY_API typename tensor<T,E,L,O>::index_type size_front(const tensor<T,E,L,O> & t) {
+    return _md::sfront_size(t.mdspan(), cs::make_index_sequence<_front_count<N, tensor<T,E,L,O>::rank()>()>{});
+}
+
 // (removed: `channel(md,c)` was just `peel_at<0>(md,c)`, and `batch_offset` — a
 //  raw F-order offset helper — was unused by any kernel. Use peel/peel_at.)
 

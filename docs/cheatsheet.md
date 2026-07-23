@@ -146,6 +146,7 @@ source strides are static), on any source layout. See [Views & structure](struct
 ```cpp
 peel<Axes...>(x);       peel_at<Axes...>(x, i);  // peel named axes
 peel_front<N>(x);       peel_front_at<N>(x, i);  // peel the first N axes
+size_front<N>(x);                                // # cells peel_front<N> yields (no range built)
 ```
 
 See [Views & structure](structure.md#nd-peel-iterate-a-subset-of-axes).
@@ -210,6 +211,7 @@ as_anyrank(data, shape, stride, ndim);        // -> anyrank WRAPPING the arrays,
 as_anyrank(data, shape, stride, ndim, copy_meta);  // -> anyrank COPYING into an inline
                                               //   TNY_MAX_RANK store (device-passable)
 at.peel_front<-Sr>();  at.peel_front_at<-Sr>(i);  // batch idiom (arg NEGATIVE: keep last Sr); 1 kernel per Sr
+at.size_front<-Sr>();                             // flattened batch count (no range built)
 dispatch_rank(at, f);                    // runtime rank -> fixed-rank view (per total rank)
 at.fixed<R>();                           // force a known rank
 ```
