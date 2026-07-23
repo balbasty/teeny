@@ -175,5 +175,16 @@ int main()
     static_assert(decltype(dr0)::rank() == 0, "rank-0 download stays rank-0");
     if (dr0.item() != 4.f) return 18;
 
+    // ---- unified empty<T, Space>(...) factory reaches the CUDA backends -------
+    auto eg = empty<float, own::gpu>(shape<2,3>{});
+    static_assert(decltype(eg)::ownership == own::gpu, "empty<T,own::gpu> -> gpu");
+    auto ep = empty<float, own::pinned>(shape<-1,3>{2});          // dynamic pinned
+    static_assert(decltype(ep)::ownership == own::pinned, "empty<T,own::pinned> -> pinned");
+    ep.fill_(2.f);                                                // pinned is host-accessible
+    if (ep(1,2) != 2.f) return 19;
+    auto em = empty<double>(shape<4>{}, own_c<own::mapped>{});    // value-tag backend form
+    static_assert(decltype(em)::ownership == own::mapped, "empty value-tag -> mapped");
+    em.zero_(); if (em(3) != 0.0) return 20;
+
     return 0;
 }

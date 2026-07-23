@@ -65,9 +65,12 @@ stack (host+device), dynamic shape → heap (host only):
 
 | Call | Returns | Element type |
 |---|---|---|
-| `make_local<T>(shape)` | `local<T,E>` | `T` (=`float`) |
-| `make_heap<T>(shape)` | `owned<T,E>` | `T` (=`float`) |
-| `make_gpu<T>(shape)` / `make_pinned<T>` / `make_mapped<T>` | CUDA owner | `T` (=`float`) |
+| `empty<T>(shape)` | `local`/`owned` (deduced) | `T` (=`float`); UNINITIALISED |
+| `empty<T, own::S>(shape)` | owner in space `S` | name a backend: `stack`/`heap`/`gpu`/`pinned`/`mapped` |
+| `empty<T>(shape, own_c<own::S>{})` | owner in space `S` | value-tag backend form (same result) |
+| `make_local<T>(shape)` | `local<T,E>` | `T` (=`float`); = `empty<T,own::stack>` |
+| `make_heap<T>(shape)` | `owned<T,E>` | `T` (=`float`); = `empty<T,own::heap>` |
+| `make_gpu<T>(shape)` / `make_pinned<T>` / `make_mapped<T>` | CUDA owner | `T` (=`float`); = `empty<T,own::gpu/…>` |
 | `zeros<T>(shape)` / `ones<T>(shape)` | stack or heap | `T` (=`float`) |
 | `full(shape, v)` | stack or heap | **the value's type** (`full<T>(…)` to force) |
 | `arange<T>(n)` | `owned<T, shape<-1>>` | `T` (=`int64_t`); 1-D `[0,n)` |

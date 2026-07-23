@@ -33,6 +33,7 @@ TESTS = \
 	$(BUILDDIR)/test_compare \
 	$(BUILDDIR)/test_ellipsis \
 	$(BUILDDIR)/test_to \
+	$(BUILDDIR)/test_empty \
 	$(BUILDDIR)/test_factory_dtype \
 	$(BUILDDIR)/test_reduce_dtype \
 	$(BUILDDIR)/test_iterate \
