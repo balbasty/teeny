@@ -73,5 +73,15 @@ int main() {
     static_assert(decltype(Rdyn)::ownership==own::heap, "dyn left-pad -> heap");
     if (Rdyn.extent(0)!=3 || Rdyn.extent(1)!=4 || Rdyn(2,3)!=Dv(2,3)+v(3)) return 16;
 
+    // #32: a rank-0 (0-d) operand broadcasts as a scalar (numpy 0-d), and must
+    // COMPILE (bc_ext/bc_str guard rank-0 so CCCL's rank>0 stride isn't touched).
+    auto s0 = M.at(1,1);                       // rank-0 view (== M(1,1))
+    static_assert(decltype(s0)::rank()==0, "at() -> rank-0");
+    auto Rz = M + s0;
+    static_assert(decltype(Rz)::rank()==2, "0-d operand -> result rank 2");
+    for (long i=0;i<3;++i) for (long j=0;j<4;++j) if (Rz(i,j) != M(i,j)+M(1,1)) return 17;
+    auto Mz = M; Mz.add_(s0);                  // in-place with a 0-d rhs
+    for (long i=0;i<3;++i) for (long j=0;j<4;++j) if (Mz(i,j) != M(i,j)+M(1,1)) return 18;
+
     return 0;
 }

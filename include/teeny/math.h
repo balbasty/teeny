@@ -146,12 +146,6 @@ struct r_min { template <class A, class X> _TNY_API A operator()(A a, X x) const
 _TNY_API constexpr bool bc_axis_ok(cs::size_t a, cs::size_t b) {
     return a == cs::dynamic_extent || b == cs::dynamic_extent || a == b || a == 1 || b == 1;
 }
-template <class Ea, class Eb, cs::size_t... D>
-_TNY_API constexpr bool bc_static_ok(cs::index_sequence<D...>) {
-    bool ok = true;
-    ( (ok = ok && bc_axis_ok(Ea::static_extent(D), Eb::static_extent(D))), ... );
-    return ok;
-}
 
 // exact-match static check for contractions (dot) — NO broadcast: each axis must
 // be EQUAL, unless either extent is dynamic (then a runtime _TNY_CHECK guards it).
@@ -199,14 +193,22 @@ using bcast_extents = decltype(bcast_ext_<typename Ea::index_type, Ea, Eb,
 // RUNTIME extent/stride of operand `x` for RESULT axis `d` in result rank `R`,
 // right-aligned (missing leading axes -> extent 1, stride 0).
 template <cs::size_t R, class X> _TNY_API typename X::index_type bc_ext(const X & x, cs::size_t d) {
-    using I = typename X::index_type; constexpr cs::size_t off = R - X::rank();
-    return d < off ? I(1) : static_cast<I>(x.extent(d - off));
+    using I = typename X::index_type;
+    // rank-0 operand: a 0-d scalar broadcasts as all-1 extents. Guarded with
+    // if constexpr so x.extent(runtime) (CCCL-constrained to rank>0) is never
+    // instantiated for rank 0 (same reason as is_contiguous, #55).
+    if constexpr (X::rank() == 0) { (void)x; (void)d; return I(1); }
+    else { constexpr cs::size_t off = R - X::rank(); return d < off ? I(1) : static_cast<I>(x.extent(d - off)); }
 }
 template <cs::size_t R, class X> _TNY_API typename X::index_type bc_str(const X & x, cs::size_t d) {
-    using I = typename X::index_type; constexpr cs::size_t off = R - X::rank();
-    if (d < off) return I(0);                        // missing (padded) axis: stride 0
-    const cs::size_t xa = d - off;
-    return x.extent(xa) == 1 ? I(0) : static_cast<I>(x.stride(xa));   // stretched axis: stride 0
+    using I = typename X::index_type;
+    if constexpr (X::rank() == 0) { (void)x; (void)d; return I(0); }   // 0-d: stride 0 everywhere
+    else {
+        constexpr cs::size_t off = R - X::rank();
+        if (d < off) return I(0);                    // missing (padded) axis: stride 0
+        const cs::size_t xa = d - off;
+        return x.extent(xa) == 1 ? I(0) : static_cast<I>(x.stride(xa));   // stretched axis: stride 0
+    }
 }
 // runtime broadcast extents object (for the heap result), over the RESULT axes.
 template <class RE, class A, class B, cs::size_t... D>
