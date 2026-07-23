@@ -70,7 +70,8 @@ _TNY_API auto gather_peel(const MD & v, const I * idx, Seq, cs::index_sequence<A
 }
 
 // Space-aware peel-at over an mdspan: `OW` is the view kind to tag the result
-// with (own::view for a host source, own::gpu_view for a device one).
+// with (own_view_of the source: view for a host source, gpu_view for a device
+// one, pinned_view/mapped_view for page-locked host memory).
 template <own OW, cs::size_t... Axes, class MD>
 _TNY_API auto peel_at_ow(const MD & src, typename MD::index_type i) {
     using I = typename MD::index_type;
