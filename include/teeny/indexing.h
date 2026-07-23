@@ -196,7 +196,7 @@ _TNY_API constexpr cs::size_t _static_range_len(long n) {
         const long ns = -step, hi = n - 1;
         st = _bound_static<A>(n - 1, n);
         long sp = _stop_static<B>(n);
-        st = st > hi ? hi : (st < Z ? Z : st);
+        st = st > hi ? hi : (st < -1 ? -1 : st);   // start in [-1,n-1] (mirror of _sl_axis)
         sp = sp > hi ? hi : (sp < -1 ? -1 : sp);
         const long w = (n <= Z) ? Z : (st - sp); cnt = w <= Z ? Z : (w + ns - 1) / ns;
     }
