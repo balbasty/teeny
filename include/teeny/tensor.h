@@ -309,8 +309,13 @@ private:
                 st = st > hi ? hi : (st < index_type(-1) ? index_type(-1) : st);   // python clamp: start in [-1,n-1]
                 sp = sp > hi ? hi : (sp < index_type(-1) ? index_type(-1) : sp);   // stop in [-1,n-1]
                 const index_type w = (n <= Z) ? Z : (st - sp); cnt = w <= Z ? Z : (w + ns - 1) / ns;
-                if (st < Z) st = Z;   // start == -1 means an EMPTY slice (cnt==0); keep the base offset valid (no before-array pointer)
             }
+            // An empty axis makes the whole view empty, so its offset is never read;
+            // zero it so the accumulated base pointer stays in-bounds — a negative
+            // start (step<0) would go BEFORE the buffer, and summed positive starts
+            // (step>0, several empty axes) BEYOND one-past-the-end. Both are UB to
+            // even form (#67 neg branch, #80 pos branch). #80.
+            if (cnt <= Z) st = Z;
             off += st * sd; ext[k] = cnt; str[k] = step * sd; ++k;  // stride may be negative
         } else {                                                    // full_extent (all)
             ext[k] = n; str[k] = sd; ++k;
