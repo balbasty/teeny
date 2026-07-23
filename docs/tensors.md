@@ -53,22 +53,33 @@ Factories:
 Copying a view copies the pointer, not the data; memory lifetime is the caller's.
 
 !!! warning "`a = b` rebinds a view; `a(ellipsis) = b` copies elements"
-    `a = b` on a **named** view makes `a` point at `b`'s data (C++ value
-    semantics); it does **not** write `b`'s elements into `a`'s buffer. To copy
-    elements (the numpy `a[:] = b`), assign into a **slice** instead — the result
-    of `operator()` is a temporary view, and assigning to it copies (with
-    broadcasting):
+    **The left-hand side decides.** A **named** view (an lvalue) *rebinds*; a
+    **temporary** view — the result of a slice, an rvalue — *copies*. So `a = b`
+    makes `a` point at `b`'s data (C++ value semantics); it does **not** write
+    `b`'s elements into `a`'s buffer. To copy elements (the numpy `a[:] = b`), put
+    a slice on the left — `operator()` returns a temporary view, and assigning into
+    it copies (with broadcasting):
 
     ```cpp
     a = b;             // rebind: `a` now views `b`'s memory (nothing copied)
     a(ellipsis) = b;   // copy: write b's elements into a's buffer (== a.copy_(b))
+    a(all) = b;        // same — copy every element
     a(0, all) = b;     // copy into a sub-region; a(0, all) = 5.0 fills it
     ```
+
+    The copy works for **any** right-hand side — an owning tensor *or another view,
+    including one of the identical type* (`y(all) = x(all)`, `y(slice(1,4)) =
+    x(slice(1,4))`). The distinguishing mechanism is the assignment operator's
+    ref-qualifier: the `&`-qualified rebind binds only to a named lvalue, so every
+    temporary-view (rvalue) assignment routes to the deep copy. Keeping the rebind
+    a defaulted special member is also what keeps a view **trivially copyable**
+    (hence passable into a CUDA kernel by value).
 
     Both `a.copy_(b)` and slice-assignment broadcast `b` numpy-style (right-aligned;
     `b`'s rank may be ≤ `a`'s — missing leading axes are size 1). An *owning*
     `local`/`owned` copies its elements on `a = b` as usual (it holds the storage,
-    not a pointer).
+    not a pointer). If a destination slice **overlaps its own source**, `clone()`
+    the source first — the copy runs front-to-back with no overlap check.
 
     **Different shapes/strides:** `a = b` is ordinary C++ assignment, so `a` and
     `b` must be the *same tensor type* — teeny has no cross-type assignment. If a
