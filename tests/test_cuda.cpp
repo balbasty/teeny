@@ -273,5 +273,27 @@ int main()
     if (mm->dl_tensor.device.device_type != kDLCUDAHost) return 26;
     mm->deleter(mm);
 
+    // ---- #50: run-wise gather of a strided device view -----------------------
+    // A padded sub-block (rows contiguous, separated by the parent row pitch) is
+    // downloaded run-by-run into a dense buffer instead of dragging the whole span.
+    double sb50[16]; for (int i = 0; i < 16; ++i) sb50[i] = i;
+    auto g50  = to<own::gpu>(wrap(sb50, shape<4,4>{}));          // device 4x4, row-major
+    auto sub50 = g50(slice(0,2), slice(0,3));                    // 2x3, strides (4,1); span 7 > numel 6
+    resetc();
+    auto hsub50 = to<own::heap>(sub50);
+    for (int i = 0; i < 2; ++i) for (int j = 0; j < 3; ++j)
+        if (hsub50(i,j) != (double)(4*i + j)) return 40;        // gathered values correct
+    if (memc(cudaMemcpyDeviceToHost) != 2) return 41;           // 2 runs (rows), not one span copy
+
+    resetc();                                                    // fully contiguous -> single span memcpy
+    auto hfull50 = to<own::heap>(g50);
+    if (hfull50(3,3) != 15.0) return 42;
+    if (memc(cudaMemcpyDeviceToHost) != 1) return 43;
+
+    resetc();                                                    // strided column (no unit inner) -> span fallback
+    auto hcol50 = to<own::heap>(g50(all, 1));
+    if (hcol50(2) != 9.0) return 44;
+    if (memc(cudaMemcpyDeviceToHost) != 1) return 45;
+
     return 0;
 }
