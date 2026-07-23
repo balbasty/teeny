@@ -29,6 +29,10 @@ namespace cs = cuda::std;
 //                 view of page-locked host memory keeps its space (both are
 //                 host-dereferenceable, so they behave like `view` everywhere
 //                 except the DLPack device label, which stays `kDLCUDAHost`).
+// NB when adding an `own` kind, update EVERY classifier so it isn't silently
+// misclassified as a plain host view: `own_is_owning`, `own_is_view`,
+// `own_is_device`, `own_view_of` (below), and `_dl::device_of` (dlpack.h) — plus a
+// `storage<T, own::NEW, N>` specialization (its absence is at least a hard error).
 enum class own { view, stack, heap, gpu, pinned, mapped, gpu_view, pinned_view, mapped_view };
 
 /** @brief Whether the mode owns (and therefore allocates) its storage. */
