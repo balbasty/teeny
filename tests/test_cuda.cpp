@@ -51,11 +51,11 @@ int main()
     static_assert(!own_is_device(own::pinned_view) && !own_is_owning(own::mapped_view), "not device, not owning");
     // all four view kinds share one pointer storage: trivially copyable (kernel-
     // passable) and exactly one pointer wide (EBO with the mapping base intact).
-    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, corder, own::view>>::value, "view trivially copyable");
-    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, corder, own::gpu_view>>::value, "gpu_view trivially copyable");
-    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, corder, own::pinned_view>>::value, "pinned_view trivially copyable");
-    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, corder, own::mapped_view>>::value, "mapped_view trivially copyable");
-    static_assert(sizeof(tensor<float, shape<2,3>, corder, own::gpu_view>) == sizeof(float*), "view tensor is one pointer wide");
+    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, ccontiguous, own::view>>::value, "view trivially copyable");
+    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, ccontiguous, own::gpu_view>>::value, "gpu_view trivially copyable");
+    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, ccontiguous, own::pinned_view>>::value, "pinned_view trivially copyable");
+    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, ccontiguous, own::mapped_view>>::value, "mapped_view trivially copyable");
+    static_assert(sizeof(tensor<float, shape<2,3>, ccontiguous, own::gpu_view>) == sizeof(float*), "view tensor is one pointer wide");
 
     // compile-time memory-space flags (members + free trait forms).
     static_assert(gpu<float, shape<2>>::is_device && !gpu<float, shape<2>>::is_host_accessible, "gpu is device");
@@ -170,8 +170,8 @@ int main()
 
     // an F-order (column-major) gpu source must NOT be silently transposed on
     // download: stage into a layout-matching host buffer, then densify.
-    auto gf = gpu<float, shape<2,3>, forder>(shape<2,3>{});
-    wrap<forder>(gf.data(), shape<2,3>{}).iota_(0.f, 1.f);   // logical (i,j) = i*3+j, stored F-order
+    auto gf = gpu<float, shape<2,3>, fcontiguous>(shape<2,3>{});
+    wrap<fcontiguous>(gf.data(), shape<2,3>{}).iota_(0.f, 1.f);   // logical (i,j) = i*3+j, stored F-order
     auto bf = to<own::heap>(gf);
     static_assert(decltype(bf)::ownership == own::heap, "download -> heap");
     if (bf(0,2) != 2.f || bf(1,0) != 3.f || bf(1,2) != 5.f) return 11;   // values, not transposed

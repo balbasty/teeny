@@ -45,8 +45,8 @@ int main()
     mh.iota_(); if (mh(4) != 4) return 4;
 
     // ---- a non-default layout threads through ---------------------------------
-    auto cf = empty<float, own::stack, forder>(shape<2,3>{});
-    static_assert(cs::is_same<decltype(cf)::layout_type, forder>::value, "layout arg honoured");
+    auto cf = empty<float, own::stack, fcontiguous>(shape<2,3>{});
+    static_assert(cs::is_same<decltype(cf)::layout_type, fcontiguous>::value, "layout arg honoured");
 
     // ---- fill factories carry the same backend selector (host-accessible) ----
     auto zs = zeros<float>(shape<2,2>{});                      // deduced: static -> stack

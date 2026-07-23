@@ -17,7 +17,7 @@ a *runtime index* is a plain integer. "→ view" means a non-owning
 ## The tensor type
 
 ```cpp
-template <class T, class Extents, class Layout = corder, own O = own::view>
+template <class T, class Extents, class Layout = ccontiguous, own O = own::view>
 struct tensor;
 ```
 
@@ -25,7 +25,7 @@ struct tensor;
 |---|---|---|
 | `T` | element type | any arithmetic type, `half`, `bfloat16` |
 | `Extents` | the **shape** | `shape<2,3>` (a `cs::extents<int64_t,…>`; `-1` = dynamic) |
-| `Layout` | memory order | `corder` (C, default), `forder` (F), `dynamic_strides` (runtime), `strides<S...>` (static/mixed) |
+| `Layout` | memory order | `ccontiguous` (C, default), `fcontiguous` (F), `dynamic_strides` (runtime), `strides<S...>` (static/mixed) |
 | `O` | ownership | `own::view` (default), `own::stack`, `own::heap`, `own::gpu`/`pinned`/`mapped`, `own::gpu_view` |
 
 Slicing / permuting / peeling / `.at()` of a `gpu` tensor yields an `own::gpu_view`
@@ -39,7 +39,7 @@ so their views are plain `view`.
 
 | Alias | Ownership | Notes |
 |---|---|---|
-| `view<T,E,L=corder>` | none (host view) | trivially copyable, kernel-passable; the bare `tensor` is this |
+| `view<T,E,L=ccontiguous>` | none (host view) | trivially copyable, kernel-passable; the bare `tensor` is this |
 | `local<T,E,L>` | stack | requires a fully static shape; `sizeof` == its data |
 | `owned<T,E,L>` | heap (host) | move-only |
 | `gpu<T,E,L>` / `pinned<T,E,L>` / `mapped<T,E,L>` | CUDA | from `<teeny/cuda.h>`; a view of a `gpu` is `own::gpu_view` |
@@ -52,7 +52,7 @@ Wrap existing memory (→ view):
 
 | Call | Returns | Notes |
 |---|---|---|
-| `wrap(ptr, shape)` | `view<T,E>` | C-order (`corder`) |
+| `wrap(ptr, shape)` | `view<T,E>` | C-order (`ccontiguous`) |
 | `wrap<Layout>(ptr, shape)` | `view<T,E,Layout>` | chosen layout |
 | `wrap(ptr, shape, {s0,s1,…})` | `view<T,E,dynamic_strides>` | **runtime** strides (elements; may be negative) |
 | `wrap<S...>(ptr, shape, {dyn…})` | `view<T,E,strides<S...>>` | **mixed** static/runtime strides (`dynamic_stride` slots) |
@@ -91,7 +91,7 @@ stack (host+device), dynamic shape → heap (host only):
 | `t.stride(d)` | `Idx` | runtime axis stride |
 | `t.stride(Int<k>())` | `integral_constant` if derivable, else `Idx` | folds for static-stride / contiguous layouts |
 | `t.is_contiguous()` | `bool` | dense in **some** order (C, F, or permuted) |
-| `t.is_contiguous<L>()` | `bool` | exact: strides equal `L`'s packing (`corder`=C, `forder`=F) |
+| `t.is_contiguous<L>()` | `bool` | exact: strides equal `L`'s packing (`ccontiguous`=C, `fcontiguous`=F) |
 | `t.data()` | `T*` | base pointer |
 | `t.view()` | `view<T,E,L>` (`gpu_view` if device) | non-owning teeny view aliasing `t`'s memory (no copy) |
 | `t.mdspan()` | `cs::mdspan<T,E,L>` | the raw mdspan |
@@ -155,7 +155,7 @@ compile-time strides through these ops.
 | `t.to<T2>()` | view (no-copy) or owning | **dtype** convert. Matching dtype (no `Force`) → a read-only borrow (`gpu_view` if `t` is on the device, else `view`); differing dtype or `t.to<T2,true>()` → a dense owning copy (static→stack, dyn→heap) |
 | `to<Space>(t)` (`cuda.h`) | view (no-copy) or owning | **memory-space** move: `to<Space, ET, Force>(t)` — `Space` ∈ `own::gpu`/`pinned`/`mapped`/`heap`/`stack`. Same no-copy/`Force` rule; a device source (gpu/`gpu_view`) downloads via `cudaMemcpy`. rvalue source → always copies |
 
-`reshape`/`flatten`/`recast` need exact C-contiguity (`is_contiguous<corder>()`);
+`reshape`/`flatten`/`recast` need exact C-contiguity (`is_contiguous<ccontiguous>()`);
 `clone()` first if the source isn't.
 
 ### nd-peel (iteration)

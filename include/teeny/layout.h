@@ -7,6 +7,7 @@
 #include <cuda/std/mdspan>
 #include <cuda/std/type_traits>
 #include <teeny/defines.h>
+#include <teeny/alias.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
 
@@ -39,7 +40,7 @@ struct _dyn_strides<Index, 0> {
  * @brief An mdspan layout policy with **per-dimension static or dynamic strides**
  *        — the stride analogue of `extents`/`shape`.
  *
- * `layout_right`/`layout_left` give contiguous (extent-derived) strides;
+ * `ccontiguous`/`fcontiguous` (mdspan `layout_right`/`layout_left`) give contiguous (extent-derived) strides;
  * `layout_stride` stores every stride at run time. `strides<S...>` bakes the
  * KNOWN strides into the type (folding to immediates, like jitfields' posdef
  * `Pointer<T,S>`) — **including negative strides** — while any dimension marked
@@ -138,8 +139,8 @@ template <cs::int64_t... S> struct _is_strides<strides<S...>> : cs::true_type {}
 template <class L> struct _strides_all_static : cs::false_type {};  // and every stride known?
 template <cs::int64_t... S> struct _strides_all_static<strides<S...>> : cs::integral_constant<bool, strides<S...>::all_static()> {};
 template <class L> struct _contiguous_layout : cs::false_type {};
-template <> struct _contiguous_layout<cs::layout_right> : cs::true_type {};
-template <> struct _contiguous_layout<cs::layout_left>  : cs::true_type {};
+template <> struct _contiguous_layout<ccontiguous> : cs::true_type {};
+template <> struct _contiguous_layout<fcontiguous>  : cs::true_type {};
 
 // per-dim static stride from a strides<...> layout (signed; `dynamic_stride` if
 // runtime, or for any non-strides layout so callers fall through).
@@ -150,20 +151,20 @@ template <cs::size_t D, cs::int64_t... S> struct _static_stride_at<D, strides<S.
 // `dynamic_stride` if only known at run time. Feeds the slice/gather stride
 // folding: a static source stride (×static step) yields a static output stride.
 //   - strides<...>       : the baked-in per-dim value.
-//   - layout_right/left  : the contiguous product of the trailing/leading static
+//   - ccontiguous/fcontiguous : the contiguous product of the trailing/leading static
 //                          extents (dynamic if any of them is dynamic).
 //   - layout_stride etc. : always dynamic.
 template <cs::size_t Ax, class L, class E>
 _TNY_API constexpr cs::int64_t _src_sstride() {
     if constexpr (_is_strides<L>::value) return _static_stride_at<Ax, L>::value;
-    else if constexpr (cs::is_same<L, cs::layout_right>::value) {
+    else if constexpr (cs::is_same<L, ccontiguous>::value) {
         cs::int64_t s = 1;
         for (cs::size_t d = Ax + 1; d < E::rank(); ++d) {
             if (E::static_extent(d) == cs::dynamic_extent) return dynamic_stride;
             s *= static_cast<cs::int64_t>(E::static_extent(d));
         }
         return s;
-    } else if constexpr (cs::is_same<L, cs::layout_left>::value) {
+    } else if constexpr (cs::is_same<L, fcontiguous>::value) {
         cs::int64_t s = 1;
         for (cs::size_t d = 0; d < Ax; ++d) {
             if (E::static_extent(d) == cs::dynamic_extent) return dynamic_stride;

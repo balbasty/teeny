@@ -71,7 +71,7 @@ helpers should follow that split. `namespace cs = cuda::std;` throughout.
 ## The tensor type
 
 ```cpp
-template <class T, class Shape, class Layout = layout_right, own O = own::view>
+template <class T, class Shape, class Layout = ccontiguous, own O = own::view>
 struct tensor;
 ```
 
@@ -88,9 +88,9 @@ struct tensor;
   dim is `dynamic_extent` or numpy-style **`-1`** (`shape<-1,3>` ==
   `shape<dynamic_extent,3>`). `rank<N>` is the fully-dynamic rank-N shape
   (`rank<3>` == `shape<-1,-1,-1>`).
-- **`Layout`** = `layout_right` (default, C-order; alias `corder`), `layout_left`
-  (F-order; alias `forder`), `layout_stride` (runtime strides), or teeny's
-  `layout_static_stride<S...>` (compile-time strides).
+- **`Layout`** = `ccontiguous` (default, C-order; mdspan `layout_right`),
+  `fcontiguous` (F-order; mdspan `layout_left`), `dynamic_strides` (runtime
+  strides), or teeny's `strides<S...>` (compile-time strides).
 - **`O`** ownership: `view` (non-owning host view, trivially copyable,
   kernel-passable), `stack` (inline array, requires fully static shape), `heap`
   (host `new[]`, move-only), CUDA `gpu`/`pinned`/`mapped` (from `cuda.h`), or
@@ -116,7 +116,7 @@ gpu/pinned/mapped<T,E,L>   // from cuda.h
 ```
 
 Factories: `wrap(ptr, extents)` / `wrap<Layout>(ptr, extents)`,
-`wrap(ptr, extents, {s...})` (runtime strides -> layout_stride),
+`wrap(ptr, extents, {s...})` (runtime strides -> dynamic_strides),
 `wrap<S...>(ptr, extents, {dyn...})` (mixed static/runtime strides),
 `wrap(ptr, extents, strides<S...>{})` (compile-time strides),
 `as_tensor(any_mdspan)` (wrap a submdspan/mdspan result as a view). Functional
@@ -172,7 +172,7 @@ t.flip<1>();          // reverse an axis (negative-stride view; needs signed ind
 t.unsqueeze<2>();     // insert size-1 axis at pos 2 (numpy newaxis) -> rank+1 view
 t.squeeze<3>();       // drop a size-1 axis -> rank-1 view
 t.reshape<6,4>(); t.flatten();  // contiguous-view reshape / ravel (clone() first if not)
-t.is_contiguous();              // dense in SOME order (C/F/permuted); <layout_right>() = exact C
+t.is_contiguous();              // dense in SOME order (C/F/permuted); <ccontiguous>() = exact C
 t.clone();                      // materialise a dense row-major copy
 t.to<double>();                 // pytorch-like dtype convert -> dense owning copy (static->stack, dyn->heap).
                                 //   NO-COPY when it already matches: t.to<>() (same dtype) borrows a read-only

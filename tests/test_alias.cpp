@@ -31,12 +31,14 @@ int main()
     static_assert(cs::is_same<f2, half>::value,         "f2 == half");
     static_assert(cs::is_same<bf16, bfloat16>::value,   "bf16 == bfloat16");
 
-    // ---- numpy-style layout spellings --------------------------------------
-    static_assert(cs::is_same<corder, layout_right>::value, "corder == layout_right");
-    static_assert(cs::is_same<forder, layout_left>::value,  "forder == layout_left");
+    // ---- layout spellings ---------------------------------------------------
+    static_assert(cs::is_same<ccontiguous, layout_right>::value, "ccontiguous == layout_right");
+    static_assert(cs::is_same<fcontiguous, layout_left>::value,  "fcontiguous == layout_left");
+    static_assert(cs::is_same<corder, ccontiguous>::value && cs::is_same<forder, fcontiguous>::value,
+                  "legacy corder/forder still alias ccontiguous/fcontiguous");
     double lb[6] = {0,1,2,3,4,5};
-    auto cw = wrap<corder>(lb, shape<2,3>{});   // row-major: strides (3,1)
-    auto fw = wrap<forder>(lb, shape<2,3>{});   // col-major: strides (1,2)
+    auto cw = wrap<ccontiguous>(lb, shape<2,3>{});   // row-major: strides (3,1)
+    auto fw = wrap<fcontiguous>(lb, shape<2,3>{});   // col-major: strides (1,2)
     if (cw(0,1) != 1 || fw(1,0) != 1) return 2;
 
     // ---- rank<N>: fully-dynamic shape of a given rank ----------------------

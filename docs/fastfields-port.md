@@ -45,7 +45,7 @@ surface:
 
 | Need | teeny |
 |---|---|
-| kernel-passable strided view | `wrap(ptr, extents)`, `wrap<layout_left>(...)`, `wrap(ptr, ext, strides<S...>{})`, `as_tensor(submdspan_result)` |
+| kernel-passable strided view | `wrap(ptr, extents)`, `wrap<fcontiguous>(...)`, `wrap(ptr, ext, strides<S...>{})`, `as_tensor(submdspan_result)` |
 | element / folded stride | `t(i,j,k)`, `t.data()[off]`, `t.stride(Int<d>())` (static) / `t.stride(d)` (runtime) |
 | **scatter (push)** | `t.add_at(v, i...)` or `tny::fetch_add(ptr, v)` — **atomic on device** |
 | assign / init | `t.copy_(src)` (broadcasts), `t.fill_(v)`, `t.zero_()` |

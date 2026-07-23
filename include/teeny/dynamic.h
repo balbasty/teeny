@@ -3,6 +3,7 @@
 #include <cuda/std/mdspan>
 #include <cuda/std/array>
 #include <teeny/defines.h>
+#include <teeny/alias.h>
 #include <teeny/tensor.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
@@ -21,9 +22,9 @@ using dyn_tensor = tensor<T, cs::dextents<offset_t, R>, cs::layout_stride, own::
 //     DLPack tensor's), so the carrier wraps them with NO copy. HOST use only —
 //     those pointers are not valid inside a device kernel.
 template <class offset_t, cs::size_t N>
-using _meta_store = tensor<offset_t, cs::extents<offset_t, N>, cs::layout_right, own::stack>;
+using _meta_store = tensor<offset_t, cs::extents<offset_t, N>, ccontiguous, own::stack>;
 template <class offset_t>
-using _meta_view = tensor<offset_t, cs::dextents<offset_t, 1>, cs::layout_right, own::view>;
+using _meta_view = tensor<offset_t, cs::dextents<offset_t, 1>, ccontiguous, own::view>;
 
 template <class T, class offset_t, class Meta, cs::size_t Sr> struct anyrank_front;  // fwd
 
