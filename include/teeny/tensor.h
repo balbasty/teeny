@@ -52,9 +52,11 @@ _TNY_API void fetch_add(T * p, T v) noexcept {
  * The layout / extents / offset mapping is delegated to `cuda::std::mdspan`
  * (the mapping lives in an empty base, so a fully-static tensor is exactly the
  * size of its data). Ownership is a policy: `own::view` (non-owning, trivially
- * copyable, kernel-passable), `own::stack` (inline storage, static shape), or
- * `own::heap` (host-only, move-only). The tensor's copy/move semantics are
- * induced by the storage member, not hand-written.
+ * copyable, kernel-passable), `own::stack` (inline storage, static shape),
+ * `own::heap` (host-only, move-only), the CUDA owners `own::gpu`/`pinned`/`mapped`
+ * (from `cuda.h`), and the space-carrying views `own::gpu_view`/`pinned_view`/
+ * `mapped_view` (a view of device / page-locked memory keeps its space). The
+ * tensor's copy/move semantics are induced by the storage member, not hand-written.
  *
  * @tparam T        Element type.
  * @tparam Shape    The shape: any `cuda::std::extents<Idx, E...>` (static or
@@ -364,7 +366,6 @@ private:
             return tensor<Vt, OE, SF, own_view_of(O)>(p + off, Map(OE(ea), dyn));
         }
     }
-    // ellipsis expansion: for output axis O, pick the front arg, an inserted
     // For output axis `out_ax`: pick the front arg, one of the inserted `all`s,
     // or the back arg (shifted past the `fill` inserted `all`s). One ellipsis at
     // position `ell_pos` expands to `fill = rank - (n_args - 1)` copies of `all`.
@@ -472,7 +473,7 @@ public:
     template <cs::size_t R = rank(), cs::enable_if_t<(R > 0), int> = 0>
     _TNY_API void operator=(T v) && { this->fill_(v); }
 
-    /* --- structural views (return md::tensor views) --------------- */
+    /* --- structural views (return teeny views) --------------- */
 
 private:
     // per output axis A: the matching take_along arg if A is named, else `all`
@@ -637,17 +638,10 @@ public:
     template <class NewE> _TNY_API auto recast()       { return _recast<T,       NewE>(store_.data(), cs::make_index_sequence<rank()>{}); }
     template <class NewE> _TNY_API auto recast() const { return _recast<const T, NewE>(store_.data(), cs::make_index_sequence<rank()>{}); }
 
-    /** @brief View as 1-D (`ravel`) — requires C-contiguous (`clone()` first). */
-    _TNY_API auto flatten() noexcept {
-        using NE = cs::dextents<index_type, 1>;
-        _TNY_CHECK(is_contiguous<cs::layout_right>(), "flatten: needs a C-contiguous tensor (clone() first)");
-        return tensor<T, NE, cs::layout_right, own_view_of(O)>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{ numel() }));
-    }
-    _TNY_API auto flatten() const noexcept {
-        using NE = cs::dextents<index_type, 1>;
-        _TNY_CHECK(is_contiguous<cs::layout_right>(), "flatten: needs a C-contiguous tensor (clone() first)");
-        return tensor<const T, NE, cs::layout_right, own_view_of(O)>(store_.data(), typename cs::layout_right::template mapping<NE>(NE{ numel() }));
-    }
+    /** @brief View as 1-D (`ravel`) — requires C-contiguous (`clone()` first). Just
+     *         `reshape<-1>()` (one inferred dim), spelled out for discoverability. */
+    _TNY_API auto flatten() noexcept       { return reshape<-1>(); }
+    _TNY_API auto flatten() const noexcept { return reshape<-1>(); }
 
     /** @brief Insert a size-1 axis at position `Ax` (numpy `newaxis`/`unsqueeze`)
      *         -> a rank-(N+1) view. Negative `Ax` counts from the back, so
@@ -979,7 +973,7 @@ template <class T = cs::int64_t, class V, V N>
 _TNY_API auto arange(cs::integral_constant<V, N>) { return arange<T, static_cast<long>(N)>(); }
 
 /** @brief Wrap any `cuda::std::mdspan` (e.g. a `submdspan` result) as a
- *         non-owning `md::tensor` view, so the tensor API applies to it. */
+ *         non-owning `tny::tensor` view, so the tensor API applies to it. */
 template <own OW, class MD>
 _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
                 typename MD::layout_type, OW>

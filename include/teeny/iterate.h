@@ -15,7 +15,7 @@ namespace cs = cuda::std;
  *                                                                    *
  *  Replaces the ndindex<->linear plumbing (jitfields index2offset /  *
  *  sub2offset): a linear index over the peeled axes is decoded for   *
- *  you, and the corresponding sub-view (a `md::tensor` view into the  *
+ *  you, and the corresponding sub-view (a `tny::tensor` view into the  *
  *  original data) is returned.                                       *
  *                                                                    *
  *  Two entry points:                                                 *
@@ -88,14 +88,14 @@ _TNY_API auto peel_at_ow(const MD & src, typename MD::index_type i) {
 
 /** @brief The `i`-th sub-view obtained by peeling `Axes...` (0 <= i < product
  *         of the peeled extents). Peeled axes vary in row-major order (the
- *         last listed axis fastest). Returns a `md::tensor` view. A raw mdspan
+ *         last listed axis fastest). Returns a `tny::tensor` view. A raw mdspan
  *         carries no memory space, so this tags the result as a host `view`; the
- *         `md::tensor` overloads below preserve the source's space. */
+ *         `tny::tensor` overloads below preserve the source's space. */
 template <cs::size_t... Axes, class MD>
 _TNY_API auto peel_at(const MD & src, typename MD::index_type i) {
     return _md::peel_at_ow<own::view, Axes...>(src, i);
 }
-// convenience: peel from a md::tensor (uses its view). Non-const -> mutable
+// convenience: peel from a tny::tensor (uses its view). Non-const -> mutable
 // peel; const -> read-only peel. A device source (gpu/gpu_view) yields gpu_view.
 template <long... Axes, class T, class E, class L, own O>
 _TNY_API auto peel_at(tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i) {

@@ -59,8 +59,14 @@ examples/          standalone example algorithms (see examples/README.md)
 external/cccl/     vendored CCCL 3.3.0 (libcudacxx). -I external/cccl/libcudacxx/include
 ```
 
-`namespace tny` is the public namespace; `tny::_md` and `tny::_detail` are
-internal. `namespace cs = cuda::std;` throughout.
+`namespace tny` is the public namespace; internal code lives in `tny::_md`
+(compute/iteration engines — the `math.h` elementwise/reduction folds and the
+`iterate.h` peel machinery), `tny::_detail` (view/mapping builders and host
+helpers — `axis.h`, `cuda.h`'s `dense_host`, `dynamic.h` dispatch, `half.h`
+converters), `tny::_dl` (DLPack), and bare `_`-prefixed names directly in `tny`
+for vocabulary that public templates must see unqualified (the `indexing.h` /
+`layout.h` traits, `_norm_axis`/`_axis_in_range`, `math.h`'s `_promote` etc.). New
+helpers should follow that split. `namespace cs = cuda::std;` throughout.
 
 ## The tensor type
 
