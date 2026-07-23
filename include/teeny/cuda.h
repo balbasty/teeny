@@ -235,6 +235,7 @@ _TNY_HOST auto to(tensor<T, Shape, Layout, O> && x) {
     using Tb = cs::remove_cv_t<T>;
     using E2 = cs::conditional_t<cs::is_same<ET, void>::value, Tb, ET>;
     if constexpr (!Force && own_is_owning(O) && O == Space && cs::is_same<E2, Tb>::value
+                  && cs::is_same<T, Tb>::value   // non-const element: a const-T owning rvalue has no move ctor
                   && cs::is_same<Layout, cs::layout_right>::value) {
         return tensor<Tb, Shape, Layout, O>(cs::move(x));   // steal the buffer (already dense in-place)
     } else {
