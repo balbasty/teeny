@@ -43,9 +43,12 @@ a & b;  a | b;  a ^ b;  ~a;  // out-of-place (tensor or scalar rhs), unary NOT
 a &= b; a |= 1; a ^= b;      // in-place
 ```
 
-Broadcasting requires **equal rank** — teeny does not right-align shapes the way
-numpy does. Add the size-1 axes yourself with `unsqueeze` (that's why the
-`(C,1,1)` params below are rank 3, not rank 1).
+Broadcasting is **numpy-style**: operands are aligned from the **right**, and a
+lower-rank operand's missing leading axes are treated as size 1. So a `(H,W)`
+tensor broadcasts against a `(W,)` vector directly, and the result rank is the
+larger of the two. (In-place `a.op_(b)` still needs `b`'s rank ≤ `a`'s — it can't
+grow the destination.) A size-1 axis stretches over its partner as usual;
+`unsqueeze` is only needed to align size-1 axes that aren't at the front.
 
 Broadcasting example — per-channel scale/bias over a `(C,H,W)` image with
 `(C,1,1)` parameters:

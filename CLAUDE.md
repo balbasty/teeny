@@ -262,13 +262,17 @@ fold**, a plain `int`/`long` when the value is only known at run time.
 
 ## How the hard parts work (so you don't re-derive them)
 
-- **Broadcasting** (`math.h`, `_md::bzip`): operands are aligned by rank; a
-  dimension of extent 1 gets stride 0 on that axis (it is stretched). The result
-  extent per axis is computed at compile time by `bc1`/`bcast_extents`
-  (`dynamic_extent` if either operand is dynamic). Out-of-place: a fully static
-  result → `own::stack` (host+device); any dynamic → `own::heap` (host only). The
-  SFINAE keys on `bcast_extents<...>::rank_dynamic()`, **not** on instantiating a
-  stack tensor (that would fire the "stack needs static shape" `static_assert`).
+- **Broadcasting** (`math.h`, `_md::bzip`): numpy-style — operands are aligned
+  from the **right** (`bc_ext`/`bc_str` right-align each operand into the result
+  rank; a shorter operand's missing leading axes are extent 1 / stride 0), so the
+  result rank is `bc_rank = max(rankA, rankB)`. A dimension of extent 1 gets
+  stride 0 (it is stretched). The result extent per axis is computed at compile
+  time by `bc1`/`bcast_extents` (`dynamic_extent` if either operand is dynamic).
+  In-place `a.op_(b)` needs `rankB ≤ rankA` (can't grow the destination).
+  Out-of-place: a fully static result → `own::stack` (host+device); any dynamic →
+  `own::heap` (host only). The SFINAE keys on `bcast_extents<...>::rank_dynamic()`,
+  **not** on instantiating a stack tensor (that would fire the "stack needs static
+  shape" `static_assert`).
 - **The gather** (`tensor.h` `_slice_range`, `iterate.h` `gather_peel`): ALL
   view-making ops — `operator()` slicing, `take_along`, `peel` — route through
   one hand-built gather (NO `cs::submdspan`). Per axis: an integer drops it (into

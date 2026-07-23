@@ -65,9 +65,10 @@ Copying a view copies the pointer, not the data; memory lifetime is the caller's
     a(0, all) = b;     // copy into a sub-region; a(0, all) = 5.0 fills it
     ```
 
-    Both `a.copy_(b)` and slice-assignment broadcast `b` and need matching rank
-    (teeny does not right-align; `unsqueeze` first). An *owning* `local`/`owned`
-    copies its elements on `a = b` as usual (it holds the storage, not a pointer).
+    Both `a.copy_(b)` and slice-assignment broadcast `b` numpy-style (right-aligned;
+    `b`'s rank may be ≤ `a`'s — missing leading axes are size 1). An *owning*
+    `local`/`owned` copies its elements on `a = b` as usual (it holds the storage,
+    not a pointer).
 
     **Different shapes/strides:** `a = b` is ordinary C++ assignment, so `a` and
     `b` must be the *same tensor type* — teeny has no cross-type assignment. If a

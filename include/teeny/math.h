@@ -146,12 +146,6 @@ struct r_min { template <class A, class X> _TNY_API A operator()(A a, X x) const
 _TNY_API constexpr bool bc_axis_ok(cs::size_t a, cs::size_t b) {
     return a == cs::dynamic_extent || b == cs::dynamic_extent || a == b || a == 1 || b == 1;
 }
-template <class Ea, class Eb, cs::size_t... D>
-_TNY_API constexpr bool bc_static_ok(cs::index_sequence<D...>) {
-    bool ok = true;
-    ( (ok = ok && bc_axis_ok(Ea::static_extent(D), Eb::static_extent(D))), ... );
-    return ok;
-}
 
 // exact-match static check for contractions (dot) — NO broadcast: each axis must
 // be EQUAL, unless either extent is dynamic (then a runtime _TNY_CHECK guards it).
@@ -167,12 +161,69 @@ _TNY_API constexpr bool ext_static_eq(cs::index_sequence<D...>) {
     return ok;
 }
 
+/* ---- broadcast geometry (numpy-style, LEFT-PADDED) --------------- *
+ * Operands are aligned from the RIGHT; a shorter operand's missing leading axes
+ * are treated as extent 1 (stride 0). The result rank is the larger of the two.
+ * Defined here (before the engine) so bzip_ can name them. */
+_TNY_API constexpr cs::size_t bc1(cs::size_t A, cs::size_t B) {   // one result axis extent
+    return (A == cs::dynamic_extent || B == cs::dynamic_extent) ? cs::dynamic_extent
+         : (A == 1 ? B : A);
+}
+constexpr cs::size_t bc_rank(cs::size_t ra, cs::size_t rb) { return ra > rb ? ra : rb; }
+// STATIC extent of operand extents `E` for RESULT axis `d` in result rank `R`,
+// right-aligned: axes before the operand's start (`d < R - rank`) are extent 1.
+template <class E, cs::size_t R> constexpr cs::size_t bc_sext(cs::size_t d) {
+    constexpr cs::size_t off = R - E::rank();       // E::rank() <= R (checked at the call sites)
+    return d < off ? cs::size_t(1) : E::static_extent(d - off);
+}
+// static broadcast-compat check, right-aligned into result rank `R`.
+template <class Ea, class Eb, cs::size_t R, cs::size_t... D>
+_TNY_API constexpr bool bc_static_ok_r(cs::index_sequence<D...>) {
+    bool ok = true;
+    ( (ok = ok && bc_axis_ok(bc_sext<Ea, R>(D), bc_sext<Eb, R>(D))), ... );
+    return ok;
+}
+template <class Idx, class Ea, class Eb, cs::size_t R, cs::size_t... D>
+cs::extents<Idx, bc1(bc_sext<Ea, R>(D), bc_sext<Eb, R>(D))...>
+bcast_ext_(cs::index_sequence<D...>);
+template <class Ea, class Eb>
+using bcast_extents = decltype(bcast_ext_<typename Ea::index_type, Ea, Eb,
+    bc_rank(Ea::rank(), Eb::rank())>(cs::make_index_sequence<bc_rank(Ea::rank(), Eb::rank())>{}));
+
+// RUNTIME extent/stride of operand `x` for RESULT axis `d` in result rank `R`,
+// right-aligned (missing leading axes -> extent 1, stride 0).
+template <cs::size_t R, class X> _TNY_API typename X::index_type bc_ext(const X & x, cs::size_t d) {
+    using I = typename X::index_type;
+    // rank-0 operand: a 0-d scalar broadcasts as all-1 extents. Guarded with
+    // if constexpr so x.extent(runtime) (CCCL-constrained to rank>0) is never
+    // instantiated for rank 0 (same reason as is_contiguous, #55).
+    if constexpr (X::rank() == 0) { (void)x; (void)d; return I(1); }
+    else { constexpr cs::size_t off = R - X::rank(); return d < off ? I(1) : static_cast<I>(x.extent(d - off)); }
+}
+template <cs::size_t R, class X> _TNY_API typename X::index_type bc_str(const X & x, cs::size_t d) {
+    using I = typename X::index_type;
+    if constexpr (X::rank() == 0) { (void)x; (void)d; return I(0); }   // 0-d: stride 0 everywhere
+    else {
+        constexpr cs::size_t off = R - X::rank();
+        if (d < off) return I(0);                    // missing (padded) axis: stride 0
+        const cs::size_t xa = d - off;
+        return x.extent(xa) == 1 ? I(0) : static_cast<I>(x.stride(xa));   // stretched axis: stride 0
+    }
+}
+// runtime broadcast extents object (for the heap result), over the RESULT axes.
+template <class RE, class A, class B, cs::size_t... D>
+_TNY_HOST RE bcast_runtime_(const A & a, const B & b, cs::index_sequence<D...>) {
+    using I = typename RE::index_type; constexpr cs::size_t R = RE::rank();
+    return RE(static_cast<I>(bc_ext<R>(a, D) == 1 ? bc_ext<R>(b, D) : bc_ext<R>(a, D))...);
+}
+
 template <class W, class C, class A, class B, class Op, cs::size_t... D>
 _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
     using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
+    constexpr cs::size_t R = C::rank();   // c has the result (largest) rank; a,b right-align into it
     const I ce[] = { c.extent(D)... }, sc[] = { c.stride(D)... };
-    const I ae[] = { a.extent(D)... }, sa[] = { a.stride(D)... };
-    const I be[] = { b.extent(D)... }, sb[] = { b.stride(D)... };
+    const I ae[] = { static_cast<I>(bc_ext<R>(a, D))... }, sa[] = { static_cast<I>(bc_str<R>(a, D))... };
+    const I be[] = { static_cast<I>(bc_ext<R>(b, D))... }, sb[] = { static_cast<I>(bc_str<R>(b, D))... };
     // runtime shape check: each operand extent must equal c's or be 1 (a larger
     // rhs would silently truncate — the worst failure mode in a numerics lib).
     for (cs::size_t r = 0; r < sizeof...(D); ++r) {
@@ -193,8 +244,9 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
 }
 template <class W = w_set, class C, class A, class B, class Op>
 _TNY_API void bzip(C & c, const A & a, const B & b, Op op) {
-    static_assert(A::rank() == C::rank() && B::rank() == C::rank(), "broadcast: rank mismatch");
-    static_assert(bc_static_ok<typename A::extents_type, typename B::extents_type>(
+    // C holds the RESULT (largest) rank; operands may be shorter (left-padded).
+    static_assert(A::rank() <= C::rank() && B::rank() <= C::rank(), "broadcast: operand rank exceeds result");
+    static_assert(bc_static_ok_r<typename A::extents_type, typename B::extents_type, C::rank()>(
                       cs::make_index_sequence<C::rank()>{}),
                   "broadcast: incompatible static extents");
     bzip_<W>(c, a, b, op, cs::make_index_sequence<C::rank()>{});
@@ -268,25 +320,6 @@ template <class C, class A, class Uop> _TNY_API void unaryo(C & c, const A & a, 
 { unaryo_(c, a, f, cs::make_index_sequence<C::rank()>{}); }
 template <class C, class Uop> _TNY_API void unary(C & c, Uop f) { unaryo(c, c, f); }
 
-/* ---- broadcast result extents ------------------------------------ *
- * one axis: dynamic if either operand is dynamic, else the non-1 one. */
-_TNY_API constexpr cs::size_t bc1(cs::size_t A, cs::size_t B) {
-    return (A == cs::dynamic_extent || B == cs::dynamic_extent) ? cs::dynamic_extent
-         : (A == 1 ? B : A);
-}
-template <class Idx, class Ea, class Eb, cs::size_t... D>
-cs::extents<Idx, bc1(Ea::static_extent(D), Eb::static_extent(D))...>
-bcast_ext_(cs::index_sequence<D...>);
-template <class Ea, class Eb>
-using bcast_extents = decltype(bcast_ext_<typename Ea::index_type, Ea, Eb>(
-    cs::make_index_sequence<Ea::rank()>{}));
-// runtime broadcast extents object (for the heap result)
-template <class RE, class A, class B, cs::size_t... D>
-_TNY_API RE bcast_runtime_(const A & a, const B & b, cs::index_sequence<D...>) {
-    using I = typename RE::index_type;
-    return RE(static_cast<I>(a.extent(D) == 1 ? b.extent(D) : a.extent(D))...);
-}
-
 /* ---- out-of-place tensor (op) tensor, broadcasting --------------- *
  * static -> stack (host+device), else heap (host only).              */
 template <class Op, class A, class B,
@@ -301,7 +334,7 @@ template <class Op, class A, class B,
 _TNY_HOST auto oop(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
     tensor<promote_t<typename A::element_type, typename B::element_type>, RE, cs::layout_right, own::heap>
-        c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<A::rank()>{}));
+        c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<RE::rank()>{}));
     bzip(c, a, b, op); return c;
 }
 
@@ -323,9 +356,10 @@ _TNY_HOST auto oops(const A & a, S s, Op op) {
 template <class Rc, class C, class A, class B, class Op, cs::size_t... D>
 _TNY_API void bcmp_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
     using I = typename C::index_type;
+    constexpr cs::size_t R = C::rank();   // c has the result rank; a,b right-align (left-pad)
     const I ce[] = { c.extent(D)... }, sc[] = { c.stride(D)... };
-    const I ae[] = { a.extent(D)... }, sa[] = { a.stride(D)... };
-    const I be[] = { b.extent(D)... }, sb[] = { b.stride(D)... };
+    const I ae[] = { static_cast<I>(bc_ext<R>(a, D))... }, sa[] = { static_cast<I>(bc_str<R>(a, D))... };
+    const I be[] = { static_cast<I>(bc_ext<R>(b, D))... }, sb[] = { static_cast<I>(bc_str<R>(b, D))... };
     for (cs::size_t r = 0; r < sizeof...(D); ++r) {
         _TNY_CHECK(ae[r] == ce[r] || ae[r] == 1, "compare: lhs extent mismatch");
         _TNY_CHECK(be[r] == ce[r] || be[r] == 1, "compare: rhs extent mismatch");
@@ -342,8 +376,8 @@ _TNY_API void bcmp_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
 }
 template <class Rc, class C, class A, class B, class Op>
 _TNY_API void bcmp(C & c, const A & a, const B & b, Op op) {
-    static_assert(A::rank() == C::rank() && B::rank() == C::rank(), "compare: rank mismatch");
-    static_assert(bc_static_ok<typename A::extents_type, typename B::extents_type>(cs::make_index_sequence<C::rank()>{}), "compare: incompatible static extents");
+    static_assert(A::rank() <= C::rank() && B::rank() <= C::rank(), "compare: operand rank exceeds result");
+    static_assert(bc_static_ok_r<typename A::extents_type, typename B::extents_type, C::rank()>(cs::make_index_sequence<C::rank()>{}), "compare: incompatible static extents");
     bcmp_<Rc>(c, a, b, op, cs::make_index_sequence<C::rank()>{});
 }
 template <class Rc, class C, class A, class S, class Op, cs::size_t... D>
@@ -373,7 +407,7 @@ template <class Op, class A, class B,
 _TNY_HOST auto oop_cmp(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
     using Rc = compute_type_t<promote_t<typename A::element_type, typename B::element_type>>;
-    tensor<bool, RE, cs::layout_right, own::heap> c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<A::rank()>{}));
+    tensor<bool, RE, cs::layout_right, own::heap> c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<RE::rank()>{}));
     bcmp<Rc>(c, a, b, op); return c;
 }
 // tensor (cmp) scalar -> bool tensor
@@ -522,8 +556,9 @@ _TNY_HOST auto reduce_to(tensor<RE, OE, cs::layout_right, own::heap> && r) {
 template <class R, class A, class B, cs::size_t... D>
 _TNY_API bool allclose_(const A & a, const B & b, R rtol, R atol, cs::index_sequence<D...>) {
     using I = typename A::index_type;
-    const I ae[] = { static_cast<I>(a.extent(D))... }, sa[] = { static_cast<I>(a.stride(D))... };
-    const I be[] = { static_cast<I>(b.extent(D))... }, sb[] = { static_cast<I>(b.stride(D))... };
+    constexpr cs::size_t Rk = sizeof...(D);   // result (broadcast) rank; a,b right-align (left-pad)
+    const I ae[] = { static_cast<I>(bc_ext<Rk>(a, D))... }, sa[] = { static_cast<I>(bc_str<Rk>(a, D))... };
+    const I be[] = { static_cast<I>(bc_ext<Rk>(b, D))... }, sb[] = { static_cast<I>(bc_str<Rk>(b, D))... };
     I ce[sizeof...(D) ? sizeof...(D) : 1], n = 1;
     for (cs::size_t r = 0; r < sizeof...(D); ++r) {
         ce[r] = ae[r] == 1 ? be[r] : ae[r];
@@ -895,11 +930,11 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) 
 template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>
 _TNY_API bool allclose(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b,
                        double rtol = 1e-5, double atol = 1e-8) {
-    static_assert(tensor<Ta,Ea,La,Oa>::rank() == tensor<Tb,Eb,Lb,Ob>::rank(), "allclose: rank mismatch");
-    static_assert(_md::bc_static_ok<Ea, Eb>(cs::make_index_sequence<Ea::rank()>{}), "allclose: incompatible static extents");
+    constexpr cs::size_t Rk = _md::bc_rank(Ea::rank(), Eb::rank());   // broadcast (left-pad)
+    static_assert(_md::bc_static_ok_r<Ea, Eb, Rk>(cs::make_index_sequence<Rk>{}), "allclose: incompatible static extents");
     using R = compute_type_t<promote_t<Ta,Tb>>;
     return _md::allclose_<R>(a, b, static_cast<R>(rtol), static_cast<R>(atol),
-                            cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{});
+                            cs::make_index_sequence<Rk>{});
 }
 
 /* --- out-of-place unary free functions ---------------------------- */
