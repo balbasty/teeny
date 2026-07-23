@@ -267,17 +267,19 @@ public:
     /* --- element access / slicing -------------------------------- */
 private:
     // wrap a negative index python-style for axis Ax (see free `_wrap_idx`).
-    template <cs::size_t Ax, class Arg>
+    // `Wrap=false` (the unchecked `uget`/`uat`/`uslice` path) skips the wrap for
+    // a runtime signed index — the caller promises it is already non-negative.
+    template <cs::size_t Ax, bool Wrap = true, class Arg>
     _TNY_API constexpr index_type _wrap(Arg a) const {
-        return _wrap_idx<index_type>(a, static_cast<index_type>(extent(cs::integral_constant<cs::size_t, Ax>{})), index_type(0));
+        return _wrap_idx<index_type, Wrap>(a, static_cast<index_type>(extent(cs::integral_constant<cs::size_t, Ax>{})), index_type(0));
     }
-    template <cs::size_t... Ax, class... Args>
+    template <bool Wrap = true, cs::size_t... Ax, class... Args>
     _TNY_API constexpr index_type _offset(cs::index_sequence<Ax...>, Args... a) const {
-        return mapping_type::operator()(_wrap<Ax>(a)...);
+        return mapping_type::operator()(_wrap<Ax, Wrap>(a)...);
     }
     // resolve one slice bound against the axis extent n (none -> default).
-    template <class V> _TNY_API index_type _sl_bound(V v, index_type dflt, index_type n) const {
-        return _wrap_idx<index_type>(v, n, dflt);
+    template <bool Wrap = true, class V> _TNY_API index_type _sl_bound(V v, index_type dflt, index_type n) const {
+        return _wrap_idx<index_type, Wrap>(v, n, dflt);
     }
     // ---- the ONE sub-view builder (gather) ------------------------------------
     // Every slicing/take_along call routes here: per axis an integer DROPS the
@@ -286,15 +288,15 @@ private:
     // each kept stride to a compile-time value where derivable — so it works on
     // ANY source layout (no submdspan) AND static shapes stay folded.
     // `stop` default for a negative step: `none` -> -1 (go past index 0), python-style.
-    template <class V> _TNY_API index_type _stop_neg(V v, index_type n) const {
-        return _wrap_idx<index_type>(v, n, index_type(-1));
+    template <bool Wrap = true, class V> _TNY_API index_type _stop_neg(V v, index_type n) const {
+        return _wrap_idx<index_type, Wrap>(v, n, index_type(-1));
     }
-    template <cs::size_t Ax, class Arg>
+    template <cs::size_t Ax, bool Wrap = true, class Arg>
     _TNY_API void _sl_axis(Arg a, index_type & off, index_type * ext, index_type * str, cs::size_t & k) const {
         const index_type sd = static_cast<index_type>(stride(Ax));
         const index_type n  = static_cast<index_type>(extent(cs::integral_constant<cs::size_t, Ax>{}));
         if constexpr (_is_index<Arg>::value) {
-            off += _wrap<Ax>(a) * sd;                                // integer: drop this axis
+            off += _wrap<Ax, Wrap>(a) * sd;                         // integer: drop this axis
         } else if constexpr (_is_slice_spec<Arg>::value) {
             const index_type step = static_cast<index_type>(a.step);
             // Resolve the (start, stop) defaults per step sign (forward: [0..n];
@@ -302,8 +304,8 @@ private:
             // via the shared `_range_count` — the SAME body the compile-time fold
             // `_static_range_len` uses, so the folded static extent can't diverge.
             index_type st, sp;
-            if (step >= index_type(0)) { st = _sl_bound(a.start, index_type(0), n); sp = _sl_bound(a.stop, n, n); }
-            else                       { st = _sl_bound(a.start, n - 1, n);         sp = _stop_neg(a.stop, n); }
+            if (step >= index_type(0)) { st = _sl_bound<Wrap>(a.start, index_type(0), n); sp = _sl_bound<Wrap>(a.stop, n, n); }
+            else                       { st = _sl_bound<Wrap>(a.start, n - 1, n);         sp = _stop_neg<Wrap>(a.stop, n); }
             const index_type cnt = _range_count(st, sp, step, n);
             // An empty axis makes the whole view empty, so its offset is never read;
             // zero it so the accumulated base pointer stays in-bounds — a negative
@@ -338,7 +340,7 @@ private:
                                      typename _slice_step<Arg>::type>(static_cast<long>(Se));
         else                                                            return cs::dynamic_extent;
     }
-    template <class P, cs::size_t... Ax, class... Args>
+    template <bool Wrap = true, class P, cs::size_t... Ax, class... Args>
     _TNY_API auto _slice_range(P p, cs::index_sequence<Ax...>, Args... a) const {
         using Vt = cs::remove_pointer_t<P>;
         constexpr cs::size_t Nk = (cs::size_t(0) + ... + (_is_index<Args>::value ? cs::size_t(0) : cs::size_t(1)));
@@ -347,7 +349,7 @@ private:
         using OE = typename _compact<index_type, _out_static<Args, Shape::static_extent(Ax)>()...>::type;
         using SF = typename _str_compact<_out_sstride<Args, Ax, Layout, Shape>()...>::type;
         index_type ext[Nk ? Nk : 1] = {}, str[Nk ? Nk : 1] = {}, off = 0; cs::size_t k = 0;
-        ( _sl_axis<Ax>(a, off, ext, str, k), ... );
+        ( _sl_axis<Ax, Wrap>(a, off, ext, str, k), ... );
         cs::array<index_type, Nk> ea{};
         for (cs::size_t i = 0; i < Nk; ++i) ea[i] = ext[i];
         // fold the kept strides into the strides<...> mapping (EBO when all static,
@@ -426,6 +428,51 @@ public:
     template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API auto operator()(Args... a) const noexcept
     { return _slice_range(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
+
+    /* --- unchecked accessors: skip the negative-index wrap ------------------ *
+     * `uget`/`uat`/`uadd_at`/`uslice` are the `u`-prefixed twins of
+     * `operator()`/`at`/`add_at`/slice-`operator()` for the hot path where every
+     * runtime index is known non-negative: they take runtime signed indices
+     * AS-IS (no `i < 0 ? i + n : i` branch per axis) — the per-call form of
+     * `-DTNY_NO_NEGATIVE_INDEX`. Passing a negative runtime index is UB (the
+     * caller's promise). Static (`Int<>`) bounds and `none` are unaffected, so a
+     * compile-time slice still folds identically; the result TYPE matches the
+     * checked op exactly. teeny has no element bounds check to skip, so `uget` is
+     * simply the wrap-free element read/write. */
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API T & uget(Args... a) noexcept
+    { return store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]; }
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API const T & uget(Args... a) const noexcept
+    { return store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]; }
+
+    /** @brief Unchecked `at`: a single element as a rank-0 VIEW, no negative wrap. */
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API auto uat(Args... a) noexcept {
+        using E0 = cs::extents<index_type>;
+        return tensor<T, E0, ccontiguous, own_view_of(O)>(&store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]);
+    }
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API auto uat(Args... a) const noexcept {
+        using E0 = cs::extents<index_type>;
+        return tensor<const T, E0, ccontiguous, own_view_of(O)>(&store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]);
+    }
+
+    /** @brief Unchecked scatter-accumulate (no negative wrap): `uat(i...).add_<true>(v)`. */
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API void uadd_at(T v, Args... a) noexcept
+    { uat(a...).template add_<true>(v); }
+
+    /** @brief Unchecked sub-view: like the slice `operator()` but with no negative
+     *         wrap on runtime integer/bound args (static bounds still fold, so the
+     *         view type is identical). Slice ranges are still clamped for a valid
+     *         extent; only the wrap is dropped. */
+    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
+    _TNY_API auto uslice(Args... a) noexcept
+    { return _slice_range<false>(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
+    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
+    _TNY_API auto uslice(Args... a) const noexcept
+    { return _slice_range<false>(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
 
     /** @brief Ellipsis form: exactly one `ellipsis` in the args expands to
      *         `rank - (#other args)` copies of `all`, then the call re-runs — so
