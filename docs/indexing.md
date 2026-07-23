@@ -38,35 +38,38 @@ float w = x.at(i,j).item();  // explicit read
 x.at(i,j).add_<true>(v);     // atomic scatter into one cell
 ```
 
-## Unchecked accessors — `uget` / `uat` / `uslice`
+## Unchecked accessors — `uget` / `uat`
 
 The wrap that lets a negative index count from the back costs one compare-and-add
 per axis. In a hot kernel where every index is already known non-negative that is
-wasted work, so each indexing entry point has a `u`-prefixed twin that **skips the
+wasted work, so the indexing entry points have a `u`-prefixed twin that **skips the
 negative-index wrap** for runtime signed args — the per-call equivalent of building
-with `-DTNY_NO_NEGATIVE_INDEX`:
+with `-DTNY_NO_NEGATIVE_INDEX`. There are just two:
+
+- **`uget`** is the twin of **`operator()`** — one entry point covering *all three*
+  forms, chosen by the argument types exactly as `operator()` does: all-integer →
+  element `T&`, any slice arg → a view, one `ellipsis` → expand and re-dispatch.
+- **`uat`** is the twin of **`at`** — one element as a rank-0 view.
 
 ```cpp
-x.uget(i, j, k);              // like x(i,j,k)      -> T&        (no wrap)
-x.uat(i, j);                  // like x.at(i,j)     -> rank-0 view
-x.uslice(0, slice(1, 4));     // like x(0, slice(1,4)) -> a VIEW (no wrap on runtime bounds)
+x.uget(i, j, k);              // like x(i,j,k)         -> T&        (element, no wrap)
+x.uget(0, slice(1, 4));       // like x(0, slice(1,4)) -> a VIEW    (no wrap on runtime bounds)
+x.uget(1, ellipsis, 2);       // like x(1, ellipsis, 2) — ellipsis expands, stays unchecked
+x.uat(i, j);                  // like x.at(i,j)        -> rank-0 view
 ```
 
 They return the **same type** as their checked counterparts, so they drop into
 existing code unchanged. Two guarantees keep them safe to fold:
 
 - **Static (`Int<>`) bounds and `none` are unaffected** — only *runtime signed*
-  values skip the wrap. A compile-time slice such as `uslice(slice<1,4>())` folds to
+  values skip the wrap. A compile-time slice such as `uget(slice<1,4>())` folds to
   exactly the same static extent as `x(slice<1,4>())`.
 - Slice ranges are still **clamped** to a valid extent; only the wrap is dropped, so
   a runtime negative bound is taken as-is and then clamped. With a forward step that
-  means a negative *stop* collapses to an **empty** axis (`uslice(0, slice(1,-1))`
+  means a negative *stop* collapses to an **empty** axis (`uget(0, slice(1,-1))`
   instead of the wrapped `[1, n-1)`), while a negative *start* clamps to `0` and keeps
-  the window open from the front (`uslice(0, slice(-3, none))` is `[0, n)`, not the
+  the window open from the front (`uget(0, slice(-3, none))` is `[0, n)`, not the
   wrapped last three). The rule is simply "no wrap", not "empties".
-
-`uslice` mirrors the slice `operator()` but **not** its `ellipsis` form — spell the
-kept axes explicitly (or use `all`).
 
 The one rule: **passing a negative runtime index to a `u`-accessor is undefined
 behaviour** — that is the promise you make in exchange for the tighter codegen.

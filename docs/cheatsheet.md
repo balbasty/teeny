@@ -109,11 +109,12 @@ x(ellipsis) = b;  x(0, all) = v;  // assign INTO a slice copies/fills (a = b reb
 slice(start, stop);  slice(start, stop, step);  // half-open range, optional (neg) step
 none;  all;                     // open slice end (== python None); keep-axis marker
 x.take_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest
-x.uget(i, j, k);  x.uat(i...);  x.uslice(0, slice(1,4));
-                    // `u`-prefixed unchecked twins of ()/at/slice: skip the
-                    // negative-index wrap for known-non-negative RUNTIME indices
-                    // (per-call -DTNY_NO_NEGATIVE_INDEX). Same result type; static
-                    // bounds still fold. A negative runtime index is then UB.
+x.uget(i, j, k);  x.uget(0, slice(1,4));  x.uget(1, ellipsis);  x.uat(i...);
+                    // uget = unchecked twin of operator() (element/slice/ellipsis,
+                    // one entry point); uat = unchecked at. Skip the negative-index
+                    // wrap for known-non-negative RUNTIME indices (per-call
+                    // -DTNY_NO_NEGATIVE_INDEX). Same result type; static bounds
+                    // still fold. A negative runtime index is then UB.
 ```
 
 See [Indexing & slicing](indexing.md).
