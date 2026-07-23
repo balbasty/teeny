@@ -55,8 +55,14 @@ existing code unchanged. Two guarantees keep them safe to fold:
   values skip the wrap. A compile-time slice such as `uslice(slice<1,4>())` folds to
   exactly the same static extent as `x(slice<1,4>())`.
 - Slice ranges are still **clamped** to a valid extent; only the wrap is dropped, so
-  a runtime negative bound is taken as-is (e.g. `uslice(0, slice(1,-1))` yields an
-  *empty* axis rather than the wrapped `[1, n-1)` window).
+  a runtime negative bound is taken as-is and then clamped. With a forward step that
+  means a negative *stop* collapses to an **empty** axis (`uslice(0, slice(1,-1))`
+  instead of the wrapped `[1, n-1)`), while a negative *start* clamps to `0` and keeps
+  the window open from the front (`uslice(0, slice(-3, none))` is `[0, n)`, not the
+  wrapped last three). The rule is simply "no wrap", not "empties".
+
+`uslice` mirrors the slice `operator()` but **not** its `ellipsis` form — spell the
+kept axes explicitly (or use `all`).
 
 The one rule: **passing a negative runtime index to a `u`-accessor is undefined
 behaviour** — that is the promise you make in exchange for the tighter codegen. teeny
