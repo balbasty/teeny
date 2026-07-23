@@ -217,9 +217,12 @@ _TNY_HOST RE bcast_runtime_(const A & a, const B & b, cs::index_sequence<D...>) 
     return RE(static_cast<I>(bc_ext<R>(a, D) == 1 ? bc_ext<R>(b, D) : bc_ext<R>(a, D))...);
 }
 
-template <class W, class C, class A, class B, class Op, cs::size_t... D>
+// `Cv` is the type the op runs in: the destination's compute type for arithmetic
+// (default via the `bzip` wrapper), or the operands' compare type for a comparison
+// whose result is a bool mask (the `bcmp` wrapper passes it) — one engine, two uses.
+template <class W, class Cv, class C, class A, class B, class Op, cs::size_t... D>
 _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
-    using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
+    using I = typename C::index_type;
     constexpr cs::size_t R = C::rank();   // c has the result (largest) rank; a,b right-align into it
     const I ce[] = { c.extent(D)... }, sc[] = { c.stride(D)... };
     const I ae[] = { static_cast<I>(bc_ext<R>(a, D))... }, sa[] = { static_cast<I>(bc_str<R>(a, D))... };
@@ -249,7 +252,7 @@ _TNY_API void bzip(C & c, const A & a, const B & b, Op op) {
     static_assert(bc_static_ok_r<typename A::extents_type, typename B::extents_type, C::rank()>(
                       cs::make_index_sequence<C::rank()>{}),
                   "broadcast: incompatible static extents");
-    bzip_<W>(c, a, b, op, cs::make_index_sequence<C::rank()>{});
+    bzip_<W, compute_type_t<typename C::element_type>>(c, a, b, op, cs::make_index_sequence<C::rank()>{});
 }
 
 /* ---- c = op(c, scalar), elementwise ------------------------------ */
@@ -290,9 +293,9 @@ _TNY_API void iota_(C & c, typename C::element_type start, typename C::element_t
 }
 
 /* ---- c(i) = op(a(i), scalar) ------------------------------------- */
-template <class C, class A, class S, class Op, cs::size_t... D>
+template <class Cv, class C, class A, class S, class Op, cs::size_t... D>
 _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
-    using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
+    using I = typename C::index_type;   // `Cv` = the op's compute type (arithmetic: dest compute type; compare: Rc)
     const I e[] = { a.extent(D)... }, sa[] = { a.stride(D)... }, sc[] = { c.stride(D)... };
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
     for (I lin = 0; lin < n; ++lin) {
@@ -302,7 +305,7 @@ _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
     }
 }
 template <class C, class A, class S, class Op> _TNY_API void scalo(C & c, const A & a, S s, Op op)
-{ scalo_(c, a, s, op, cs::make_index_sequence<C::rank()>{}); }
+{ scalo_<compute_type_t<typename C::element_type>>(c, a, s, op, cs::make_index_sequence<C::rank()>{}); }
 
 /* ---- c(i) = uop(a(i))  and  c(i) = uop(c(i)) (in place) ---------- */
 template <class C, class A, class Uop, cs::size_t... D>
@@ -351,48 +354,18 @@ _TNY_HOST auto oops(const A & a, S s, Op op) {
 }
 
 /* ---- comparisons -> a bool tensor (broadcast; computed in Rc) ----- *
- * Like bzip_/scalo_ but the output element type is bool and the compare runs in
- * the INPUTS' compute type (not bool), so `a < b` gives a boolean mask.         */
-template <class Rc, class C, class A, class B, class Op, cs::size_t... D>
-_TNY_API void bcmp_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
-    using I = typename C::index_type;
-    constexpr cs::size_t R = C::rank();   // c has the result rank; a,b right-align (left-pad)
-    const I ce[] = { c.extent(D)... }, sc[] = { c.stride(D)... };
-    const I ae[] = { static_cast<I>(bc_ext<R>(a, D))... }, sa[] = { static_cast<I>(bc_str<R>(a, D))... };
-    const I be[] = { static_cast<I>(bc_ext<R>(b, D))... }, sb[] = { static_cast<I>(bc_str<R>(b, D))... };
-    for (cs::size_t r = 0; r < sizeof...(D); ++r) {
-        _TNY_CHECK(ae[r] == ce[r] || ae[r] == 1, "compare: lhs extent mismatch");
-        _TNY_CHECK(be[r] == ce[r] || be[r] == 1, "compare: rhs extent mismatch");
-    }
-    I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= ce[r];
-    for (I lin = 0; lin < n; ++lin) {
-        I rem = lin, oa = 0, ob = 0, oc = 0;
-        for (int d = (int)sizeof...(D)-1; d >= 0; --d) {
-            I k = rem % ce[d]; rem /= ce[d];
-            oc += k * sc[d]; oa += (ae[d] == 1 ? I(0) : k) * sa[d]; ob += (be[d] == 1 ? I(0) : k) * sb[d];
-        }
-        c.data()[oc] = op(static_cast<Rc>(a.data()[oa]), static_cast<Rc>(b.data()[ob]));
-    }
-}
+ * A comparison is just `bzip_`/`scalo_` run in the operands' compare type `Rc`
+ * (so `a < b` compares the values, not their bool cast) with a plain-store writer
+ * (`w_set`) into the bool result — so they reuse those engines directly rather
+ * than duplicating the broadcast decode. */
 template <class Rc, class C, class A, class B, class Op>
 _TNY_API void bcmp(C & c, const A & a, const B & b, Op op) {
     static_assert(A::rank() <= C::rank() && B::rank() <= C::rank(), "compare: operand rank exceeds result");
     static_assert(bc_static_ok_r<typename A::extents_type, typename B::extents_type, C::rank()>(cs::make_index_sequence<C::rank()>{}), "compare: incompatible static extents");
-    bcmp_<Rc>(c, a, b, op, cs::make_index_sequence<C::rank()>{});
-}
-template <class Rc, class C, class A, class S, class Op, cs::size_t... D>
-_TNY_API void scmp_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
-    using I = typename C::index_type; const Rc sv = static_cast<Rc>(s);
-    const I e[] = { a.extent(D)... }, sa[] = { a.stride(D)... }, sc[] = { c.stride(D)... };
-    I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
-    for (I lin = 0; lin < n; ++lin) {
-        I rem = lin, oa = 0, oc = 0;
-        for (int d = (int)sizeof...(D)-1; d >= 0; --d) { I k = rem % e[d]; rem /= e[d]; oa += k * sa[d]; oc += k * sc[d]; }
-        c.data()[oc] = op(static_cast<Rc>(a.data()[oa]), sv);
-    }
+    bzip_<w_set, Rc>(c, a, b, op, cs::make_index_sequence<C::rank()>{});   // compare in Rc; op returns bool -> stored
 }
 template <class Rc, class C, class A, class S, class Op> _TNY_API void scmp(C & c, const A & a, S s, Op op)
-{ scmp_<Rc>(c, a, s, op, cs::make_index_sequence<C::rank()>{}); }
+{ scalo_<Rc>(c, a, s, op, cs::make_index_sequence<C::rank()>{}); }
 
 // tensor (cmp) tensor -> bool tensor (static -> stack, dynamic -> heap)
 template <class Op, class A, class B,
