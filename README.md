@@ -95,6 +95,12 @@ Tests under `tests/` mix `static_assert` batteries with host runtime checks;
 and validate them numerically. `test_cuda` exercises the CUDA storage against a
 malloc-backed fake runtime (`tests/fakecuda/`).
 
+## Contributing
+
+Bug reports and PRs welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the
+workflow (issue-based, conventional commits, both-compiler test gate) and coding
+style; [`CLAUDE.md`](CLAUDE.md) has the deep design rules.
+
 ## Status
 
 Implemented and tested on host under clang++ and g++ at C++17. Device (`nvcc`)
