@@ -117,42 +117,22 @@ struct owning_storage {
 template <class T, own O, cs::size_t N>
 struct storage;
 
-/* --- view: non-owning pointer ------------------------------------- */
-template <class T, cs::size_t N>
-struct storage<T, own::view, N> {
+/* --- the four non-owning VIEW kinds all wrap a bare pointer; they differ only in
+ *     the `own` tag they carry (view = host; gpu_view = device memory; pinned_view
+ *     / mapped_view = page-locked host memory, so DLPack labels them kDLCUDAHost).
+ *     Share one storage so a tweak can't land in three copies and miss the fourth.
+ *     Trivially copyable (single pointer, defaulted specials) -> kernel-passable. */
+template <class T>
+struct ptr_storage {
     T * p = nullptr;
-    storage() = default;
-    _TNY_API constexpr storage(T * q) noexcept : p(q) {}
+    ptr_storage() = default;
+    _TNY_API constexpr ptr_storage(T * q) noexcept : p(q) {}
     _TNY_API constexpr T * data() const noexcept { return p; }
 };
-
-/* --- gpu_view: non-owning pointer into device memory (same storage as `view`,
- *     a distinct `own` so the memory space is carried in the type) ---------- */
-template <class T, cs::size_t N>
-struct storage<T, own::gpu_view, N> {
-    T * p = nullptr;
-    storage() = default;
-    _TNY_API constexpr storage(T * q) noexcept : p(q) {}
-    _TNY_API constexpr T * data() const noexcept { return p; }
-};
-
-/* --- pinned_view / mapped_view: non-owning pointer into page-locked HOST memory
- *     (host-dereferenceable like `view`, a distinct `own` so the space is carried
- *     in the type for a correct DLPack `kDLCUDAHost` label) ------------------ */
-template <class T, cs::size_t N>
-struct storage<T, own::pinned_view, N> {
-    T * p = nullptr;
-    storage() = default;
-    _TNY_API constexpr storage(T * q) noexcept : p(q) {}
-    _TNY_API constexpr T * data() const noexcept { return p; }
-};
-template <class T, cs::size_t N>
-struct storage<T, own::mapped_view, N> {
-    T * p = nullptr;
-    storage() = default;
-    _TNY_API constexpr storage(T * q) noexcept : p(q) {}
-    _TNY_API constexpr T * data() const noexcept { return p; }
-};
+template <class T, cs::size_t N> struct storage<T, own::view,        N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
+template <class T, cs::size_t N> struct storage<T, own::gpu_view,    N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
+template <class T, cs::size_t N> struct storage<T, own::pinned_view, N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
+template <class T, cs::size_t N> struct storage<T, own::mapped_view, N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
 
 /* --- stack: inline array (fully-static shape) --------------------- */
 template <class T, cs::size_t N>

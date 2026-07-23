@@ -49,6 +49,13 @@ int main()
     static_assert(own_is_view(own::pinned_view) && own_is_view(own::mapped_view), "pinned_view/mapped_view are views");
     static_assert(own_is_host_accessible(own::pinned_view) && own_is_host_accessible(own::mapped_view), "pinned_view/mapped_view host-accessible");
     static_assert(!own_is_device(own::pinned_view) && !own_is_owning(own::mapped_view), "not device, not owning");
+    // all four view kinds share one pointer storage: trivially copyable (kernel-
+    // passable) and exactly one pointer wide (EBO with the mapping base intact).
+    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, corder, own::view>>::value, "view trivially copyable");
+    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, corder, own::gpu_view>>::value, "gpu_view trivially copyable");
+    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, corder, own::pinned_view>>::value, "pinned_view trivially copyable");
+    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, corder, own::mapped_view>>::value, "mapped_view trivially copyable");
+    static_assert(sizeof(tensor<float, shape<2,3>, corder, own::gpu_view>) == sizeof(float*), "view tensor is one pointer wide");
 
     // compile-time memory-space flags (members + free trait forms).
     static_assert(gpu<float, shape<2>>::is_device && !gpu<float, shape<2>>::is_host_accessible, "gpu is device");
