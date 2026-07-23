@@ -278,7 +278,13 @@ private:
     // a runtime signed index — the caller promises it is already non-negative.
     template <cs::size_t Ax, bool Wrap = true, class Arg>
     _TNY_API constexpr index_type _wrap(Arg a) const {
-        return _wrap_idx<index_type, Wrap>(a, static_cast<index_type>(extent(cs::integral_constant<cs::size_t, Ax>{})), index_type(0));
+        const index_type n = static_cast<index_type>(extent(cs::integral_constant<cs::size_t, Ax>{}));
+        const index_type i = _wrap_idx<index_type, Wrap>(a, n, index_type(0));
+        // Checked accessors bounds-check under -DTNY_HARDENED (off by default, off
+        // on device); the `u`-accessors (Wrap == false) skip it. Catches both an
+        // over-range positive index and a too-negative one (checked after the wrap).
+        if constexpr (Wrap) _TNY_BOUND(i >= index_type(0) && i < n, "index out of range");
+        return i;
     }
     template <bool Wrap = true, cs::size_t... Ax, class... Args>
     _TNY_API constexpr index_type _offset(cs::index_sequence<Ax...>, Args... a) const {

@@ -225,7 +225,8 @@ See [Dispatch & the ndarray boundary](dispatch.md).
 | `-DTNY_STD_PROMOTION` | standard C++ float promotion (wider wins) instead of lower-wins |
 | `-DTNY_NO_NEGATIVE_INDEX` | drop python-style negative-index wrap from `operator()` (tightest codegen) |
 | `-DTNY_PORTABLE_HALF` | force the portable software `half`/`bfloat16` even under nvcc |
-| `-DNDEBUG` | strip debug shape/precondition checks (host-only, already off on device) |
+| `-DTNY_HARDENED` | turn ON element-access bounds checks (OFF by default, like `mdspan`; the `u*` accessors always skip them; always off on device) |
+| `-DNDEBUG` | strip the debug shape/precondition checks (`_TNY_CHECK`; on by default host-side, already off on device) |
 
 ---
 

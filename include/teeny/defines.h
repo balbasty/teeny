@@ -28,6 +28,19 @@
 #   define _TNY_CHECK(cond, msg) ((void)sizeof((cond) ? 0 : 0))
 #endif
 
+// Opt-in element-access bounds check. teeny follows `mdspan`: `operator()` /
+// `operator[]` / `at` are UNCHECKED by default (an out-of-range index is UB, as
+// with `mdspan`'s subscript). Define `-DTNY_HARDENED` to turn on a per-index
+// bounds check in the CHECKED accessors; the `u`-accessors always skip it, and it
+// is always off on the device. Gated on TNY_HARDENED, NOT NDEBUG, so it is a
+// deliberate opt-in that survives an optimized `-DNDEBUG` release build.
+#if defined(TNY_HARDENED) && !defined(__CUDA_ARCH__)
+#   include <cassert>
+#   define _TNY_BOUND(cond, msg) assert((cond) && (msg))
+#else
+#   define _TNY_BOUND(cond, msg) ((void)sizeof((cond) ? 0 : 0))
+#endif
+
 #define _TNY_NAMESPACE_BEGIN(NAME) namespace NAME {
 #define _TNY_NAMESPACE_END(NAME)   }
 
