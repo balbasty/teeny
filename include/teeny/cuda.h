@@ -14,6 +14,7 @@
 #include <cuda_runtime.h>
 #include <cuda/std/cstddef>
 #include <teeny/defines.h>
+#include <teeny/alias.h>
 #include <teeny/storage.h>
 #include <teeny/tensor.h>
 
@@ -71,24 +72,24 @@ struct storage<T, own::mapped, N> : owning_storage<T, cuda_mapped_alloc> {
  * ------------------------------------------------------------------ */
 
 /** @brief Owning tensor in device (GPU) memory (move-only). `gpu<T,E>(extents)`. */
-template <class T, class Shape, class Layout = cs::layout_right>
+template <class T, class Shape, class Layout = ccontiguous>
 using gpu = tensor<T, Shape, Layout, own::gpu>;
 /** @brief Owning tensor in page-locked ("pinned") host memory (move-only).
  *         `pinned<T,E>(extents)` — pytorch's `pin_memory`. */
-template <class T, class Shape, class Layout = cs::layout_right>
+template <class T, class Shape, class Layout = ccontiguous>
 using pinned = tensor<T, Shape, Layout, own::pinned>;
 /** @brief Owning tensor in mapped (zero-copy) host memory (move-only). `mapped<T,E>(extents)`. */
-template <class T, class Shape, class Layout = cs::layout_right>
+template <class T, class Shape, class Layout = ccontiguous>
 using mapped = tensor<T, Shape, Layout, own::mapped>;
 
 /* --- functional factories (deduce the Shape type from the argument; `T` defaults
  *     to `float`, like the host factories). Thin spellings of the unified
  *     `empty<T, own::gpu/pinned/mapped>` factory (tensor.h). --- */
-template <class T = float, class Layout = cs::layout_right, class Shape>
+template <class T = float, class Layout = ccontiguous, class Shape>
 _TNY_HOST auto make_gpu(Shape e)    { return empty<T, own::gpu,    Layout>(e); }
-template <class T = float, class Layout = cs::layout_right, class Shape>
+template <class T = float, class Layout = ccontiguous, class Shape>
 _TNY_HOST auto make_pinned(Shape e) { return empty<T, own::pinned, Layout>(e); }
-template <class T = float, class Layout = cs::layout_right, class Shape>
+template <class T = float, class Layout = ccontiguous, class Shape>
 _TNY_HOST auto make_mapped(Shape e) { return empty<T, own::mapped, Layout>(e); }
 
 /* ------------------------------------------------------------------ *
@@ -202,8 +203,8 @@ _TNY_HOST auto to(const tensor<T, Shape, Layout, O> & x) {
         // — no host round-trip. A strided/permuted device source still needs a
         // reorder we can't do on-device without a kernel, so it falls back to the
         // host densify (a device gather kernel is the #50 follow-up).
-        tensor<E2, Shape, cs::layout_right, Space> dst(x.extents());
-        if (x.template is_contiguous<cs::layout_right>())
+        tensor<E2, Shape, ccontiguous, Space> dst(x.extents());
+        if (x.template is_contiguous<ccontiguous>())
             cudaMemcpy(dst.data(), x.data(), static_cast<cs::size_t>(dst.numel()) * sizeof(E2), cudaMemcpyDeviceToDevice);
         else {
             auto host = _detail::dense_host<E2>(x);
@@ -212,12 +213,12 @@ _TNY_HOST auto to(const tensor<T, Shape, Layout, O> & x) {
         return dst;
     } else if constexpr (Space == own::stack) {
         auto host = _detail::dense_host<E2>(x);
-        tensor<E2, Shape, cs::layout_right, own::stack> dst{};   // static shape
+        tensor<E2, Shape, ccontiguous, own::stack> dst{};   // static shape
         cudaMemcpy(dst.data(), host.data(), static_cast<cs::size_t>(dst.numel()) * sizeof(E2), cudaMemcpyHostToHost);
         return dst;
     } else {
         auto host = _detail::dense_host<E2>(x);
-        tensor<E2, Shape, cs::layout_right, Space> dst(x.extents());
+        tensor<E2, Shape, ccontiguous, Space> dst(x.extents());
         const cudaMemcpyKind kind = (Space == own::gpu) ? cudaMemcpyHostToDevice : cudaMemcpyHostToHost;
         cudaMemcpy(dst.data(), host.data(), static_cast<cs::size_t>(dst.numel()) * sizeof(E2), kind);
         return dst;
@@ -236,7 +237,7 @@ _TNY_HOST auto to(tensor<T, Shape, Layout, O> && x) {
     using E2 = cs::conditional_t<cs::is_same<ET, void>::value, Tb, ET>;
     if constexpr (!Force && own_is_owning(O) && O == Space && cs::is_same<E2, Tb>::value
                   && cs::is_same<T, Tb>::value   // non-const element: a const-T owning rvalue has no move ctor
-                  && cs::is_same<Layout, cs::layout_right>::value) {
+                  && cs::is_same<Layout, ccontiguous>::value) {
         return tensor<Tb, Shape, Layout, O>(cs::move(x));   // steal the buffer (already dense in-place)
     } else {
         return to<Space, ET, /*Force=*/true>(x);   // x is a named lvalue here -> the const& copy path

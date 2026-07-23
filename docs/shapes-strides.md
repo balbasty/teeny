@@ -40,7 +40,7 @@ t.extent(Int<-1>());    // negative axis: the last dimension
 
 ## `strides<...>` — the strides
 
-The default layout is `layout_right` (C-order); strides derive from the extents.
+The default layout is `ccontiguous` (C-order); strides derive from the extents.
 For specific strides — a padded row, a channel-last view, a reversed axis — use
 `strides<...>`, the stride analogue of `shape<...>`:
 

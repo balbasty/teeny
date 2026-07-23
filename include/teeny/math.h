@@ -5,6 +5,7 @@
 #include <cuda/std/limits>
 #include <cuda/std/cmath>
 #include <teeny/defines.h>
+#include <teeny/alias.h>
 #include <teeny/half.h>
 #include <teeny/tensor.h>
 
@@ -329,14 +330,14 @@ template <class Op, class A, class B,
           cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() == 0, int> = 0>
 _TNY_API auto oop(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
-    tensor<promote_t<typename A::element_type, typename B::element_type>, RE, cs::layout_right, own::stack> c{};
+    tensor<promote_t<typename A::element_type, typename B::element_type>, RE, ccontiguous, own::stack> c{};
     bzip(c, a, b, op); return c;
 }
 template <class Op, class A, class B,
           cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() != 0, int> = 0>
 _TNY_HOST auto oop(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
-    tensor<promote_t<typename A::element_type, typename B::element_type>, RE, cs::layout_right, own::heap>
+    tensor<promote_t<typename A::element_type, typename B::element_type>, RE, ccontiguous, own::heap>
         c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<RE::rank()>{}));
     bzip(c, a, b, op); return c;
 }
@@ -344,12 +345,12 @@ _TNY_HOST auto oop(const A & a, const B & b, Op op) {
 /* ---- out-of-place tensor (op) scalar ----------------------------- */
 template <class Op, class A, class S, cs::enable_if_t<A::is_static, int> = 0>
 _TNY_API auto oops(const A & a, S s, Op op) {
-    tensor<promote_t<typename A::element_type, S>, typename A::extents_type, cs::layout_right, own::stack> c{};
+    tensor<promote_t<typename A::element_type, S>, typename A::extents_type, ccontiguous, own::stack> c{};
     scalo(c, a, s, op); return c;
 }
 template <class Op, class A, class S, cs::enable_if_t<!A::is_static, int> = 0>
 _TNY_HOST auto oops(const A & a, S s, Op op) {
-    tensor<promote_t<typename A::element_type, S>, typename A::extents_type, cs::layout_right, own::heap> c(a.extents());
+    tensor<promote_t<typename A::element_type, S>, typename A::extents_type, ccontiguous, own::heap> c(a.extents());
     scalo(c, a, s, op); return c;
 }
 
@@ -373,37 +374,37 @@ template <class Op, class A, class B,
 _TNY_API auto oop_cmp(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
     using Rc = compute_type_t<promote_t<typename A::element_type, typename B::element_type>>;
-    tensor<bool, RE, cs::layout_right, own::stack> c{}; bcmp<Rc>(c, a, b, op); return c;
+    tensor<bool, RE, ccontiguous, own::stack> c{}; bcmp<Rc>(c, a, b, op); return c;
 }
 template <class Op, class A, class B,
           cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() != 0, int> = 0>
 _TNY_HOST auto oop_cmp(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
     using Rc = compute_type_t<promote_t<typename A::element_type, typename B::element_type>>;
-    tensor<bool, RE, cs::layout_right, own::heap> c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<RE::rank()>{}));
+    tensor<bool, RE, ccontiguous, own::heap> c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<RE::rank()>{}));
     bcmp<Rc>(c, a, b, op); return c;
 }
 // tensor (cmp) scalar -> bool tensor
 template <class Op, class A, class S, cs::enable_if_t<A::is_static, int> = 0>
 _TNY_API auto oops_cmp(const A & a, S s, Op op) {
     using Rc = compute_type_t<promote_t<typename A::element_type, S>>;
-    tensor<bool, typename A::extents_type, cs::layout_right, own::stack> c{}; scmp<Rc>(c, a, s, op); return c;
+    tensor<bool, typename A::extents_type, ccontiguous, own::stack> c{}; scmp<Rc>(c, a, s, op); return c;
 }
 template <class Op, class A, class S, cs::enable_if_t<!A::is_static, int> = 0>
 _TNY_HOST auto oops_cmp(const A & a, S s, Op op) {
     using Rc = compute_type_t<promote_t<typename A::element_type, S>>;
-    tensor<bool, typename A::extents_type, cs::layout_right, own::heap> c(a.extents()); scmp<Rc>(c, a, s, op); return c;
+    tensor<bool, typename A::extents_type, ccontiguous, own::heap> c(a.extents()); scmp<Rc>(c, a, s, op); return c;
 }
 
 /* ---- out-of-place unary : static -> stack, dynamic -> heap ------- */
 template <class Uop, class A, cs::enable_if_t<A::is_static, int> = 0>
 _TNY_API auto uop_out(const A & a, Uop f) {
-    tensor<typename A::element_type, typename A::extents_type, cs::layout_right, own::stack> c{};
+    tensor<typename A::element_type, typename A::extents_type, ccontiguous, own::stack> c{};
     unaryo(c, a, f); return c;
 }
 template <class Uop, class A, cs::enable_if_t<!A::is_static, int> = 0>
 _TNY_HOST auto uop_out(const A & a, Uop f) {
-    tensor<typename A::element_type, typename A::extents_type, cs::layout_right, own::heap> c(a.extents());
+    tensor<typename A::element_type, typename A::extents_type, ccontiguous, own::heap> c(a.extents());
     unaryo(c, a, f); return c;
 }
 
@@ -491,7 +492,7 @@ _TNY_API void reduce_axes_(Out & out, const A & a, R init, Op op, const bool * r
 template <long... Axes, class R, class Op, class T,class E,class L,own O,
           class OE = reduced_extents<E, Axes...>, cs::enable_if_t<OE::rank_dynamic() == 0, int> = 0>
 _TNY_API auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
-    tensor<R, OE, cs::layout_right, own::stack> out{};
+    tensor<R, OE, ccontiguous, own::stack> out{};
     bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
     reduce_axes_<R>(out, a, init, op, red, cs::make_index_sequence<E::rank()>{});
     return out;
@@ -505,7 +506,7 @@ _TNY_HOST auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
     cs::array<I, OE::rank()> ke{}; cs::size_t oi = 0;
     for (cs::size_t d = 0; d < E::rank(); ++d) if (!red[d]) ke[oi++] = static_cast<I>(a.extent(d));
     OE oe(ke);
-    tensor<R, OE, cs::layout_right, own::heap> out(oe);
+    tensor<R, OE, ccontiguous, own::heap> out(oe);
     reduce_axes_<R>(out, a, init, op, red, cs::make_index_sequence<E::rank()>{});
     return out;
 }
@@ -515,14 +516,14 @@ _TNY_HOST auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
 // when `Ret == RE`. Two overloads keep the stack path _TNY_API (host+device) and
 // the heap path _TNY_HOST, mirroring the `axreduce` overload that produced `r`.
 template <class Ret, class RE, class OE>
-_TNY_API auto reduce_to(tensor<RE, OE, cs::layout_right, own::stack> && r) {
-    if constexpr (cs::is_same<Ret, RE>::value) return static_cast<tensor<RE,OE,cs::layout_right,own::stack>&&>(r);
-    else { tensor<Ret, OE, cs::layout_right, own::stack> o{}; o.copy_(r); return o; }
+_TNY_API auto reduce_to(tensor<RE, OE, ccontiguous, own::stack> && r) {
+    if constexpr (cs::is_same<Ret, RE>::value) return static_cast<tensor<RE,OE,ccontiguous,own::stack>&&>(r);
+    else { tensor<Ret, OE, ccontiguous, own::stack> o{}; o.copy_(r); return o; }
 }
 template <class Ret, class RE, class OE>
-_TNY_HOST auto reduce_to(tensor<RE, OE, cs::layout_right, own::heap> && r) {
-    if constexpr (cs::is_same<Ret, RE>::value) return static_cast<tensor<RE,OE,cs::layout_right,own::heap>&&>(r);
-    else { tensor<Ret, OE, cs::layout_right, own::heap> o(r.extents()); o.copy_(r); return o; }
+_TNY_HOST auto reduce_to(tensor<RE, OE, ccontiguous, own::heap> && r) {
+    if constexpr (cs::is_same<Ret, RE>::value) return static_cast<tensor<RE,OE,ccontiguous,own::heap>&&>(r);
+    else { tensor<Ret, OE, ccontiguous, own::heap> o(r.extents()); o.copy_(r); return o; }
 }
 
 /* ---- allclose: |a-b| <= atol + rtol*|b| for every (broadcast) element ---- */

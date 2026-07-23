@@ -26,15 +26,19 @@ using cs::full_extent_t;
 using cs::layout_right;
 using cs::layout_left;
 using cs::layout_stride;
-/** @brief numpy-style spellings of the contiguous layouts: `corder` is C-order
- *         (row-major, `layout_right`), `forder` is Fortran-order (column-major,
- *         `layout_left`). Use wherever a `Layout` is expected. */
-using corder = cs::layout_right;
-using forder = cs::layout_left;
+/** @brief Names for the two contiguous layouts: `ccontiguous` is C-contiguous
+ *         (row-major, `layout_right`), `fcontiguous` is Fortran-contiguous
+ *         (column-major, `layout_left`). Use wherever a `Layout` is expected —
+ *         this is teeny's default and preferred spelling. */
+using ccontiguous = cs::layout_right;
+using fcontiguous = cs::layout_left;
+/** @brief Legacy aliases (`corder`/`forder`); prefer `ccontiguous`/`fcontiguous`. */
+using corder = ccontiguous;
+using forder = fcontiguous;
 /** @brief `dynamic_strides` — the all-runtime strided layout (`cs::layout_stride`,
- *         a full runtime stride array). The all-/mixed-static sibling is teeny's
- *         `strides<S...>` (folds known strides to immediates). Same name shape as
- *         `strides<...>` so the two read as a pair. */
+ *         a full runtime stride array). Prefer teeny's `strides<S...>` (folds known
+ *         strides to immediates, and is what slicing produces); `dynamic_strides`
+ *         is `strides<>` with every stride runtime. */
 using dynamic_strides = cs::layout_stride;
 using cs::mdspan;
 using cs::submdspan;

@@ -43,9 +43,9 @@ Factories:
 | factory | makes |
 |---|---|
 | `wrap(ptr, extents)` | C-order view |
-| `wrap<layout_left>(ptr, extents)` | F-order view |
+| `wrap<fcontiguous>(ptr, extents)` | F-order view |
 | `wrap(ptr, extents, strides<Sx,Sy,...>{})` | view with compile-time strides (may be negative) |
-| `wrap(ptr, extents, {s0,s1,...})` | view with runtime strides (layout_stride) |
+| `wrap(ptr, extents, {s0,s1,...})` | view with runtime strides (`dynamic_strides`) |
 | `wrap<S...>(ptr, extents, {dyn...})` | mixed static/runtime strides (`dynamic_stride` slots) |
 | `as_tensor(any_mdspan)` | wrap an `mdspan`/`submdspan` result as a view |
 | `make_view(ptr, extents)` | same as `view`, deducing the extents type |
@@ -141,7 +141,7 @@ auto v = d.view();  // view over d's memory — pass THIS to the kernel
 The variants are one class template with a different final argument:
 
 ```cpp
-template <class T, class Extents, class Layout = layout_right, own O = own::view>
+template <class T, class Extents, class Layout = ccontiguous, own O = own::view>
 struct tensor;
 ```
 

@@ -12,8 +12,8 @@ Everything is in `namespace tny`. `namespace cs = cuda::std`. Include
 ## The tensor type
 
 ```cpp
-template <class T, class Shape, class Layout = corder, own O = own::view>
-struct tensor;  // Shape = any cuda::std::extents (spell it shape<...>); Layout: corder/forder/...
+template <class T, class Shape, class Layout = ccontiguous, own O = own::view>
+struct tensor;  // Shape = any cuda::std::extents (spell it shape<...>); Layout: ccontiguous/fcontiguous/...
 ```
 
 One tensor type parameterised by element type, `cuda::std::extents`, an mdspan
@@ -23,9 +23,9 @@ below. See [Tensors & ownership](tensors.md).
 ### Ownership aliases
 
 ```cpp
-view<T, E, L = corder>       // non-owning view (default; the bare `tensor` is this)
-local<T, E, L = corder>        // stack-owned (requires a fully static shape)
-owned<T, E, L = corder>        // heap-owned, host, move-only
+view<T, E, L = ccontiguous>       // non-owning view (default; the bare `tensor` is this)
+local<T, E, L = ccontiguous>        // stack-owned (requires a fully static shape)
+owned<T, E, L = ccontiguous>        // heap-owned, host, move-only
 gpu<T, E, L>  pinned<T, E, L>  mapped<T, E, L>  // CUDA memory (from <teeny/cuda.h>)
 ```
 
@@ -109,6 +109,11 @@ x(ellipsis) = b;  x(0, all) = v;  // assign INTO a slice copies/fills (a = b reb
 slice(start, stop);  slice(start, stop, step);  // half-open range, optional (neg) step
 none;  all;                     // open slice end (== python None); keep-axis marker
 x.take_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest
+x.uget(i, j, k);  x.uat(i...);  x.uslice(0, slice(1,4));  x.uadd_at(v, i...);
+                    // `u`-prefixed unchecked twins of ()/at/slice/add_at: skip the
+                    // negative-index wrap for known-non-negative RUNTIME indices
+                    // (per-call -DTNY_NO_NEGATIVE_INDEX). Same result type; static
+                    // bounds still fold. A negative runtime index is then UB.
 ```
 
 See [Indexing & slicing](indexing.md).

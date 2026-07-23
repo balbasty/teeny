@@ -33,6 +33,41 @@ x.at(i,j).add_<true>(v);     // atomic scatter into one cell
 x.add_at(v, i, j);           // shorthand for at(i,j).add_<true>(v)
 ```
 
+## Unchecked accessors — `uget` / `uat` / `uslice` / `uadd_at`
+
+The wrap that lets a negative index count from the back costs one compare-and-add
+per axis. In a hot kernel where every index is already known non-negative that is
+wasted work, so each indexing entry point has a `u`-prefixed twin that **skips the
+negative-index wrap** for runtime signed args — the per-call equivalent of building
+with `-DTNY_NO_NEGATIVE_INDEX`:
+
+```cpp
+x.uget(i, j, k);              // like x(i,j,k)      -> T&        (no wrap)
+x.uat(i, j);                  // like x.at(i,j)     -> rank-0 view
+x.uadd_at(v, i, j);           // like x.add_at(v,i,j)  scatter (atomic on device)
+x.uslice(0, slice(1, 4));     // like x(0, slice(1,4)) -> a VIEW (no wrap on runtime bounds)
+```
+
+They return the **same type** as their checked counterparts, so they drop into
+existing code unchanged. Two guarantees keep them safe to fold:
+
+- **Static (`Int<>`) bounds and `none` are unaffected** — only *runtime signed*
+  values skip the wrap. A compile-time slice such as `uslice(slice<1,4>())` folds to
+  exactly the same static extent as `x(slice<1,4>())`.
+- Slice ranges are still **clamped** to a valid extent; only the wrap is dropped, so
+  a runtime negative bound is taken as-is and then clamped. With a forward step that
+  means a negative *stop* collapses to an **empty** axis (`uslice(0, slice(1,-1))`
+  instead of the wrapped `[1, n-1)`), while a negative *start* clamps to `0` and keeps
+  the window open from the front (`uslice(0, slice(-3, none))` is `[0, n)`, not the
+  wrapped last three). The rule is simply "no wrap", not "empties".
+
+`uslice` mirrors the slice `operator()` but **not** its `ellipsis` form — spell the
+kept axes explicitly (or use `all`).
+
+The one rule: **passing a negative runtime index to a `u`-accessor is undefined
+behaviour** — that is the promise you make in exchange for the tighter codegen. teeny
+has no element bounds check to begin with, so `uget` is simply the wrap-free read/write.
+
 ## Slicing → a sub-view (no copy)
 
 If any argument is a slice specifier, `operator()` returns a lower- or same-rank

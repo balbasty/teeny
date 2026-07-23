@@ -34,16 +34,16 @@ the same memory). If it isn't, materialise first:
 
 ```cpp
 t.is_contiguous();                // dense in SOME order (C, F, or a permuted view)
-t.is_contiguous<layout_right>();  // exact C-contiguity — what reshape/flatten need
+t.is_contiguous<ccontiguous>();   // exact C-contiguity — what reshape/flatten need
 auto c = t.clone();               // a dense, row-major OWNING copy (static -> stack, dyn -> heap)
 c.flatten();                      // now contiguous
 ```
 
 `is_contiguous()` with no argument asks only whether the elements occupy a dense
 block of memory — so a *permuted* C-contiguous view still counts. Pass a layout
-for an exact C/F check, in either spelling: `is_contiguous<layout_right>()` (type
-form) or `is_contiguous(layout_right{})` (value form, layout deduced from the
-argument — e.g. `is_contiguous(corder())`).
+for an exact C/F check, in either spelling: `is_contiguous<ccontiguous>()` (type
+form) or `is_contiguous(ccontiguous{})` (value form, layout deduced from the
+argument — e.g. `is_contiguous(ccontiguous())`).
 
 ## Recover static inner dims
 

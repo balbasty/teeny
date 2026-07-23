@@ -85,13 +85,21 @@ template <class... Args> _TNY_API constexpr cs::size_t _ellipsis_count() {
 // Folds when it can: a static (integral_constant) or unsigned arg needs no branch,
 // and -DTNY_NO_NEGATIVE_INDEX drops the wrap entirely for runtime signed args
 // (kernels that guarantee non-negative indices, for the tightest codegen).
-template <class Idx, class V>
+//
+// `Wrap` is a PER-CALL version of that opt-out (the `uget`/`uat`/`uslice`
+// unchecked accessors pass `Wrap=false`): it drops the wrap for RUNTIME SIGNED
+// args only. `none`/unsigned are unaffected, and a STATIC (`integral_constant`)
+// bound STILL wraps regardless of `Wrap` — the compile-time slice fold
+// (`_static_range_len`) always wraps static bounds, so keeping them wrapped here
+// is what prevents the folded static extent from diverging from the runtime one.
+template <class Idx, bool Wrap = true, class V>
 _TNY_API constexpr Idx _wrap_idx(V v, Idx n, Idx dflt) noexcept {
     if constexpr (cs::is_same<V, none_t>::value)     { (void)v; (void)n; return dflt; }
     else if constexpr (cs::is_unsigned<V>::value)    { (void)n; return static_cast<Idx>(v); }
 #ifdef TNY_NO_NEGATIVE_INDEX
     else                                             { (void)n; return static_cast<Idx>(v); }
 #else
+    else if constexpr (!Wrap && !_is_ic<V>::value)   { (void)n; return static_cast<Idx>(v); }
     else { using S = cs::make_signed_t<Idx>; const S i = static_cast<S>(v);
            return static_cast<Idx>(i < S(0) ? i + static_cast<S>(n) : i); }
 #endif

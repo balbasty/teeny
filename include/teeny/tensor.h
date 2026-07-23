@@ -6,6 +6,7 @@
 #include <cuda/std/limits>
 #include <cuda/std/type_traits>
 #include <teeny/defines.h>
+#include <teeny/alias.h>
 #include <teeny/storage.h>
 #include <teeny/layout.h>
 #include <teeny/indexing.h>
@@ -17,7 +18,7 @@ namespace cs = cuda::std;
 
 // Forward declarations so the tensor's structural members can name as_tensor
 // (its argument is a cuda::std::mdspan, so ADL would not find it).
-template <class T, class Shape, class Layout = cs::layout_right, own O = own::view>
+template <class T, class Shape, class Layout = ccontiguous, own O = own::view>
 struct tensor;
 template <own OW = own::view, class MD>
 _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
@@ -61,7 +62,7 @@ _TNY_API void fetch_add(T * p, T v) noexcept {
  * @tparam T        Element type.
  * @tparam Shape    The shape: any `cuda::std::extents<Idx, E...>` (static or
  *                  dynamic per dim). Spell it with the `shape<...>` alias.
- * @tparam Layout   mdspan layout policy (default `layout_right`).
+ * @tparam Layout   mdspan layout policy (default `ccontiguous`).
  * @tparam O        Ownership kind (default `own::view`).
  */
 template <class T, class Shape, class Layout, own O>
@@ -164,10 +165,10 @@ struct tensor : private Layout::template mapping<Shape> {
         else if constexpr (is_static && is_contiguous_layout)
             return cs::integral_constant<index_type, static_cast<index_type>(mapping_type{}.stride(D))>{};
         // The unit stride of a contiguous layout is 1 regardless of dynamic
-        // extents: layout_right's last axis, layout_left's first axis.
-        else if constexpr (cs::is_same<Layout, cs::layout_right>::value && D + 1 == rank())
+        // extents: ccontiguous's last axis, fcontiguous's first axis.
+        else if constexpr (cs::is_same<Layout, ccontiguous>::value && D + 1 == rank())
             return cs::integral_constant<index_type, 1>{};
-        else if constexpr (cs::is_same<Layout, cs::layout_left>::value && D == 0)
+        else if constexpr (cs::is_same<Layout, fcontiguous>::value && D == 0)
             return cs::integral_constant<index_type, 1>{};
         else
             return mapping_type::stride(D);
@@ -204,8 +205,8 @@ public:
      *         stride is unconstrained); an empty tensor is trivially contiguous.
      *         Negative strides (flips) are *not* dense in this sense -> false.
      *
-     *         Pass a layout for an **exact** check: `is_contiguous<layout_right>()`
-     *         / `is_contiguous<layout_left>()` (aka `corder`/`forder`) test C- /
+     *         Pass a layout for an **exact** check: `is_contiguous<ccontiguous>()`
+     *         / `is_contiguous<fcontiguous>()` test C- /
      *         F-contiguity specifically — or any layout whose mapping is derivable
      *         from the extents. */
     _TNY_API constexpr bool is_contiguous() const noexcept {
@@ -230,9 +231,9 @@ public:
             return true;
         }
     }
-    /** @brief Exact contiguity in layout `L` (e.g. `corder`/`forder`): the actual
-     *         strides equal what `L` produces for these extents. Two spellings —
-     *         `t.is_contiguous<corder>()` (type form) and `t.is_contiguous(corder())`
+    /** @brief Exact contiguity in layout `L` (e.g. `ccontiguous`/`fcontiguous`): the
+     *         actual strides equal what `L` produces for these extents. Two spellings —
+     *         `t.is_contiguous<ccontiguous>()` (type form) and `t.is_contiguous(ccontiguous())`
      *         (value form, layout deduced from the argument). */
     template <class L>
     _TNY_API bool is_contiguous() const noexcept {
@@ -266,17 +267,19 @@ public:
     /* --- element access / slicing -------------------------------- */
 private:
     // wrap a negative index python-style for axis Ax (see free `_wrap_idx`).
-    template <cs::size_t Ax, class Arg>
+    // `Wrap=false` (the unchecked `uget`/`uat`/`uslice` path) skips the wrap for
+    // a runtime signed index — the caller promises it is already non-negative.
+    template <cs::size_t Ax, bool Wrap = true, class Arg>
     _TNY_API constexpr index_type _wrap(Arg a) const {
-        return _wrap_idx<index_type>(a, static_cast<index_type>(extent(cs::integral_constant<cs::size_t, Ax>{})), index_type(0));
+        return _wrap_idx<index_type, Wrap>(a, static_cast<index_type>(extent(cs::integral_constant<cs::size_t, Ax>{})), index_type(0));
     }
-    template <cs::size_t... Ax, class... Args>
+    template <bool Wrap = true, cs::size_t... Ax, class... Args>
     _TNY_API constexpr index_type _offset(cs::index_sequence<Ax...>, Args... a) const {
-        return mapping_type::operator()(_wrap<Ax>(a)...);
+        return mapping_type::operator()(_wrap<Ax, Wrap>(a)...);
     }
     // resolve one slice bound against the axis extent n (none -> default).
-    template <class V> _TNY_API index_type _sl_bound(V v, index_type dflt, index_type n) const {
-        return _wrap_idx<index_type>(v, n, dflt);
+    template <bool Wrap = true, class V> _TNY_API index_type _sl_bound(V v, index_type dflt, index_type n) const {
+        return _wrap_idx<index_type, Wrap>(v, n, dflt);
     }
     // ---- the ONE sub-view builder (gather) ------------------------------------
     // Every slicing/take_along call routes here: per axis an integer DROPS the
@@ -285,15 +288,15 @@ private:
     // each kept stride to a compile-time value where derivable — so it works on
     // ANY source layout (no submdspan) AND static shapes stay folded.
     // `stop` default for a negative step: `none` -> -1 (go past index 0), python-style.
-    template <class V> _TNY_API index_type _stop_neg(V v, index_type n) const {
-        return _wrap_idx<index_type>(v, n, index_type(-1));
+    template <bool Wrap = true, class V> _TNY_API index_type _stop_neg(V v, index_type n) const {
+        return _wrap_idx<index_type, Wrap>(v, n, index_type(-1));
     }
-    template <cs::size_t Ax, class Arg>
+    template <cs::size_t Ax, bool Wrap = true, class Arg>
     _TNY_API void _sl_axis(Arg a, index_type & off, index_type * ext, index_type * str, cs::size_t & k) const {
         const index_type sd = static_cast<index_type>(stride(Ax));
         const index_type n  = static_cast<index_type>(extent(cs::integral_constant<cs::size_t, Ax>{}));
         if constexpr (_is_index<Arg>::value) {
-            off += _wrap<Ax>(a) * sd;                                // integer: drop this axis
+            off += _wrap<Ax, Wrap>(a) * sd;                         // integer: drop this axis
         } else if constexpr (_is_slice_spec<Arg>::value) {
             const index_type step = static_cast<index_type>(a.step);
             // Resolve the (start, stop) defaults per step sign (forward: [0..n];
@@ -301,8 +304,8 @@ private:
             // via the shared `_range_count` — the SAME body the compile-time fold
             // `_static_range_len` uses, so the folded static extent can't diverge.
             index_type st, sp;
-            if (step >= index_type(0)) { st = _sl_bound(a.start, index_type(0), n); sp = _sl_bound(a.stop, n, n); }
-            else                       { st = _sl_bound(a.start, n - 1, n);         sp = _stop_neg(a.stop, n); }
+            if (step >= index_type(0)) { st = _sl_bound<Wrap>(a.start, index_type(0), n); sp = _sl_bound<Wrap>(a.stop, n, n); }
+            else                       { st = _sl_bound<Wrap>(a.start, n - 1, n);         sp = _stop_neg<Wrap>(a.stop, n); }
             const index_type cnt = _range_count(st, sp, step, n);
             // An empty axis makes the whole view empty, so its offset is never read;
             // zero it so the accumulated base pointer stays in-bounds — a negative
@@ -337,7 +340,7 @@ private:
                                      typename _slice_step<Arg>::type>(static_cast<long>(Se));
         else                                                            return cs::dynamic_extent;
     }
-    template <class P, cs::size_t... Ax, class... Args>
+    template <bool Wrap = true, class P, cs::size_t... Ax, class... Args>
     _TNY_API auto _slice_range(P p, cs::index_sequence<Ax...>, Args... a) const {
         using Vt = cs::remove_pointer_t<P>;
         constexpr cs::size_t Nk = (cs::size_t(0) + ... + (_is_index<Args>::value ? cs::size_t(0) : cs::size_t(1)));
@@ -346,7 +349,7 @@ private:
         using OE = typename _compact<index_type, _out_static<Args, Shape::static_extent(Ax)>()...>::type;
         using SF = typename _str_compact<_out_sstride<Args, Ax, Layout, Shape>()...>::type;
         index_type ext[Nk ? Nk : 1] = {}, str[Nk ? Nk : 1] = {}, off = 0; cs::size_t k = 0;
-        ( _sl_axis<Ax>(a, off, ext, str, k), ... );
+        ( _sl_axis<Ax, Wrap>(a, off, ext, str, k), ... );
         cs::array<index_type, Nk> ea{};
         for (cs::size_t i = 0; i < Nk; ++i) ea[i] = ext[i];
         // fold the kept strides into the strides<...> mapping (EBO when all static,
@@ -400,12 +403,12 @@ public:
     template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
     _TNY_API auto at(Args... a) noexcept {
         using E0 = cs::extents<index_type>;   // rank 0
-        return tensor<T, E0, cs::layout_right, own_view_of(O)>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
+        return tensor<T, E0, ccontiguous, own_view_of(O)>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
     }
     template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
     _TNY_API auto at(Args... a) const noexcept {
         using E0 = cs::extents<index_type>;
-        return tensor<const T, E0, cs::layout_right, own_view_of(O)>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
+        return tensor<const T, E0, ccontiguous, own_view_of(O)>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
     }
 
     /** @brief Scatter-accumulate: `(*this)(i...) += v`, atomic on the device —
@@ -425,6 +428,51 @@ public:
     template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API auto operator()(Args... a) const noexcept
     { return _slice_range(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
+
+    /* --- unchecked accessors: skip the negative-index wrap ------------------ *
+     * `uget`/`uat`/`uadd_at`/`uslice` are the `u`-prefixed twins of
+     * `operator()`/`at`/`add_at`/slice-`operator()` for the hot path where every
+     * runtime index is known non-negative: they take runtime signed indices
+     * AS-IS (no `i < 0 ? i + n : i` branch per axis) — the per-call form of
+     * `-DTNY_NO_NEGATIVE_INDEX`. Passing a negative runtime index is UB (the
+     * caller's promise). Static (`Int<>`) bounds and `none` are unaffected, so a
+     * compile-time slice still folds identically; the result TYPE matches the
+     * checked op exactly. teeny has no element bounds check to skip, so `uget` is
+     * simply the wrap-free element read/write. */
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API T & uget(Args... a) noexcept
+    { return store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]; }
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API const T & uget(Args... a) const noexcept
+    { return store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]; }
+
+    /** @brief Unchecked `at`: a single element as a rank-0 VIEW, no negative wrap. */
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API auto uat(Args... a) noexcept {
+        using E0 = cs::extents<index_type>;
+        return tensor<T, E0, ccontiguous, own_view_of(O)>(&store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]);
+    }
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API auto uat(Args... a) const noexcept {
+        using E0 = cs::extents<index_type>;
+        return tensor<const T, E0, ccontiguous, own_view_of(O)>(&store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]);
+    }
+
+    /** @brief Unchecked scatter-accumulate (no negative wrap): `uat(i...).add_<true>(v)`. */
+    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    _TNY_API void uadd_at(T v, Args... a) noexcept
+    { uat(a...).template add_<true>(v); }
+
+    /** @brief Unchecked sub-view: like the slice `operator()` but with no negative
+     *         wrap on runtime integer/bound args (static bounds still fold, so the
+     *         view type is identical). Slice ranges are still clamped for a valid
+     *         extent; only the wrap is dropped. */
+    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
+    _TNY_API auto uslice(Args... a) noexcept
+    { return _slice_range<false>(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
+    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
+    _TNY_API auto uslice(Args... a) const noexcept
+    { return _slice_range<false>(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
 
     /** @brief Ellipsis form: exactly one `ellipsis` in the args expands to
      *         `rank - (#other args)` copies of `all`, then the call re-runs — so
@@ -518,9 +566,9 @@ public:
      *         non-contiguous / permuted / flipped tensor). Static shape -> stack
      *         (host+device); dynamic -> heap (host only). */
     template <bool S = is_static, cs::enable_if_t<S, int> = 0>
-    _TNY_API auto clone() const { tensor<T, Shape, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
+    _TNY_API auto clone() const { tensor<T, Shape, ccontiguous, own::stack> c{}; c.copy_(*this); return c; }
     template <bool S = is_static, cs::enable_if_t<!S, int> = 0>
-    _TNY_HOST auto clone() const { tensor<T, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
+    _TNY_HOST auto clone() const { tensor<T, Shape, ccontiguous, own::heap> c(extents()); c.copy_(*this); return c; }
 
     /** @brief pytorch-like `.to<T2>()`: convert the element type to `T2`.
      *
@@ -553,10 +601,10 @@ public:
     }
     template <class T2 = element_type, bool Force = false, bool S = is_static,
               cs::enable_if_t<(Force || !cs::is_same<T2, element_type>::value) && S, int> = 0>
-    _TNY_API auto to() const & { tensor<cs::remove_cv_t<T2>, Shape, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
+    _TNY_API auto to() const & { tensor<cs::remove_cv_t<T2>, Shape, ccontiguous, own::stack> c{}; c.copy_(*this); return c; }
     template <class T2 = element_type, bool Force = false, bool S = is_static,
               cs::enable_if_t<(Force || !cs::is_same<T2, element_type>::value) && !S, int> = 0>
-    _TNY_HOST auto to() const & { tensor<cs::remove_cv_t<T2>, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
+    _TNY_HOST auto to() const & { tensor<cs::remove_cv_t<T2>, Shape, ccontiguous, own::heap> c(extents()); c.copy_(*this); return c; }
     // Rvalue overloads. A non-owning VIEW temporary (view/gpu_view) borrows
     // storage owned elsewhere, so a borrow from it is as safe as from an lvalue
     // (and stays _TNY_API even for a dynamic shape — it carries only a pointer).
@@ -574,10 +622,10 @@ public:
     }
     template <class T2 = element_type, bool Force = false, bool S = is_static,
               cs::enable_if_t<!(own_is_view(O) && !Force && cs::is_same<T2, element_type>::value) && S, int> = 0>
-    _TNY_API auto to() const && { tensor<cs::remove_cv_t<T2>, Shape, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
+    _TNY_API auto to() const && { tensor<cs::remove_cv_t<T2>, Shape, ccontiguous, own::stack> c{}; c.copy_(*this); return c; }
     template <class T2 = element_type, bool Force = false, bool S = is_static,
               cs::enable_if_t<!(own_is_view(O) && !Force && cs::is_same<T2, element_type>::value) && !S, int> = 0>
-    _TNY_HOST auto to() const && { tensor<cs::remove_cv_t<T2>, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
+    _TNY_HOST auto to() const && { tensor<cs::remove_cv_t<T2>, Shape, ccontiguous, own::heap> c(extents()); c.copy_(*this); return c; }
 
 private:
     // shared reshape body: one axis may be `-1` (numpy-style, inferred from numel).
@@ -586,11 +634,11 @@ private:
         static_assert(((NewExt < 0 ? 1 : 0) + ... + 0) <= 1, "reshape: at most one inferred (-1) dimension");
         using NE = cs::extents<index_type, (NewExt < 0 ? cs::dynamic_extent : static_cast<cs::size_t>(NewExt))...>;
         constexpr index_type known = (index_type(1) * ... * (NewExt < 0 ? index_type(1) : index_type(NewExt)));
-        _TNY_CHECK(is_contiguous<cs::layout_right>(), "reshape: needs a C-contiguous tensor (clone() first)");
+        _TNY_CHECK(is_contiguous<ccontiguous>(), "reshape: needs a C-contiguous tensor (clone() first)");
         _TNY_CHECK(known != 0 && numel() % known == 0, "reshape: numel not divisible by given extents");
         const index_type inferred = numel() / (known ? known : index_type(1));
         cs::array<index_type, sizeof...(NewExt)> ea{ (NewExt < 0 ? inferred : index_type(NewExt))... };
-        return tensor<El, NE, cs::layout_right, own_view_of(O)>(p, typename cs::layout_right::template mapping<NE>(NE(ea)));
+        return tensor<El, NE, ccontiguous, own_view_of(O)>(p, typename ccontiguous::template mapping<NE>(NE(ea)));
     }
 public:
     /** @brief View this tensor as a new shape — requires it be C-contiguous
@@ -608,12 +656,12 @@ private:
         // C-contiguous source (else it would silently mis-address the data). And
         // every static dim of NewE must equal the actual extent. Checked here
         // (host-debug) because a non-contiguous ndarray is the norm at the boundary.
-        _TNY_CHECK(is_contiguous<cs::layout_right>(), "recast: needs a C-contiguous tensor (clone() first)");
+        _TNY_CHECK(is_contiguous<ccontiguous>(), "recast: needs a C-contiguous tensor (clone() first)");
         ( _TNY_CHECK(NewE::static_extent(D) == cs::dynamic_extent ||
                      static_cast<index_type>(NewE::static_extent(D)) == static_cast<index_type>(extent(D)),
                      "recast: a static dim does not match the actual extent"), ... );
-        return tensor<El, NewE, cs::layout_right, own_view_of(O)>(
-            p, typename cs::layout_right::template mapping<NewE>(NewE(cs::array<index_type, rank()>{ static_cast<index_type>(extent(D))... })));
+        return tensor<El, NewE, ccontiguous, own_view_of(O)>(
+            p, typename ccontiguous::template mapping<NewE>(NewE(cs::array<index_type, rank()>{ static_cast<index_type>(extent(D))... })));
     }
 public:
     /** @brief Reinterpret with a MORE-STATIC extents type of the same rank —
@@ -752,9 +800,9 @@ public:
     _TNY_API tensor & operator++() { return add_(T(1)); }
     _TNY_API tensor & operator--() { return sub_(T(1)); }
     template <bool S = is_static, cs::enable_if_t<S, int> = 0>
-    _TNY_API tensor<T, Shape, cs::layout_right, own::stack> operator++(int) { auto old = clone(); add_(T(1)); return old; }
+    _TNY_API tensor<T, Shape, ccontiguous, own::stack> operator++(int) { auto old = clone(); add_(T(1)); return old; }
     template <bool S = is_static, cs::enable_if_t<S, int> = 0>
-    _TNY_API tensor<T, Shape, cs::layout_right, own::stack> operator--(int) { auto old = clone(); sub_(T(1)); return old; }
+    _TNY_API tensor<T, Shape, ccontiguous, own::stack> operator--(int) { auto old = clone(); sub_(T(1)); return old; }
 };
 
 /* ------------------------------------------------------------------ *
@@ -764,7 +812,7 @@ public:
 /** @brief Wrap `p` as a non-owning view with a contiguous layout (default
  *         C-order). This is the factory; the `view<T,E>` alias is the type it
  *         produces, and the member `t.view()` re-views an existing tensor. */
-template <class Layout = cs::layout_right, class T, class Shape>
+template <class Layout = ccontiguous, class T, class Shape>
 _TNY_API tensor<T, Shape, Layout, own::view> wrap(T * p, Shape e) {
     using Tn = tensor<T, Shape, Layout, own::view>;
     return Tn(p, typename Tn::mapping_type(e));
@@ -828,15 +876,15 @@ template <class Tn> inline constexpr bool is_device_v          = Tn::is_device;
 template <class Tn> inline constexpr bool is_host_accessible_v = Tn::is_host_accessible;
 
 /** @brief A non-owning view type. Construct as `view<T,E>(ptr, extents)`. */
-template <class T, class Shape, class Layout = cs::layout_right>
+template <class T, class Shape, class Layout = ccontiguous>
 using view = tensor<T, Shape, Layout, own::view>;
 
 /** @brief Stack-owned tensor (fully static shape). Use `local<T,E>{}`. */
-template <class T, class Shape, class Layout = cs::layout_right>
+template <class T, class Shape, class Layout = ccontiguous>
 using local = tensor<T, Shape, Layout, own::stack>;
 
 /** @brief Heap-owned tensor (host only, move-only). Use `owned<T,E>(extents)`. */
-template <class T, class Shape, class Layout = cs::layout_right>
+template <class T, class Shape, class Layout = ccontiguous>
 using owned = tensor<T, Shape, Layout, own::heap>;
 
 /* --- functional factories (deduce the Shape type from the argument) ------ *
@@ -845,7 +893,7 @@ using owned = tensor<T, Shape, Layout, own::heap>;
  * type is deduced, so a runtime-built shape needs no `decltype` spelling.       */
 
 /** @brief `make_view<L>(ptr, extents)` — a non-owning view (alias of `wrap`). */
-template <class Layout = cs::layout_right, class T, class Shape>
+template <class Layout = ccontiguous, class T, class Shape>
 _TNY_API auto make_view(T * p, Shape e) { return wrap<Layout>(p, e); }
 
 /** @brief `empty<T>(extents)` — a new UNINITIALISED tensor. The one factory the
@@ -856,10 +904,10 @@ _TNY_API auto make_view(T * p, Shape e) { return wrap<Layout>(p, e); }
  *  `<teeny/cuda.h>` (their storage lives there). `T` defaults to `float`. Split
  *  by the resolved ownership so the `stack` case stays `_TNY_API` (host+device)
  *  while the allocating cases are `_TNY_HOST`. */
-template <class T = float, own O = own_deduce, class Layout = cs::layout_right, class Shape,
+template <class T = float, own O = own_deduce, class Layout = ccontiguous, class Shape,
           cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) == own::stack, int> = 0>
 _TNY_API auto empty(Shape = Shape{}) { return tensor<T, Shape, Layout, own::stack>{}; }
-template <class T = float, own O = own_deduce, class Layout = cs::layout_right, class Shape,
+template <class T = float, own O = own_deduce, class Layout = ccontiguous, class Shape,
           cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) != own::stack, int> = 0>
 _TNY_HOST auto empty(Shape e) {
     constexpr own R = own_resolve(O, Shape::rank_dynamic() == 0);
@@ -869,18 +917,18 @@ _TNY_HOST auto empty(Shape e) {
 /** @brief Value-tag backend form: `empty<T>(extents, own_c<own::gpu>{})`. Always
  *  `_TNY_HOST` (a host-side convenience); for a device-usable static-shape build
  *  spell the backend as a template arg — `empty<T, own::stack>(extents)`. */
-template <class T = float, class Layout = cs::layout_right, class Shape, own O>
+template <class T = float, class Layout = ccontiguous, class Shape, own O>
 _TNY_HOST auto empty(Shape e, own_c<O>) { return empty<T, O, Layout>(e); }
 
 /** @brief `make_local<T>(extents)` — a stack-owned tensor (static shape).
  *         `T` defaults to `float` (numpy's default float dtype). Thin spelling of
  *         `empty<T, own::stack>`. */
-template <class T = float, class Layout = cs::layout_right, class Shape>
+template <class T = float, class Layout = ccontiguous, class Shape>
 _TNY_API auto make_local(Shape = Shape{}) { return empty<T, own::stack, Layout>(Shape{}); }
 
 /** @brief `make_heap<T>(extents)` — a heap-owned tensor (host, move-only).
  *         `T` defaults to `float`. Thin spelling of `empty<T, own::heap>`. */
-template <class T = float, class Layout = cs::layout_right, class Shape>
+template <class T = float, class Layout = ccontiguous, class Shape>
 _TNY_HOST auto make_heap(Shape e) { return empty<T, own::heap, Layout>(e); }
 
 /* --- numpy-style creation factories: static shape -> stack (host+device),   *
@@ -899,11 +947,11 @@ _TNY_HOST auto make_heap(Shape e) { return empty<T, own::heap, Layout>(e); }
  *  (`gpu`) fill needs a kernel launch, so it is a `static_assert` steering you to
  *  `to<own::gpu>(full<T>(s, v))`. Split by resolved ownership for the
  *  `_TNY_API`/`_TNY_HOST` annotation. */
-template <class T = void, own O = own_deduce, class Layout = cs::layout_right, class Shape, class V,
+template <class T = void, own O = own_deduce, class Layout = ccontiguous, class Shape, class V,
           class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
           cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) == own::stack, int> = 0>
 _TNY_API auto full(Shape e, V v) { auto t = empty<ET, O, Layout>(e); t.fill_(static_cast<ET>(v)); return t; }
-template <class T = void, own O = own_deduce, class Layout = cs::layout_right, class Shape, class V,
+template <class T = void, own O = own_deduce, class Layout = ccontiguous, class Shape, class V,
           class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
           cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) != own::stack, int> = 0>
 _TNY_HOST auto full(Shape e, V v) {
@@ -912,7 +960,7 @@ _TNY_HOST auto full(Shape e, V v) {
     auto t = empty<ET, O, Layout>(e); t.fill_(static_cast<ET>(v)); return t;
 }
 /** @brief Value-tag backend form: `full<T>(extents, v, own_c<own::pinned>{})`. */
-template <class T = void, class Layout = cs::layout_right, class Shape, class V, own O>
+template <class T = void, class Layout = ccontiguous, class Shape, class V, own O>
 _TNY_HOST auto full(Shape e, V v, own_c<O>) { return full<T, O, Layout>(e, v); }
 
 /** @brief `zeros<T>(extents)` / `ones<T>(extents)` — a new tensor of 0s / 1s.
@@ -920,21 +968,21 @@ _TNY_HOST auto full(Shape e, V v, own_c<O>) { return full<T, O, Layout>(e, v); }
  *         as `full` (a device backend `static_assert`s — fill via
  *         `to<own::gpu>(zeros<T>(shape))`); the annotation is split to match the
  *         `full` overload each routes to. */
-template <class T = float, own O = own_deduce, class Layout = cs::layout_right, class Shape,
+template <class T = float, own O = own_deduce, class Layout = ccontiguous, class Shape,
           cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) == own::stack, int> = 0>
 _TNY_API  auto zeros(Shape e) { return full<T, O, Layout>(e, T(0)); }
-template <class T = float, own O = own_deduce, class Layout = cs::layout_right, class Shape,
+template <class T = float, own O = own_deduce, class Layout = ccontiguous, class Shape,
           cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) != own::stack, int> = 0>
 _TNY_HOST auto zeros(Shape e) { return full<T, O, Layout>(e, T(0)); }
-template <class T = float, class Layout = cs::layout_right, class Shape, own O>
+template <class T = float, class Layout = ccontiguous, class Shape, own O>
 _TNY_HOST auto zeros(Shape e, own_c<O>) { return zeros<T, O, Layout>(e); }
-template <class T = float, own O = own_deduce, class Layout = cs::layout_right, class Shape,
+template <class T = float, own O = own_deduce, class Layout = ccontiguous, class Shape,
           cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) == own::stack, int> = 0>
 _TNY_API  auto ones(Shape e) { return full<T, O, Layout>(e, T(1)); }
-template <class T = float, own O = own_deduce, class Layout = cs::layout_right, class Shape,
+template <class T = float, own O = own_deduce, class Layout = ccontiguous, class Shape,
           cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) != own::stack, int> = 0>
 _TNY_HOST auto ones(Shape e) { return full<T, O, Layout>(e, T(1)); }
-template <class T = float, class Layout = cs::layout_right, class Shape, own O>
+template <class T = float, class Layout = ccontiguous, class Shape, own O>
 _TNY_HOST auto ones(Shape e, own_c<O>) { return ones<T, O, Layout>(e); }
 
 /** @brief `arange<T>(n)` — a 1-D tensor `[0, 1, ..., n-1]` (heap, host). `T`
@@ -947,14 +995,14 @@ _TNY_HOST auto arange(long n) {
     using E = cs::dextents<cs::int64_t, 1>;
     static_assert(own_is_host_accessible(own_resolve(O, false)),
         "arange<..., own::gpu>: a device fill needs a kernel launch; use to<own::gpu>(arange<T>(n)).");
-    auto t = empty<T, O, cs::layout_right>(E{n}); t.iota_(); return t;
+    auto t = empty<T, O, ccontiguous>(E{n}); t.iota_(); return t;
 }
 /** @brief Value-tag backend form: `arange<T>(n, own_c<own::pinned>{})`. */
 template <class T = cs::int64_t, own O>
 _TNY_HOST auto arange(long n, own_c<O>) { return arange<T, O>(n); }
 /** @brief Static `arange<T, N>()` — a stack `[0..N-1]` (host+device, folds). */
 template <class T = cs::int64_t, long N>
-_TNY_API auto arange() { tensor<T, cs::extents<cs::int64_t, static_cast<cs::size_t>(N)>, cs::layout_right, own::stack> t{}; t.iota_(); return t; }
+_TNY_API auto arange() { tensor<T, cs::extents<cs::int64_t, static_cast<cs::size_t>(N)>, ccontiguous, own::stack> t{}; t.iota_(); return t; }
 /** @brief `arange<T>(Int<N>())` — the static form spelled with a static integer. */
 template <class T = cs::int64_t, class V, V N>
 _TNY_API auto arange(cs::integral_constant<V, N>) { return arange<T, static_cast<long>(N)>(); }

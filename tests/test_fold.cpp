@@ -96,7 +96,7 @@ int main() {
     if (!r0.is_contiguous())               return 30;
     if (!r0.is_contiguous<layout_right>()) return 31;
     if (!r0.is_contiguous<layout_left>())  return 32;
-    // and a rank-0 result flows through clone() (it gates on is_contiguous<corder>())
+    // and a rank-0 result flows through clone() (it gates on is_contiguous<ccontiguous>())
     auto r0c = r0.clone();
     if (r0c.item() != cc(0,0,0))           return 33;
 
