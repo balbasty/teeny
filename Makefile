@@ -78,10 +78,25 @@ examples: verb.build $(EXAMPLES) verb.build.done
 
 run-examples: verb.run $(EXAMPLES:$(BUILDDIR)/ex_%=runex-%) verb.run.done
 
+# Release build of the tests: optimized, assertions stripped via the ISO -DNDEBUG
+# (so _TNY_CHECK precondition checks compile out) — the "trust the inputs" build.
+# Recursive so the flag change forces a clean rebuild (a bare `.cpp` is unchanged,
+# so make would otherwise reuse the default-build binaries).
+release:
+	$(MAKE) clean
+	$(MAKE) CXXFLAGS='$(CXXFLAGS) -O2 -DNDEBUG' run-test
+
+# Hardened build: turn ON the opt-in element-access bounds checks (mdspan, and thus
+# teeny, is unchecked by default). Independent of NDEBUG, so it composes with a
+# release build; verifies the checks don't reject valid access.
+hardened:
+	$(MAKE) clean
+	$(MAKE) CXXFLAGS='$(CXXFLAGS) -O2 -DTNY_HARDENED' run-test
+
 clean:
 	$(DEL) $(TESTS) $(EXAMPLES)
 
-.PHONY: all test run-test examples run-examples clean
+.PHONY: all test run-test examples run-examples release hardened clean
 
 ########################################################################
 # 	Rules

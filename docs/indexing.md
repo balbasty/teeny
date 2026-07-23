@@ -65,8 +65,14 @@ existing code unchanged. Two guarantees keep them safe to fold:
 kept axes explicitly (or use `all`).
 
 The one rule: **passing a negative runtime index to a `u`-accessor is undefined
-behaviour** — that is the promise you make in exchange for the tighter codegen. teeny
-has no element bounds check to begin with, so `uget` is simply the wrap-free read/write.
+behaviour** — that is the promise you make in exchange for the tighter codegen.
+
+By default teeny does no bounds checking either (like `mdspan`'s subscript — an
+out-of-range index is UB), so in a default build `uget` differs from `operator()`
+only by the dropped wrap. Build with **`-DTNY_HARDENED`** to turn on a per-index
+bounds check in the *checked* accessors (`operator()`/`at`/slice) — the `u*`
+accessors always skip it, so under hardening they are the deliberate opt-out (the
+`get_unchecked` role). The bounds check is always off on the device.
 
 ## Slicing → a sub-view (no copy)
 
