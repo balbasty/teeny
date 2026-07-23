@@ -118,10 +118,11 @@ namespace _detail {
 // non-negative strides — see layout.h.)
 //
 // NOTE the span == numel for a CONTIGUOUS device view (so it copies exactly the
-// viewed extent — optimal), but span > numel for a STRIDED device view (e.g. a
-// column of a big matrix): the download then over-copies the underlying volume.
-// Correct, but wasteful for pathologically strided device views; a run-wise /
-// contiguous-then-copy gather is the follow-up (#50).
+// viewed extent — optimal). For a STRIDED device view span > numel; when the
+// innermost axis is unit-stride (a padded sub-block) the run-wise path below
+// gathers only the runs (#50). A view with NO unit-stride axis (e.g. a single
+// strided column) still over-copies its span — a general device gather kernel is
+// the remaining follow-up.
 template <class E2, class T, class Shape, class Layout, own O>
 _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
     using Ts  = cs::remove_cv_t<T>;
@@ -141,6 +142,34 @@ _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
             }
         }
         const cs::size_t span = empty ? 0 : static_cast<cs::size_t>(hi - lo + 1);
+        // #50 run-wise gather: when the INNERMOST axis is unit-stride and the span
+        // has GAPS (span > numel — e.g. a padded sub-block: rows are contiguous but
+        // separated by the parent's row pitch), copy the contiguous runs straight
+        // into a dense row-major buffer instead of dragging the whole span (gaps and
+        // all) across the bus. One D2H memcpy per run (`numel` elements total) vs one
+        // of `span`. A stride-1 inner axis with span == numel is already fully
+        // contiguous (the single-span copy below is optimal); other layouts (no
+        // unit-stride axis, e.g. a strided column) still fall back — a general device
+        // gather kernel is the remaining follow-up.
+        if constexpr (Shape::rank() > 0) {
+            const Idx inner = static_cast<Idx>(x.extent(x.rank() - 1));
+            if (!empty && span > static_cast<cs::size_t>(x.numel())
+                       && static_cast<Idx>(x.stride(x.rank() - 1)) == Idx(1) && inner > Idx(1)) {
+                auto dense = make_heap<Ts>(x.extents());                 // dense row-major, x's extents
+                const Idx nouter = static_cast<Idx>(x.numel()) / inner;   // one run per outer index tuple
+                for (Idx o = 0; o < nouter; ++o) {
+                    Idx rem = o, src = 0;                                  // decode o over the outer axes (row-major)
+                    for (int d = static_cast<int>(x.rank()) - 2; d >= 0; --d) {
+                        const Idx e = static_cast<Idx>(x.extent(static_cast<cs::size_t>(d)));
+                        const Idx k = rem % e; rem /= e;
+                        src += k * static_cast<Idx>(x.stride(static_cast<cs::size_t>(d)));   // signed
+                    }
+                    cudaMemcpy(dense.data() + o * inner, x.data() + src,
+                               static_cast<cs::size_t>(inner) * sizeof(Ts), cudaMemcpyDeviceToHost);
+                }
+                return dense.template to<E2, true>();     // already dense row-major; convert to E2 (owning)
+            }
+        }
         auto raw = make_heap<Ts>(cs::dextents<cs::int64_t, 1>{ static_cast<cs::int64_t>(span) });   // 1-D host span buffer
         if (span) cudaMemcpy(raw.data(), x.data() + lo, span * sizeof(Ts), cudaMemcpyDeviceToHost);
         tensor<Ts, Shape, Layout, own::view> hv(raw.data() - lo, x.mapping());   // re-impose x's layout; origin at -lo
