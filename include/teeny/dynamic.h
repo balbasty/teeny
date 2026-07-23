@@ -139,6 +139,19 @@ struct anyrank {
         static_assert(N < 0, "anyrank::peel_front needs a NEGATIVE index (keep the last |N| dims)");
         return { *this };
     }
+
+    /** @brief The number of cells `peel_front<N>()` would yield — the product of
+     *         the peeled leading (batch) extents — computed directly, without
+     *         building the range. `N` is NEGATIVE (keep the last |N| dims), the
+     *         same sign as `peel_front`; `size_front<-2>()` is the flattened
+     *         batch count of a `(*batch, C, C)` carrier. */
+    template <long N>
+    _TNY_API offset_t size_front() const noexcept {
+        static_assert(N < 0, "anyrank::size_front needs a NEGATIVE index (keep the last |N| dims)");
+        offset_t n = 1;
+        for (int d = 0; d < ndim - static_cast<int>(-N); ++d) n *= shape(d);
+        return n;
+    }
 };
 
 /** @brief A range of fixed-rank-`Sr` sub-views over an `anyrank`'s batch axes. */
@@ -146,11 +159,7 @@ template <class T, class offset_t, class Meta, cs::size_t Sr>
 struct anyrank_front {
     anyrank<T, offset_t, Meta> src;
 
-    _TNY_API offset_t size() const noexcept {
-        offset_t n = 1;
-        for (int d = 0; d < src.ndim - static_cast<int>(Sr); ++d) n *= src.shape(d);
-        return n;
-    }
+    _TNY_API offset_t size() const noexcept { return src.template size_front<-static_cast<long>(Sr)>(); }
     _TNY_API auto operator[](offset_t i) const { return src.template _keep_last<Sr>(i); }
 
     struct iterator {

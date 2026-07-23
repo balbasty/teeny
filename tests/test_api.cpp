@@ -59,6 +59,13 @@ int main() {
     if (count != 6) return 9;                               // 2*3 lines
     if (checksum != (2*3*4-1)*(2*3*4)/2) return 10;          // sum 0..23
 
+    // ---- size_front<N>: peel count without building the range ----------
+    if (size_front<2>(t)  != 6)  return 30;                 // == peel_front<2>(t).size()
+    if (size_front<-1>(t) != 6)  return 31;                 // keep last 1 -> product of first 2
+    if (size_front<-2>(t) != 2)  return 32;                 // flattened batch (all but last 2)
+    if (size_front<0>(t)  != 1)  return 33;                 // peel 0 -> one cell
+    if (size_front<2>(t)  != (long)peel_front<2>(t).size()) return 34;
+
     // ---- slicing: kept axes stay static, ranged axis resolves at runtime -
     // (a range goes through a layout_stride view — see the CCCL note in
     //  tensor.h — so the ranged axis is dynamic, but `all`-kept axes stay static)

@@ -247,6 +247,8 @@ auto s = peel_at<0,1>(t, i);               // the i-th peeled sub-view (grid-str
 // --- nd-peel: peel the FIRST N axes (arbitrary batch rank) ---
 for (auto v : peel_front<N>(t)) f(v);      // v is (*spatial, C); N = #batch dims
 auto v = peel_front_at<N>(t, i);            // the i-th (grid-stride style)
+auto nb = size_front<N>(t);                 // #cells peel_front<N> yields (product of the peeled
+                                            //   extents), computed directly — no range materialised
 
 // --- dynamic-rank / dynamic-value host boundary (dynamic.h) ---
 auto at = as_anyrank(data, shape, stride, ndim);    // -> anyrank: rank-erased carrier; WRAPS the
@@ -261,6 +263,7 @@ dispatch_value<1,2,3>(D, [&](auto d){ kern<d.value>(v); });  // runtime value ->
 // (keep the last |N|), like the tensor's peel_front — anyrank asserts N<0.
 for (auto cell : at.peel_front<-Sr>()) kernel<Sr>(cell);  // Sr=2 -> peel_front<-2>; cell is rank-Sr
 auto cell = at.peel_front_at<-Sr>(i);         // i-th (grid-stride); .recast<shape<-1,c,c>>() folds inner dims
+auto nb = at.size_front<-Sr>();               // flattened batch count (no range built), same NEGATIVE arg
 ```
 
 ### Static vs runtime values (important idiom)
