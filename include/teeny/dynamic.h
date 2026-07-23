@@ -94,6 +94,7 @@ struct anyrank {
     template <cs::size_t R>
     _TNY_API dyn_tensor<T, offset_t, R> fixed() const {
         _device_guard();
+        _TNY_CHECK(static_cast<cs::size_t>(ndim) == R, "fixed<R>(): R must equal ndim (else reads past the shape/stride arrays)");
         using E = cs::dextents<offset_t, R>;
         cs::array<offset_t, R> ext{}, st{};
         for (cs::size_t i = 0; i < R; ++i) { ext[i] = shape(i); st[i] = stride(i); }

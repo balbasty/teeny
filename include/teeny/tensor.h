@@ -90,6 +90,13 @@ struct tensor : private Layout::template mapping<Shape> {
 
     /* --- constructors --------------------------------------------- */
     tensor() = default;
+    // Copy/move are induced by `store_` (view = shallow pointer copy; heap = move
+    // of the buffer). They are spelled out because the assignment operators below
+    // are — declaring an assignment operator would otherwise suppress the implicit
+    // constructors. `= default` keeps them trivial (a view stays trivially copyable
+    // / kernel-passable) and keeps a heap tensor move-only (its copy is deleted).
+    tensor(const tensor &) = default;
+    tensor(tensor &&)      = default;
 
     /** @brief View constructor: wrap `p` with the given mapping. */
     template <own OO = O, cs::enable_if_t<own_is_view(OO), int> = 0>
@@ -299,6 +306,7 @@ private:
             off += _wrap<Ax, Wrap>(a) * sd;                         // integer: drop this axis
         } else if constexpr (_is_slice_spec<Arg>::value) {
             const index_type step = static_cast<index_type>(a.step);
+            _TNY_CHECK(step != index_type(0), "slice step cannot be 0");  // runtime twin of the compile-time guard (avoids /0)
             // Resolve the (start, stop) defaults per step sign (forward: [0..n];
             // backward: start at the last, stop before index 0), then clamp + count
             // via the shared `_range_count` — the SAME body the compile-time fold
@@ -498,11 +506,21 @@ public:
     _TNY_API T item() const noexcept { return store_.data()[0]; }
 
     /* --- assign INTO a slice/temporary view: copies CONTENTS ------- *
-     * `a = b` on a NAMED view rebinds it (shallow — the C++ default). The result
-     * of a slice, e.g. `a(ellipsis) = b` or `a(0, all) = b`, is a TEMPORARY
-     * (rvalue) view; assigning to it copies b's elements into the viewed region
-     * (b broadcasts), the numpy `a[:] = b` meaning. The rvalue ref-qualifier is
-     * what tells the two apart. A scalar rhs fills. */
+     * `a = b` on a NAMED view (an lvalue) rebinds it (shallow — the C++ default).
+     * The result of a slice, e.g. `a(ellipsis) = b` or `a(0, all) = b`, is a
+     * TEMPORARY (rvalue) view; assigning to it copies b's elements into the viewed
+     * region (b broadcasts), the numpy `a[:] = b` meaning. The ref-qualifier is
+     * what tells the two apart. A scalar rhs fills.
+     *
+     * The rebind operators are `&`-qualified (lvalue-only) and defaulted — this is
+     * load-bearing, not cosmetic. Left implicit, the compiler-generated copy/move
+     * assignment is unqualified, so for an rvalue `*this` with a SAME-TYPE rhs it
+     * out-ranks the templated deep-copy below (a non-template beats a template),
+     * and `a(slice) = b` silently rebinds a discarded temporary — a no-op. Being
+     * `&`-qualified, these apply only to the lvalue rebind and leave every rvalue
+     * assignment to the deep-copy template. `= default` keeps them trivial. */
+    tensor & operator=(const tensor &) &  = default;   // lvalue: rebind (shallow)
+    tensor & operator=(tensor &&)      &  = default;
     template <class B, class E2, class L2, own O2>
     _TNY_API void operator=(const tensor<B,E2,L2,O2> & rhs) && { this->copy_(rhs); }
     template <cs::size_t R = rank(), cs::enable_if_t<(R > 0), int> = 0>
@@ -536,12 +554,14 @@ public:
     _TNY_API auto take_along(Args... args) noexcept {
         static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
         static_assert((_axis_in_range(Axes, rank()) && ...), "take_along: axis out of range");
+        static_assert(_all_distinct<_norm_axis(Axes, rank())...>(), "take_along: axes must be distinct");
         return _ta_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
     }
     template <long... Axes, class... Args>
     _TNY_API auto take_along(Args... args) const noexcept {
         static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
         static_assert((_axis_in_range(Axes, rank()) && ...), "take_along: axis out of range");
+        static_assert(_all_distinct<_norm_axis(Axes, rank())...>(), "take_along: axes must be distinct");
         return _ta_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
     }
 
@@ -634,8 +654,15 @@ private:
         static_assert(((NewExt < 0 ? 1 : 0) + ... + 0) <= 1, "reshape: at most one inferred (-1) dimension");
         using NE = cs::extents<index_type, (NewExt < 0 ? cs::dynamic_extent : static_cast<cs::size_t>(NewExt))...>;
         constexpr index_type known = (index_type(1) * ... * (NewExt < 0 ? index_type(1) : index_type(NewExt)));
+        constexpr bool has_inferred = ((NewExt < 0) || ...);
         _TNY_CHECK(is_contiguous<ccontiguous>(), "reshape: needs a C-contiguous tensor (clone() first)");
-        _TNY_CHECK(known != 0 && numel() % known == 0, "reshape: numel not divisible by given extents");
+        // With a `-1` the given extents must DIVIDE numel (the rest is inferred);
+        // without one they must equal it exactly — else reshape<2,3> of a 24-elem
+        // tensor would silently view only the first 6 (a divisor is not a reshape).
+        if constexpr (has_inferred)
+            _TNY_CHECK(known != 0 && numel() % known == 0, "reshape: numel not divisible by given extents");
+        else
+            _TNY_CHECK(known == numel(), "reshape: element count must match the given extents (no -1 to infer)");
         const index_type inferred = numel() / (known ? known : index_type(1));
         cs::array<index_type, sizeof...(NewExt)> ea{ (NewExt < 0 ? inferred : index_type(NewExt))... };
         return tensor<El, NE, ccontiguous, own_view_of(O)>(p, typename ccontiguous::template mapping<NE>(NE(ea)));
@@ -707,12 +734,18 @@ public:
     _TNY_API auto squeeze() noexcept {
         if constexpr (Ax == _ax_all) return _squeeze_all(store_.data(), cs::make_index_sequence<rank()>{});
         else { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range");
+               static_assert(Shape::static_extent(A) == cs::dynamic_extent || Shape::static_extent(A) == 1,
+                             "squeeze: axis must have extent 1");
+               _TNY_CHECK(extent(A) == index_type(1), "squeeze: axis must have extent 1");   // runtime check for a dynamic extent
                return as_tensor<own_view_of(O)>(_detail::squeeze_md<A>(mdspan(), cs::make_index_sequence<rank() - 1>{})); }
     }
     template <long Ax = _ax_all>
     _TNY_API auto squeeze() const noexcept {
         if constexpr (Ax == _ax_all) return _squeeze_all(store_.data(), cs::make_index_sequence<rank()>{});
         else { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range");
+               static_assert(Shape::static_extent(A) == cs::dynamic_extent || Shape::static_extent(A) == 1,
+                             "squeeze: axis must have extent 1");
+               _TNY_CHECK(extent(A) == index_type(1), "squeeze: axis must have extent 1");   // runtime check for a dynamic extent
                return as_tensor<own_view_of(O)>(_detail::squeeze_md<A>(mdspan(), cs::make_index_sequence<rank() - 1>{})); }
     }
 

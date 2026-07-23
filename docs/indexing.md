@@ -111,7 +111,9 @@ t(ellipsis) = b;     // whole-tensor slice-assign (copies b's elements in)
 If what remains after expansion is all integers you get an element `T&`; anything
 else yields a view. Assigning into a slice — `t(...) = b`, `t(0, all) = 5.0` —
 copies (see [Tensors & ownership](tensors.md), which contrasts it with the
-rebinding `a = b`).
+rebinding `a = b`). The copy runs front-to-back with no overlap check, so a slice
+that **overlaps its own source** (`a(slice(1,5)) = a(slice(0,4))`) reads cells it
+has already written — `clone()` the source first if the regions overlap.
 
 Axes kept with `all` keep their static extent; a ranged axis becomes dynamic
 (its size is a runtime value). Reach for `all` when you want the extent to keep

@@ -492,6 +492,7 @@ _TNY_API void reduce_axes_(Out & out, const A & a, R init, Op op, const bool * r
 template <long... Axes, class R, class Op, class T,class E,class L,own O,
           class OE = reduced_extents<E, Axes...>, cs::enable_if_t<OE::rank_dynamic() == 0, int> = 0>
 _TNY_API auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
+    static_assert((_axis_in_range(Axes, E::rank()) && ...), "reduction axis out of range");
     tensor<R, OE, ccontiguous, own::stack> out{};
     bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
     reduce_axes_<R>(out, a, init, op, red, cs::make_index_sequence<E::rank()>{});
@@ -501,6 +502,7 @@ _TNY_API auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
 template <long... Axes, class R, class Op, class T,class E,class L,own O,
           class OE = reduced_extents<E, Axes...>, cs::enable_if_t<OE::rank_dynamic() != 0, int> = 0>
 _TNY_HOST auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
+    static_assert((_axis_in_range(Axes, E::rank()) && ...), "reduction axis out of range");
     using I = typename E::index_type;
     bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
     cs::array<I, OE::rank()> ke{}; cs::size_t oi = 0;

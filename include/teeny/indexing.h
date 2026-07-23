@@ -47,6 +47,16 @@ template <cs::size_t... A> _TNY_API constexpr bool _is_perm() noexcept {
     return true;
 }
 
+// No repeats among A... (a SUBSET of axes, unlike `_is_perm` which needs a full
+// 0..N-1 permutation). Used by `take_along`, where a repeated axis would bind two
+// args to the same axis and silently drop one.
+template <cs::size_t... A> _TNY_API constexpr bool _all_distinct() noexcept {
+    constexpr cs::size_t N = sizeof...(A);
+    cs::size_t a[N ? N : 1] = { A... };
+    for (cs::size_t i = 0; i < N; ++i) for (cs::size_t j = i + 1; j < N; ++j) if (a[i] == a[j]) return false;
+    return true;
+}
+
 /** @brief Open-ended slice sentinel — teeny's `None` (python `a[:n]` / `a[m:]`).
  *
  * `slice(none, n)` starts at 0, `slice(m, none)` runs to the end, and
