@@ -48,6 +48,9 @@ zeros<T>(shape);  ones<T>(shape);   // T defaults to float; static->stack, dyn->
 full(shape, v);                     // element type = the VALUE's type (full<T>(...) to force)
 arange<T>(n);                       // 1-D [0..n-1] (heap); T defaults to int64
 arange<T, N>();  arange<T>(Int<N>());  // static 1-D [0..N-1] (stack, folds)
+zeros<T, own::pinned>(shape);  arange<T>(n, own_c<own::pinned>{});   // ...or name a
+                    // host-accessible backend (stack/heap/pinned/mapped); a gpu fill
+                    // static_asserts -> use to<own::gpu>(zeros<T>(shape))
 ```
 
 ---

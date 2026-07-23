@@ -186,5 +186,16 @@ int main()
     static_assert(decltype(em)::ownership == own::mapped, "empty value-tag -> mapped");
     em.zero_(); if (em(3) != 0.0) return 20;
 
+    // ---- fill factories reach host-accessible CUDA backends (pinned/mapped) --
+    auto zp = zeros<float, own::pinned>(shape<2,3>{});            // pinned zeros (host fill ok)
+    static_assert(decltype(zp)::ownership == own::pinned, "zeros<T,own::pinned> -> pinned");
+    if (zp(1,2) != 0.f) return 21;
+    auto ap = arange<int, own::pinned>(4);                        // pinned [0..3]
+    static_assert(decltype(ap)::ownership == own::pinned, "arange<T,own::pinned> -> pinned");
+    if (ap(3) != 3) return 22;
+    auto fm = full<double>(shape<2>{}, 2.0, own_c<own::mapped>{}); // mapped, value-tag
+    static_assert(decltype(fm)::ownership == own::mapped, "full value-tag -> mapped");
+    if (fm(1) != 2.0) return 23;
+
     return 0;
 }

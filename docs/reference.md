@@ -75,6 +75,7 @@ stack (host+device), dynamic shape → heap (host only):
 | `full(shape, v)` | stack or heap | **the value's type** (`full<T>(…)` to force) |
 | `arange<T>(n)` | `owned<T, shape<-1>>` | `T` (=`int64_t`); 1-D `[0,n)` |
 | `arange<T,N>()` / `arange<T>(Int<N>())` | `local<T, shape<N>>` | static 1-D `[0,N)` |
+| `zeros<T, own::S>(shape)` (also `ones`/`full`/`arange`) | owner in space `S` | host-accessible backend (`stack`/`heap`/`pinned`/`mapped`); `own::gpu` `static_assert`s → `to<own::gpu>(zeros<T>(shape))`. Value-tag: `zeros<T>(shape, own_c<own::S>{})` |
 
 ---
 
