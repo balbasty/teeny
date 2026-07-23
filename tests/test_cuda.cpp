@@ -169,10 +169,55 @@ int main()
     static_assert(decltype(bf)::ownership == own::heap, "download -> heap");
     if (bf(0,2) != 2.f || bf(1,0) != 3.f || bf(1,2) != 5.f) return 11;   // values, not transposed
 
-    // rvalue source (a temporary) must be COPIED, never borrowed (no dangling /
-    // no freed-device-memory view).
+    // rvalue source (a temporary) must never be BORROWED (no dangling /
+    // freed-device-memory view) — it is moved or copied into an owning result.
     auto tv = to<own::gpu>(make_gpu<float>(shape<2,3>{}));
-    static_assert(decltype(tv)::ownership == own::gpu, "rvalue source -> owning copy, not a view");
+    static_assert(decltype(tv)::ownership == own::gpu, "rvalue source -> owning, not a view");
+
+    // ---- #58: device data bound for the device stays on the device -----------
+    auto memc   = [](cudaMemcpyKind k){ return tny_fakecuda::memcpy_count[static_cast<unsigned>(k)]; };
+    auto resetc = []{ for (int i = 0; i < 5; ++i) tny_fakecuda::memcpy_count[i] = 0; };
+
+    auto hsrc = zeros<float, own::heap>(shape<3,4>{}); hsrc.iota_(0.f, 1.f);   // 0..11 (host)
+    auto gsrc = to<own::gpu>(hsrc);                          // upload -> owning gpu
+    static_assert(decltype(gsrc)::ownership == own::gpu, "upload -> gpu");
+
+    // (a) a gpu_view slice sent to the device BORROWS — no copy, stays a gpu_view
+    auto gview = gsrc(1, all);
+    static_assert(decltype(gview)::ownership == own::gpu_view, "slice of gpu -> gpu_view");
+    resetc();
+    auto gb = to<own::gpu>(gview);                           // already on device -> borrow
+    static_assert(decltype(gb)::ownership == own::gpu_view, "to<gpu>(gpu_view) borrows");
+    if (memc(cudaMemcpyDeviceToDevice) || memc(cudaMemcpyDeviceToHost) || memc(cudaMemcpyHostToDevice)) return 27;
+    if (gb.data() != gview.data()) return 28;               // aliases the source, no round-trip
+
+    // (b) a FORCED device->device copy of a dense source is ONE device-to-device
+    //     memcpy — never a host round-trip
+    resetc();
+    auto gcopy = to<own::gpu, void, true>(gsrc);
+    static_assert(decltype(gcopy)::ownership == own::gpu, "forced -> owning gpu");
+    if (memc(cudaMemcpyDeviceToDevice) != 1) return 29;
+    if (memc(cudaMemcpyDeviceToHost) != 0)  return 30;      // no download
+    if (gcopy.data() == gsrc.data())        return 31;      // distinct storage
+    if (to<own::heap>(gcopy)(2,3) != 11.f)  return 32;      // values preserved
+
+    // (c) an rvalue owning gpu of the same space is MOVED — buffer stolen, zero memcpy
+    auto gtmp = to<own::gpu, void, true>(gsrc);
+    resetc();
+    auto gmv = to<own::gpu>(cs::move(gtmp));
+    static_assert(decltype(gmv)::ownership == own::gpu, "moved rvalue -> owning gpu");
+    if (memc(cudaMemcpyDeviceToDevice) || memc(cudaMemcpyDeviceToHost) || memc(cudaMemcpyHostToDevice)) return 33;
+    if (to<own::heap>(gmv)(0,0) != 0.f || to<own::heap>(gmv)(2,3) != 11.f) return 34;   // stole the right buffer
+
+    // (d) a STRIDED device source forced to the device can't flat-densify, so it
+    //     falls back to the host densify (D2H + H2D), NOT a wrong flat D2D
+    auto gcol = gsrc(all, 1);                                // column -> stride-4 gpu_view (non-contiguous)
+    static_assert(decltype(gcol)::ownership == own::gpu_view, "column -> gpu_view");
+    resetc();
+    auto gcolc = to<own::gpu, void, true>(gcol);
+    if (memc(cudaMemcpyDeviceToDevice) != 0) return 35;     // NOT a flat D2D (would mis-densify)
+    if (memc(cudaMemcpyDeviceToHost) < 1 || memc(cudaMemcpyHostToDevice) < 1) return 36;   // host round-trip
+    if (to<own::heap>(gcolc)(2) != 9.f) return 37;          // column 1 = [1,5,9]
 
     // rank-0 device view download: read one element back from the GPU. Must
     // COMPILE (dense_host's span loop guards rank-0 now, #55) and round-trip.

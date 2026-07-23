@@ -159,36 +159,57 @@ _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
  *            auto e = to<own::gpu, half>(h);     // convert to half AND upload
  *            auto c = to<own::heap>(d);          // download device -> host
  *
- * **No-op when already there:** if the source is already an owning tensor of
- * element type `ET` in space `Space`, and `Force` is false, this returns a *view*
- * of it (no copy, borrows the source) — like any teeny view op. Pass `Force =
- * true` to always materialise a fresh owning copy (a force-clone into a space):
+ * **Stays put when already there (#58):** with `Force` false and no dtype change,
+ * a source already in a **compatible** space borrows instead of copying — the exact
+ * same space (`heap`->`heap`, `gpu`->`gpu`), OR a device source moving to a device
+ * space (a `gpu` OR a `gpu_view` slice -> `gpu`). So the common "send data that's
+ * already on the device to the device" returns a `gpu_view`, NOT a host round-trip.
+ * Pass `Force = true` for a fresh owning copy:
  *
- *            auto v = to<own::gpu>(g);           // g is already gpu<T> -> a view, no copy
+ *            auto v = to<own::gpu>(g);              // g is gpu (or a gpu_view slice) -> a view, no copy
  *            auto k = to<own::gpu, void, true>(g);  // forced: a fresh gpu copy
  *
- * Any **device** source — an owning `gpu` OR a `gpu_view` (a slice/permute/peel
- * of a gpu tensor) — is downloaded via `cudaMemcpy` (any layout, C/F/strided, is
- * preserved and densified on the host); a host-accessible source is read directly,
- * gathering only the viewed extent. `Space == stack` needs a static shape. Since
- * #15, a device view is correctly *typed* (`gpu_view`), so it takes the download
- * path instead of being host-dereferenced — the hazard the earlier version warned
- * about is closed. NB a **contiguous** device view downloads exactly its `numel`
- * elements; a **strided** device view currently downloads its full span (over-copies
- * — a run-wise gather is a tracked follow-up, #50).
+ * When a copy IS made: a **device -> device** copy (Force, same dtype) of a dense
+ * row-major source is a single **device-to-device** `cudaMemcpy` — no host hop; a
+ * strided device source falls back to the host densify (a device gather kernel is
+ * the #50 follow-up). A **device -> host** copy downloads via `cudaMemcpy` (any
+ * layout C/F/strided preserved, densified on the host). A **host -> device** copy
+ * reads the source directly (gathering only the viewed extent) and uploads.
+ * `Space == stack` needs a static shape.
  *
- * @note The no-copy branch returns a **borrow** of `x` (a `gpu_view` when `x` is a
- * gpu tensor, else a host `view`), so it must outlive the result — same lifetime
- * rule as `view()`/`permute()`/slicing. Calling it on a temporary lvalue would
- * dangle; the rvalue overload below forces a copy instead.
+ * @note The no-copy branch returns a **borrow** of `x` (a `gpu_view` for a device
+ * source, else a host `view`), so it must outlive the result — same lifetime rule
+ * as `view()`/`permute()`/slicing. On a temporary the rvalue overload below instead
+ * **moves** a same-space dense owning source (steals its buffer) or forces a copy,
+ * so nothing dangles. NB a **contiguous** device download copies exactly `numel`;
+ * a **strided** device download still copies its full span (over-copies — #50).
  */
 template <own Space, class ET = void, bool Force = false, class T, class Shape, class Layout, own O>
 _TNY_HOST auto to(const tensor<T, Shape, Layout, O> & x) {
     static_assert(!own_is_view(Space), "to<Space>: Space must be an owning space or stack, not a view kind");
     using Tb = cs::remove_cv_t<T>;
     using E2 = cs::conditional_t<cs::is_same<ET, void>::value, Tb, ET>;
-    if constexpr (!Force && cs::is_same<E2, Tb>::value && O == Space) {
-        return tensor<const Tb, Shape, Layout, own_view_of(O)>(x.data(), x.mapping());  // already there -> borrow (gpu_view if device)
+    if constexpr (!Force && cs::is_same<E2, Tb>::value
+                  && (O == Space || (own_is_device(O) && own_is_device(Space)))) {
+        // Already in a compatible space (exact same space, or both device) and
+        // same dtype -> borrow, no copy. This covers the common "move to the
+        // device data that's ALREADY on the device" (a gpu OR a gpu_view slice):
+        // it returns a gpu_view instead of round-tripping through the host.
+        return tensor<const Tb, Shape, Layout, own_view_of(O)>(x.data(), x.mapping());
+    } else if constexpr (own_is_device(O) && own_is_device(Space) && cs::is_same<E2, Tb>::value) {
+        // Device -> device, same dtype, but a fresh owning copy is wanted (Force).
+        // A DENSE row-major source densifies with a single device-to-device memcpy
+        // — no host round-trip. A strided/permuted device source still needs a
+        // reorder we can't do on-device without a kernel, so it falls back to the
+        // host densify (a device gather kernel is the #50 follow-up).
+        tensor<E2, Shape, cs::layout_right, Space> dst(x.extents());
+        if (x.template is_contiguous<cs::layout_right>())
+            cudaMemcpy(dst.data(), x.data(), static_cast<cs::size_t>(dst.numel()) * sizeof(E2), cudaMemcpyDeviceToDevice);
+        else {
+            auto host = _detail::dense_host<E2>(x);
+            cudaMemcpy(dst.data(), host.data(), static_cast<cs::size_t>(dst.numel()) * sizeof(E2), cudaMemcpyHostToDevice);
+        }
+        return dst;
     } else if constexpr (Space == own::stack) {
         auto host = _detail::dense_host<E2>(x);
         tensor<E2, Shape, cs::layout_right, own::stack> dst{};   // static shape
@@ -204,11 +225,21 @@ _TNY_HOST auto to(const tensor<T, Shape, Layout, O> & x) {
 }
 
 /** @brief Rvalue overload of `to<Space>`: a temporary source cannot be borrowed
- *  (the no-copy branch would dangle — and for a `gpu` temporary would point at
- *  freed device memory), so this always **forces a fresh owning copy**. */
+ *  (the no-copy branch would dangle — and for a device temporary would point at
+ *  freed device memory). A same-space, same-dtype, dense OWNING temporary is
+ *  **moved** (its buffer stolen — no copy, no round-trip); otherwise this forces a
+ *  fresh owning copy (which, for a device->device contiguous source, is the
+ *  device-to-device path above, not a host round-trip). */
 template <own Space, class ET = void, bool Force = false, class T, class Shape, class Layout, own O>
 _TNY_HOST auto to(tensor<T, Shape, Layout, O> && x) {
-    return to<Space, ET, /*Force=*/true>(x);   // x is a named lvalue here -> the const& overload, copy branch
+    using Tb = cs::remove_cv_t<T>;
+    using E2 = cs::conditional_t<cs::is_same<ET, void>::value, Tb, ET>;
+    if constexpr (!Force && own_is_owning(O) && O == Space && cs::is_same<E2, Tb>::value
+                  && cs::is_same<Layout, cs::layout_right>::value) {
+        return tensor<Tb, Shape, Layout, O>(cs::move(x));   // steal the buffer (already dense in-place)
+    } else {
+        return to<Space, ET, /*Force=*/true>(x);   // x is a named lvalue here -> the const& copy path
+    }
 }
 
 _TNY_NAMESPACE_END(tny)

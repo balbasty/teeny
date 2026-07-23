@@ -16,7 +16,12 @@ typedef enum {
     cudaMemcpyHostToHost = 0, cudaMemcpyHostToDevice = 1,
     cudaMemcpyDeviceToHost = 2, cudaMemcpyDeviceToDevice = 3, cudaMemcpyDefault = 4,
 } cudaMemcpyKind;
-static inline cudaError_t cudaMemcpy(void * dst, const void * src, std::size_t n, cudaMemcpyKind) {
+// Per-direction call counters, so a test can assert WHICH path `to<Space>` took
+// (e.g. a device->device move issues one DeviceToDevice and zero DeviceToHost —
+// no host round-trip). Real CUDA has no such hook; this is fake-runtime only.
+namespace tny_fakecuda { inline unsigned long memcpy_count[5] = {0, 0, 0, 0, 0}; }
+static inline cudaError_t cudaMemcpy(void * dst, const void * src, std::size_t n, cudaMemcpyKind k) {
+    if (static_cast<unsigned>(k) < 5) ++tny_fakecuda::memcpy_count[static_cast<unsigned>(k)];
     std::memcpy(dst, src, n); return cudaSuccess;
 }
 
