@@ -256,6 +256,9 @@ auto at = as_anyrank(data, shape, stride, ndim);    // -> anyrank: rank-erased c
                                              //   shape/stride arrays (1-D tensor views), NO copy; HOST only (default)
 auto ac = as_anyrank(data, shape, stride, ndim, copy_meta);  // COPIES into an inline TNY_MAX_RANK (default
                                              //   32) store -> trivially copyable, device-passable
+auto ag = as_anyrank<own::gpu_view>(dptr, shape, stride, ndim);  // DEVICE data: fixed()/peel_front yield
+                                             //   gpu_view cells (Space param; default own::view = host).
+                                             //   from_dlpack<T[,Space]>/dispatch_dlpack<Space> set+check it vs m->device
 dispatch_rank(at, [&](auto v){ kernel(v); });  // instantiates kernel once per TOTAL rank
 auto v3 = at.fixed<3>();                      // or force a known rank
 dispatch_value<1,2,3>(D, [&](auto d){ kern<d.value>(v); });  // runtime value -> static
