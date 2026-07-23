@@ -250,6 +250,8 @@ Axis reductions: a fully static result → stack (host+device); any dynamic resu
 |---|---|---|
 | `as_anyrank(data, shape, stride, ndim)` | `anyrank` (view store) | **wraps** the arrays, no copy (default; host only) |
 | `as_anyrank(data, shape, stride, ndim, copy_meta)` | `anyrank` (inline store) | **copies** into a `TNY_MAX_RANK` store (device-passable); `as_anyrank<N>(…,copy_meta)` sets capacity |
+| `as_anyrank<Space>(…)` | space-tagged `anyrank` | `Space` = the data's memory space (default `own::view` = host); pass `own::gpu_view` for a device pointer so `fixed`/`peel_front` yield `gpu_view` views |
+| `from_dlpack<T[, Space]>(m)` / `from_dlpack<T, R[, Space]>(m)` | `anyrank` / rank-`R` view | import a capsule; `Space` (default host) is **checked against `m→device`** — a `kDLCUDA` capsule needs `own::gpu_view` |
 | `at.fixed<R>()` | rank-`R` `dynamic_strides` view | requires `ndim == R` |
 | `dispatch_rank(at, f)` | `bool` | call `f` with a fixed-rank view chosen by runtime `ndim` (one instantiation per total rank) |
 | `at.peel_front<N>()` / `at.peel_front_at<N>(i)` | range / view | batch idiom: keep the last `\|N\|` dims static, peel the rest (one kernel per `\|N\|`) |

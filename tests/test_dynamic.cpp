@@ -90,5 +90,16 @@ int main()
     auto vc = ac.fixed<3>();
     if (vc(1,2,3) != buf[1*12+2*4+3]) return 16;
 
+    // ---- #38: memory-space tag. Default is host (own::view); as_anyrank<Space>
+    //           tags the carrier, and fixed()/peel_front propagate it. `buf` is a
+    //           stand-in device pointer — we only check TAGS/metadata, never deref.
+    static_assert(decltype(at)::space == own::view, "default carrier is host");
+    static_assert(decltype(at.fixed<3>())::ownership == own::view, "host fixed -> view");
+    auto dev = as_anyrank<own::gpu_view>(buf, shape, stride, 3);   // borrowed device ptr
+    static_assert(decltype(dev)::is_device, "as_anyrank<gpu_view> is device");
+    static_assert(decltype(dev.fixed<3>())::ownership == own::gpu_view, "device fixed -> gpu_view");
+    static_assert(decltype(dev.peel_front_at<-2>(0))::ownership == own::gpu_view, "device peel -> gpu_view");
+    if (dev.size_front<-2>() != 2) return 17;                      // batch count (host metadata)
+
     return 0;
 }

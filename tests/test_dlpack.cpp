@@ -91,5 +91,38 @@ int main()
     if (double(s0) != 7.0) return 19;                 // rank-0 <-> scalar
     ms->deleter(ms);
 
+    // ---- #38: memory space at the rank-erased boundary -----------------------
+    // A host capsule imports as host views (default), a kDLCUDA capsule imports
+    // as gpu_view-tagged views when asked for own::gpu_view. We only inspect
+    // METADATA (shape/stride live in the carrier / on the host) — never deref the
+    // views here, so `dbuf` needn't be real device memory for a type/label test.
+    {
+        // default host import -> own::view everywhere.
+        static_assert(decltype(from_dlpack<float>(&mm))::space == own::view, "host anyrank space");
+        static_assert(decltype(from_dlpack<float, 2>(&mm))::ownership == own::view, "host fixed -> view");
+
+        // a device-tagged capsule (kDLCUDA); data pointer is host memory here but
+        // we never dereference it — only the tag/rank is under test.
+        long dshape[3] = {2, 3, 4}, dstride[3] = {12, 4, 1};
+        DLManagedTensor md{};
+        md.dl_tensor.data = buf;                       // stand-in pointer (not dereferenced)
+        md.dl_tensor.device = {kDLCUDA, 0};
+        md.dl_tensor.ndim = 3;
+        md.dl_tensor.dtype = {kDLFloat, 32, 1};
+        md.dl_tensor.shape = dshape; md.dl_tensor.strides = dstride;
+
+        auto g = from_dlpack<float, own::gpu_view>(&md);          // device anyrank
+        static_assert(decltype(g)::space == own::gpu_view, "device anyrank tagged gpu_view");
+        static_assert(decltype(g)::is_device, "device anyrank is_device");
+        if (g.ndim != 3 || g.size(1) != 3) return 20;             // metadata read (host), no deref
+        static_assert(decltype(g.fixed<3>())::ownership == own::gpu_view, "device fixed -> gpu_view");
+        static_assert(decltype(g.peel_front_at<-2>(0))::ownership == own::gpu_view, "device peel -> gpu_view");
+        if (g.size_front<-2>() != 2) return 21;                    // batch count from host metadata
+
+        auto gf = from_dlpack<float, 3, own::gpu_view>(&md);      // device fixed-rank
+        static_assert(decltype(gf)::ownership == own::gpu_view, "device from_dlpack<T,R> -> gpu_view");
+        if (gf.extent(0) != 2 || gf.extent(2) != 4) return 22;    // extents only (no deref)
+    }
+
     return 0;
 }
