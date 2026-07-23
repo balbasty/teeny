@@ -80,7 +80,7 @@ auto hh = local<half, shape<64,64>>();
 | `tensor.h` | `tensor<T, Extents, Layout, own>` + `view`/`local`/`owned` + slicing / `take_along` / `at` |
 | `math.h` | in-place / out-of-place ops (broadcasting) + unary math + reductions |
 | `iterate.h` | nd-peel: `peel` / `peel_at` / `peel_front` / `peel_front_at` |
-| `dynamic.h` | `anyrank` (rank-erased carrier) + `peel_front<Sr>` + `dispatch_rank` |
+| `dynamic.h` | `anyrank` (rank-erased carrier) + `peel_front<-Sr>` + `dispatch_rank` |
 | `cuda.h` | opt-in gpu / pinned / mapped memory (needs the CUDA runtime) |
 
 ## Building & testing

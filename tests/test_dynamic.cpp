@@ -44,8 +44,9 @@ int main()
     bool ok0 = dispatch_rank(zero, [&](auto v){ r0 = decltype(v)::rank(); });
     if (!ok0 || r0 != 0) return 7;
 
-    // ---- peel_front<Sr>: peel the runtime batch dims, keep Sr static ---------
+    // ---- peel_front<-Sr>: peel the runtime batch dims, keep Sr static --------
     // shape (2,3,4): treat the last Sr=2 as "interesting", the first as batch.
+    // NB the arg is NEGATIVE on anyrank (keep the last |N|): Sr=2 -> peel_front<-2>.
     long acc = 0;
     long cells = 0;
     for (auto cell : at.peel_front<-2>()) {       // 2 batch cells, each a (3,4) view

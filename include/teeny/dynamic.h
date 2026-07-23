@@ -49,13 +49,18 @@ constexpr copy_meta_t copy_meta{};
  * statically-typed view at the boundary and compute on that:
  *   - `fixed<R>()`            — force a known total rank R.
  *   - `dispatch_rank(...)`    — pick R from the runtime `ndim`.
- *   - `peel_front<Sr>()`      — the batch idiom: peel the runtime number of
+ *   - `peel_front<-Sr>()`     — the batch idiom: peel the runtime number of
  *                               leading batch dims, keep the trailing `Sr`
  *                               "interesting" dims STATIC. One kernel per Sr.
+ *                               NB the template arg is NEGATIVE: pass `-Sr`
+ *                               (`peel_front<-2>()` keeps the last two dims),
+ *                               matching the tensor's `peel_front` sign rule —
+ *                               a positive front-count would leave a runtime
+ *                               rank, which can't be a static view (asserted).
  *
  * Deliberately no `add_`/`mul_`/etc.: a runtime-rank arithmetic path would loop
  * over `ndim` (killing folding) or dispatch to every rank (the bloat
- * `peel_front<Sr>` avoids). Do host-side math on a `fixed<R>()`/`peel_front<Sr>()`
+ * `peel_front<-Sr>` avoids). Do host-side math on a `fixed<R>()`/`peel_front<-Sr>()`
  * view instead.
  */
 template <class T, class offset_t = cs::int64_t, class Meta = _meta_store<offset_t, TNY_MAX_RANK>>
@@ -216,7 +221,7 @@ _TNY_HOST bool dispatch_from(const anyrank<T, offset_t, Meta> & t, F & f) {
  *
  * `f` is a generic callable instantiated once per possible rank; the kernel it
  * launches is fully static. Returns false if `ndim` exceeds `max_rank`. Prefer
- * `peel_front<Sr>` when only the trailing dims need to be static — one
+ * `peel_front<-Sr>` when only the trailing dims need to be static — one
  * instantiation instead of one per total rank.
  *
  *     dispatch_rank(as_anyrank(data, size, stride, ndim), [&](auto v){ kernel(v); });

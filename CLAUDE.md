@@ -46,7 +46,7 @@ include/teeny/
                    + reductions (sum/prod/max/min/dot). Members declared in
                    tensor.h, DEFINED here.
   iterate.h        nd-peel: peel / peel_at / peel_front / peel_front_at
-  dynamic.h        anyrank (rank-erased carrier) + peel_front<Sr> + dispatch_rank
+  dynamic.h        anyrank (rank-erased carrier) + peel_front<-Sr> + dispatch_rank
   cuda.h           gpu/pinned/mapped memory. Self-guarded (__has_include /
                    __CUDACC__): a no-op unless the CUDA runtime is reachable, so
                    teeny.h includes it unconditionally. TNY_NO_CUDA forces it off.
@@ -257,9 +257,10 @@ dispatch_rank(at, [&](auto v){ kernel(v); });  // instantiates kernel once per T
 auto v3 = at.fixed<3>();                      // or force a known rank
 dispatch_value<1,2,3>(D, [&](auto d){ kern<d.value>(v); });  // runtime value -> static
 // BATCH idiom (one kernel per Sr, not per total rank): peel the runtime batch
-// dims, keep the trailing Sr "interesting" dims static.
-for (auto cell : at.peel_front<Sr>()) kernel<Sr>(cell);   // each cell is rank-Sr
-auto cell = at.peel_front_at<Sr>(i);          // i-th (grid-stride); .recast<shape<-1,c,c>>() folds inner dims
+// dims, keep the trailing Sr "interesting" dims static. NB the arg is NEGATIVE
+// (keep the last |N|), like the tensor's peel_front — anyrank asserts N<0.
+for (auto cell : at.peel_front<-Sr>()) kernel<Sr>(cell);  // Sr=2 -> peel_front<-2>; cell is rank-Sr
+auto cell = at.peel_front_at<-Sr>(i);         // i-th (grid-stride); .recast<shape<-1,c,c>>() folds inner dims
 ```
 
 ### Static vs runtime values (important idiom)
