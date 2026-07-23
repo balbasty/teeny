@@ -873,8 +873,14 @@ template <class T = float, own O = own_deduce, class Layout = cs::layout_right, 
 _TNY_API auto empty(Shape = Shape{}) { return tensor<T, Shape, Layout, own::stack>{}; }
 template <class T = float, own O = own_deduce, class Layout = cs::layout_right, class Shape,
           cs::enable_if_t<own_resolve(O, Shape::rank_dynamic() == 0) != own::stack, int> = 0>
-_TNY_HOST auto empty(Shape e) { return tensor<T, Shape, Layout, own_resolve(O, Shape::rank_dynamic() == 0)>(e); }
-/** @brief Value-tag backend form: `empty<T>(extents, own_c<own::gpu>{})`. */
+_TNY_HOST auto empty(Shape e) {
+    constexpr own R = own_resolve(O, Shape::rank_dynamic() == 0);
+    static_assert(!own_is_view(R), "empty(): a non-owning view kind (view/gpu_view) has no storage to allocate — use wrap()/make_view() for a view.");
+    return tensor<T, Shape, Layout, R>(e);
+}
+/** @brief Value-tag backend form: `empty<T>(extents, own_c<own::gpu>{})`. Always
+ *  `_TNY_HOST` (a host-side convenience); for a device-usable static-shape build
+ *  spell the backend as a template arg — `empty<T, own::stack>(extents)`. */
 template <class T = float, class Layout = cs::layout_right, class Shape, own O>
 _TNY_HOST auto empty(Shape e, own_c<O>) { return empty<T, O, Layout>(e); }
 
