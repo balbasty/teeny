@@ -72,20 +72,17 @@ struct anyrank {
             ? Meta::extents_type::static_extent(0) : cs::size_t(TNY_MAX_RANK);
 
     // True for an inline (copy) store; false for a view store that wraps external
-    // host arrays. Only a device_passable carrier may be used inside a kernel.
+    // host arrays. CONTRACT: only a `device_passable` carrier (built with the
+    // `copy_meta` tag) may be passed into a kernel — a view carrier holds host
+    // pointers, so using it on the device is UB. This is the caller's guarantee,
+    // not a compile-time trip-wire: a former `static_assert(device_passable)` under
+    // `#ifdef __CUDA_ARCH__` OVER-FIRED — a HOST-only `fixed()`/`peel_front` on a
+    // view carrier is still instantiated in nvcc's device pass and tripped it,
+    // breaking valid host code under nvcc (#59). It could not distinguish a
+    // host-only instantiation from an actual device use, so it is gone; assert on
+    // `device_passable` yourself at your kernel boundary if you want the check.
     static constexpr bool device_passable =
         (Meta::extents_type::static_extent(0) != cs::dynamic_extent);
-
-    // Compile-time trip-wire: using a view carrier on the device dereferences raw
-    // host pointers (UB). Under nvcc's device pass this turns that into an error;
-    // it is inert on the host and for a copy carrier.
-    _TNY_API static void _device_guard() noexcept {
-#ifdef __CUDA_ARCH__
-        static_assert(device_passable,
-            "this anyrank WRAPS host arrays (default as_anyrank) and is host-only; "
-            "rebuild it with the `copy_meta` tag to use it on the device");
-#endif
-    }
 
     _TNY_API offset_t size(int i)  const noexcept { return shape(i); }   // size of dim i
     _TNY_API offset_t step(int i)  const noexcept { return stride(i); }  // stride of dim i
@@ -93,7 +90,6 @@ struct anyrank {
     /** @brief View this tensor as a fixed rank `R` (requires `ndim == R`). */
     template <cs::size_t R>
     _TNY_API dyn_tensor<T, offset_t, R> fixed() const {
-        _device_guard();
         _TNY_CHECK(static_cast<cs::size_t>(ndim) == R, "fixed<R>(): R must equal ndim (else reads past the shape/stride arrays)");
         using E = cs::dextents<offset_t, R>;
         cs::array<offset_t, R> ext{}, st{};
@@ -106,7 +102,6 @@ struct anyrank {
     // the leading `ndim - Sr` runtime batch axes into the pointer offset).
     template <cs::size_t Sr>
     _TNY_API dyn_tensor<T, offset_t, Sr> _keep_last(offset_t lin) const {
-        _device_guard();
         const int nb = ndim - static_cast<int>(Sr);          // # batch dims (runtime)
         _TNY_CHECK(nb >= 0, "peel_front: keep-count exceeds ndim");
         offset_t off = 0, rem = lin;                          // decode lin over batch axes
