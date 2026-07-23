@@ -30,6 +30,22 @@ template <class A> struct _is_index
 _TNY_API constexpr cs::size_t _norm_axis(long a, cs::size_t rank) noexcept {
     return static_cast<cs::size_t>(a < 0 ? a + static_cast<long>(rank) : a);
 }
+// Whether a signed axis (negatives count from the back) is valid for `rank`, i.e.
+// in [-rank, rank). Used by the view ops to reject an out-of-range axis at compile
+// time instead of silently wrapping to a huge index via `_norm_axis`.
+_TNY_API constexpr bool _axis_in_range(long a, cs::size_t rank) noexcept {
+    return a >= -static_cast<long>(rank) && a < static_cast<long>(rank);
+}
+// Whether the ALREADY-NORMALISED axes `A...` are a permutation of 0..N-1 (each in
+// range, no repeats). An out-of-range source axis normalises to a huge index >= N,
+// so this also catches that — `permute` needs a genuine permutation or it aliases.
+template <cs::size_t... A> _TNY_API constexpr bool _is_perm() noexcept {
+    constexpr cs::size_t N = sizeof...(A);
+    cs::size_t a[N ? N : 1] = { A... };
+    bool seen[N ? N : 1] = {};
+    for (cs::size_t i = 0; i < N; ++i) { if (a[i] >= N || seen[a[i]]) return false; seen[a[i]] = true; }
+    return true;
+}
 
 /** @brief Open-ended slice sentinel — teeny's `None` (python `a[:n]` / `a[m:]`).
  *

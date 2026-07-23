@@ -99,10 +99,12 @@ _TNY_API auto peel_at(const MD & src, typename MD::index_type i) {
 // peel; const -> read-only peel. A device source (gpu/gpu_view) yields gpu_view.
 template <long... Axes, class T, class E, class L, own O>
 _TNY_API auto peel_at(tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i) {
+    static_assert((_axis_in_range(Axes, tensor<T,E,L,O>::rank()) && ...), "peel_at: axis out of range");
     return _md::peel_at_ow<own_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>(t.mdspan(), i);
 }
 template <long... Axes, class T, class E, class L, own O>
 _TNY_API auto peel_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i) {
+    static_assert((_axis_in_range(Axes, tensor<T,E,L,O>::rank()) && ...), "peel_at: axis out of range");
     return _md::peel_at_ow<own_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>(t.mdspan(), i);
 }
 
@@ -137,10 +139,12 @@ struct peel_range {
  *         yields mutable peel; const `t` yields read-only peel. */
 template <long... Axes, class T, class E, class L, own O>
 _TNY_API auto peel(tensor<T,E,L,O> & t) {
+    static_assert((_axis_in_range(Axes, tensor<T,E,L,O>::rank()) && ...), "peel: axis out of range");
     return peel_range<decltype(t.mdspan()), own_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>{ t.mdspan() };
 }
 template <long... Axes, class T, class E, class L, own O>
 _TNY_API auto peel(const tensor<T,E,L,O> & t) {
+    static_assert((_axis_in_range(Axes, tensor<T,E,L,O>::rank()) && ...), "peel: axis out of range");
     return peel_range<decltype(t.mdspan()), own_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>{ t.mdspan() };
 }
 /** @brief Build a range of sub-views over a raw mdspan. */
@@ -154,8 +158,11 @@ template <class T, cs::size_t... A> _TNY_API auto sfront_at(T & t, typename T::i
 
 // # of FRONT axes to peel for a peel_front index N over a rank-R tensor:
 //   N >= 0 -> peel the first N axes;  N < 0 -> keep the last |N| (peel R - |N|).
-template <long N, cs::size_t R> constexpr cs::size_t _front_count()
-{ return N >= 0 ? static_cast<cs::size_t>(N) : R - static_cast<cs::size_t>(-N); }
+// N must be in [-R, R] (else R - |N| underflows into a giant index_sequence).
+template <long N, cs::size_t R> constexpr cs::size_t _front_count() {
+    static_assert(N >= -static_cast<long>(R) && N <= static_cast<long>(R), "peel_front: N out of range [-rank, rank]");
+    return N >= 0 ? static_cast<cs::size_t>(N) : R - static_cast<cs::size_t>(-N);
+}
 
 /** @brief Peel the FIRST `N` axes -> a range of sub-views over the rest — the
  *         runtime-batch-rank half of `(*batch, *spatial, C)`. `N` is **signed**:

@@ -499,30 +499,32 @@ public:
     template <long... Axes, class... Args>
     _TNY_API auto take_along(Args... args) noexcept {
         static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
+        static_assert((_axis_in_range(Axes, rank()) && ...), "take_along: axis out of range");
         return _ta_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
     }
     template <long... Axes, class... Args>
     _TNY_API auto take_along(Args... args) const noexcept {
         static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
+        static_assert((_axis_in_range(Axes, rank()) && ...), "take_along: axis out of range");
         return _ta_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
     }
 
     /** @brief Reorder the axes (a permutation of 0..N-1; negatives wrap) -> a rank-N view. */
     template <long... Perm>
     _TNY_API auto permute() noexcept
-    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor<own_view_of(O)>(_detail::perm_md(mdspan(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
+    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); static_assert(_is_perm<_norm_axis(Perm, rank())...>(), "permute: axes must be a permutation of 0..N-1 (in range, no repeats)"); return as_tensor<own_view_of(O)>(_detail::perm_md(mdspan(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
     template <long... Perm>
     _TNY_API auto permute() const noexcept
-    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); return as_tensor<own_view_of(O)>(_detail::perm_md(mdspan(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
+    { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); static_assert(_is_perm<_norm_axis(Perm, rank())...>(), "permute: axes must be a permutation of 0..N-1 (in range, no repeats)"); return as_tensor<own_view_of(O)>(_detail::perm_md(mdspan(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
 
     /** @brief Reverse axis `Ax` (negatives wrap) -> a view (numpy `flip`). Uses a
      *         negative stride, so the index type must be signed (`shape<...>` is). */
     template <long Ax = 0>
     _TNY_API auto flip() noexcept
-    { return as_tensor<own_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(mdspan(), cs::make_index_sequence<rank()>{})); }
+    { static_assert(_axis_in_range(Ax, rank()), "flip: axis out of range"); return as_tensor<own_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(mdspan(), cs::make_index_sequence<rank()>{})); }
     template <long Ax = 0>
     _TNY_API auto flip() const noexcept
-    { return as_tensor<own_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(mdspan(), cs::make_index_sequence<rank()>{})); }
+    { static_assert(_axis_in_range(Ax, rank()), "flip: axis out of range"); return as_tensor<own_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(mdspan(), cs::make_index_sequence<rank()>{})); }
 
     /** @brief A dense, row-major OWNING copy of this tensor (materialise a view /
      *         non-contiguous / permuted / flipped tensor). Static shape -> stack
