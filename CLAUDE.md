@@ -90,11 +90,12 @@ struct tensor;
   (host `new[]`, move-only), CUDA `gpu`/`pinned`/`mapped` (from `cuda.h`), or
   `gpu_view` (a non-owning view of **device** memory). Slicing / permuting /
   peeling / `.at()` of a `gpu` tensor yields a `gpu_view`, not a `view`, so a
-  device pointer is never mistaken for a host one in the type. Helpers:
-  `own_is_device(O)` (gpu/gpu_view), `own_is_host_accessible(O)`, `own_is_view(O)`
-  (view/gpu_view), `own_view_of(O)` (the view kind that preserves a source's
-  space — used by every view-producing op). `pinned`/`mapped` are host-accessible,
-  so their views are plain `view`.
+  device pointer is never mistaken for a host one in the type. `pinned`/`mapped`
+  views likewise keep their space (`pinned_view`/`mapped_view`) so DLPack labels
+  them `kDLCUDAHost`; they are still host-accessible and behave like `view`
+  otherwise. Helpers: `own_is_device(O)` (gpu/gpu_view), `own_is_host_accessible(O)`,
+  `own_is_view(O)` (view/gpu_view/pinned_view/mapped_view), `own_view_of(O)` (the
+  view kind that preserves a source's space — used by every view-producing op).
 
 The mapping lives in an **empty base** (private inheritance → EBO), so a
 fully-static stack tensor is *exactly* `sizeof` its data.

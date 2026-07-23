@@ -73,13 +73,16 @@ template <class T> _TNY_HOST bool dtype_matches(const DLDataType & d) {
 }
 
 // teeny ownership -> DLDevice type. A device tensor/view (gpu/gpu_view) is CUDA;
-// a plain host view is kDLCPU by default (override with the explicit-device
+// pinned/mapped and their views (pinned_view/mapped_view) are kDLCUDAHost; a plain
+// host view/stack/heap is kDLCPU (override any of these with the explicit-device
 // to_dlpack overload).
 template <own O> _TNY_HOST constexpr DLDeviceType device_of() {
     return own_is_device(O) ? kDLCUDA          // gpu OR gpu_view
-         : O == own::pinned ? kDLCUDAHost
-         : O == own::mapped ? kDLCUDAHost   // cudaHostAllocMapped = page-locked HOST memory (zero-copy),
-                                            //   NOT managed/UVM — kDLCUDAHost is the honest label
+         : (O == own::pinned || O == own::pinned_view) ? kDLCUDAHost
+         : (O == own::mapped || O == own::mapped_view) ? kDLCUDAHost
+                                            // cudaHostAllocMapped = page-locked HOST memory (zero-copy),
+                                            //   NOT managed/UVM — kDLCUDAHost is the honest label; a view
+                                            //   of pinned/mapped keeps that label (pinned_view/mapped_view)
                             : kDLCPU;   // host view / stack / heap
 }
 
@@ -130,12 +133,13 @@ _TNY_HOST DLManagedTensor * make_managed(const tensor<T, Shape, Layout, O> & t, 
 
 /* ============================ export (teeny -> DLPack) ============================ */
 
-/** @brief Export a **view** (host `view` or device `gpu_view`) to a
- *         `DLManagedTensor` (borrows the data — the caller must keep the
+/** @brief Export a **view** (`view` / `gpu_view` / `pinned_view` / `mapped_view`)
+ *         to a `DLManagedTensor` (borrows the data — the caller must keep the
  *         underlying memory alive; only the metadata is owned by the capsule).
  *         The device defaults to the tensor's memory space (`kDLCPU` for a host
- *         view, `kDLCUDA` for a `gpu_view`; pass `dev` to override). The consumer
- *         owns the returned pointer and MUST call `m->deleter(m)` exactly once. */
+ *         view, `kDLCUDA` for a `gpu_view`, `kDLCUDAHost` for a `pinned_view`/
+ *         `mapped_view`; pass `dev` to override). The consumer owns the returned
+ *         pointer and MUST call `m->deleter(m)` exactly once. */
 template <class T, class Shape, class Layout, own O,
           cs::enable_if_t<own_is_view(O), int> = 0>
 _TNY_HOST DLManagedTensor * to_dlpack(const tensor<T, Shape, Layout, O> & t,

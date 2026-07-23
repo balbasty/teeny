@@ -25,16 +25,21 @@ namespace cs = cuda::std;
 //                 counterpart of `view`). Slicing / permuting / peeling a `gpu`
 //                 tensor yields a `gpu_view`, not a `view`, so device pointers
 //                 stay distinguishable from host ones in the type.
-enum class own { view, stack, heap, gpu, pinned, mapped, gpu_view };
+//  - `pinned_view` / `mapped_view` : the same idea for `pinned` / `mapped` — a
+//                 view of page-locked host memory keeps its space (both are
+//                 host-dereferenceable, so they behave like `view` everywhere
+//                 except the DLPack device label, which stays `kDLCUDAHost`).
+enum class own { view, stack, heap, gpu, pinned, mapped, gpu_view, pinned_view, mapped_view };
 
 /** @brief Whether the mode owns (and therefore allocates) its storage. */
 _TNY_API constexpr bool own_is_owning(own o) noexcept {
     return o == own::heap || o == own::gpu || o == own::pinned || o == own::mapped;
 }
-/** @brief Whether the mode is a non-owning view (host `view` or `gpu_view`) — the
- *         pointer-wrapping modes (as opposed to `stack`'s inline array). */
+/** @brief Whether the mode is a non-owning view (`view`/`gpu_view`/`pinned_view`/
+ *         `mapped_view`) — the pointer-wrapping modes (vs `stack`'s inline array). */
 _TNY_API constexpr bool own_is_view(own o) noexcept {
-    return o == own::view || o == own::gpu_view;
+    return o == own::view || o == own::gpu_view
+        || o == own::pinned_view || o == own::mapped_view;
 }
 /** @brief Whether the storage lives in device (GPU) memory (owning or view). */
 _TNY_API constexpr bool own_is_device(own o) noexcept {
@@ -45,11 +50,15 @@ _TNY_API constexpr bool own_is_host_accessible(own o) noexcept {
     return !own_is_device(o);
 }
 /** @brief The non-owning VIEW kind that preserves a source's memory space: a
- *         device source (`gpu`/`gpu_view`) -> `gpu_view`, anything else -> `view`.
- *         Every view-producing op (slice / permute / peel / reshape / at) tags its
- *         result with this so a device view is never mistaken for a host one. */
+ *         device source (`gpu`/`gpu_view`) -> `gpu_view`, a `pinned`/`mapped`
+ *         source -> `pinned_view`/`mapped_view`, anything else -> `view`. Every
+ *         view-producing op (slice / permute / peel / reshape / at) tags its
+ *         result with this so a view never loses (or misreports) its space. */
 _TNY_API constexpr own own_view_of(own o) noexcept {
-    return own_is_device(o) ? own::gpu_view : own::view;
+    return own_is_device(o)                            ? own::gpu_view
+         : (o == own::pinned || o == own::pinned_view) ? own::pinned_view
+         : (o == own::mapped || o == own::mapped_view) ? own::mapped_view
+                                                       : own::view;
 }
 
 /** @brief Factory sentinel meaning "deduce the ownership from the shape" — a fully
@@ -117,6 +126,24 @@ struct storage<T, own::view, N> {
  *     a distinct `own` so the memory space is carried in the type) ---------- */
 template <class T, cs::size_t N>
 struct storage<T, own::gpu_view, N> {
+    T * p = nullptr;
+    storage() = default;
+    _TNY_API constexpr storage(T * q) noexcept : p(q) {}
+    _TNY_API constexpr T * data() const noexcept { return p; }
+};
+
+/* --- pinned_view / mapped_view: non-owning pointer into page-locked HOST memory
+ *     (host-dereferenceable like `view`, a distinct `own` so the space is carried
+ *     in the type for a correct DLPack `kDLCUDAHost` label) ------------------ */
+template <class T, cs::size_t N>
+struct storage<T, own::pinned_view, N> {
+    T * p = nullptr;
+    storage() = default;
+    _TNY_API constexpr storage(T * q) noexcept : p(q) {}
+    _TNY_API constexpr T * data() const noexcept { return p; }
+};
+template <class T, cs::size_t N>
+struct storage<T, own::mapped_view, N> {
     T * p = nullptr;
     storage() = default;
     _TNY_API constexpr storage(T * q) noexcept : p(q) {}

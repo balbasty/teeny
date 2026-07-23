@@ -42,7 +42,13 @@ int main()
     static_assert(own_view_of(own::gpu) == own::gpu_view, "view of gpu -> gpu_view");
     static_assert(own_view_of(own::gpu_view) == own::gpu_view, "view of gpu_view -> gpu_view");
     static_assert(own_view_of(own::heap) == own::view && own_view_of(own::stack) == own::view, "host source -> host view");
-    static_assert(own_view_of(own::pinned) == own::view && own_view_of(own::mapped) == own::view, "pinned/mapped are host -> view");
+    // #41: a VIEW of pinned/mapped keeps its space (pinned_view/mapped_view), still
+    // host-accessible & non-owning, so to_dlpack can label it kDLCUDAHost.
+    static_assert(own_view_of(own::pinned) == own::pinned_view && own_view_of(own::mapped) == own::mapped_view, "pinned/mapped view keeps space");
+    static_assert(own_view_of(own::pinned_view) == own::pinned_view && own_view_of(own::mapped_view) == own::mapped_view, "idempotent");
+    static_assert(own_is_view(own::pinned_view) && own_is_view(own::mapped_view), "pinned_view/mapped_view are views");
+    static_assert(own_is_host_accessible(own::pinned_view) && own_is_host_accessible(own::mapped_view), "pinned_view/mapped_view host-accessible");
+    static_assert(!own_is_device(own::pinned_view) && !own_is_owning(own::mapped_view), "not device, not owning");
 
     // compile-time memory-space flags (members + free trait forms).
     static_assert(gpu<float, shape<2>>::is_device && !gpu<float, shape<2>>::is_host_accessible, "gpu is device");
@@ -81,11 +87,12 @@ int main()
     if (dl->dl_tensor.device.device_type != kDLCUDA) return 12;
     dl->deleter(dl);
 
-    // contrast: a view of host-accessible owning memory (pinned) is a plain view.
+    // #41: a view of host-accessible owning memory (pinned) keeps its space
+    // (pinned_view) and exports as kDLCUDAHost — not a silent kDLCPU downgrade.
     auto pm = pinned<float, shape<4,5>>(shape<4,5>{});
-    static_assert(decltype(pm(1, all))::ownership == own::view, "pinned slice -> host view");
+    static_assert(decltype(pm(1, all))::ownership == own::pinned_view, "pinned slice -> pinned_view");
     auto * dlp = to_dlpack(pm(1, all));
-    if (dlp->dl_tensor.device.device_type != kDLCPU) return 13;   // pinned view is host
+    if (dlp->dl_tensor.device.device_type != kDLCUDAHost) return 13;   // space preserved
     dlp->deleter(dlp);
 
     // an OWNING pinned/mapped export keeps its space label: both are page-locked
@@ -196,6 +203,23 @@ int main()
     auto fm = full<double>(shape<2>{}, 2.0, own_c<own::mapped>{}); // mapped, value-tag
     static_assert(decltype(fm)::ownership == own::mapped, "full value-tag -> mapped");
     if (fm(1) != 2.0) return 23;
+
+    // ---- #41: a slice/view of pinned/mapped keeps its space, and to_dlpack
+    //           labels it kDLCUDAHost (not kDLCPU) ------------------------------
+    auto pt = pinned<float, shape<4,5>>(shape<4,5>{}); pt.zero_();
+    auto pv = pt(1, all);                                         // a view of pinned memory
+    static_assert(decltype(pv)::ownership == own::pinned_view, "slice of pinned -> pinned_view");
+    static_assert(decltype(pv)::is_view && decltype(pv)::is_host_accessible, "pinned_view: host-accessible view");
+    pv(2) = 9.f; if (pt(1,2) != 9.f) return 24;                  // host-writable, aliases the source
+    DLManagedTensor * mp = to_dlpack(pv);
+    if (mp->dl_tensor.device.device_type != kDLCUDAHost) return 25;   // space preserved through the view
+    mp->deleter(mp);
+    auto mt = mapped<double, shape<3>>(shape<3>{}); mt.zero_();
+    auto mv = mt.flip<0>();                                      // a structural view of mapped memory
+    static_assert(decltype(mv)::ownership == own::mapped_view, "view of mapped -> mapped_view");
+    DLManagedTensor * mm = to_dlpack(mv);
+    if (mm->dl_tensor.device.device_type != kDLCUDAHost) return 26;
+    mm->deleter(mm);
 
     return 0;
 }
