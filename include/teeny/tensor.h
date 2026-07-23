@@ -533,8 +533,9 @@ public:
      *  and `Force` is false, this returns a (read-only) *view* of `*this`, no
      *  allocation, keeping the source layout. So `x.to<>()` is a zero-cost borrow,
      *  not a clone. Because it borrows, the result must not outlive `x` — the same
-     *  lifetime rule as `view()`/`permute()`/slicing (don't bind `.to<>()` of a
-     *  temporary to a longer-lived name). Pass `Force = true` to always materialise
+     *  lifetime rule as `view()`/`permute()`/slicing. The borrow is **lvalue-only**:
+     *  calling `.to<>()` on a temporary forces an owning copy instead (it cannot
+     *  dangle), mirroring the free `to<Space>(tensor&&)`. Pass `Force = true` to always materialise
      *  a fresh owning copy even when the dtype already matches (`x.to<float,
      *  true>()` force-clones a `float` tensor); `x.clone()` is the
      *  unconditional-copy spelling.
@@ -544,17 +545,31 @@ public:
      *  -> stack (host+device), dynamic -> heap (host only). To also move across
      *  memory spaces (host <-> CUDA) use the `to<own::gpu, T2, Force>(x)` free
      *  functions from `<teeny/cuda.h>`. */
+    //
+    //  The no-copy borrow is **lvalue-only** (`const &`): borrowing from a
+    //  temporary would dangle, so `to<>()` on an rvalue routes to the `const &&`
+    //  overloads below, which always force a fresh owning copy (mirroring the free
+    //  `to<Space>(tensor&&)` in `<teeny/cuda.h>`).
     template <class T2 = element_type, bool Force = false,
               cs::enable_if_t<!Force && cs::is_same<T2, element_type>::value, int> = 0>
-    _TNY_API auto to() const {
+    _TNY_API auto to() const & {
         return tensor<const element_type, Shape, Layout, own_view_of(O)>(data(), mapping());  // already that dtype -> borrow (gpu_view if device)
     }
     template <class T2 = element_type, bool Force = false, bool S = is_static,
               cs::enable_if_t<(Force || !cs::is_same<T2, element_type>::value) && S, int> = 0>
-    _TNY_API auto to() const { tensor<T2, Shape, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
+    _TNY_API auto to() const & { tensor<T2, Shape, cs::layout_right, own::stack> c{}; c.copy_(*this); return c; }
     template <class T2 = element_type, bool Force = false, bool S = is_static,
               cs::enable_if_t<(Force || !cs::is_same<T2, element_type>::value) && !S, int> = 0>
-    _TNY_HOST auto to() const { tensor<T2, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
+    _TNY_HOST auto to() const & { tensor<T2, Shape, cs::layout_right, own::heap> c(extents()); c.copy_(*this); return c; }
+    // Rvalue: a temporary source cannot be borrowed (the no-copy branch would
+    // dangle), so always force a fresh owning copy. `*this` is a named lvalue in
+    // here, so `to<T2, true>()` selects the `&`-qualified copy branch.
+    template <class T2 = element_type, bool Force = false, bool S = is_static,
+              cs::enable_if_t<S, int> = 0>
+    _TNY_API auto to() const && { return to<T2, true>(); }
+    template <class T2 = element_type, bool Force = false, bool S = is_static,
+              cs::enable_if_t<!S, int> = 0>
+    _TNY_HOST auto to() const && { return to<T2, true>(); }
 
 private:
     // shared reshape body: one axis may be `-1` (numpy-style, inferred from numel).

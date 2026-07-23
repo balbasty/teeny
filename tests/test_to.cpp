@@ -49,5 +49,16 @@ int main()
     static_assert(cs::is_same<decltype(hf)::element_type, half>::value, "to<half>");
     if ((float)hf(1,2) != 5.f) return 7;
 
+    // ---- rvalue .to<>() must NOT borrow (would dangle) -> forces a copy -------
+    // A named lvalue with a matching dtype borrows (own::view, checked above);
+    // the SAME call on a temporary instead materialises an owning copy, so the
+    // result never points at freed storage.
+    auto rc = local<float, shape<2,2>>{}.to<>();
+    static_assert(decltype(rc)::ownership == own::stack, "rvalue .to<>() forces an owning copy, not a borrow");
+    static_assert(cs::is_same<decltype(rc)::element_type, float>::value, "rvalue .to<>() keeps the dtype");
+    auto rd = wrap(buf, shape<-1,3>{2}).to<>();               // dynamic rvalue -> heap copy
+    static_assert(decltype(rd)::ownership == own::heap, "dynamic rvalue .to<>() -> heap copy");
+    if (rd(1,2) != v(1,2)) return 10;
+
     return 0;
 }
