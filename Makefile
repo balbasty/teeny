@@ -40,6 +40,7 @@ TESTS = \
 	$(BUILDDIR)/test_iterate \
 	$(BUILDDIR)/test_peel_recast \
 	$(BUILDDIR)/test_recast_guard \
+	$(BUILDDIR)/test_overlap_guard \
 	$(BUILDDIR)/test_reshape_view \
 	$(BUILDDIR)/test_reshape \
 	$(BUILDDIR)/test_subperm \

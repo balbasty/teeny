@@ -54,7 +54,7 @@ Wrap existing memory (→ view):
 |---|---|---|
 | `wrap(ptr, shape)` | `view<T,E>` | C-order (`ccontiguous`) |
 | `wrap<Layout>(ptr, shape)` | `view<T,E,Layout>` | chosen layout |
-| `wrap(ptr, shape, {s0,s1,…})` | `view<T,E,dynamic_strides>` | **runtime** strides (elements; may be negative) |
+| `wrap(ptr, shape, {s0,s1,…})` | `view<T,E,dynamic_strides>` | **runtime** strides (elements; may be negative). A **stride-0** axis self-overlaps — fine to read (broadcast), but an in-place write is a host-debug error (`clone()` first) |
 | `wrap<S...>(ptr, shape, {dyn…})` | `view<T,E,strides<S...>>` | **mixed** static/runtime strides (`dynamic_stride` slots) |
 | `wrap(ptr, shape, strides<S...>{})` | `view<T,E,strides<S...>>` | **compile-time** strides (fold into the type) |
 | `wrap(…, storage_v<storage::gpu>)` | view in that space | trailing **memory-space** tag on any overload above (default `storage::view`); pass the plain backend — `storage::gpu`/`pinned`/`mapped` — and it folds to the view kind (`gpu_view`/…), since `wrap` always views. `storage_c<S>{}` / `storage_v<S>` are the braced / no-braces spellings |
