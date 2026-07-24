@@ -595,6 +595,14 @@ _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::sub_(T s) {
 }
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::mul_(T s) { _md::scal(*this,s,_md::mul{}); return *this; }
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::div_(T s) { _md::scal(*this,s,_md::div{}); return *this; }
+// atomic accumulate aliases: the readable spelling of add_<true>/sub_<true>
+// (atomic-on-device scatter/"push"). Thin forwarders over the Atomic form.
+template <class T,class E,class L,own O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::atomic_add_(const B & b) { return add_<true>(b); }
+template <class T,class E,class L,own O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::atomic_sub_(const B & b) { return sub_<true>(b); }
+template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::atomic_add_(T s) { return add_<true>(s); }
+template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::atomic_sub_(T s) { return sub_<true>(s); }
 template <class T,class E,class L,own O> template <class B>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::copy_(const B & b) { _md::bzip(*this,*this,b,_md::rhs{}); return *this; }
 template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::fill_(T s) { _md::scal(*this,s,_md::setc{}); return *this; }

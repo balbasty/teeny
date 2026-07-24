@@ -35,7 +35,7 @@ cell. Rank-0 tensors convert to and from `T` and have `.item()`:
 x.at(i,j) = 3;               // write
 float v = x.at(i,j);         // read (implicit conversion to T)
 float w = x.at(i,j).item();  // explicit read
-x.at(i,j).add_<true>(v);     // atomic scatter into one cell
+x.at(i,j).atomic_add_(v);    // atomic scatter into one cell
 ```
 
 ## Unchecked accessors — `uget` / `uat`

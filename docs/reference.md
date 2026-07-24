@@ -111,7 +111,7 @@ Negative integer indices wrap (count from the back).
 | Call | Returns | Notes |
 |---|---|---|
 | `t(i, j, k)` (all integers) | `T&` | element access |
-| `t.at(i, j, k)` (all integers) | rank-0 view | scalar-like: converts to/from `T`, `.item()`, has `add_<true>` |
+| `t.at(i, j, k)` (all integers) | rank-0 view | scalar-like: converts to/from `T`, `.item()`, has `atomic_add_` |
 | `t(0, all, slice(1,4))` (any slice arg) | → view | lower-/same-rank |
 | `t(1, ellipsis, 2)` | → view or `T&` | `ellipsis` = `rank − #other args` copies of `all` (≤1 per call) |
 | `t.take_along<Axes...>(args...)` | → view | bind named axes only, keep the rest |
@@ -205,7 +205,7 @@ scalar rhs applies to every element.
 | Call | Notes |
 |---|---|
 | `a.add_(x)` `a.sub_(x)` `a.mul_(x)` `a.div_(x)` | `x` = tensor (broadcasts) or scalar |
-| `a.add_<true>(x)` `a.sub_<true>(x)` | atomic accumulate (`fetch_add`; atomic on device) |
+| `a.atomic_add_(x)` `a.atomic_sub_(x)` | atomic accumulate on device (`x` = tensor or scalar); underlying form is `add_<Atomic>`/`sub_<Atomic>` |
 | `a += x` `a -= x` `a *= x` `a /= x` | compound-assign sugar |
 | `++a` `--a` | prefix, in place |
 | `a++` | postfix → pre-value **stack copy** (static shape only) |
@@ -214,8 +214,7 @@ scalar rhs applies to every element.
 | `a & b` `a \| b` `a ^ b` `~a` `a &= b` … | bitwise (**integer** element types only) |
 | `a.fill_(v)` `a.zero_()` `a.copy_(b)` `a.iota_(start,step)` | assignment / init (`b` broadcasts) |
 | `a.map_(f)` `a.zip_with_(g, b)` | user functor (a device-safe struct, not a lambda) |
-| `a.at(i...).add_<true>(v)` | scatter-accumulate `a(i...) += v` (atomic on device) |
-| `fetch_add(ptr, v)` | raw-pointer atomic add (device); the primitive under the above |
+| `a.at(i...).atomic_add_(v)` | scatter-accumulate `a(i...) += v` (atomic on device) |
 
 ### Out-of-place (→ new tensor; static shape → stack, else heap)
 

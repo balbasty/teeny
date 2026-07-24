@@ -25,6 +25,7 @@ TESTFLAGS += -ftemplate-backtrace-limit=0
 TESTS = \
 	$(BUILDDIR)/test_tensor \
 	$(BUILDDIR)/test_math \
+	$(BUILDDIR)/test_atomic_alias \
 	$(BUILDDIR)/test_mathops \
 	$(BUILDDIR)/test_ops \
 	$(BUILDDIR)/test_fold \

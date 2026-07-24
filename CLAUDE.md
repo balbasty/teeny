@@ -176,7 +176,7 @@ t.data();  t.view();  t.mdspan();  t.extents();  t.shape();  t.mapping();
 // --- indexing / slicing (python-like) ---
 t(1, 2, 3);           // element access -> T& ; negative indices wrap (count from the back)
 t.at(1, 2, 3);        // same element as a rank-0 VIEW (has add_/etc.); rank-0 <-> scalar
-                      //   (implicit to/from T, `.item()`). at(i...).add_<true>(v) = atomic scatter
+                      //   (implicit to/from T, `.item()`). at(i...).atomic_add_(v) = atomic scatter
 t.uget(1,2,3); t.uget(0,slice(1,4)); t.uget(1,ellipsis); t.uat(i...);  // UNCHECKED:
                       //   uget = twin of operator() (element/slice/ellipsis, one entry point),
                       //   uat = twin of at. Skip the negative-index wrap for known-non-negative
@@ -221,7 +221,8 @@ t(all, slice(none,none,-1));    // reverse a range (negative step; a[::-1])
 a.add_(b); a.sub_(b); a.mul_(b); a.div_(b);   // tensor rhs BROADCASTS numpy-style
 a.add_(2.0); a.mul_(0.5);                     // scalar rhs
 a += b; a -= 2.0; a *= b; a /= 2.0;           // compound-assign sugar (scalar or tensor)
-a.add_<true>(b); a.sub_<true>(2.0);           // ATOMIC accumulate (device scatter/push)
+a.atomic_add_(b); a.atomic_sub_(2.0);         // ATOMIC accumulate (device scatter/push);
+                                              //   underlying form: add_<Atomic>/sub_<Atomic>
 a.neg_(); a.abs_(); a.exp_(); a.log_();       // unary in-place
 a.sin_(); a.cos_(); a.sqrt_(); a.tanh_(); a.pow_(3.0);
 a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_(); a.clamp_(lo,hi);
@@ -232,7 +233,7 @@ a & b; a | b; a ^ b; ~a; a &= b; a |= 1;       // bitwise (INTEGER element types
 a.fill_(0.0); a.zero_(); a.copy_(b);          // b broadcasts into a
 a.iota_(start, step);                         // 0,1,2,... (row-major)
 a.map_(f); a.zip_with_(g, b); auto c = a.map(f);  // user functor (device-safe struct)
-a.at(i, j).add_<true>(v);                     // scatter-accumulate: a(i,j) += v,
+a.at(i, j).atomic_add_(v);                    // scatter-accumulate: a(i,j) += v,
                                               //   ATOMIC on device (push/splat write)
 auto z = zeros<T>(shape); ones<T>(sh); full(sh,v); arange<T>(n);  // creation. zeros/ones
                       //   default T=float; full's T = value type; arange defaults T=int64.
