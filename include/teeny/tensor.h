@@ -378,6 +378,10 @@ private:
     }
     template <cs::size_t Ax, bool Wrap = true, class Arg>
     _TNY_API void _sl_axis(Arg a, index_type & off, index_type * ext, index_type * str, cs::size_t & k) const {
+        if constexpr (_is_newaxis<Arg>::value) {                        // newaxis: insert a size-1 axis, consume no source axis
+            (void)a; ext[k] = index_type(1); str[k] = index_type(0); ++k;
+            return;
+        } else {
         const index_type sd = static_cast<index_type>(stride(Ax));
         const index_type n  = static_cast<index_type>(extent(cs::integral_constant<cs::size_t, Ax>{}));
         if constexpr (_is_index<Arg>::value) {
@@ -403,11 +407,13 @@ private:
         } else {                                                    // full_extent (all)
             ext[k] = n; str[k] = sd; ++k;
         }
+        }
     }
     // static output extent for one axis: DROP (integer), the input static extent
     // (an `all`/full_extent OR a folded `slice(none,none)` kept axis), or dynamic.
     template <class Arg, cs::size_t Se> static constexpr cs::size_t _out_static() {
-        if constexpr (_is_index<Arg>::value)                            return _drop_axis;
+        if constexpr (_is_newaxis<Arg>::value)                          return 1;   // newaxis: inserted axis, static extent 1
+        else if constexpr (_is_index<Arg>::value)                       return _drop_axis;
         else if constexpr (cs::is_same<Arg, cs::full_extent_t>::value)  return Se;
         else if constexpr (_is_full_slice<Arg>::value)                  return Se;
         // a compile-time range folds its extent too: source static + static
@@ -426,16 +432,46 @@ private:
                                      typename _slice_step<Arg>::type>(static_cast<long>(Se));
         else                                                            return cs::dynamic_extent;
     }
+    // The SOURCE axis that arg `i` binds: the count of source-CONSUMING args before
+    // it. Every arg consumes one source axis EXCEPT a bare `none` (newaxis), which
+    // consumes none — so a `none` shifts the source axis of every later arg by 0 and
+    // itself maps to whatever axis count precedes it (an out-of-range value it never
+    // reads). This is the arg -> source-axis accounting that decouples the arg
+    // position (which grows with each `none`) from the source rank.
+    template <class... A2>
+    _TNY_API static constexpr cs::size_t _src_axis_at(cs::size_t i) noexcept {
+        const bool consumes[] = { (!_is_newaxis<A2>::value)..., false };
+        cs::size_t ax = 0;
+        for (cs::size_t j = 0; j < i; ++j) ax += consumes[j] ? 1 : 0;
+        return ax;
+    }
+    // Source static extent feeding `_out_static` for arg `Arg` at source axis `SrcAx`.
+    // A newaxis has no source axis (SrcAx may be out of range), so short-circuit it —
+    // `_out_static` returns the fixed extent 1 and never reads this.
+    template <class Arg, cs::size_t SrcAx>
+    _TNY_API static constexpr cs::size_t _arg_src_ext() noexcept {
+        if constexpr (_is_newaxis<Arg>::value) return cs::dynamic_extent;   // unused
+        else                                   return Shape::static_extent(SrcAx);
+    }
     template <bool Wrap = true, class P, cs::size_t... Ax, class... Args>
-    _TNY_API auto _slice_range(P p, cs::index_sequence<Ax...>, Args... a) const {
+    _TNY_API auto _slice_range(P p, cs::index_sequence<Ax...> argseq, Args... a) const {
+        // The index sequence is one entry per ARG (grows with each `none`); map each
+        // to its source axis so the gather still consumes exactly `rank()` axes.
+        return _slice_gather<Wrap>(p, cs::index_sequence<_src_axis_at<Args...>(Ax)...>{}, a...);
+    }
+    template <bool Wrap = true, class P, cs::size_t... SA, class... Args>
+    _TNY_API auto _slice_gather(P p, cs::index_sequence<SA...>, Args... a) const {
         using Vt = cs::remove_pointer_t<P>;
+        // exactly one source-consuming arg (int/all/range) per axis; `none` is extra.
+        static_assert((cs::size_t(0) + ... + (_is_newaxis<Args>::value ? cs::size_t(0) : cs::size_t(1))) == rank(),
+                      "slice: one index per axis (any number of `none`/newaxis is extra)");
         constexpr cs::size_t Nk = (cs::size_t(0) + ... + (_is_index<Args>::value ? cs::size_t(0) : cs::size_t(1)));
-        // output extents (static where a kept axis is static) and output strides
-        // (static where source-stride × step is known) — folded into strides<...>.
-        using OE = typename _compact<index_type, _out_static<Args, Shape::static_extent(Ax)>()...>::type;
-        using SF = typename _str_compact<_out_sstride<Args, Ax, Layout, Shape>()...>::type;
+        // output extents (static where a kept axis is static; `none` -> static 1) and
+        // output strides (static where derivable; `none` -> static 0) -> strides<...>.
+        using OE = typename _compact<index_type, _out_static<Args, _arg_src_ext<Args, SA>()>()...>::type;
+        using SF = typename _str_compact<_out_sstride<Args, SA, Layout, Shape>()...>::type;
         index_type ext[Nk ? Nk : 1] = {}, str[Nk ? Nk : 1] = {}, off = 0; cs::size_t k = 0;
-        ( _sl_axis<Ax, Wrap>(a, off, ext, str, k), ... );
+        ( _sl_axis<SA, Wrap>(a, off, ext, str, k), ... );
         cs::array<index_type, Nk> ea{};
         for (cs::size_t i = 0; i < Nk; ++i) ea[i] = ext[i];
         // fold the kept strides into the strides<...> mapping (EBO when all static,
@@ -455,24 +491,35 @@ private:
     _TNY_API static constexpr cs::size_t _tup_ellipsis_pos(cs::index_sequence<I...>) {
         return _ellipsis_pos<cs::tuple_element_t<I, Tup>...>();
     }
+    // #newaxis (`none`) args in the tuple — they don't consume a source axis, so the
+    // ellipsis `fill` excludes them and the expanded arg count grows by this many.
+    template <class Tup, cs::size_t... I>
+    _TNY_API static constexpr cs::size_t _tup_newaxis_count(cs::index_sequence<I...>) {
+        return (cs::size_t(0) + ... + (_is_newaxis<cs::tuple_element_t<I, Tup>>::value ? cs::size_t(1) : cs::size_t(0)));
+    }
+    template <class... Args> _TNY_API static constexpr cs::size_t _n_newaxis() {
+        return (cs::size_t(0) + ... + (_is_newaxis<Args>::value ? cs::size_t(1) : cs::size_t(0)));
+    }
     // `Wrap` re-dispatches the expanded args through the CHECKED `operator()`
     // (Wrap=true) or the UNCHECKED `uget` (Wrap=false) — so `t.uget(1, ellipsis)`
     // stays wrap-free after the ellipsis is filled with `all`s.
     template <bool Wrap = true, class Tup, cs::size_t... out_ax>
     _TNY_API decltype(auto) _ellip_call(Tup t, cs::index_sequence<out_ax...>) {
         constexpr cs::size_t n_args   = cs::tuple_size<Tup>::value;
-        static_assert(n_args - 1 <= rank(), "too many indices for ellipsis expansion");
+        constexpr cs::size_t n_new     = _tup_newaxis_count<Tup>(cs::make_index_sequence<n_args>{});
+        static_assert(n_args - 1 - n_new <= rank(), "too many indices for ellipsis expansion");
         constexpr cs::size_t ell_pos  = _tup_ellipsis_pos<Tup>(cs::make_index_sequence<n_args>{});
-        constexpr cs::size_t fill     = rank() - (n_args - 1);
+        constexpr cs::size_t fill     = rank() - (n_args - 1 - n_new);  // ellipsis fills only source-consuming args (excl. `none`)
         if constexpr (Wrap) return (*this)(_ellip_arg<out_ax, ell_pos, fill>(t)...);
         else                return uget(_ellip_arg<out_ax, ell_pos, fill>(t)...);
     }
     template <bool Wrap = true, class Tup, cs::size_t... out_ax>
     _TNY_API decltype(auto) _ellip_call(Tup t, cs::index_sequence<out_ax...>) const {
         constexpr cs::size_t n_args   = cs::tuple_size<Tup>::value;
-        static_assert(n_args - 1 <= rank(), "too many indices for ellipsis expansion");
+        constexpr cs::size_t n_new     = _tup_newaxis_count<Tup>(cs::make_index_sequence<n_args>{});
+        static_assert(n_args - 1 - n_new <= rank(), "too many indices for ellipsis expansion");
         constexpr cs::size_t ell_pos  = _tup_ellipsis_pos<Tup>(cs::make_index_sequence<n_args>{});
-        constexpr cs::size_t fill     = rank() - (n_args - 1);
+        constexpr cs::size_t fill     = rank() - (n_args - 1 - n_new);  // ellipsis fills only source-consuming args (excl. `none`)
         if constexpr (Wrap) return (*this)(_ellip_arg<out_ax, ell_pos, fill>(t)...);
         else                return uget(_ellip_arg<out_ax, ell_pos, fill>(t)...);
     }
@@ -502,16 +549,18 @@ public:
         return tensor<const T, E0, ccontiguous, storage_view_of(O)>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
     }
 
-    /** @brief Sub-view when any argument is a slice (`all`, `slice(a,b[,step])`).
-     *         Integer args drop their axis, `all` keeps it, a range keeps a strided
-     *         window — all via the one gather (folds static strides into
-     *         `strides<...>`; works on any source layout). */
+    /** @brief Sub-view when any argument is a slice (`all`, `slice(a,b[,step])`)
+     *         or a bare `none` (numpy `newaxis`). Integer args drop their axis,
+     *         `all` keeps it, a range keeps a strided window, and a bare `none`
+     *         inserts a size-1 axis (static extent 1, stride 0) at its position —
+     *         all via the one gather (folds static strides into `strides<...>`;
+     *         works on any source layout). `t(none,all,all)` == `unsqueeze<0>()`. */
     template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API auto operator()(Args... a) noexcept
-    { return _slice_range(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
+    { return _slice_range(store_.data(), cs::make_index_sequence<sizeof...(a)>{}, a...); }
     template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API auto operator()(Args... a) const noexcept
-    { return _slice_range(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
+    { return _slice_range(store_.data(), cs::make_index_sequence<sizeof...(a)>{}, a...); }
 
     /* --- unchecked accessors: skip the negative-index wrap ------------------ *
      * `uget` is the `u`-prefixed twin of `operator()`, and `uat` of `at`, for
@@ -544,18 +593,18 @@ public:
     // slice: at least one slice arg, no ellipsis -> a VIEW
     template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API auto uget(Args... a) noexcept
-    { return _slice_range<false>(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
+    { return _slice_range<false>(store_.data(), cs::make_index_sequence<sizeof...(a)>{}, a...); }
     template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API auto uget(Args... a) const noexcept
-    { return _slice_range<false>(store_.data(), cs::make_index_sequence<rank()>{}, a...); }
+    { return _slice_range<false>(store_.data(), cs::make_index_sequence<sizeof...(a)>{}, a...); }
 
     // ellipsis: expand to `all`s, then re-dispatch through `uget` (unchecked)
     template <class... Args, cs::enable_if_t<_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API decltype(auto) uget(Args... a) noexcept
-    { return _ellip_call<false>(cs::make_tuple(a...), cs::make_index_sequence<rank()>{}); }
+    { return _ellip_call<false>(cs::make_tuple(a...), cs::make_index_sequence<rank() + _n_newaxis<Args...>()>{}); }
     template <class... Args, cs::enable_if_t<_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API decltype(auto) uget(Args... a) const noexcept
-    { return _ellip_call<false>(cs::make_tuple(a...), cs::make_index_sequence<rank()>{}); }
+    { return _ellip_call<false>(cs::make_tuple(a...), cs::make_index_sequence<rank() + _n_newaxis<Args...>()>{}); }
 
     /** @brief Unchecked `at`: a single element as a rank-0 VIEW, no negative wrap. */
     template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
@@ -575,10 +624,10 @@ public:
      *         remains decides the result (all integers -> element, else view). */
     template <class... Args, cs::enable_if_t<_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API decltype(auto) operator()(Args... a) noexcept
-    { return _ellip_call(cs::make_tuple(a...), cs::make_index_sequence<rank()>{}); }
+    { return _ellip_call(cs::make_tuple(a...), cs::make_index_sequence<rank() + _n_newaxis<Args...>()>{}); }
     template <class... Args, cs::enable_if_t<_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API decltype(auto) operator()(Args... a) const noexcept
-    { return _ellip_call(cs::make_tuple(a...), cs::make_index_sequence<rank()>{}); }
+    { return _ellip_call(cs::make_tuple(a...), cs::make_index_sequence<rank() + _n_newaxis<Args...>()>{}); }
 
 #if defined(__cpp_multidimensional_subscript)
     /** @brief C++23 multidimensional subscript: `t[i, j, k]` / `t[0, all, slice(1,4)]`

@@ -185,7 +185,10 @@ t.uget(1,2,3); t.uget(0,slice(1,4)); t.uget(1,ellipsis); t.uat(i...);  // UNCHEC
 t(0, all, slice(1,4));  // any slice arg -> a lower-/same-rank VIEW. all = keep axis,
                       //   slice(a,b) = half-open [a,b). Integer args drop that axis.
 t(0, slice(none,4), slice(1,none,2));  // python-like: none = open end, 3rd arg = step.
-t(1, ellipsis, 2);    // ellipsis (numpy ...) = (rank - #other args) copies of `all`; max one.
+t(none, all, all); t(all, none); t(ellipsis, none);  // a BARE `none` arg = numpy newaxis:
+                      //   inserts a size-1 axis (static extent 1, stride 0) -> rank+1 view,
+                      //   == unsqueeze at that position (composes with int/range/ellipsis).
+t(1, ellipsis, 2);    // ellipsis (numpy ...) = (rank - #other args, excl. none) copies of `all`; max one.
 t(ellipsis) = b; t(0,all) = 3.0;  // assign INTO a slice copies/fills (b broadcasts);
                       //   `a = b` on a NAMED view REBINDS (shallow) — the contrast.
 t(0, slice<1,4>()); t(0, slice<0,8,2>());  // compile-time slice (bounds fold like `all`);
