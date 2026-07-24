@@ -258,13 +258,17 @@ auto m = a < b; a == 2.0; 3.0 < a;    // ==,!=,<,<=,>,>= ; scalar either side
 (a > 0).all(); (a > 3).any();         // bool reductions (MEMBERS: `all` is the slice kw)
 
 // --- reductions -> scalar (all axes). ACCUMULATE in the "reduce type" (double for
-//   small floats float/double/half, item type for ints; reduce_type_t<T>), then
-//   CAST the result to the tensor's element type: sum(float)->float. A leading TYPE
-//   arg makes that type BOTH accumulator and result: sum<double>(a), dot<double>(a,b).
+//   small floats float/double/half; 64-bit int for narrow ints so sum/prod/dot
+//   can't overflow mid-accumulation -> int64/uint64; reduce_type_t<T>), then
+//   CAST the result to the tensor's element type: sum(float)->float, sum(int8)->int8
+//   (defined truncation). A leading TYPE arg makes that type BOTH accumulator and
+//   result: sum<double>(a), dot<double>(a,b), sum<int64_t>(int8_tensor) (untruncated).
+//   mean(int_tensor) -> DOUBLE (numpy: integer mean is float64); mean(float)->T.
 sum(a); prod(a); max(a); min(a); mean(a); dot(a,b);
 allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
 // --- axis reductions -> a lower-rank TENSOR (named axes removed; negatives wrap).
-//   Same rule: accumulate in reduce_type, result element type = the tensor's type.
+//   Same rule: accumulate in reduce_type, result element type = the tensor's type
+//   (mean over an integer tensor is the exception: DOUBLE, like the scalar mean).
 //   sum<Acc,Axes...>(a) makes Acc accumulator AND result (leading TYPE = accumulator,
 //   leading int = axis -> never collide).
 sum<0>(a); mean<0,2>(a); max<1>(a); min<-1>(a); prod<0>(a); sum<double,0>(a);
