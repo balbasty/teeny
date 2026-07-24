@@ -772,6 +772,28 @@ public:
     template <long... NewExt> _TNY_API auto reshape() noexcept       { return _reshape<T, NewExt...>(store_.data()); }
     template <long... NewExt> _TNY_API auto reshape() const noexcept { return _reshape<const T, NewExt...>(store_.data()); }
 
+    /** @brief Whether `reshape<NewExt...>()` can produce a VIEW (no copy) of this
+     *         tensor's actual layout — numpy's rule: not just C-contiguity, but any
+     *         stride-compatible regrouping (splitting an axis, merging a contiguous
+     *         run). One `-1` may be inferred. `false` -> the reshape needs a
+     *         `clone()`. (The result type of a viewable `reshape` is a folded
+     *         `strides<...>` view.) */
+    template <long... NewExt>
+    _TNY_API bool can_reshape_without_copy() const noexcept {
+        static_assert(((NewExt < 0 ? 1 : 0) + ... + 0) <= 1, "reshape: at most one inferred (-1) dimension");
+        constexpr cs::size_t M = sizeof...(NewExt);
+        constexpr index_type known = (index_type(1) * ... * (NewExt < 0 ? index_type(1) : index_type(NewExt)));
+        constexpr bool has_inferred = ((NewExt < 0) || ...);
+        const index_type n = numel();
+        index_type inferred = 1;
+        if constexpr (has_inferred) { if (known == 0 || n % known != 0) return false; inferred = n / (known ? known : index_type(1)); }
+        else                        { if (known != n) return false; }
+        cs::array<index_type, rank()> se{}, ss{};
+        for (cs::size_t r = 0; r < rank(); ++r) { se[r] = static_cast<index_type>(extent(r)); ss[r] = static_cast<index_type>(stride(r)); }
+        cs::array<index_type, M> te{ (NewExt < 0 ? inferred : index_type(NewExt))... }, ts{};
+        return _detail::reshape_view_strides(se, ss, te, ts);
+    }
+
 private:
     template <class El, class NewE, class NewL, cs::size_t... D>
     _TNY_API auto _recast(El * p, cs::index_sequence<D...>) const {
