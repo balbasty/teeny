@@ -1,7 +1,8 @@
 name: Test on push
 
-# Trigger: run the compiler matrix on pushes to main that touch the library,
-# tests, examples, build, or the workflows themselves — and on every PR.
+# Trigger: run the compiler matrix on pushes to main, and on PRs, that touch the
+# library, tests, examples, build, or the workflows themselves. Docs-only changes
+# (docs/**, *.md) match none of these paths, so they skip the test matrix entirely.
 
 on:
   push:
@@ -15,6 +16,13 @@ on:
       - Makefile
       - .github/workflows/test*.yaml
   pull_request:
+    paths:
+      - include/**
+      - tests/**
+      - examples/**
+      - external/**
+      - Makefile
+      - .github/workflows/test*.yaml
 
 permissions:
   contents: read
