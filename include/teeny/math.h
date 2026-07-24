@@ -877,7 +877,22 @@ template <class Acc, long... Axes, class T,class E,class L,storage O, class R = 
 _TNY_API  auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); } \
 template <class Acc, long... Axes, class T,class E,class L,storage O, class R = Acc,                   \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); }
+_TNY_HOST auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); } \
+/* value forms: NAME(a, axis<Axes...>{}) == NAME<Axes...>(a) — numpy's `axis=` spelling  \
+   (no `.template` on a dependent receiver). Forward to the template axis form, keeping   \
+   the static(_TNY_API)/dynamic(_TNY_HOST) split so a device path never calls host code. */ \
+template <long... Axes, class T,class E,class L,storage O,                                              \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
+_TNY_API  auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>) { return NAME<Axes...>(a); }              \
+template <long... Axes, class T,class E,class L,storage O,                                              \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
+_TNY_HOST auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>) { return NAME<Axes...>(a); }              \
+template <class Acc, long... Axes, class T,class E,class L,storage O,                                   \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
+_TNY_API  auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>) { return NAME<Acc, Axes...>(a); }         \
+template <class Acc, long... Axes, class T,class E,class L,storage O,                                   \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
+_TNY_HOST auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>) { return NAME<Acc, Axes...>(a); }
 _TNY_MD_AXRED(sum,  R(0),                          r_add)
 _TNY_MD_AXRED(prod, R(1),                          r_mul)
 _TNY_MD_AXRED(max,  _reduce_seed_lowest<R>(),  r_max)
@@ -919,6 +934,20 @@ template <class Acc, long... Axes, class T,class E,class L,storage O,
 _TNY_HOST auto mean(const tensor<T,E,L,O> & a) {
     auto s = sum<Acc, Axes...>(a); s.div_(static_cast<Acc>(a.numel() / s.numel())); return s;
 }
+// value forms: mean(a, axis<Axes...>{}) == mean<Axes...>(a) (numpy `axis=`); forward to
+// the template form, keeping the static/dynamic split (integer->double rule preserved).
+template <long... Axes, class T,class E,class L,storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
+_TNY_API  auto mean(const tensor<T,E,L,O> & a, axis<Axes...>) { return mean<Axes...>(a); }
+template <long... Axes, class T,class E,class L,storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
+_TNY_HOST auto mean(const tensor<T,E,L,O> & a, axis<Axes...>) { return mean<Axes...>(a); }
+template <class Acc, long... Axes, class T,class E,class L,storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
+_TNY_API  auto mean(const tensor<T,E,L,O> & a, axis<Axes...>) { return mean<Acc, Axes...>(a); }
+template <class Acc, long... Axes, class T,class E,class L,storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
+_TNY_HOST auto mean(const tensor<T,E,L,O> & a, axis<Axes...>) { return mean<Acc, Axes...>(a); }
 
 /** @brief Inner product over matching extents. Accumulates in the reduce type of
  *         the promoted element type (`double` for small floats), result cast to

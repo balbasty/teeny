@@ -122,11 +122,27 @@ sum(a); prod(a); max(a); min(a); mean(a); dot(a, b);
 Over named axes → a lower-rank **tensor** (the named axes are removed; negatives
 wrap):
 
-```cpp
-sum<0>(a);     // remove axis 0
-mean<0,2>(a);  // remove axes 0 and 2
-max<1>(a);  min<-1>(a);  prod<0>(a);
-```
+=== "value form"
+
+    ```cpp
+    sum(a, axis<0>{});      // remove axis 0 — numpy's `np.sum(a, axis=0)`
+    mean(a, axis<0,2>{});   // remove axes 0 and 2
+    max(a, axis<1>{});  min(a, axis<-1>{});  prod(a, axis<0>{});
+    sum<double>(a, axis<0>{});   // leading TYPE = accumulator; axes deduced from the tag
+    ```
+
+=== "template form"
+
+    ```cpp
+    sum<0>(a);     // remove axis 0
+    mean<0,2>(a);  // remove axes 0 and 2
+    max<1>(a);  min<-1>(a);  prod<0>(a);
+    ```
+
+The `axis<...>{}` value form (a compile-time axis list, sibling of `shape<...>`,
+like numpy's `axis: int | list[int]`) is deduced, so it needs no `.template` on a
+type-dependent receiver; a leading TYPE arg still selects the accumulator
+(`sum<double>(a, axis<0>{})` == `sum<double,0>(a)`).
 
 A fully-static result is stack-owned (host and device); any dynamic extent makes
 it heap-owned (host only — it allocates, so it is not callable on the device

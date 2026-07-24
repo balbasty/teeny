@@ -332,6 +332,7 @@ makes that type both the accumulator **and** the result.
 | `allclose(a, b, rtol=1e-5, atol=1e-8)` | `bool` | `\|a−b\| ≤ atol+rtol·\|b\|` everywhere (broadcasts) |
 | `sum<Axes...>(a)` `mean<Axes...>` `max`/`min`/`prod<Axes...>` | lower-rank tensor | remove the named axes (negatives wrap) |
 | `sum<Acc, Axes...>(a)` | lower-rank tensor | leading **type** = accumulator, leading **int** = axis |
+| `sum(a, axis<Axes...>{})` (also `mean`/`max`/`min`/`prod`) | lower-rank tensor | value form — numpy `axis=` selector; `sum<Acc>(a, axis<...>{})` for the accumulator; no `.template` on a dependent receiver |
 
 Axis reductions: a fully static result → stack (host+device); any dynamic result
 → heap (host only).

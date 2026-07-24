@@ -202,6 +202,7 @@ allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (bro
 //   rule: accumulate in reduce_type, result element type = the tensor's type;
 //   sum<Acc, Axes...>(a) makes Acc accumulator AND result (leading TYPE = acc, int = axis).
 sum<Axes...>(a); prod<...>(a); max<...>(a); min<...>(a); mean<...>(a);  // sum<Acc,Axes...>(a)
+sum(a, axis<0,2>{}); mean(a, axis<-1>{}); sum<double>(a, axis<0>{});    // numpy `axis=` value form
 ```
 
 Promotion: C++ rules but lower-width float wins (`-DTNY_STD_PROMOTION` opts out).

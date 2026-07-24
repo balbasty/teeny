@@ -279,6 +279,8 @@ allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (bro
 //   sum<Acc,Axes...>(a) makes Acc accumulator AND result (leading TYPE = accumulator,
 //   leading int = axis -> never collide).
 sum<0>(a); mean<0,2>(a); max<1>(a); min<-1>(a); prod<0>(a); sum<double,0>(a);
+//   VALUE FORM (numpy `axis=`): sum(a, axis<0,2>{}) == sum<0,2>(a); sum<double>(a, axis<0>{})
+//   == sum<double,0>(a). Deduced -> no `.template` on a dependent receiver.
 //   static result -> stack (host+device); any dynamic -> heap (HOST ONLY: allocates)
 
 // --- nd-peel: iterate a SUBSET of axes, each yielding a lower-rank view ---
@@ -343,10 +345,11 @@ does). Two selector vocabularies:
   `t.reshape(Int<6>(),Int<-1>())`, `t.recast(shape<3,3>{})`,
   `t.is_contiguous(ccontiguous{})`.
 
-`peel_front<N>` / `size_front<N>` (a COUNT, not an axis) and the reductions
-`sum`/`mean`/`max`/`min`/`prod` stay template-only for now — the reductions'
-leading TYPE arg (`sum<double>(a)`) would need care to coexist with an axis
-value form (tracked separately for the numpy `sum(a, axis<...>{})` spelling).
+The **reductions** `sum`/`mean`/`max`/`min`/`prod` also take the `axis<...>` value
+form — `sum(a, axis<0,2>{})` == `sum<0,2>(a)`, and `sum<double>(a, axis<0>{})`
+keeps the leading TYPE as the accumulator (the value axis arg and the type arg
+never collide). `peel_front<N>` / `size_front<N>` (a COUNT, not an axis list) stay
+template-only.
 
 ## How the hard parts work (so you don't re-derive them)
 
