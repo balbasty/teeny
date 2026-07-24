@@ -1013,6 +1013,44 @@ public:
     template <class NewShape, class NewLayout = keep_strides>
     _TNY_API auto recast() const { return _recast<const T, NewShape, NewLayout>(store_.data(), cs::make_index_sequence<rank()>{}); }
 
+    /** @brief Does every element offset of this view fit the index type `Idx2`?
+     *         Computes the SIGNED reach directly (teeny has negative-stride views, so
+     *         `required_span_size`'s non-negative assumption doesn't apply):
+     *         `max = Σ_{s>0}(e−1)·s`, `min = Σ_{s<0}(e−1)·s`; fits ⟺ `min..max` ⊆
+     *         `Idx2`. Accumulates in a wide type; a broadcast (stride-0) axis adds 0.
+     *         The precondition `reindex<Idx2>()` debug-checks. */
+    template <class Idx2>
+    _TNY_API bool index_fits() const noexcept {
+        using W = long long;
+        W maxo = 0, mino = 0;
+        for (cs::size_t r = 0; r < rank(); ++r) {
+            const W e = static_cast<W>(extent(r));
+            if (e <= W(1)) continue;                              // size-1/0 axis: no reach
+            const W reach = (e - W(1)) * static_cast<W>(stride(r));
+            if (reach > 0) maxo += reach; else mino += reach;     // reach sign == stride sign (e>1)
+        }
+        return maxo <= static_cast<W>((cs::numeric_limits<Idx2>::max)())
+            && mino >= static_cast<W>((cs::numeric_limits<Idx2>::min)());
+    }
+
+    /** @brief No-copy, **layout-preserving** retype of the offset index width to
+     *         `Idx2`: same pointer, same layout KIND, the extents' `index_type` and any
+     *         dynamic strides narrowed to `Idx2` (a `strides<...>` literal pack is
+     *         unchanged). Narrowing the boundary view to `shape32` halves the by-value
+     *         footprint and runs offset math in 32-bit (big device win). Orthogonal to
+     *         `recast` (which staticizes the extent VALUES) — they compose. Debug-checks
+     *         `index_fits<Idx2>()`; UB if the caller lies (same contract as `u*`). */
+    template <class Idx2>
+    _TNY_API auto reindex() {
+        _TNY_CHECK(index_fits<Idx2>(), "reindex: element offsets don't fit the target index type (span exceeds its range)");
+        return _recast<T, _reindex_extents_t<Idx2, Shape>, keep_strides>(store_.data(), cs::make_index_sequence<rank()>{});
+    }
+    template <class Idx2>
+    _TNY_API auto reindex() const {
+        _TNY_CHECK(index_fits<Idx2>(), "reindex: element offsets don't fit the target index type (span exceeds its range)");
+        return _recast<const T, _reindex_extents_t<Idx2, Shape>, keep_strides>(store_.data(), cs::make_index_sequence<rank()>{});
+    }
+
     /** @brief View as 1-D (`ravel`) — a VIEW whenever the layout is mergeable into a
      *         single contiguous run without a copy (numpy semantics; `clone()` first
      *         otherwise). Just `reshape<-1>()` (one inferred dim), spelled out for
@@ -1171,6 +1209,16 @@ public:
     template <bool S = is_static, cs::enable_if_t<S, int> = 0>
     _TNY_API tensor<T, Shape, ccontiguous, storage::stack> operator--(int) { auto old = clone(); sub_(T(1)); return old; }
 };
+
+/** @brief Free forms of `reindex`/`index_fits` — deduce the tensor, so a
+ *         type-dependent receiver avoids `.template`: `reindex<int32_t>(t)`,
+ *         `index_fits<int32_t>(t)`. (`Idx2` is a TYPE, so there is no value form.) */
+template <class Idx2, class T, class E, class L, storage O>
+_TNY_API auto reindex(tensor<T,E,L,O> & t)       { return t.template reindex<Idx2>(); }
+template <class Idx2, class T, class E, class L, storage O>
+_TNY_API auto reindex(const tensor<T,E,L,O> & t) { return t.template reindex<Idx2>(); }
+template <class Idx2, class T, class E, class L, storage O>
+_TNY_API bool index_fits(const tensor<T,E,L,O> & t) { return t.template index_fits<Idx2>(); }
 
 /* ------------------------------------------------------------------ *
  *     Factories                                                      *

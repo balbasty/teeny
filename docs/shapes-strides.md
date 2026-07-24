@@ -86,3 +86,25 @@ Rule of thumb: pass `Int<k>()` to make the compiler fold; pass a plain
 t.extent(Int<0>());   // -> integral_constant<…,2>  (a constant, folds)
 t.extent(runtime_d);  // -> int64_t                 (a value)
 ```
+
+## The index type — `shape32` / `reindex`
+
+Every offset computation runs in the extents' `index_type` (`int64_t` for
+`shape<...>`, matching DLPack). At a **kernel boundary** you can narrow it to 32-bit
+without a copy:
+
+```cpp
+auto v32 = t.reindex<int32_t>();     // free form: reindex<int32_t>(t)
+```
+
+`reindex` preserves the layout — same pointer and layout kind, with the extents and
+any *dynamic* strides narrowed to the new width (a `strides<...>` literal pack is
+unchanged). It's the index-width twin of `recast` (which recovers static extent
+*values*): orthogonal, and they compose. `shape32<...>` == `shape_as<int32_t, ...>`
+is the int32-indexed shape; `shape_as<Idx, ...>` picks any index type.
+
+The payoff is on the device: a dynamic-stride view carries its strides by value, so
+halving their width cuts the register footprint (rank-2: 40 → 24 bytes) and runs the
+address math in 32-bit. Guard it with `t.index_fits<int32_t>()` — a signed-reach
+check that handles negative-stride (flipped) and broadcast views — and only narrow
+when the element span provably fits. See [Performance](performance.md).

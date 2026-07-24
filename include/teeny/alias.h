@@ -118,6 +118,21 @@ template <class T> _TNY_API constexpr cs::size_t _dyn_extent(T e) {
  * `owned<float, shape<-1,4>>`. */
 template <auto... E> using shape = cs::extents<cs::int64_t, _dyn_extent(E)...>;
 
+/** @brief `shape<...>` with an explicit index type: `shape_as<int32_t, -1,3,3>`.
+ *  `shape<>` is the int64 default (DLPack's index type); `shape32<...>` narrows the
+ *  offset math to **int32** for the kernel-boundary view (see `reindex`). The `-1`
+ *  == dynamic rule is the same. */
+template <class Idx, auto... E> using shape_as = cs::extents<Idx, _dyn_extent(E)...>;
+template <auto... E>            using shape32  = shape_as<cs::int32_t, E...>;
+
+// Retype an extents' index_type to Idx2, keeping the same compile-time extent values
+// (the primitive behind `reindex` — swap offset width, preserve the shape).
+template <class Idx2, class E, class Seq> struct _reindex_extents;
+template <class Idx2, class E, cs::size_t... D>
+struct _reindex_extents<Idx2, E, cs::index_sequence<D...>> { using type = cs::extents<Idx2, E::static_extent(D)...>; };
+template <class Idx2, class E>
+using _reindex_extents_t = typename _reindex_extents<Idx2, E, cs::make_index_sequence<E::rank()>>::type;
+
 /** @brief Fully-dynamic shape of a given rank: `rank<3>` == `shape<-1,-1,-1>`
  *  == `extents<int64_t, dynamic_extent, dynamic_extent, dynamic_extent>`. Handy
  *  for a rank-N view whose sizes are all runtime: `view<float, rank<3>>`.
