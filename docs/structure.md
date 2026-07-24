@@ -47,10 +47,17 @@ aliases of `is_dense<Layout>()` (the exact-layout check), so `is_contiguous()` =
 `is_dense<ccontiguous>()`; a value form `is_dense(ccontiguous{})` /
 `is_contiguous(ccontiguous{})` deduces the layout from the argument.
 
+!!! note "mdspan equivalent"
+    teeny leads with the numpy/pytorch vocabulary — `t.shape()`, `t.shape(d)`,
+    `t.strides()`, `t.numel()`, `t.rank()`, `t.is_contiguous()`. The mdspan spellings
+    are still there as an interop escape hatch: `t.extents()` / `t.mapping()` return
+    the raw `cuda::std` objects and `t.extent(d) == t.shape(d)`.
+
 ## Recover static inner dims
 
 At the ndarray boundary a view is often fully dynamic. `recast` reinterprets it
-with a **more-static** extents type of the same rank, so known inner dims fold:
+with a **more-static** shape (a `shape<...>`, i.e. the mdspan extents type) of the
+same rank, so known inner dims fold:
 
 ```cpp
 auto dyn = wrap(ptr, shape<-1,-1,-1>{n,3,3});  // came in fully dynamic
