@@ -108,3 +108,14 @@ halving their width cuts the register footprint (rank-2: 40 → 24 bytes) and ru
 address math in 32-bit. Guard it with `t.index_fits<int32_t>()` — a signed-reach
 check that handles negative-stride (flipped) and broadcast views — and only narrow
 when the element span provably fits. See [Performance](performance.md).
+
+### Mixing widths in a broadcast
+
+When two operands of **different** index widths meet in a broadcast (`a + b`,
+`a < b`, …), the result takes the **wider** of the two — an `int32`-indexed view
+plus an `int64`-indexed one yields an `int64`-indexed result, in either order. This
+is lossless (the broadcast engine already runs its offset math in the result's index
+type) and avoids silently truncating the wide operand's strides to the narrow width.
+Two equal-width operands are unchanged; note that broadening cannot rescue two `int32`
+operands whose broadcast *span* overflows `int32` (an outer-product stretch) — that
+stays the caller's concern, guarded by `index_fits`/`dispatch_index` at the boundary.

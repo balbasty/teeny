@@ -378,7 +378,10 @@ template-only.
   Out-of-place: a fully static result → `storage::stack` (host+device); any dynamic →
   `storage::heap` (host only). The SFINAE keys on `bcast_extents<...>::rank_dynamic()`,
   **not** on instantiating a stack tensor (that would fire the "stack needs static
-  shape" `static_assert`).
+  shape" `static_assert`). The result's offset **index type** is the WIDER of the two
+  operands' (`_wider_index_t`, by `sizeof`; tie → first operand), so a mixed-width
+  broadcast (int32 view + int64 view) yields an int64 result — lossless, and it stops
+  the engine truncating the wide operand's strides to a narrow result width.
 - **The gather** (`tensor.h` `_slice_range`, `iterate.h` `gather_peel`): ALL
   view-making ops — `operator()` slicing, `take_along`, `peel` — route through
   one hand-built gather (NO `cs::submdspan`). Per axis: an integer drops it (into
