@@ -54,5 +54,24 @@ int main() {
     static_assert(decltype(dr)::ownership == storage::heap, "dynamic result -> heap");
     if (dr(0)!=3.0 || dr(1)!=12.0) return 10;
 
+    // ---- axis<...> value form (numpy `axis=`): NAME(a, axis<...>{}) == NAME<...>(a) ----
+    // Each value form must be TYPE-identical to its template form, and behave the same.
+    static_assert(cs::is_same<decltype(sum(t, axis<0,2>{})), decltype(sum<0,2>(t))>::value, "sum axis value form");
+    if (sum(t, axis<0,2>{})(0)!=14.0 || sum(t, axis<0,2>{})(1)!=22.0) return 11;
+    // Acc form: leading TYPE arg + deduced axes
+    static_assert(cs::is_same<decltype(sum<double>(t, axis<1>{})), decltype(sum<double,1>(t))>::value, "sum<Acc> axis value form");
+    // mean / max / min / prod
+    static_assert(cs::is_same<decltype(mean(m, axis<0>{})), decltype(mean<0>(m))>::value, "mean axis value form");
+    static_assert(cs::is_same<decltype(max(t,  axis<2>{})), decltype(max<2>(t))>::value,  "max axis value form");
+    static_assert(cs::is_same<decltype(min(t,  axis<0,1>{})), decltype(min<0,1>(t))>::value, "min axis value form");
+    static_assert(cs::is_same<decltype(prod(t, axis<1>{})), decltype(prod<1>(t))>::value, "prod axis value form");
+    if (max(t, axis<2>{})(0,0) != max<2>(t)(0,0)) return 12;
+    // integer mean -> double, preserved through the value form
+    auto im = local<int, shape<2,4>>(); im.iota_(1,1);
+    static_assert(cs::is_same<decltype(mean(im, axis<1>{})), decltype(mean<1>(im))>::value, "int mean axis value form");
+    // dynamic source: value form matches, stays on the same (heap) path
+    static_assert(cs::is_same<decltype(sum(d, axis<0>{})), decltype(sum<0>(d))>::value, "dynamic sum axis value form");
+    if (sum(d, axis<0>{})(0) != 3.0 || sum(d, axis<0>{})(2) != 7.0) return 13;
+
     return 0;
 }
