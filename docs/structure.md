@@ -165,7 +165,27 @@ for (auto cell : peel_front<N>(t)) work(cell);  // peel the FIRST N axes
 auto c = peel_front_at<N>(t, i);                // the i-th
 ```
 
-`peel_front<N>` handles **arbitrary batch rank**: for a `(*batch, *spatial, C)`
+The peeled-axis selector has a **value form** too — pass `axis<...>{}` (a
+compile-time axis list, the sibling of `shape<...>`, like numpy's
+`axis: int | list[int]`) instead of the `<...>` template list. It reads the same
+and, being a deduced argument, needs no `.template` on a type-dependent receiver:
+
+=== "value form"
+
+    ```cpp
+    for (auto line : peel(t, axis<0,1>{})) work(line);   // == peel<0,1>(t)
+    auto s = peel_at(t, i, axis<0,1>{});                 // == peel_at<0,1>(t, i)
+    ```
+
+=== "template form"
+
+    ```cpp
+    for (auto line : peel<0,1>(t)) work(line);
+    auto s = peel_at<0,1>(t, i);
+    ```
+
+(`peel_front<N>` / `size_front<N>` take a **count**, not an axis list, so they stay
+template-only.) `peel_front<N>` handles **arbitrary batch rank**: for a `(*batch, *spatial, C)`
 tensor, `peel_front<Nbatch>` yields `(*spatial, C)` sub-views to parallelise
 over — one per CPU thread or CUDA thread. Each sub-view already has the batch
 offset baked into its pointer, so the inner kernel sees only spatial strides.

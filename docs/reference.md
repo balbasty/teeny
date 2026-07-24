@@ -138,6 +138,7 @@ Negative integer indices wrap (count from the back).
 | `t(0, all, slice(1,4))` (any slice arg) | → view | lower-/same-rank |
 | `t(1, ellipsis, 2)` | → view or `T&` | `ellipsis` = `rank − #other args` copies of `all` (≤1 per call) |
 | `t.take_along<Axes...>(args...)` | → view | bind named axes only, keep the rest |
+| `t.take_along(axis<Axes...>{}, args...)` | → view | value form — `axis<...>` selector (numpy-like), no `.template` on a dependent receiver |
 
 Slice specifiers:
 

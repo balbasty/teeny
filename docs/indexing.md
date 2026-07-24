@@ -159,11 +159,25 @@ you want the extent to keep folding:
 `operator()` is positional. To name only the axes you touch and keep the rest,
 use `take_along`:
 
-```cpp
-t.take_along<1>(2);                // fix axis 1 at index 2, keep all others
-t.take_along<0,2>(i, slice(1,4));  // bind axes 0 and 2 at once
-t.take_along<-1>(k);               // negative axis: the last one
-```
+=== "value form"
 
-Each argument is an integer (negatives wrap), `all`, or a `slice` — the same
-specifiers `operator()` accepts.
+    ```cpp
+    t.take_along(axis<1>{}, 2);                // fix axis 1 at index 2, keep all others
+    t.take_along(axis<0,2>{}, i, slice(1,4));  // bind axes 0 and 2 at once
+    t.take_along(axis<-1>{}, k);               // negative axis: the last one
+    ```
+
+=== "template form"
+
+    ```cpp
+    t.take_along<1>(2);
+    t.take_along<0,2>(i, slice(1,4));
+    t.take_along<-1>(k);
+    ```
+
+Each bind argument is an integer (negatives wrap), `all`, or a `slice` — the same
+specifiers `operator()` accepts. The **value form** leads with an `axis<...>{}`
+selector (a compile-time axis list, sibling of `shape<...>`, like numpy's
+`axis: int | list[int]`); being a single deduced argument it needs no `.template`
+on a type-dependent receiver, and it's the one spelling that disambiguates
+`take_along`'s two argument packs cleanly.

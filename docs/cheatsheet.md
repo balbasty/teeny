@@ -146,7 +146,12 @@ to<storage::gpu>(x);                      // memory-space move: to<Space,ET,Forc
 
 Axis template arguments are signed (negatives count from the back); each `<Ax>` op
 also has a **value form** — `t.permute(Int<2>(),Int<0>(),Int<1>())` == `t.permute<2,0,1>()`,
-`t.recast(shape<-1,3,3>{})` == `t.recast<shape<-1,3,3>>()`. **Every** view op —
+`t.recast(shape<-1,3,3>{})` == `t.recast<shape<-1,3,3>>()`. The axis-**list** ops
+(`peel`/`peel_at`/`take_along`) take an `axis<...>{}` selector (a compile-time axis
+list, sibling of `shape<...>`, like numpy's `axis: int | list[int]`):
+`peel(t, axis<0,1>{})` == `peel<0,1>(t)`, `t.take_along(axis<0,2>{}, i, slice(1,4))`.
+Value forms are deduced, so a type-dependent receiver needs no `.template`.
+**Every** view op —
 `operator()`/`take_along`/`peel` **and** `permute`/`flip`/`unsqueeze`/`squeeze` —
 folds its output strides into a static `strides<...>` (compile-time where the
 source strides are static), on any source layout. See [Views & structure](structure.md).
@@ -157,7 +162,8 @@ source strides are static), on any source layout. See [Views & structure](struct
 
 ```cpp
 peel<Axes...>(x);       peel_at<Axes...>(x, i);  // peel named axes
-peel_front<N>(x);       peel_front_at<N>(x, i);  // peel the first N axes
+peel(x, axis<Axes...>{}); peel_at(x, i, axis<Axes...>{});  // value form (numpy-like axis selector)
+peel_front<N>(x);       peel_front_at<N>(x, i);  // peel the first N axes (COUNT -> template-only)
 size_front<N>(x);                                // # cells peel_front<N> yields (no range built)
 ```
 
