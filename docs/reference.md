@@ -85,21 +85,27 @@ stack (host+device), dynamic shape → heap (host only):
 | Call | Returns | Notes |
 |---|---|---|
 | `t.rank()` | `size_t` (constexpr) | number of axes |
-| `t.numel()` | `integral_constant` if fully static, else `Idx` | product of extents; folds when static |
-| `t.extent(d)` | `Idx` | runtime axis size |
-| `t.extent(Int<k>())` | `integral_constant` if static, else `Idx` | folds when static |
-| `t.shape()` | array-like accessor | `shape()[Int<k>()]` folds (integral_constant), `shape()[i]` is runtime; `rank()`, iterable, converts to `Extents` |
-| `t.shape(d)` | `integral_constant`/`Idx` | per-axis shorthand (== `extent(d)`) |
-| `t.strides()` | array-like accessor | twin of `shape()` for strides: `strides()[Int<k>()]` folds where derivable, `strides()[i]` runtime |
-| `t.stride(d)` | `Idx` | runtime axis stride |
-| `t.stride(Int<k>())` | `integral_constant` if derivable, else `Idx` | folds for static-stride / contiguous layouts |
-| `t.is_dense()` | `bool` | dense block in **some** axis order (C, F, or permuted) |
-| `t.is_dense<L>()` | `bool` | exact: strides equal `L`'s packing (`ccontiguous`=C, `fcontiguous`=F) |
-| `t.is_contiguous()` | `bool` | **C-order** (numpy/pytorch default); `is_contiguous<fcontiguous>()` for F — a thin alias of `is_dense<L>()`. This is what `reshape`/`flatten` need |
+| `t.numel()` | `integral_constant` if fully static, else `Idx` | number of elements (product of the shape); folds when static |
+| `t.shape()` | array-like accessor | the tensor's **shape** (numpy/pytorch spelling): `shape()[Int<k>()]` folds (integral_constant), `shape()[i]` is runtime; has `rank()`, is iterable, converts to the raw `Extents` |
+| `t.shape(d)` | `integral_constant`/`Idx` | size of axis `d` — static `Int<k>()` folds, runtime `d` is a value |
+| `t.strides()` | array-like accessor | the tensor's **strides**: twin of `shape()` — `strides()[Int<k>()]` folds where derivable, `strides()[i]` is runtime |
+| `t.stride(d)` | `integral_constant` if derivable, else `Idx` | stride of axis `d`; static-stride / contiguous layouts fold |
+| `t.is_contiguous()` | `bool` | **C-order** (numpy/pytorch default) — what `reshape`/`flatten` need; `is_contiguous<fcontiguous>()` for F |
+| `t.is_dense()` | `bool` | dense block in **some** axis order (C, F, or permuted); `is_dense<L>()` is the exact-layout check and `is_contiguous()` == `is_dense<ccontiguous>()` |
 | `t.data()` | `T*` | base pointer |
 | `t.view()` | `view<T,E,L>` (`gpu_view` if device) | non-owning teeny view aliasing `t`'s memory (no copy) |
-| `t.mdspan()` | `cs::mdspan<T,E,L>` | the raw mdspan |
-| `t.extents()` / `t.mapping()` | `const Extents&` / `const mapping&` | |
+| `t.extent(d)` / `t.extent(Int<k>())` | `Idx` / `integral_constant` if static | mdspan-side per-axis size (== `t.shape(d)`); folds when static |
+| `t.extents()` / `t.mapping()` | `const Extents&` / `const mapping&` | the **raw mdspan objects** (interop escape hatch) |
+| `t.mdspan()` | `cs::mdspan<T,E,L>` | the raw `cuda::std::mdspan` |
+
+!!! note "mdspan equivalent"
+    `t.shape()` and `t.strides()` are teeny's **array-like accessors** — indexable
+    with a static `Int<k>()` (folds to an `integral_constant`) or a runtime
+    integer, iterable, and rank-aware — and are the primary spelling. `t.extents()`
+    and `t.mapping()` hand back the **raw `cuda::std` objects** (`cs::extents`, the
+    layout mapping) for mdspan interop. Per-axis, `t.extent(d) == t.shape(d)`, and
+    `t.stride(d)` is the strides twin. Reach for `extent`/`extents`/`mapping`/
+    `mdspan()` only when you need the underlying mdspan types.
 
 ---
 
