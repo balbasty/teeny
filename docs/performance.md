@@ -101,10 +101,12 @@ loop, where they hoist for free.
 
 ## Open work
 
-- **32-bit offset dispatch (#115).** `reindex` a kernel-boundary view to `shape32`
-  when its element span provably fits — halving the dynamic-view footprint
-  (56→~32 B for rank-3) and moving offset math to 32-bit. The biggest device win for
-  genuinely-dynamic views; the direct mitigation for the footprint cost above.
+- **32-bit offset dispatch (#115).** `t.reindex<int32_t>()` (→ `shape32`) already
+  lands the no-copy, layout-preserving retype — narrowing a dynamic boundary view
+  halves its footprint (rank-2: 40→24 B) and runs offset math in 32-bit, the biggest
+  device win. What remains is `dispatch_index(t, f)` — instantiate the kernel for both
+  widths and pick `reindex` when `t.index_fits<int32_t>()` — plus the anyrank/DLPack
+  boundary wiring.
 - **`restrict`/no-alias fast path (#161).** teeny's elementwise engines carry
   non-`restrict` pointers, so even contiguous host loops don't auto-vectorize (the
   compiler must assume the destination may alias a source). A `__restrict__` path — or

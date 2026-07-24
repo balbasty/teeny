@@ -59,11 +59,18 @@ zeros<T, storage::pinned>(shape);  arange<T>(n, storage_c<storage::pinned>{});  
 
 ```cpp
 template <auto... E>       using shape   = cs::extents<int64_t, E...>;  // -1 == dynamic
+template <class Idx, auto... E> using shape_as = cs::extents<Idx, E...>; // shape<> with a chosen index type
+template <auto... E>       using shape32 = shape_as<int32_t, E...>;     // int32-indexed boundary view
 template <size_t N>        using rank    = shape<-1 ...N times>;        // fully-dynamic rank-N shape
 template <int64_t... S>    struct strides;                // signed; dynamic_stride sentinel
 template <int64_t... S>    using layout_static_stride = strides<S...>;  // back-compat alias
 constexpr int64_t dynamic_stride;                         // a runtime stride
 ```
+
+`t.reindex<int32_t>()` (free: `reindex<int32_t>(t)`) retypes the offset index width
+without a copy (layout preserved; extents/dynamic strides narrowed) — halves a
+dynamic view's footprint and runs offset math in 32-bit at the kernel boundary.
+`t.index_fits<int32_t>()` is the signed-reach guard. See [Performance](performance.md).
 
 Static-integer aliases (each converts to a runtime integer and carries `::value`);
 pass them where a static index/size is wanted, e.g. `x.extent(Int<0>())`:
