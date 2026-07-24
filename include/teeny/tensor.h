@@ -961,16 +961,16 @@ public:
  *         C-order). This is the factory; the `view<T,E>` alias is the type it
  *         produces, and the member `t.view()` re-views an existing tensor.
  *
- *         MEMORY SPACE: `p` is a **host** pointer (`own::view`) unless a trailing
- *         `own_c<Space>{}` tag says otherwise — `own_c<own::gpu_view>{}` for a
- *         device pointer, `own_c<own::pinned_view/mapped_view>{}` for page-locked
- *         host memory. (Symmetric with `as_anyrank<Space>` / `from_dlpack<T,Space>`;
- *         the space must be a VIEW kind — `wrap` never owns/allocates.) */
+ *         MEMORY SPACE: `p` is a **host** pointer unless a trailing `own_c<Space>{}`
+ *         (or `own_v<Space>`) tag names where it lives — pass the plain BACKEND the
+ *         memory is in (`own::gpu` for a device pointer, `own::pinned`/`own::mapped`
+ *         for page-locked host memory). Since `wrap` always yields a VIEW, the space
+ *         folds to its view kind (`gpu -> gpu_view`, …) via `own_view_of` — you
+ *         never spell the `_view` kinds. Symmetric with `as_anyrank<Space>` /
+ *         `from_dlpack<T,Space>`. */
 template <class Layout = ccontiguous, own Space = own::view, class T, class Shape>
-_TNY_API tensor<T, Shape, Layout, Space> wrap(T * p, Shape e, own_c<Space> = {}) {
-    static_assert(own_is_view(Space), "wrap: the memory-space tag must be a VIEW kind "
-                  "(view / gpu_view / pinned_view / mapped_view) — wrap never owns storage");
-    using Tn = tensor<T, Shape, Layout, Space>;
+_TNY_API tensor<T, Shape, Layout, own_view_of(Space)> wrap(T * p, Shape e, own_c<Space> = {}) {
+    using Tn = tensor<T, Shape, Layout, own_view_of(Space)>;
     return Tn(p, typename Tn::mapping_type(e));
 }
 
@@ -981,13 +981,12 @@ _TNY_API tensor<T, Shape, Layout, Space> wrap(T * p, Shape e, own_c<Space> = {})
  *         `wrap(p, shape<2,3>{}, {3, 1})` is the row-major view; `{1, 2}` the
  *         column-major one. For strides known at compile time pass a
  *         `strides<S...>{}` instead (overload below) so they fold into the type.
- *         A trailing `own_c<Space>{}` tags the memory space (default host view). */
+ *         A trailing `own_c<Space>{}` tags the memory space (default host; the plain
+ *         backend folds to its view kind, e.g. `own::gpu -> gpu_view`). */
 template <own Space = own::view, class T, class Shape>
-_TNY_API tensor<T, Shape, cs::layout_stride, Space>
+_TNY_API tensor<T, Shape, cs::layout_stride, own_view_of(Space)>
 wrap(T * p, Shape e, cs::array<typename Shape::index_type, Shape::rank()> st, own_c<Space> = {}) {
-    static_assert(own_is_view(Space), "wrap: the memory-space tag must be a VIEW kind "
-                  "(view / gpu_view / pinned_view / mapped_view) — wrap never owns storage");
-    using Tn = tensor<T, Shape, cs::layout_stride, Space>;
+    using Tn = tensor<T, Shape, cs::layout_stride, own_view_of(Space)>;
     return Tn(p, typename Tn::mapping_type(e, st));
 }
 
@@ -1000,15 +999,13 @@ wrap(T * p, Shape e, cs::array<typename Shape::index_type, Shape::rank()> st, ow
  *         strides, use the template form below; for all-runtime strides the
  *         `{s...}` overload above (a `layout_stride` view) is simplest. */
 template <cs::int64_t... Strides, own Space = own::view, class T, class Shape>
-_TNY_API tensor<T, Shape, strides<Strides...>, Space>
+_TNY_API tensor<T, Shape, strides<Strides...>, own_view_of(Space)>
 wrap(T * p, Shape e, strides<Strides...>, own_c<Space> = {}) {
     static_assert(strides<Strides...>::all_static(),
         "wrap(ptr, shape, strides<...>{}): a strides<> tag carries only COMPILE-TIME "
         "strides; for mixed strides use wrap<S...>(ptr, shape, {runtime slots}), or "
         "for all-runtime strides pass the values as `{s0, s1, ...}`");
-    static_assert(own_is_view(Space), "wrap: the memory-space tag must be a VIEW kind "
-                  "(view / gpu_view / pinned_view / mapped_view) — wrap never owns storage");
-    using Tn = tensor<T, Shape, strides<Strides...>, Space>;
+    using Tn = tensor<T, Shape, strides<Strides...>, own_view_of(Space)>;
     return Tn(p, typename Tn::mapping_type(e));
 }
 
@@ -1022,13 +1019,12 @@ wrap(T * p, Shape e, strides<Strides...>, own_c<Space> = {}) {
  *             wrap<dynamic_stride, dynamic_stride>(ptr, sh, {4,1}); // both runtime (a strides<> layout)
  *
  *         The static slots fold into the type; only the runtime ones are stored.
- *         A trailing `own_c<Space>{}` tags the memory space (default host view). */
+ *         A trailing `own_c<Space>{}` tags the memory space (default host; the plain
+ *         backend folds to its view kind, e.g. `own::gpu -> gpu_view`). */
 template <cs::int64_t S0, cs::int64_t... Srest, own Space = own::view, class T, class Shape>   // S0 forces explicit <...>
-_TNY_API tensor<T, Shape, strides<S0, Srest...>, Space>
+_TNY_API tensor<T, Shape, strides<S0, Srest...>, own_view_of(Space)>
 wrap(T * p, Shape e, cs::array<typename Shape::index_type, strides<S0, Srest...>::ndyn()> dyn, own_c<Space> = {}) {
-    static_assert(own_is_view(Space), "wrap: the memory-space tag must be a VIEW kind "
-                  "(view / gpu_view / pinned_view / mapped_view) — wrap never owns storage");
-    using Tn = tensor<T, Shape, strides<S0, Srest...>, Space>;
+    using Tn = tensor<T, Shape, strides<S0, Srest...>, own_view_of(Space)>;
     return Tn(p, typename Tn::mapping_type(e, dyn));
 }
 
