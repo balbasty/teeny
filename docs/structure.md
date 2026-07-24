@@ -63,9 +63,9 @@ a **compile error** for a static source and a debug check for a dynamic one — 
 first, or `clone()`:
 
 ```cpp
-t.can_reshape_without_copy<6,4>();  // will reshape<6,4>() be a view? (numpy's rule)
+t.can_reshape_without_copy<6,4>();  // will reshape(Int<6>(),Int<4>()) be a view? (numpy's rule)
 auto c = t.clone();                 // a dense, row-major OWNING copy (static -> stack, dyn -> heap)
-c.reshape<6,4>();                   // guaranteed viewable now
+c.reshape(Int<6>(), Int<4>());      // guaranteed viewable now
 ```
 
 `is_dense()` with no argument asks only whether the elements occupy a dense block

@@ -25,10 +25,10 @@ Everything works on a view:
 ```cpp
 m(0,-1);                             // element access (negative index counts from the back)
 m(all, slice(0,2));                  // sub-view (still no copy)
-m.permute<1,0>();                    // transpose (a view)
+m.permute(Int<1>(), Int<0>());       // transpose (a view)
 m.add_(other);                       // in-place math
 auto s = sum(m);                     // reductions
-for (auto row : peel<0>(m)) work(row);  // iterate a subset of axes
+for (auto row : peel(m, axis<0>{})) work(row);  // iterate a subset of axes
 ```
 
 `view` is the default ownership, so the bare type name is a view:
@@ -53,40 +53,28 @@ Factories:
 Copying a view copies the pointer, not the data; memory lifetime is the caller's.
 
 !!! warning "`a = b` rebinds a view; `a(ellipsis) = b` copies elements"
-    **The left-hand side decides.** A **named** view (an lvalue) *rebinds*; a
-    **temporary** view — the result of a slice, an rvalue — *copies*. So `a = b`
-    makes `a` point at `b`'s data (C++ value semantics); it does **not** write
-    `b`'s elements into `a`'s buffer. To copy elements (the numpy `a[:] = b`), put
-    a slice on the left — `operator()` returns a temporary view, and assigning into
-    it copies (with broadcasting):
+    On a **named** view, `a = b` is ordinary C++ assignment: `a` *rebinds* to point
+    at `b`'s memory — nothing is copied. To copy elements (numpy's `a[:] = b`), put a
+    slice on the left: `operator()` returns a *temporary* view, and assigning into a
+    temporary copies (with broadcasting).
 
     ```cpp
     a = b;             // rebind: `a` now views `b`'s memory (nothing copied)
     a(ellipsis) = b;   // copy: write b's elements into a's buffer (== a.copy_(b))
-    a(all) = b;        // same — copy every element
     a(0, all) = b;     // copy into a sub-region; a(0, all) = 5.0 fills it
     ```
 
-    The copy works for **any** right-hand side — an owning tensor *or another view,
-    including one of the identical type* (`y(all) = x(all)`, `y(slice(1,4)) =
-    x(slice(1,4))`). The distinguishing mechanism is the assignment operator's
-    ref-qualifier: the `&`-qualified rebind binds only to a named lvalue, so every
-    temporary-view (rvalue) assignment routes to the deep copy. Keeping the rebind
-    a defaulted special member is also what keeps a view **trivially copyable**
-    (hence passable into a CUDA kernel by value).
+    The copy accepts **any** right-hand side, including another view of the same type
+    (`y(all) = x(all)`), and broadcasts `b` numpy-style (right-aligned; `b`'s rank may
+    be ≤ `a`'s). The rebind is an `&`-qualified defaulted assignment, so it binds only
+    to named lvalues — every temporary-view assignment routes to the deep copy, and the
+    view stays **trivially copyable** (passable into a CUDA kernel by value).
 
-    Both `a.copy_(b)` and slice-assignment broadcast `b` numpy-style (right-aligned;
-    `b`'s rank may be ≤ `a`'s — missing leading axes are size 1). An *owning*
-    `local`/`owned` copies its elements on `a = b` as usual (it holds the storage,
-    not a pointer). If a destination slice **overlaps its own source**, `clone()`
-    the source first — the copy runs front-to-back with no overlap check.
-
-    **Different shapes/strides:** `a = b` is ordinary C++ assignment, so `a` and
-    `b` must be the *same tensor type* — teeny has no cross-type assignment. If a
-    dynamic-shaped `a` is assigned a `b` with a different runtime shape, `a`
-    simply takes on `b`'s shape and pointer (it is a rebind). Two *different*
-    static shapes are different types and won't compile — use `a(ellipsis) = b`
-    (or `a.copy_(b)`), which broadcasts, when you mean to copy across shapes.
+    Two caveats: an *owning* `local`/`owned` copies its elements on `a = b` as usual
+    (it holds storage, not a pointer); and if a destination slice **overlaps its own
+    source**, `clone()` the source first — the copy has no overlap check. Since `a = b`
+    needs `a` and `b` to be the *same* type, use `a(ellipsis) = b` (which broadcasts)
+    to copy across differing shapes.
 
 ## Owning variants
 
@@ -97,7 +85,9 @@ when they die. Pick one by where the memory should live.
 
     Inline array. Requires a fully static shape (size known at compile time). A
     `local` is exactly `sizeof` its data — no pointer, no heap, host and device.
-    Use for kernel-local scratch (a small matrix, an accumulator).
+    Use for kernel-local scratch (a small matrix, an accumulator). A static shape
+    also lets every index computation fold to immediates — see
+    [Performance](performance.md).
 
     ```cpp
     auto m = local<double, shape<3,3>>{};  // 9 doubles on the stack

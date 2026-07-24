@@ -58,28 +58,19 @@ x.uget(1, ellipsis, 2);       // like x(1, ellipsis, 2) — ellipsis expands, st
 x.uat(i, j);                  // like x.at(i,j)        -> rank-0 view
 ```
 
-They return the **same type** as their checked counterparts, so they drop into
-existing code unchanged. Two guarantees keep them safe to fold:
-
-- **Static (`Int<>`) bounds and `none` are unaffected** — only *runtime signed*
-  values skip the wrap. A compile-time slice such as `uget(slice<1,4>())` folds to
-  exactly the same static extent as `x(slice<1,4>())`.
-- Slice ranges are still **clamped** to a valid extent; only the wrap is dropped, so
-  a runtime negative bound is taken as-is and then clamped. With a forward step that
-  means a negative *stop* collapses to an **empty** axis (`uget(0, slice(1,-1))`
-  instead of the wrapped `[1, n-1)`), while a negative *start* clamps to `0` and keeps
-  the window open from the front (`uget(0, slice(-3, none))` is `[0, n)`, not the
-  wrapped last three). The rule is simply "no wrap", not "empties".
+They return the **same type** as their checked counterparts, so they drop in
+unchanged, and static (`Int<>`) bounds and `none` fold identically — only *runtime
+signed* values skip the wrap. Slice ranges are still clamped, so a runtime negative
+bound is now taken literally then clamped (the rule is just "no wrap": with a forward
+step a negative *stop* yields an empty axis, a negative *start* clamps to `0`).
 
 The one rule: **passing a negative runtime index to a `u`-accessor is undefined
 behaviour** — that is the promise you make in exchange for the tighter codegen.
 
-By default teeny does no bounds checking either (like `mdspan`'s subscript — an
-out-of-range index is UB), so in a default build `uget` differs from `operator()`
-only by the dropped wrap. Build with **`-DTNY_HARDENED`** to turn on a per-index
-bounds check in the *checked* accessors (`operator()`/`at`/slice) — the `u*`
-accessors always skip it, so under hardening they are the deliberate opt-out (the
-`get_unchecked` role). The bounds check is always off on the device.
+Bounds checking is off by default (like `mdspan`'s subscript), so normally `uget`
+differs from `operator()` only by the dropped wrap. Under **`-DTNY_HARDENED`** the
+*checked* accessors gain a per-index bounds check; the `u*` accessors always skip it,
+so they are the deliberate opt-out. The bounds check is always off on the device.
 
 ## Slicing → a sub-view (no copy)
 

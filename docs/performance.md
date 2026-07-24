@@ -83,7 +83,7 @@ teeny is built to route around the above; the idioms:
   `unsqueeze`/`squeeze`, and `reshape` all **fold their output strides** to
   compile-time constants where the source is static — so a static source stays static
   through a chain of views (see [Views & structure](structure.md)).
-- **Recover static inner dims at the boundary.** `recast<shape<-1,3,3>>()` re-types a
+- **Recover static inner dims at the boundary.** `recast(shape<-1,3,3>{})` re-types a
   runtime `(n,3,3)` view so the `3`s fold, without a copy and preserving the source
   strides.
 - **Peel the batch into the pointer.** `peel_front<Nbatch>` bakes the batch offset
