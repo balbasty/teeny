@@ -177,6 +177,10 @@ t.flip<1>();          // reverse an axis (negative-stride view; needs signed ind
 t.unsqueeze<2>();     // insert size-1 axis at pos 2 (numpy newaxis) -> rank+1 view
 t.squeeze<3>();       // drop a size-1 axis -> rank-1 view
 t.reshape<6,4>(); t.flatten();  // contiguous-view reshape / ravel (clone() first if not)
+t.recast<shape<-1,3,3>>();      // re-type extents (recover static dims), PRESERVE source strides (any
+                                //   layout, no copy). 2nd arg = layout override: recast<E,ccontiguous>()
+                                //   reinterprets AS contiguous (folds strides; "I promise"); strides<S> imposes.
+                                //   Functional: recast(shape<...>{}, ccontiguous{}).
 t.is_contiguous();              // dense in SOME order (C/F/permuted); <ccontiguous>() = exact C
 t.clone();                      // materialise a dense row-major copy
 t.to<double>();                 // pytorch-like dtype convert -> dense owning copy (static->stack, dyn->heap).
@@ -266,7 +270,8 @@ dispatch_value<1,2,3>(D, [&](auto d){ kern<d.value>(v); });  // runtime value ->
 // dims, keep the trailing Sr "interesting" dims static. NB the arg is NEGATIVE
 // (keep the last |N|), like the tensor's peel_front — anyrank asserts N<0.
 for (auto cell : at.peel_front<-Sr>()) kernel<Sr>(cell);  // Sr=2 -> peel_front<-2>; cell is rank-Sr
-auto cell = at.peel_front_at<-Sr>(i);         // i-th (grid-stride); .recast<shape<-1,c,c>>() folds inner dims
+auto cell = at.peel_front_at<-Sr>(i);         // i-th (grid-stride); .recast<shape<-1,c,c>>() folds inner
+                                              //   EXTENTS (add ,ccontiguous> to also fold the strides)
 auto nb = at.size_front<-Sr>();               // flattened batch count (no range built), same NEGATIVE arg
 ```
 

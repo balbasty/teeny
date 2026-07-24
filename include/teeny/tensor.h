@@ -703,29 +703,68 @@ public:
     template <long... NewExt> _TNY_API auto reshape() const noexcept { return _reshape<const T, NewExt...>(store_.data()); }
 
 private:
-    template <class El, class NewE, cs::size_t... D>
+    template <class El, class NewE, class NewL, cs::size_t... D>
     _TNY_API auto _recast(El * p, cs::index_sequence<D...>) const {
         static_assert(NewE::rank() == rank(), "recast: rank must match");
-        // recast re-types the extents but reuses row-major strides, so it needs a
-        // C-contiguous source (else it would silently mis-address the data). And
-        // every static dim of NewE must equal the actual extent. Checked here
-        // (host-debug) because a non-contiguous ndarray is the norm at the boundary.
-        _TNY_CHECK(is_contiguous<ccontiguous>(), "recast: needs a C-contiguous tensor (clone() first)");
+        // recast re-types the EXTENTS (to recover statically-known dims). Each static
+        // dim of NewE must equal the runtime extent (a genuine mismatch is a bug —
+        // validated host-debug). The STRIDES come from `NewL`:
         ( _TNY_CHECK(NewE::static_extent(D) == cs::dynamic_extent ||
                      static_cast<index_type>(NewE::static_extent(D)) == static_cast<index_type>(extent(D)),
                      "recast: a static dim does not match the actual extent"), ... );
-        return tensor<El, NewE, ccontiguous, own_view_of(O)>(
-            p, typename ccontiguous::template mapping<NewE>(NewE(cs::array<index_type, rank()>{ static_cast<index_type>(extent(D))... })));
+        NewE oe(cs::array<index_type, rank()>{ static_cast<index_type>(extent(D))... });
+        if constexpr (cs::is_same<NewL, keep_strides>::value) {
+            // DEFAULT — PRESERVE the source strides: folded via NewE's (now richer)
+            // static extents where the source layout makes them derivable, else
+            // carried from the actual runtime strides. Works for ANY source layout
+            // (contiguous, transposed, broadcast, strided) and can never mis-address.
+            using SF = strides< _src_sstride<D, Layout, NewE>()... >;
+            const index_type rstr[rank() ? rank() : 1] = { static_cast<index_type>(stride(D))... };
+            return tensor<El, NewE, SF, own_view_of(O)>(p, _detail::fold_mapping<SF>(oe, rstr));
+        } else if constexpr (cs::is_same<NewL, ccontiguous>::value || cs::is_same<NewL, fcontiguous>::value) {
+            // EXPLICIT contiguous — reinterpret AS row/col-major: the strides are
+            // DERIVED FROM THE EXTENTS (the "I promise this is contiguous" form, e.g.
+            // to fold a dynamic_strides cell's inner unit stride). UB if the data is
+            // not actually contiguous in that order — the caller's promise. Emit the
+            // folded `strides<...>` (contiguous products, static where the trailing
+            // extents are), filling any dynamic slot from the contiguous mapping.
+            using SF = strides< _src_sstride<D, NewL, NewE>()... >;
+            typename NewL::template mapping<NewE> cm(oe);
+            const index_type rstr[rank() ? rank() : 1] = { static_cast<index_type>(cm.stride(D))... };
+            return tensor<El, NewE, SF, own_view_of(O)>(p, _detail::fold_mapping<SF>(oe, rstr));
+        } else {
+            // EXPLICIT `strides<S...>` — bake its static strides; a dynamic_stride
+            // slot is filled from the SOURCE stride for that axis. (To impose wholly
+            // new runtime strides, `wrap(t.data(), shape, strides)` instead.)
+            using SF = NewL;
+            const index_type rstr[rank() ? rank() : 1] = { static_cast<index_type>(stride(D))... };
+            return tensor<El, NewE, SF, own_view_of(O)>(p, _detail::fold_mapping<SF>(oe, rstr));
+        }
     }
 public:
     /** @brief Reinterpret with a MORE-STATIC extents type of the same rank —
      *         recover statically-known inner dims at the dynamic (ndarray)
      *         boundary: a runtime `(n,3,3)` view -> `.recast<shape<-1,3,3>>()` so
-     *         the `3`s fold. **Requires a C-contiguous tensor** (`clone()` first
-     *         otherwise); each static dim of `NewE` is validated against the
-     *         actual extent. */
-    template <class NewE> _TNY_API auto recast()       { return _recast<T,       NewE>(store_.data(), cs::make_index_sequence<rank()>{}); }
-    template <class NewE> _TNY_API auto recast() const { return _recast<const T, NewE>(store_.data(), cs::make_index_sequence<rank()>{}); }
+     *         the `3`s (extents) fold.
+     *
+     *         `NewLayout` chooses the STRIDES (default `keep_strides`):
+     *         - **`keep_strides`** (default) — PRESERVE the source strides; works on
+     *           ANY layout (no copy, no contiguity requirement), a strided/transposed
+     *           source keeps its strides, a `dynamic_strides` source keeps them at
+     *           run time. Never mis-addresses.
+     *         - **`ccontiguous`/`fcontiguous`** — reinterpret AS that order, deriving
+     *           the strides from the extents (folds the inner unit stride). The
+     *           "I promise this is contiguous" form — UB if it isn't.
+     *         - **`strides<S...>`** — impose those (static) strides; a `dynamic_stride`
+     *           slot comes from the source.
+     *
+     *         Each static dim of `NewShape` is validated against the actual extent.
+     *         Functional form: `recast(shape_value, layout_value)` (both may mix
+     *         static/dynamic; the runtime values only deduce the types). */
+    template <class NewShape, class NewLayout = keep_strides>
+    _TNY_API auto recast()       { return _recast<T,       NewShape, NewLayout>(store_.data(), cs::make_index_sequence<rank()>{}); }
+    template <class NewShape, class NewLayout = keep_strides>
+    _TNY_API auto recast() const { return _recast<const T, NewShape, NewLayout>(store_.data(), cs::make_index_sequence<rank()>{}); }
 
     /** @brief View as 1-D (`ravel`) — requires C-contiguous (`clone()` first). Just
      *         `reshape<-1>()` (one inferred dim), spelled out for discoverability. */
@@ -792,6 +831,12 @@ public:
     template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && (_is_ic<I>::value && ...), int> = 0> _TNY_API auto reshape(I...) const noexcept { return reshape<static_cast<long>(I::value)...>(); }
     template <class NewE> _TNY_API auto recast(NewE)       { return recast<NewE>(); }
     template <class NewE> _TNY_API auto recast(NewE) const { return recast<NewE>(); }
+    // functional form with an explicit layout: recast(shape<...>{}, ccontiguous{}),
+    // recast(shp, strides<S...>{}). Deduces both types; the runtime values pick the
+    // types only (dynamic extents/strides come from the source — spell an exact
+    // runtime layout with `wrap(t.data(), shape, strides)`).
+    template <class NewE, class NewL> _TNY_API auto recast(NewE, NewL)       { return recast<NewE, NewL>(); }
+    template <class NewE, class NewL> _TNY_API auto recast(NewE, NewL) const { return recast<NewE, NewL>(); }
 
     /* --- in-place elementwise math (declared here, defined in math.h) --- *
      * tensor rhs broadcasts; a scalar rhs applies to all. add_/sub_ take a

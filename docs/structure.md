@@ -55,7 +55,26 @@ auto dyn = wrap(ptr, shape<-1,-1,-1>{n,3,3});  // came in fully dynamic
 auto st  = dyn.recast<shape<-1,3,3>>();        // the 3s are now compile-time
 ```
 
-Static dims of the target are validated against the actual extents.
+Static dims of the target are validated against the actual extents. `recast`
+**preserves the source's strides and works on any layout** (no copy, no contiguity
+requirement): a strided or transposed source keeps its strides — they fold to
+compile-time constants where the source layout makes them derivable (contiguous /
+`strides<>`), and stay run-time for a `dynamic_strides` source. It only re-types
+the *extents*; it never assumes row-major (which would silently mis-address a
+non-contiguous view).
+
+A second **layout** argument overrides that when you *want* to reinterpret the
+data with a specific layout — e.g. to fold a `dynamic_strides` cell's inner strides
+to compile-time constants when you know it's contiguous:
+
+```cpp
+auto st = dyn.recast<shape<-1,3,3>, ccontiguous>();  // reinterpret AS row-major: strides fold to (9,3,1)
+auto sv = dyn.recast(shape<-1,3,3>{}, ccontiguous{});// functional form (shape + layout)
+```
+
+`ccontiguous`/`fcontiguous` derive the strides from the extents (**you** promise
+the data is contiguous in that order — UB if not); `strides<S...>` imposes explicit
+strides. The default (`keep_strides`) preserves the source strides, as above.
 
 ## nd-peel — iterate a subset of axes
 
