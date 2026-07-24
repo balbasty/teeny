@@ -1074,9 +1074,10 @@ using owned = tensor<T, Shape, Layout, own::heap>;
  * Element type `T` is explicit (it can't be deduced from a shape); the extents
  * type is deduced, so a runtime-built shape needs no `decltype` spelling.       */
 
-/** @brief `make_view<L>(ptr, extents)` — a non-owning view (alias of `wrap`). */
-template <class Layout = ccontiguous, class T, class Shape>
-_TNY_API auto make_view(T * p, Shape e) { return wrap<Layout>(p, e); }
+/** @brief `make_view<L>(ptr, extents)` — a non-owning view (alias of `wrap`).
+ *         Takes the same optional trailing `own_c<Space>{}` memory-space tag. */
+template <class Layout = ccontiguous, own Space = own::view, class T, class Shape>
+_TNY_API auto make_view(T * p, Shape e, own_c<Space> tag = {}) { return wrap<Layout>(p, e, tag); }
 
 /** @brief `empty<T>(extents)` — a new UNINITIALISED tensor. The one factory the
  *  `make_*` family fuses into: ownership is **deduced** from the shape (fully

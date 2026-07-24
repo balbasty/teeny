@@ -59,7 +59,7 @@ Wrap existing memory (→ view):
 | `wrap(ptr, shape, strides<S...>{})` | `view<T,E,strides<S...>>` | **compile-time** strides (fold into the type) |
 | `wrap(…, own_c<own::gpu_view>{})` | `view` in that space | trailing **memory-space** tag on any overload above (default `own::view`); `gpu_view` for a device pointer, `pinned_view`/`mapped_view` for page-locked host memory (must be a view kind) |
 | `as_tensor(md)` | `view<…>` | wrap any `cs::mdspan`/`submdspan` result |
-| `make_view(ptr, shape)` | `view<T,E>` | an alias of `wrap` that deduces `E` (`make_view<Layout>` for the layout) |
+| `make_view(ptr, shape)` | `view<T,E>` | an alias of `wrap` that deduces `E` (`make_view<Layout>` for the layout); takes the same trailing `own_c<Space>{}` tag |
 
 Allocate new storage — element type **`T` defaults to `float`**; static shape →
 stack (host+device), dynamic shape → heap (host only):

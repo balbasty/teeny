@@ -73,5 +73,13 @@ int main() {
     if (mh(1,2,3) != buf[12+8+3]) return 6;
     static_assert(decltype(mh.stride(Int<2>()))::value == 1, "mixed static slot still folds");
 
+    // ---- make_view mirrors wrap's tag (deduces E) ---------------------------
+    auto mkh = make_view(buf, shape<2,3,4>{});                            // default view
+    static_assert(is_own<decltype(mkh), own::view>, "make_view default view");
+    auto mkd = make_view<fcontiguous>(buf, shape<2,3,4>{}, own_c<own::gpu_view>{});
+    static_assert(cs::is_same<decltype(mkd), tensor<double, shape<2,3,4>, fcontiguous, own::gpu_view>>::value,
+                  "make_view<Layout> + space tag");
+    if (mkh(1,2,3) != buf[12+8+3]) return 7;
+
     return 0;
 }
