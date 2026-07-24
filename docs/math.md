@@ -19,13 +19,16 @@ auto old = a++;                         // postfix: pre-value as a stack copy
                                         //   (STATIC shape only)
 ```
 
-`add_`/`sub_` take a bool `Atomic` flag (default false). When true the write is
-`fetch_add` (atomic on device) — the scatter/"push" accumulate:
+`atomic_add_`/`atomic_sub_` accumulate a delta **atomically on device** — the
+scatter/"push" accumulate. Both a broadcasting tensor rhs and a scalar rhs:
 
 ```cpp
-a.add_<true>(b);  // accumulate a delta, atomic on device
-a.sub_<true>(2.0);
+a.atomic_add_(b);    // accumulate a delta, atomic on device
+a.atomic_sub_(2.0);
 ```
+
+These are the readable spelling of the underlying `add_<Atomic>`/`sub_<Atomic>`
+form (`a.atomic_add_(x)` == `a.add_<true>(x)`).
 
 Unary math (in place):
 
@@ -66,13 +69,12 @@ a.iota_(start, step);                 // start, start+step, … (row-major)
 a.map_(f);                            // *this = f(*this)      (user functor)
 a.zip_with_(g, b);                    // *this = g(*this, b)   (broadcasts)
 auto c = a.map(f);                    // out-of-place variant
-a.at(i, j).add_<true>(v);             // scatter: a(i,j) += v — ATOMIC on device
+a.at(i, j).atomic_add_(v);            // scatter: a(i,j) += v — ATOMIC on device
 ```
 
 `map_`/`zip_with_` take a functor **struct** (a lambda would need
-`--extended-lambda` under nvcc). `at(i...).add_<true>(v)` / the free
-`fetch_add(ptr, v)` are the write half of a scatter/"push" kernel (`atomicAdd` on
-device).
+`--extended-lambda` under nvcc). `at(i...).atomic_add_(v)` is the write half of a
+scatter/"push" kernel (`atomicAdd` on device).
 
 ## Out-of-place ops → a new tensor
 

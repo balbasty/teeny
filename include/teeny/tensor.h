@@ -101,11 +101,13 @@ struct _geom_view {
 /**
  * @brief Accumulate `v` into `*p`, atomic **on the device only**.
  *
+ * INTERNAL primitive behind the atomic accumulate ops — prefer
+ * `a.atomic_add_(x)` / `t.at(i...).atomic_add_(v)` in user code.
+ *
  * The scatter/"push" write: on the device many threads accumulate into
  * overlapping outputs, which a plain `+=` would race. Device -> `atomicAdd`
  * (`double` needs sm_60+, `__half` sm_70+; not all integer widths have an
- * overload — that surfaces as an nvcc error at instantiation). Use via
- * `t.at(i...).add_<true>(v)` (scatter into one cell) / `a.add_<true>(b)`.
+ * overload — that surfaces as an nvcc error at instantiation).
  *
  * WARNING: on the **host** this is a plain `*p += v` — NOT atomic. A push kernel
  * parallelised with std::thread over overlapping outputs races; guard those
@@ -487,7 +489,7 @@ public:
      *         args; negatives wrap). Unlike `operator()`, which returns a plain
      *         `T&`, this is a view, so the whole tensor API applies to one
      *         element: `x.at(i,j) = 3` writes it, `float v = x.at(i,j)` reads it
-     *         (rank-0 tensors convert to/from `T`), and `x.at(i,j).add_<true>(v)`
+     *         (rank-0 tensors convert to/from `T`), and `x.at(i,j).atomic_add_(v)`
      *         is an atomic scatter. */
     template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
     _TNY_API auto at(Args... a) noexcept {
@@ -907,8 +909,9 @@ public:
 
     /* --- in-place elementwise math (declared here, defined in math.h) --- *
      * tensor rhs broadcasts; a scalar rhs applies to all. add_/sub_ take a
-     * bool `Atomic` flag (default false): `a.add_<true>(b)` commits with
-     * fetch_add — the atomic-on-device scatter/"push" write. */
+     * bool `Atomic` flag (default false): when true the write is an
+     * atomic-on-device scatter/"push" accumulate — spelled `a.atomic_add_(b)`
+     * (see below); `add_<Atomic>`/`sub_<Atomic>` is the underlying form. */
     template <bool Atomic = false, class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & add_(const B & b);
     template <bool Atomic = false, class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & sub_(const B & b);
     template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & mul_(const B & b);
@@ -917,6 +920,18 @@ public:
     template <bool Atomic = false> _TNY_API tensor & sub_(T s);
     _TNY_API tensor & mul_(T s);
     _TNY_API tensor & div_(T s);
+
+    /* --- atomic accumulate aliases: readable spelling of the atomic scatter *
+     * "push" write. `atomic_add_(x)` == `add_<true>(x)`, `atomic_sub_(x)` == *
+     * `sub_<true>(x)` — atomic on device (a delta commit, not a read-modify- *
+     * write). Both a broadcasting tensor rhs and a scalar rhs, mirroring the *
+     * add_/sub_ overloads. Works on a rank-0 at(i...) result, so             *
+     * `a.at(i,j).atomic_add_(v)` is the scatter-accumulate idiom. The        *
+     * underlying form is add_<Atomic>/sub_<Atomic>. */
+    template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & atomic_add_(const B & b);
+    template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & atomic_sub_(const B & b);
+    _TNY_API tensor & atomic_add_(T s);
+    _TNY_API tensor & atomic_sub_(T s);
 
     /* --- compound assignment (sugar over the in-place ops; broadcasts a
      *     tensor rhs, applies a scalar rhs) ------------------------------- */

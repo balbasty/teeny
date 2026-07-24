@@ -47,7 +47,7 @@ surface:
 |---|---|
 | kernel-passable strided view | `wrap(ptr, extents)`, `wrap<fcontiguous>(...)`, `wrap(ptr, ext, strides<S...>{})`, `as_tensor(submdspan_result)` |
 | element / folded stride | `t(i,j,k)`, `t.data()[off]`, `t.stride(Int<d>())` (static) / `t.stride(d)` (runtime) |
-| **scatter (push)** | `t.at(i...).add_<true>(v)` or `tny::fetch_add(ptr, v)` — **atomic on device** |
+| **scatter (push)** | `t.at(i...).atomic_add_(v)` — **atomic on device** |
 | assign / init | `t.copy_(src)` (broadcasts), `t.fill_(v)`, `t.zero_()` |
 | in-place / reduce math | `t.add_(x)/mul_(x)/…` (broadcasts), `sum/dot/min/max` |
 | **peel arbitrary batch** | `peel_front<Nbatch>(t)` → range of `(*spatial, C)` views; `peel_front_at<Nbatch>(t, i)` for a grid-stride index |
@@ -124,7 +124,7 @@ sign (§5). Gather: `out[c] = Σ_neighbourhood (Πweights)·(Πsigns)·inp[offse
 (DST bounds).
 
 **push** = the adjoint: same neighbours/weights, but
-`out.at(idx...).add_<true>(val·Πweights·Πsigns)` (atomic). This is `push_rec` in the
+`out.at(idx...).atomic_add_(val·Πweights·Πsigns)` (atomic). This is `push_rec` in the
 reference. **Correctness gate:** the adjoint identity `<pull x, y> == <x, push y>`
 must hold (the reference test checks it across orders 0–3 and 4 bounds — keep
 that test).
@@ -189,7 +189,7 @@ jitfields). Same `peel_front` + innermost-axis sweep structure.
 `resize`/`restrict` are pull/push with a scale factor (prolongation/restriction);
 build on 4.1. `regularisers` (field/flow, 1d/2d/3d) are stencil operators —
 express the stencil with `t(i+di, j+dj, …)` element access (boundary-mapped) and,
-for the adjoint/`push`-like accumulation, `at(i...).add_<true>(v)`. These are lower priority.
+for the adjoint/`push`-like accumulation, `at(i...).atomic_add_(v)`. These are lower priority.
 
 ---
 
