@@ -124,6 +124,18 @@ template <auto... E> using shape = cs::extents<cs::int64_t, _dyn_extent(E)...>;
  *  `rank<0>` is the rank-0 (scalar) shape. */
 template <cs::size_t N> using rank = cs::dextents<cs::int64_t, N>;
 
+/** @brief Compile-time **axis selector** — a value tag carrying a list of axes,
+ *  the sibling of `shape<...>` for axis arguments. It lets axis-taking ops be
+ *  spelled by VALUE (deducing the axes from the argument type) instead of an
+ *  explicit template list, so on a type-dependent receiver they need no
+ *  `.template`: `peel(t, axis<0,1>{})` == `peel<0,1>(t)`,
+ *  `t.take_along(axis<0,2>{}, i, slice(1,4))` == `t.take_along<0,2>(i, slice(1,4))`.
+ *
+ *  Like numpy's `axis: int | list[int]`, one variadic tag covers both a single
+ *  axis (`axis<0>{}`) and a list (`axis<0,2>{}`); axes are **signed** (negatives
+ *  count from the back, as everywhere in teeny). `rank` is the axis count. */
+template <long... Axes> struct axis { static constexpr cs::size_t rank = sizeof...(Axes); };
+
 /** @brief Keep-this-axis marker for slicing (an alias of `full_extent`). */
 constexpr cs::full_extent_t all{};
 

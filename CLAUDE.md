@@ -328,6 +328,26 @@ slices of either**, and dispatches to the right output type:
 Rule of thumb: **pass a static index (`Int<k>()`) when you want the compiler to
 fold**, a plain `int`/`long` when the value is only known at run time.
 
+Methods that take a compile-time **selector** as an explicit `<...>` template
+argument also have a **deduced value-form twin**, so on a **type-dependent**
+receiver (inside a kernel/template) you avoid the `x.template method<...>()`
+disambiguator (a deduced call needs no `.template`; the explicit `<...>` form
+does). Two selector vocabularies:
+- **`axis<...>`** — the numpy-like axis selector (`axis: int | list[int]`), a
+  value tag sibling to `shape<...>` (in `alias.h`). For the axis-LIST ops:
+  `peel(t, axis<0,1>{})` == `peel<0,1>(t)`, `peel_at(t, i, axis<0,1>{})`,
+  `t.take_along(axis<0,2>{}, i, slice(1,4))` == `t.take_along<0,2>(...)`. Being a
+  single distinct-typed arg it also disambiguates `take_along`'s two packs.
+- **`Int<k>()` / `shape<...>{}` / a layout tag** — the single-selector ops:
+  `t.squeeze(Int<1>())`, `t.permute(Int<2>(),Int<0>(),Int<1>())`,
+  `t.reshape(Int<6>(),Int<-1>())`, `t.recast(shape<3,3>{})`,
+  `t.is_contiguous(ccontiguous{})`.
+
+`peel_front<N>` / `size_front<N>` (a COUNT, not an axis) and the reductions
+`sum`/`mean`/`max`/`min`/`prod` stay template-only for now — the reductions'
+leading TYPE arg (`sum<double>(a)`) would need care to coexist with an axis
+value form (tracked separately for the numpy `sum(a, axis<...>{})` spelling).
+
 ## How the hard parts work (so you don't re-derive them)
 
 - **Broadcasting** (`math.h`, `_md::bzip`): numpy-style — operands are aligned
