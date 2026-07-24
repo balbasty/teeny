@@ -159,19 +159,20 @@ output strides), so a strides<...> tensor is fully sliceable.
 ## API cheat-sheet
 
 ```cpp
-// --- geometry (static index -> integral_constant, runtime index -> value) ---
-t.rank();  t.numel();
-t.extent(Int<0>());   // static lookup -> integral_constant when the extent is static
-t.extent(0);          // runtime lookup -> index_type   (t.shape(...) is a python-y alias)
-t.stride(Int<1>());   // static when derivable (static-stride layout; or a contiguous
-                      //   stride = product of the STATIC extents it spans — so it folds
-                      //   even for a partially-dynamic shape, e.g. shape<-1,3,3> stride0=9)
-t.shape()[Int<1>()];  t.strides()[Int<1>()];  // shape()/strides() are ARRAY-LIKE: [Int<k>()] folds
-                      //   to integral_constant where derivable, [i] (runtime) is a value; rank(),
-                      //   iterable, shape() converts to the raw extents. (extents()/mapping() = raw mdspan.)
-t.data();  t.view();  t.mdspan();  t.extents();  t.shape();  t.mapping();
-                      //   view() = non-owning teeny view tensor (gpu_view if device);
-                      //   mdspan() = the raw cuda::std::mdspan
+// --- geometry: LEAD with the python-y spelling (shape/strides/numel/rank) ---
+t.rank();  t.numel();  t.is_contiguous();  // #axes / #elements / C-order? (numpy/pytorch default)
+t.shape();  t.strides();  // the teeny shape/strides — ARRAY-LIKE accessors: [Int<k>()] folds to an
+                      //   integral_constant where derivable, [i] (runtime) is a value; have rank(),
+                      //   are iterable, and shape() converts to the raw extents
+t.shape()[Int<1>()];  t.strides()[Int<1>()];  // static index folds; runtime index is a value
+t.shape(1);  t.stride(Int<1>());  // per-axis size / stride (== extent/stride below). stride static when
+                      //   derivable (static-stride layout; or a contiguous stride = product of the
+                      //   STATIC extents it spans — folds even for shape<-1,3,3>: stride0=9)
+t.data();  t.view();  // base ptr / non-owning teeny view tensor (gpu_view if device)
+// --- raw-mdspan escape hatch (interop only; not the primary spelling) ---
+t.mdspan();  t.extents();  t.mapping();  // the raw cuda::std::mdspan / raw cs::extents / layout mapping
+t.extent(0);  t.extent(Int<0>());  // mdspan-side per-axis size (== t.shape(d)): runtime -> index_type,
+                      //   static Int<k> -> integral_constant. Same folding as shape()/stride()
 
 // --- indexing / slicing (python-like) ---
 t(1, 2, 3);           // element access -> T& ; negative indices wrap (count from the back)
