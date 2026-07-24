@@ -37,6 +37,7 @@ TESTS = \
 	$(BUILDDIR)/test_factory_dtype \
 	$(BUILDDIR)/test_reduce_dtype \
 	$(BUILDDIR)/test_iterate \
+	$(BUILDDIR)/test_peel_recast \
 	$(BUILDDIR)/test_subperm \
 	$(BUILDDIR)/test_takealong \
 	$(BUILDDIR)/test_alias \
