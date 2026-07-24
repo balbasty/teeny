@@ -383,6 +383,8 @@ axes removed) and the ownership splits static → stack / dynamic → heap.
 | `from_dlpack<T[, Space]>(m)` / `from_dlpack<T, R[, Space]>(m)` | `anyrank` / rank-`R` view | import a capsule; `Space` (default host) is **checked against `m→device`** — a `kDLCUDA` capsule needs `storage::gpu_view` |
 | `at.fixed<R>()` | rank-`R` `dynamic_strides` view | requires `ndim == R` |
 | `dispatch_rank(at, f)` | `bool` | call `f` with a fixed-rank view chosen by runtime `ndim` (one instantiation per total rank) |
+| `dispatch_rank<narrow_index>(at, f)` | `bool` | ...and narrow each fixed cell's offset width to `int32` when `index_fits` (rank outer, width inner; the leaf doubles). Default `Narrow=false` is the plain dispatch |
+| `dispatch_index<Idx2=int32_t>(v, f)` | `void` | narrow a fixed-rank view `v` to `Idx2` offsets when its span fits, else keep it — then call `f`; instantiates `f` for both widths |
 | `at.peel_front<N>()` / `at.peel_front_at<N>(i)` | range / view | batch idiom: keep the last `\|N\|` dims static, peel the rest (one kernel per `\|N\|`) |
 | `at.size_front<N>()` | → offset | flattened batch count `peel_front<N>` yields (product of the peeled leading extents), no range built; `N < 0` |
 | `dispatch_value<Vs...>(v, f)` | `bool` | call `f(Int<k>{})` for the matching candidate `k == v` |

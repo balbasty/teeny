@@ -242,6 +242,8 @@ as_anyrank(data, shape, stride, ndim, copy_meta);  // -> anyrank COPYING into an
 at.peel_front<-Sr>();  at.peel_front_at<-Sr>(i);  // batch idiom (arg NEGATIVE: keep last Sr); 1 kernel per Sr
 at.size_front<-Sr>();                             // flattened batch count (no range built)
 dispatch_rank(at, f);                    // runtime rank -> fixed-rank view (per total rank)
+dispatch_rank<narrow_index>(at, f);      // ...+ int32 offsets when the span fits (rank outer, width inner)
+dispatch_index(v, f);                    // narrow one fixed view's offset width to int32 (else keep it)
 at.fixed<R>();                           // force a known rank
 ```
 

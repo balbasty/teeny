@@ -52,5 +52,27 @@ int main() {
     if ( wrap(buf, shape<2>{}, {-2147483649LL}).index_fits<cs::int32_t>()) return 11;  // -1
     if ( index_fits<cs::int32_t>(wrap(buf, shape<2>{}, {3000000000LL}))) return 12;     // >2^31 span -> false (free form)
 
+    // ---- NEGATIVE strides: the signed-reach path must narrow & address correctly ----
+    auto m = wrap(buf, shape<3,4>{});
+    // (a) static flip -> folded strides<-4,1>; reindex keeps the negative static stride.
+    auto fl = m.flip<0>();
+    auto fl32 = fl.reindex<cs::int32_t>();
+    static_assert(cs::is_same<decltype(fl32)::index_type, cs::int32_t>::value, "flip reindex int32");
+    for (long i = 0; i < 3; ++i) for (long j = 0; j < 4; ++j) if (fl32(i,j) != fl(i,j)) return 13;
+    if (fl32(0,0) != m(2,0)) return 14;                          // flipped row 0 == source last row
+    // (b) RUNTIME reversed-step slice -> strides<4, dynamic_stride>: the dynamic
+    //     negative stride must narrow int64->int32 (the mixed-ctor fix) and address right.
+    auto rev = m(all, slice(none,none,-1));
+    auto rev32 = rev.reindex<cs::int32_t>();
+    for (long i = 0; i < 3; ++i) for (long j = 0; j < 4; ++j) if (rev32(i,j) != m(i, 3 - j)) return 15;
+    // (c) both axes reversed.
+    auto both = m.flip<0>().flip<1>();
+    auto both32 = both.reindex<cs::int32_t>();
+    for (long i = 0; i < 3; ++i) for (long j = 0; j < 4; ++j) if (both32(i,j) != m(2 - i, 3 - j)) return 16;
+    // (d) index_fits: SIGNED int32 accepts a negative stride; UNSIGNED rejects it
+    //     (min offset < 0 can't fit [0, uint32_max]) — the guard blocks a bad narrow.
+    if (!fl.index_fits<cs::int32_t>())  return 17;
+    if ( fl.index_fits<cs::uint32_t>()) return 18;
+
     return 0;
 }

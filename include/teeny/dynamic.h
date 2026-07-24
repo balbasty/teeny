@@ -233,12 +233,37 @@ as_anyrank(T * data, const offset_t * shape, const offset_t * stride, int ndim, 
     return t;
 }
 
+/**
+ * @brief Narrow a fixed-rank view's OFFSET INDEX WIDTH to `Idx2` (default `int32_t`)
+ *        when its element span fits, then call `f` — else call `f` with the view as-is.
+ *
+ * The kernel-boundary primitive behind the int32 fast path (#115): it instantiates
+ * `f` for BOTH widths and picks at run time via `index_fits`/`reindex`, so a genuinely
+ * dynamic view runs its offset math in 32-bit (half the by-value footprint, fewer
+ * device registers) exactly when that is lossless. `_TNY_HOST`; preserves the view's
+ * mutability. Use it standalone on a known-rank view (or a `peel_front` batch cell), or
+ * via `dispatch_rank<narrow_index>` to fuse it with the rank dispatch.
+ *
+ *     for (auto cell : at.peel_front<-Sr>()) dispatch_index(cell, [&](auto c){ kernel<Sr>(c); });
+ */
+template <class Idx2 = cs::int32_t, class V, class F>
+_TNY_HOST void dispatch_index(V && v, F && f) {
+    if (v.template index_fits<Idx2>()) f(v.template reindex<Idx2>());   // int32 arm
+    else                               f(v);                            // wide (int64) arm
+}
+/** @brief The spelling for `dispatch_rank`'s opt-in flag: `dispatch_rank<narrow_index>(at, f)`. */
+inline constexpr bool narrow_index = true;
+
 namespace _detail {
-template <cs::size_t R, class T, class offset_t, class Meta, storage Space, class F>
+template <cs::size_t R, bool Narrow, class T, class offset_t, class Meta, storage Space, class F>
 _TNY_HOST bool dispatch_from(const anyrank<T, offset_t, Meta, Space> & t, F & f) {
     if constexpr (R <= anyrank<T, offset_t, Meta, Space>::max_rank) {
-        if (t.ndim == static_cast<int>(R)) { f(t.template fixed<R>()); return true; }
-        return dispatch_from<R + 1>(t, f);
+        if (t.ndim == static_cast<int>(R)) {
+            if constexpr (Narrow) dispatch_index(t.template fixed<R>(), f);   // width innermost
+            else                  f(t.template fixed<R>());
+            return true;
+        }
+        return dispatch_from<R + 1, Narrow>(t, f);
     } else {
         (void)t; (void)f; return false;   // ndim > max_rank
     }
@@ -254,10 +279,17 @@ _TNY_HOST bool dispatch_from(const anyrank<T, offset_t, Meta, Space> & t, F & f)
  * instantiation instead of one per total rank.
  *
  *     dispatch_rank(as_anyrank(data, size, stride, ndim), [&](auto v){ kernel(v); });
+ *
+ * Opt into the int32 fast path with the compile-time `narrow_index` flag: each fixed
+ * cell is then also `dispatch_index`-narrowed (rank OUTER, width INNER — only the leaf
+ * doubles). `Narrow = false` (the default) is exactly the plain rank dispatch — no
+ * extra instantiation.
+ *
+ *     dispatch_rank<narrow_index>(at, [&](auto v){ kernel(v); });   // int32 cells when they fit
  */
-template <class T, class offset_t, class Meta, storage Space, class F>
+template <bool Narrow = false, class T, class offset_t, class Meta, storage Space, class F>
 _TNY_HOST bool dispatch_rank(const anyrank<T, offset_t, Meta, Space> & t, F && f) {
-    return _detail::dispatch_from<0>(t, f);   // R=0 handles a rank-0 (scalar) ndarray
+    return _detail::dispatch_from<0, Narrow>(t, f);   // R=0 handles a rank-0 (scalar) ndarray
 }
 
 /**

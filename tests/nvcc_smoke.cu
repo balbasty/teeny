@@ -43,6 +43,11 @@ void smoke() {
     // A copy-carrier anyrank IS device-passable: hand it to a kernel, peel on device.
     auto dev_carrier = as_anyrank(hp, sh, st, 3, copy_meta);
     peel_kernel<<<1, 1>>>(dev_carrier);
+
+    // int32 offset dispatch (#115): the narrowed (shape32) view must stay a POD,
+    // device-passable view. dispatch_index instantiates the kernel for both widths;
+    // launching from each arm exercises the int32-view device pass under nvcc.
+    dispatch_index(y, [&](auto v){ axpy_kernel<<<1, 32>>>(v, v, 1.f); });
 }
 
 int main() { smoke(); return 0; }

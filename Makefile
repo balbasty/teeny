@@ -42,6 +42,7 @@ TESTS = \
 	$(BUILDDIR)/test_recast_guard \
 	$(BUILDDIR)/test_overlap_guard \
 	$(BUILDDIR)/test_reindex \
+	$(BUILDDIR)/test_dispatch_index \
 	$(BUILDDIR)/test_reshape_view \
 	$(BUILDDIR)/test_reshape \
 	$(BUILDDIR)/test_subperm \

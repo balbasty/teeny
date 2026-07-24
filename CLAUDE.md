@@ -312,6 +312,11 @@ auto ag = as_anyrank<storage::gpu_view>(dptr, shape, stride, ndim);  // DEVICE d
                                              //   gpu_view cells (Space param; default storage::view = host).
                                              //   from_dlpack<T[,Space]>/dispatch_dlpack<Space> set+check it vs m->device
 dispatch_rank(at, [&](auto v){ kernel(v); });  // instantiates kernel once per TOTAL rank
+dispatch_rank<narrow_index>(at, f);           // ...+ int32 offsets when the span fits (rank OUTER, width INNER;
+                                              //   only the leaf doubles). Default Narrow=false == plain dispatch.
+dispatch_index<Idx2=int32_t>(v, f);           // the primitive: narrow ONE fixed view's offset width when
+                                              //   index_fits, else keep it; f instantiated for both widths.
+                                              //   Batch: for (cell : at.peel_front<-Sr>()) dispatch_index(cell, f);
 auto v3 = at.fixed<3>();                      // or force a known rank
 dispatch_value<1,2,3>(D, [&](auto d){ kern<d.value>(v); });  // runtime value -> static
 // BATCH idiom (one kernel per Sr, not per total rank): peel the runtime batch
