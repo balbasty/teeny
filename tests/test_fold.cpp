@@ -74,6 +74,22 @@ int main() {
     for (long i = 0; i < 3; ++i) for (long j = 0; j < 2; ++j)
         if (tpr(i, j) != tp(i, j)) return 34;            // values match the source, not a row-major walk
 
+    // ---- recast<Shape, Layout>: explicit layout override -----------------------
+    // A runtime-strided but contiguous view: default keeps runtime strides; the
+    // explicit ccontiguous form folds them to immediates (the "I promise" form).
+    double eb[18]; for (int i = 0; i < 18; ++i) eb[i] = i;
+    auto ds = wrap(eb, shape<-1,-1,-1>{2,3,3}, {9,3,1});             // dynamic_strides (contiguous values)
+    auto ccf = ds.recast<shape<-1,3,3>, ccontiguous>();             // fold inner strides
+    static_assert(decltype(ccf.stride(Int<2>()))::value == 1, "ccontiguous unit stride folds");
+    static_assert(decltype(ccf.stride(Int<1>()))::value == 3, "ccontiguous inner stride folds");
+    static_assert(decltype(ccf.stride(Int<0>()))::value == 9, "ccontiguous outer stride folds");
+    if (ccf(1,2,2) != eb[9+6+2]) return 35;
+    auto ccv = ds.recast(shape<-1,3,3>{}, ccontiguous{});           // functional form
+    static_assert(cs::is_same<decltype(ccv), decltype(ccf)>::value, "functional recast == type form");
+    auto imp = ds.recast<shape<2,3,3>, strides<9,3,1>>();           // impose exact static strides
+    static_assert(cs::is_same<decltype(imp)::layout_type, strides<9,3,1>>::value, "imposed strides<>");
+    if (imp(1,2,2) != eb[9+6+2]) return 36;
+
     // ---- is_contiguous: order-agnostic (dense) vs exact-layout check ---------
     auto cc = wrap(buf, shape<2,3,4>{});               // C-contiguous
     if (!cc.is_contiguous()) return 16;                // dense

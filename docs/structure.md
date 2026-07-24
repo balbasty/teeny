@@ -63,6 +63,19 @@ compile-time constants where the source layout makes them derivable (contiguous 
 the *extents*; it never assumes row-major (which would silently mis-address a
 non-contiguous view).
 
+A second **layout** argument overrides that when you *want* to reinterpret the
+data with a specific layout — e.g. to fold a `dynamic_strides` cell's inner strides
+to compile-time constants when you know it's contiguous:
+
+```cpp
+auto st = dyn.recast<shape<-1,3,3>, ccontiguous>();  // reinterpret AS row-major: strides fold to (9,3,1)
+auto sv = dyn.recast(shape<-1,3,3>{}, ccontiguous{});// functional form (shape + layout)
+```
+
+`ccontiguous`/`fcontiguous` derive the strides from the extents (**you** promise
+the data is contiguous in that order — UB if not); `strides<S...>` imposes explicit
+strides. The default (`keep_strides`) preserves the source strides, as above.
+
 ## nd-peel — iterate a subset of axes
 
 Peel some axes and get a lower-rank sub-view for each, without writing index

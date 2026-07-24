@@ -129,6 +129,14 @@ struct strides {
 /** @brief Back-compat alias: the original all-static-stride layout name. */
 template <cs::int64_t... S> using layout_static_stride = strides<S...>;
 
+/** @brief Sentinel `Layout` selector for `recast<NewShape, keep_strides>()` (the
+ *         default): PRESERVE the source strides (fold where the source layout makes
+ *         them derivable, keep runtime otherwise). Contrast an explicit layout —
+ *         `recast<NewShape, ccontiguous>()` reinterprets AS that layout, deriving
+ *         the strides from the extents (the "I promise this is C-contiguous" form).
+ *         Not a real layout (it has no mapping) — only a recast tag. */
+struct keep_strides {};
+
 /* --- layout classification (stride folding) ----------------------- *
  * Traits the tensor class uses to decide when a stride is a compile-time
  * constant. Live here (with the strides<...> definition) rather than in

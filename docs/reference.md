@@ -150,7 +150,7 @@ compile-time strides through these ops.
 | `t.squeeze<Ax>()` / `t.squeeze()` | → view, rank−1 / − all size-1 | drop size-1 axis / axes |
 | `t.reshape<NewExt...>()` | → view | contiguous reshape (one `-1` inferred) |
 | `t.flatten()` | → 1-D view | ravel; needs C-contiguous |
-| `t.recast<NewExtents>()` | → view | reinterpret with a more-static same-rank extents; **preserves the source strides** (any layout, no copy) |
+| `t.recast<NewShape[, NewLayout]>()` | → view | reinterpret with a more-static same-rank extents; **`NewLayout` defaults to `keep_strides`** (preserve the source strides, any layout, no copy). `ccontiguous`/`fcontiguous` = reinterpret AS that order (derive+fold the strides — the "I promise it's contiguous" form); `strides<S...>` = impose them. Functional form `t.recast(shape{…}, layout{…})` |
 | `t.clone()` | owning (stack/heap) | materialise a dense row-major copy |
 | `t.to<T2>()` | view (no-copy) or owning | **dtype** convert. Matching dtype (no `Force`) → a read-only borrow (`gpu_view` if `t` is on the device, else `view`); differing dtype or `t.to<T2,true>()` → a dense owning copy (static→stack, dyn→heap) |
 | `to<Space>(t)` (`cuda.h`) | view (no-copy) or owning | **memory-space** move: `to<Space, ET, Force>(t)` — `Space` ∈ `own::gpu`/`pinned`/`mapped`/`heap`/`stack`. Same no-copy/`Force` rule; a device source (gpu/`gpu_view`) downloads via `cudaMemcpy`. rvalue source → always copies |

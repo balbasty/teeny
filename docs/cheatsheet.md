@@ -130,7 +130,9 @@ x.unsqueeze<Ax>();  x.squeeze<Ax>();  // insert / drop a size-1 axis
 x.reshape<NewExt...>();               // contiguous-view reshape (one -1 inferred)
 x.flatten();                          // 1-D contiguous view
 x.clone();                            // dense row-major OWNING copy
-x.recast<NewExtents>();               // reinterpret with a more-static same-rank extents
+x.recast<NewExtents>();               // reinterpret w/ a more-static same-rank extents (keeps source strides)
+x.recast<NewExtents, ccontiguous>();  // ...AS contiguous (fold the strides; "I promise it's contiguous")
+x.recast(shape<...>{}, ccontiguous{}); // functional form (shape + layout, both may mix static/dynamic)
 x.to<T2>();                           // dtype convert (matching dtype -> no-copy borrow; else owning copy)
 to<own::gpu>(x);                      // memory-space move: to<Space,ET,Force>(x) (from <teeny/cuda.h>)
 ```
