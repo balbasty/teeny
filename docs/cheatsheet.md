@@ -88,7 +88,7 @@ See [Shapes & strides](shapes-strides.md).
 ## Geometry
 
 ```cpp
-x.rank();  x.numel();  x.is_contiguous();
+x.rank();  x.numel();  x.is_contiguous();  x.is_dense();  // is_contiguous = C-order; is_dense = any order
 x.extent(d);          x.extent(Int<d>());  // runtime value / static integral_constant
 x.shape(d);           x.shape();           // aliases of extent(d) / extents()
 x.stride(d);          x.stride(Int<d>());  // static when derivable

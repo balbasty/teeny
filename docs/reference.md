@@ -93,8 +93,9 @@ stack (host+device), dynamic shape → heap (host only):
 | `t.strides()` | array-like accessor | twin of `shape()` for strides: `strides()[Int<k>()]` folds where derivable, `strides()[i]` runtime |
 | `t.stride(d)` | `Idx` | runtime axis stride |
 | `t.stride(Int<k>())` | `integral_constant` if derivable, else `Idx` | folds for static-stride / contiguous layouts |
-| `t.is_contiguous()` | `bool` | dense in **some** order (C, F, or permuted) |
-| `t.is_contiguous<L>()` | `bool` | exact: strides equal `L`'s packing (`ccontiguous`=C, `fcontiguous`=F) |
+| `t.is_dense()` | `bool` | dense block in **some** axis order (C, F, or permuted) |
+| `t.is_dense<L>()` | `bool` | exact: strides equal `L`'s packing (`ccontiguous`=C, `fcontiguous`=F) |
+| `t.is_contiguous()` | `bool` | **C-order** (numpy/pytorch default); `is_contiguous<fcontiguous>()` for F — a thin alias of `is_dense<L>()`. This is what `reshape`/`flatten` need |
 | `t.data()` | `T*` | base pointer |
 | `t.view()` | `view<T,E,L>` (`gpu_view` if device) | non-owning teeny view aliasing `t`'s memory (no copy) |
 | `t.mdspan()` | `cs::mdspan<T,E,L>` | the raw mdspan |
@@ -175,7 +176,7 @@ Worked input→output shapes (`E` = source extents):
 | `t.to<T2>()` | view (no-copy) or owning | **dtype** convert. Matching dtype (no `Force`) → a read-only borrow (`gpu_view` if `t` is on the device, else `view`); differing dtype or `t.to<T2,true>()` → a dense owning copy (static→stack, dyn→heap) |
 | `to<Space>(t)` (`cuda.h`) | view (no-copy) or owning | **memory-space** move: `to<Space, ET, Force>(t)` — `Space` ∈ `own::gpu`/`pinned`/`mapped`/`heap`/`stack`. Same no-copy/`Force` rule; a device source (gpu/`gpu_view`) downloads via `cudaMemcpy`. rvalue source → always copies |
 
-`reshape`/`flatten` need exact C-contiguity (`is_contiguous<ccontiguous>()`);
+`reshape`/`flatten` need exact C-contiguity (`is_contiguous()`);
 `clone()` first if the source isn't. `recast` does **not** — it only re-types the
 extents and keeps the source strides, so it works on any layout.
 

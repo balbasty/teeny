@@ -33,17 +33,19 @@ t.flatten();        // view as 1-D (ravel)
 the same memory). If it isn't, materialise first:
 
 ```cpp
-t.is_contiguous();                // dense in SOME order (C, F, or a permuted view)
-t.is_contiguous<ccontiguous>();   // exact C-contiguity — what reshape/flatten need
+t.is_dense();                     // dense block in SOME order (C, F, or a permuted view)
+t.is_contiguous();                // C-order specifically — what reshape/flatten need
 auto c = t.clone();               // a dense, row-major OWNING copy (static -> stack, dyn -> heap)
 c.flatten();                      // now contiguous
 ```
 
-`is_contiguous()` with no argument asks only whether the elements occupy a dense
-block of memory — so a *permuted* C-contiguous view still counts. Pass a layout
-for an exact C/F check, in either spelling: `is_contiguous<ccontiguous>()` (type
-form) or `is_contiguous(ccontiguous{})` (value form, layout deduced from the
-argument — e.g. `is_contiguous(ccontiguous())`).
+`is_dense()` with no argument asks only whether the elements occupy a dense block
+of memory in *some* axis order — so a *permuted* C-contiguous view still counts.
+`is_contiguous()` is the **C-order** question (numpy/pytorch's meaning) and is what
+`reshape`/`flatten` need; `is_contiguous<fcontiguous>()` asks F-order. Both are thin
+aliases of `is_dense<Layout>()` (the exact-layout check), so `is_contiguous()` ==
+`is_dense<ccontiguous>()`; a value form `is_dense(ccontiguous{})` /
+`is_contiguous(ccontiguous{})` deduces the layout from the argument.
 
 ## Recover static inner dims
 

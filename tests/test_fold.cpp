@@ -94,38 +94,45 @@ int main() {
     static_assert(cs::is_same<decltype(imp)::layout_type, strides<9,3,1>>::value, "imposed strides<>");
     if (imp(1,2,2) != eb[9+6+2]) return 36;
 
-    // ---- is_contiguous: order-agnostic (dense) vs exact-layout check ---------
+    // ---- is_dense (any/exact order) vs is_contiguous (C-order default) -------
     auto cc = wrap(buf, shape<2,3,4>{});               // C-contiguous
-    if (!cc.is_contiguous()) return 16;                // dense
-    if (!cc.is_contiguous<layout_right>()) return 17;  // exactly C
-    if (cc.is_contiguous<layout_left>())  return 18;   // not F
+    // is_dense(): dense block in SOME axis order; is_dense<L>(): exactly that layout.
+    if (!cc.is_dense()) return 16;                     // dense
+    if (!cc.is_dense<layout_right>()) return 17;       // exactly C
+    if (cc.is_dense<layout_left>())  return 18;        // not F
     auto perm = cc.permute<2,0,1>();                   // permuted: still dense in memory
-    if (!perm.is_contiguous()) return 19;              // order-agnostic -> true
-    if (perm.is_contiguous<layout_right>()) return 20; // but not C-contiguous
+    if (!perm.is_dense()) return 19;                   // order-agnostic -> true
+    if (perm.is_dense<layout_right>()) return 20;      // but not exact C
     auto ff = wrap<layout_left>(buf, shape<2,3,4>{});  // F-contiguous
-    if (!ff.is_contiguous()) return 21;                // dense
-    if (!ff.is_contiguous<layout_left>())  return 22;  // exactly F
-    if (ff.is_contiguous<layout_right>())  return 23;  // not C
+    if (!ff.is_dense()) return 21;                     // dense
+    if (!ff.is_dense<layout_left>())  return 22;       // exactly F
+    if (ff.is_dense<layout_right>())  return 23;       // not C
     auto gap = cc(all, slice(0,2), all);               // a hole along axis 1
-    if (gap.is_contiguous()) return 24;                // not dense
+    if (gap.is_dense()) return 24;                     // not dense
     auto flp = cc.flip<0>();                           // negative stride
-    if (flp.is_contiguous()) return 25;                // flips are not "dense" here
+    if (flp.is_dense()) return 25;                     // flips are not dense here
     auto sq  = wrap(buf, shape<3,1,4>{});              // size-1 axis is ignored
-    if (!sq.is_contiguous()) return 26;
+    if (!sq.is_dense()) return 26;
+    if (!cc.is_dense(layout_right{})) return 27;       // value form == is_dense<layout_right>()
 
-    // value form: is_contiguous(layout_right{}) == is_contiguous<layout_right>()
-    if (!cc.is_contiguous(layout_right{}))  return 27;
-    if (cc.is_contiguous(layout_left{}))    return 28;
-    if (!ff.is_contiguous(layout_left{}))   return 29;
+    // is_contiguous(): C-order by DEFAULT (numpy/pytorch), <fcontiguous> for F —
+    // a thin alias of is_dense<Layout>(). The redefault: a permuted/F view that is
+    // DENSE is NOT is_contiguous() (it isn't C-order).
+    if (!cc.is_contiguous()) return 28;                // C source IS C-contiguous
+    if (cc.is_contiguous<fcontiguous>()) return 29;    // ...but not F
+    if (perm.is_contiguous()) return 30;               // a PERMUTED (dense) view is NOT C-contiguous
+    if (ff.is_contiguous()) return 31;                 // F-order (dense) is NOT C-contiguous
+    if (!ff.is_contiguous<fcontiguous>()) return 37;   // ...but it IS F-contiguous
+    if (!cc.is_contiguous(layout_right{})) return 38;  // value form
+    if (cc.is_contiguous(layout_left{}))   return 39;
 
-    // rank-0 (an at() result): a single element is trivially dense and matches
-    // any layout — must COMPILE (was a hard error before #55) and be true.
+    // rank-0 (an at() result): one element -> dense and contiguous in every layout.
     auto r0 = cc.at(0,0,0);                             // cc is rank-3 -> bind all axes
     static_assert(decltype(r0)::rank() == 0, "at() -> rank-0");
-    if (!r0.is_contiguous())               return 30;
-    if (!r0.is_contiguous<layout_right>()) return 31;
-    if (!r0.is_contiguous<layout_left>())  return 32;
-    // and a rank-0 result flows through clone() (it gates on is_contiguous<ccontiguous>())
+    if (!r0.is_dense())                    return 32;
+    if (!r0.is_contiguous())               return 40;
+    if (!r0.is_contiguous<layout_left>())  return 41;
+    // and a rank-0 result flows through clone() (it gates on is_contiguous())
     auto r0c = r0.clone();
     if (r0c.item() != cc(0,0,0))           return 33;
 
