@@ -133,15 +133,26 @@ Axes kept with `all` keep their static extent; a ranged axis becomes dynamic
 folding. The output layout is `strides<...>` with each kept stride folded to a
 compile-time value where derivable.
 
-**Compile-time bounds.** `slice<a,b>()` / `slice<a,b,step>()` bake the bounds
-into the type, so a ranged axis keeps a static extent and stride (folds like
-`all`):
+**Runtime vs compile-time bounds.** `slice(a, b)` takes its bounds as ordinary
+values; `slice<a,b>()` / `slice<a,b,step>()` bake them into the type, so a ranged
+axis keeps a **static** extent and stride (folds like `all`) instead of a runtime
+one. The runtime form is the value spelling; reach for the compile-time form when
+you want the extent to keep folding:
 
-```cpp
-t(0, slice<1,4>());             // [1,4), static
-t(all, slice<0,8,2>());         // static stride 2
-t(0, slice<Int<1>, Int<4>>());  // type form (the only way to bake `none`)
-```
+=== "runtime bounds"
+
+    ```cpp
+    t(0, slice(1, 4));       // [1,4), extent is a runtime value
+    t(all, slice(0, 8, 2));  // runtime stride 2
+    ```
+
+=== "compile-time bounds"
+
+    ```cpp
+    t(0, slice<1,4>());              // [1,4), static extent (folds like `all`)
+    t(all, slice<0,8,2>());          // static stride 2
+    t(0, slice<Int<1>, Int<4>>());   // type form (the only way to bake `none`)
+    ```
 
 ## `take_along<Axes...>` — bind named axes
 

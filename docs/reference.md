@@ -181,7 +181,11 @@ So `t(i, all, slice<1,4>())` on `<A,B,C>` → `<B,3>`; `t(i, all, slice(a,b))` o
 ## Structure (views)
 
 All return a view and work on any source layout (incl. `strides<...>`); axis
-template args are signed (negatives count from the back).
+template args are signed (negatives count from the back). Each `<Ax>` op also has
+a **value form** — pass `Int<Ax>()` in place of the template argument
+(`t.squeeze(Int<1>()) == t.squeeze<1>()`, likewise `permute`/`flip`/`unsqueeze`/
+`reshape`/`recast`); the value spelling is the preferred one. See
+[Views & structure](structure.md).
 
 **Type inference — what the output *type* keeps.** A view op transforms the input
 type along four independent facets; staticity is preserved wherever it is

@@ -5,29 +5,53 @@ Axis template arguments are signed — **negatives count from the back**.
 
 Every axis argument has a **value form** too: pass a static integer
 (`Int<k>()`) instead of the `<k>` template argument — `t.squeeze(Int<1>())` ==
-`t.squeeze<1>()`. Both spellings are equivalent.
+`t.squeeze<1>()`, and likewise for `permute`/`flip`/`unsqueeze`/`reshape`. Both
+spellings compile to the same code; the tabs below **lead with the value form**.
 
 ## Rearrange axes
 
-```cpp
-t.permute<2,0,1>();               // reorder axes (a permutation of 0..N-1)
-t.permute<-1,0,1>();              // negatives allowed
-t.permute(Int<2>(), Int<0>(), Int<1>());  // value form
-t.flip<1>();                      // reverse an axis (a negative-stride view; needs a signed
-                                  //   index type, which shape<...> is)
-```
+=== "value form"
+
+    ```cpp
+    t.permute(Int<2>(), Int<0>(), Int<1>());   // reorder axes (a permutation of 0..N-1)
+    t.permute(Int<-1>(), Int<0>(), Int<1>());  // negatives count from the back
+    t.flip(Int<1>());                          // reverse an axis (a negative-stride view; needs a
+                                               //   signed index type, which shape<...> is)
+    ```
+
+=== "template form"
+
+    ```cpp
+    t.permute<2,0,1>();               // reorder axes (a permutation of 0..N-1)
+    t.permute<-1,0,1>();              // negatives count from the back
+    t.flip<1>();                      // reverse an axis (a negative-stride view)
+    ```
 
 ## Add / drop / reshape
 
-```cpp
-t.unsqueeze<2>();   // insert a size-1 axis (numpy newaxis) -> rank+1
-t.unsqueeze<-1>();  // append a trailing axis, e.g. (H,W) -> (H,W,1)
-t.squeeze<3>();     // drop a specific size-1 axis -> rank-1
-t.squeeze();        // drop EVERY statically-size-1 axis
-t.reshape<6,4>();   // view as a new shape (needs C-contiguous, same numel)
-t.reshape<6,-1>();  // one -1 dimension is inferred from numel
-t.flatten();        // view as 1-D (ravel)
-```
+=== "value form"
+
+    ```cpp
+    t.unsqueeze(Int<2>());   // insert a size-1 axis (numpy newaxis) -> rank+1
+    t.unsqueeze(Int<-1>());  // append a trailing axis, e.g. (H,W) -> (H,W,1)
+    t.squeeze(Int<3>());     // drop a specific size-1 axis -> rank-1
+    t.squeeze();             // drop EVERY statically-size-1 axis
+    t.reshape(Int<6>(), Int<4>());   // view as a new shape (needs C-contiguous, same numel)
+    t.reshape(Int<6>(), Int<-1>());  // one -1 dimension is inferred from numel
+    t.flatten();             // view as 1-D (ravel)
+    ```
+
+=== "template form"
+
+    ```cpp
+    t.unsqueeze<2>();   // insert a size-1 axis (numpy newaxis) -> rank+1
+    t.unsqueeze<-1>();  // append a trailing axis, e.g. (H,W) -> (H,W,1)
+    t.squeeze<3>();     // drop a specific size-1 axis -> rank-1
+    t.squeeze();        // drop EVERY statically-size-1 axis
+    t.reshape<6,4>();   // view as a new shape (needs C-contiguous, same numel)
+    t.reshape<6,-1>();  // one -1 dimension is inferred from numel
+    t.flatten();        // view as 1-D (ravel)
+    ```
 
 `reshape`/`flatten` require the tensor to be **C-contiguous** (they reinterpret
 the same memory). If it isn't, materialise first:
@@ -44,8 +68,27 @@ of memory in *some* axis order — so a *permuted* C-contiguous view still count
 `is_contiguous()` is the **C-order** question (numpy/pytorch's meaning) and is what
 `reshape`/`flatten` need; `is_contiguous<fcontiguous>()` asks F-order. Both are thin
 aliases of `is_dense<Layout>()` (the exact-layout check), so `is_contiguous()` ==
-`is_dense<ccontiguous>()`; a value form `is_dense(ccontiguous{})` /
-`is_contiguous(ccontiguous{})` deduces the layout from the argument.
+`is_dense<ccontiguous>()`. The exact-layout check takes its layout either way — as
+an argument (value form) or as a template parameter:
+
+=== "value form"
+
+    ```cpp
+    t.is_dense(ccontiguous{});        // dense in C-order?  (layout deduced from the argument)
+    t.is_dense(fcontiguous{});        // ...F-order?
+    t.is_contiguous(ccontiguous{});   // C-contiguous specifically
+    ```
+
+=== "template form"
+
+    ```cpp
+    t.is_dense<ccontiguous>();        // dense in C-order?
+    t.is_dense<fcontiguous>();        // ...F-order?
+    t.is_contiguous<fcontiguous>();   // F-contiguous
+    ```
+
+(`is_dense()` / `is_contiguous()` with no argument are the argument-free defaults —
+any-order denseness, and C-order contiguity respectively.)
 
 !!! note "mdspan equivalent"
     teeny leads with the numpy/pytorch vocabulary — `t.shape()`, `t.shape(d)`,
@@ -61,8 +104,19 @@ same rank, so known inner dims fold:
 
 ```cpp
 auto dyn = wrap(ptr, shape<-1,-1,-1>{n,3,3});  // came in fully dynamic
-auto st  = dyn.recast<shape<-1,3,3>>();        // the 3s are now compile-time
 ```
+
+=== "value form"
+
+    ```cpp
+    auto st = dyn.recast(shape<-1,3,3>{});  // the 3s are now compile-time
+    ```
+
+=== "template form"
+
+    ```cpp
+    auto st = dyn.recast<shape<-1,3,3>>();  // the 3s are now compile-time
+    ```
 
 Static dims of the target are validated against the actual extents. `recast`
 **preserves the source's strides and works on any layout** (no copy, no contiguity
@@ -76,10 +130,17 @@ A second **layout** argument overrides that when you *want* to reinterpret the
 data with a specific layout — e.g. to fold a `dynamic_strides` cell's inner strides
 to compile-time constants when you know it's contiguous:
 
-```cpp
-auto st = dyn.recast<shape<-1,3,3>, ccontiguous>();  // reinterpret AS row-major: strides fold to (9,3,1)
-auto sv = dyn.recast(shape<-1,3,3>{}, ccontiguous{});// functional form (shape + layout)
-```
+=== "value form"
+
+    ```cpp
+    auto sv = dyn.recast(shape<-1,3,3>{}, ccontiguous{});  // reinterpret AS row-major: strides fold to (9,3,1)
+    ```
+
+=== "template form"
+
+    ```cpp
+    auto st = dyn.recast<shape<-1,3,3>, ccontiguous>();    // reinterpret AS row-major: strides fold to (9,3,1)
+    ```
 
 `ccontiguous`/`fcontiguous` derive the strides from the extents (**you** promise
 the data is contiguous in that order — UB if not); `strides<S...>` imposes explicit

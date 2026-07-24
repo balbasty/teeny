@@ -144,9 +144,11 @@ x.to<T2>();                           // dtype convert (matching dtype -> no-cop
 to<storage::gpu>(x);                      // memory-space move: to<Space,ET,Force>(x) (from <teeny/cuda.h>)
 ```
 
-Axis template arguments are signed (negatives count from the back). **Every** view
-op — `operator()`/`take_along`/`peel` **and** `permute`/`flip`/`unsqueeze`/`squeeze`
-— folds its output strides into a static `strides<...>` (compile-time where the
+Axis template arguments are signed (negatives count from the back); each `<Ax>` op
+also has a **value form** — `t.permute(Int<2>(),Int<0>(),Int<1>())` == `t.permute<2,0,1>()`,
+`t.recast(shape<-1,3,3>{})` == `t.recast<shape<-1,3,3>>()`. **Every** view op —
+`operator()`/`take_along`/`peel` **and** `permute`/`flip`/`unsqueeze`/`squeeze` —
+folds its output strides into a static `strides<...>` (compile-time where the
 source strides are static), on any source layout. See [Views & structure](structure.md).
 
 ---
