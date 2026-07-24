@@ -1201,7 +1201,15 @@ _TNY_API tensor<T, Shape, Layout, storage_view_of(Space)> wrap(T * p, Shape e, s
  *         column-major one. For strides known at compile time pass a
  *         `strides<S...>{}` instead (overload below) so they fold into the type.
  *         A trailing `storage_c<Space>{}` tags the memory space (default host; the plain
- *         backend folds to its view kind, e.g. `storage::gpu -> gpu_view`). */
+ *         backend folds to its view kind, e.g. `storage::gpu -> gpu_view`).
+ *
+ *         `wrap` TRUSTS the strides you give it: a **stride 0** (or a stride smaller
+ *         than an inner extent) makes a SELF-OVERLAPPING view where several indices
+ *         alias one element. Reading such a view is fine (that is how a broadcast
+ *         works), but an **in-place write** into it (`v.add_(b)`, `v.iota_(...)`)
+ *         applies the update to the same element repeatedly — a host-debug check
+ *         rejects an in-place write whose destination has an `extent > 1` axis with
+ *         stride 0. `clone()` to a dense tensor first if you need to write. */
 template <storage Space = storage::view, class T, class Shape>
 _TNY_API tensor<T, Shape, cs::layout_stride, storage_view_of(Space)>
 wrap(T * p, Shape e, cs::array<typename Shape::index_type, Shape::rank()> st, storage_c<Space> = {}) {

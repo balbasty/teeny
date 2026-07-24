@@ -246,9 +246,24 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
         W{}(&c.data()[oc], op(static_cast<Cv>(a.data()[oa]), static_cast<Cv>(b.data()[ob])));
     }
 }
+// A self-overlapping DESTINATION — an axis with extent>1 AND stride 0 — makes an
+// in-place write ALIAS: the update lands on the same element repeatedly, so
+// `v.add_(b)` double-counts (and mul_/iota_/... are likewise wrong). Such a view
+// can only come from `wrap(ptr, e, strides-with-a-0)`; teeny's own view ops never
+// make one, and clone()/to() write into a fresh DENSE destination. Host-debug guard
+// (a no-op on device / under -DNDEBUG); DESTINATION only, so a broadcasting RHS
+// (which legitimately stretches with stride 0) is never flagged.
+template <class C, cs::size_t... D>
+_TNY_API void check_dest_no_overlap(const C & c, cs::index_sequence<D...>) {
+    ( _TNY_CHECK(!(static_cast<long long>(c.extent(D)) > 1 && c.stride(D) == 0),
+        "in-place write into a self-overlapping view (an axis has extent>1 and stride 0): "
+        "the update aliases and is applied multiple times to the same element — clone() to a "
+        "dense tensor first, or write into a non-overlapping destination."), ... );
+}
 template <class W = w_set, class C, class A, class B, class Op>
 _TNY_API void bzip(C & c, const A & a, const B & b, Op op) {
     // C holds the RESULT (largest) rank; operands may be shorter (left-padded).
+    check_dest_no_overlap(c, cs::make_index_sequence<C::rank()>{});
     static_assert(A::rank() <= C::rank() && B::rank() <= C::rank(), "broadcast: operand rank exceeds result");
     static_assert(bc_static_ok_r<typename A::extents_type, typename B::extents_type, C::rank()>(
                       cs::make_index_sequence<C::rank()>{}),
@@ -259,6 +274,7 @@ _TNY_API void bzip(C & c, const A & a, const B & b, Op op) {
 /* ---- c = op(c, scalar), elementwise ------------------------------ */
 template <class W, class C, class Op, cs::size_t... D>
 _TNY_API void scal_(C & c, typename C::element_type s, Op op, cs::index_sequence<D...>) {
+    check_dest_no_overlap(c, cs::index_sequence<D...>{});
     using I  = typename C::index_type;
     using Cv = compute_type_t<typename C::element_type>;   // compute in float for half types
     const Cv sv = static_cast<Cv>(s);
@@ -282,6 +298,7 @@ _TNY_API void scal(C & c, typename C::element_type s, Op op) {
 /* ---- c = start, start+step, ... in row-major logical order -------- */
 template <class C, cs::size_t... D>
 _TNY_API void iota_(C & c, typename C::element_type start, typename C::element_type step, cs::index_sequence<D...>) {
+    check_dest_no_overlap(c, cs::index_sequence<D...>{});
     using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
     const I e[]  = { c.extent(D)... };
     const I sc[] = { c.stride(D)... };

@@ -19,6 +19,15 @@ auto old = a++;                         // postfix: pre-value as a stack copy
                                         //   (STATIC shape only)
 ```
 
+!!! warning "Don't write in place through a self-overlapping view"
+    `wrap` trusts the strides you pass, so a **stride-0** axis (or a stride smaller
+    than an inner extent) makes a view where several indices alias the same element.
+    *Reading* one is fine — that's how a broadcast RHS works — but an in-place
+    **write** into such a destination applies the update to the same element
+    repeatedly (`v.add_(b)` double-counts). A host-debug check rejects an in-place
+    write whose destination has an `extent > 1` axis with stride 0; `clone()` to a
+    dense tensor first if you need to write.
+
 `atomic_add_`/`atomic_sub_` accumulate a delta **atomically on device** — the
 scatter/"push" accumulate. Both a broadcasting tensor rhs and a scalar rhs:
 
