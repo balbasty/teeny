@@ -41,6 +41,7 @@ TESTS = \
 	$(BUILDDIR)/test_takealong \
 	$(BUILDDIR)/test_alias \
 	$(BUILDDIR)/test_static_extent \
+	$(BUILDDIR)/test_wrap \
 	$(BUILDDIR)/test_slice \
 	$(BUILDDIR)/test_unchecked \
 	$(BUILDDIR)/test_assign \

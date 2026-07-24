@@ -119,7 +119,11 @@ Factories: `wrap(ptr, extents)` / `wrap<Layout>(ptr, extents)`,
 `wrap(ptr, extents, {s...})` (runtime strides -> dynamic_strides),
 `wrap<S...>(ptr, extents, {dyn...})` (mixed static/runtime strides),
 `wrap(ptr, extents, strides<S...>{})` (compile-time strides),
-`as_tensor(any_mdspan)` (wrap a submdspan/mdspan result as a view). Functional
+`as_tensor(any_mdspan)` (wrap a submdspan/mdspan result as a view). Every `wrap`
+overload takes an optional trailing memory-space tag `own_c<Space>{}` (default
+`own::view`, a host view): `wrap(dptr, e, own_c<own::gpu_view>{})` wraps a **device**
+pointer, `own::pinned_view`/`own::mapped_view` page-locked host memory (symmetric
+with `as_anyrank<Space>` / `from_dlpack<T,Space>`; Space must be a view kind). Functional
 factories that deduce the extents type: `make_view(ptr,e)`, `make_local<T>(e)`,
 `make_heap<T>(e)`, `make_gpu/pinned/mapped<T>(e)` (E deduced; **T defaults to
 `float`**, override explicitly). The `make_*` owning factories are thin spellings
