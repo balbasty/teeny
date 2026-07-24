@@ -28,6 +28,30 @@ valarray-like math layer, and kernel ergonomics (nd-peel, dynamic-rank dispatch)
   ```
   Add `-I include -I external/cccl/libcudacxx/include`.
 
+## Using it in your build
+
+teeny is header-only, so you only need the include paths above. Two convenient
+ways to wire it in:
+
+**CMake** — teeny ships an `INTERFACE` target `teeny::teeny` that carries the
+include dirs, the C++17 requirement, and the CCCL dependency.
+
+```cmake
+# In-tree (a submodule / vendored copy), or via FetchContent:
+add_subdirectory(teeny)
+target_link_libraries(my_app PRIVATE teeny::teeny)
+
+# ...or after `cmake --install`:
+find_package(teeny CONFIG REQUIRED)   # re-resolves CCCL via find_package(CCCL)
+target_link_libraries(my_app PRIVATE teeny::teeny)
+```
+
+If CCCL is installed it is found automatically; otherwise the vendored submodule
+is used for in-tree builds. Run the test suite with `-DTEENY_BUILD_TESTS=ON` then
+`ctest`. (The [`Makefile`](Makefile) remains the reference build for the tests.)
+
+**Plain compiler flags** — `-std=c++17 -I include -I external/cccl/libcudacxx/include`.
+
 ## At a glance
 
 ```cpp

@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+# teeny is header-only but built on CCCL (cuda::std::mdspan), so a consumer of
+# the installed package needs CCCL too. Re-resolve it here; if you built teeny
+# against the vendored submodule, install CCCL (or point CMAKE_PREFIX_PATH at it)
+# before using the installed teeny package.
+include(CMakeFindDependencyMacro)
+find_dependency(CCCL)
+
+include("${CMAKE_CURRENT_LIST_DIR}/teeny-targets.cmake")
+
+check_required_components(teeny)
