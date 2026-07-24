@@ -138,12 +138,29 @@ Assignment **into** a slice copies (broadcasts); on a **named** view it rebinds:
 ## Structure (views)
 
 All return a view and work on any source layout (incl. `strides<...>`); axis
-template args are signed (negatives count from the back). **Every** view op —
-`operator()` slicing, `take_along`, `peel`, and `permute`/`flip`/`unsqueeze`/
-`squeeze` — folds its output strides into a static `strides<...>` layout
-(compile-time where the source strides are static; permute reorders them, flip
-negates one, un/squeeze inserts/drops an axis), so a static source keeps its
-compile-time strides through these ops.
+template args are signed (negatives count from the back).
+
+**Type inference — what the output *type* keeps.** A view op transforms the input
+type along four independent facets; staticity is preserved wherever it is
+derivable, so a kernel written against a static shape stays static through these
+ops (no accidental fallback to runtime extents/strides):
+
+| Facet | Rule |
+|---|---|
+| **extents** | each *kept* axis keeps its source extent — static stays static. Peeling the batch dims off `shape<-1,-1,M,N>` yields a `<M,N>` cell; a *static-bounds* slice/range keeps a static extent, a runtime range is dynamic; `unsqueeze` inserts a static `1` |
+| **strides** | folded to a compile-time `strides<...>` slot wherever `source_stride × step` is known at compile time — a static source keeps folded strides, and a partially-dynamic *contiguous* stride folds from the static extents it spans (`shape<-1,3,3>` → `stride0 = 9`); otherwise runtime |
+| **layout** | the view ops (`operator()`, `take_along`, `permute`, `flip`, `un/squeeze`, `peel`) output a folded `strides<...>`. `recast<keep_strides>` (the default) instead **preserves the source layout type** (`ccontiguous` stays `ccontiguous`, `strides<>` stays `strides<>`) |
+| **space** | `own_view_of(source)`: a `gpu`/`gpu_view` source → `gpu_view`, `pinned`/`mapped` → the matching `_view`, else `view` — a view never loses its memory space |
+
+Worked input→output shapes (`E` = source extents):
+
+| Call | `E` | → output |
+|---|---|---|
+| `t(i, all, slice<1,4>())` | `<A,B,C>` | `<B,3>` — integer drops the axis, `all` keeps `B`, a static range keeps a static extent |
+| `t(i, all, slice(a,b))` | `<A,B,C>` | `<B,-1>` — a runtime range's extent is dynamic |
+| `peel_front<N>(t)` cell | `<*batch(N),M,N>` | `<M,N>` — trailing extents **and** strides stay static even when the batch is dynamic |
+| `t.recast<NewE>()` | `<-1,M,N>` (any layout) | `NewE` with the static dims recovered; **strides + layout preserved** |
+| `sum<Ax>(t)` | `<A,B,C>` | `<A,C>` — named axis removed (static result → stack, any dynamic → heap) |
 
 | Call | Returns | Notes |
 |---|---|---|
@@ -153,7 +170,7 @@ compile-time strides through these ops.
 | `t.squeeze<Ax>()` / `t.squeeze()` | → view, rank−1 / − all size-1 | drop size-1 axis / axes |
 | `t.reshape<NewExt...>()` | → view | contiguous reshape (one `-1` inferred) |
 | `t.flatten()` | → 1-D view | ravel; needs C-contiguous |
-| `t.recast<NewShape[, NewLayout]>()` | → view | reinterpret with a more-static same-rank extents; **`NewLayout` defaults to `keep_strides`** (preserve the source strides, any layout, no copy). `ccontiguous`/`fcontiguous` = reinterpret AS that order (derive+fold the strides — the "I promise it's contiguous" form); `strides<S...>` = impose them. Functional form `t.recast(shape{…}, layout{…})` |
+| `t.recast<NewShape[, NewLayout]>()` | → view | reinterpret with a more-static same-rank extents; **`NewLayout` defaults to `keep_strides`** (preserve the source strides AND layout type, any layout, no copy). `ccontiguous`/`fcontiguous` = reinterpret AS that order (derive+fold the strides — the "I promise it's contiguous" form); `strides<S...>` = impose them. Functional form `t.recast(shape{…}, layout{…})` |
 | `t.clone()` | owning (stack/heap) | materialise a dense row-major copy |
 | `t.to<T2>()` | view (no-copy) or owning | **dtype** convert. Matching dtype (no `Force`) → a read-only borrow (`gpu_view` if `t` is on the device, else `view`); differing dtype or `t.to<T2,true>()` → a dense owning copy (static→stack, dyn→heap) |
 | `to<Space>(t)` (`cuda.h`) | view (no-copy) or owning | **memory-space** move: `to<Space, ET, Force>(t)` — `Space` ∈ `own::gpu`/`pinned`/`mapped`/`heap`/`stack`. Same no-copy/`Force` rule; a device source (gpu/`gpu_view`) downloads via `cudaMemcpy`. rvalue source → always copies |
