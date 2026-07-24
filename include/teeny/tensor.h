@@ -796,30 +796,103 @@ public:
     _TNY_HOST auto to() const && { tensor<cs::remove_cv_t<T2>, Shape, ccontiguous, storage::heap> c(extents()); c.copy_(*this); return c; }
 
 private:
+    // POD the compile-time reshape solver returns (fully-static sources): whether the
+    // reshape is viewable without a copy, plus the resolved target extents and strides.
+    template <cs::size_t M> struct _rs_static_t {
+        bool ok;
+        index_type  te[M ? M : 1];
+        cs::int64_t ts[M ? M : 1];
+    };
+    // Solve the reshape at COMPILE TIME from the fully-static source geometry (static
+    // extents + statically-known strides). Mirrors the runtime body: resolve a `-1`,
+    // check the element count, then run numpy's C-order no-copy walk. Only meaningful
+    // when the source strides are all static (the caller gates on that).
+    template <long... NewExt, cs::size_t... Rs>
+    static constexpr _rs_static_t<sizeof...(NewExt)> _reshape_static_impl(cs::index_sequence<Rs...>) {
+        constexpr cs::size_t R = sizeof...(Rs), M = sizeof...(NewExt);
+        cs::array<index_type, R ? R : 1> se{ static_cast<index_type>(Shape::static_extent(Rs))... };
+        cs::array<index_type, R ? R : 1> ss{ static_cast<index_type>(_src_sstride<Rs, Layout, Shape>())... };
+        const long ne[M ? M : 1] = { NewExt... };
+        index_type n = 1; for (cs::size_t r = 0; r < R; ++r) n *= se[r];
+        index_type known = 1; bool has_inf = false;
+        for (cs::size_t k = 0; k < M; ++k) { if (ne[k] < 0) has_inf = true; else known *= static_cast<index_type>(ne[k]); }
+        _rs_static_t<M> out{}; out.ok = true; index_type inferred = 1;
+        // A `-1` must DIVIDE numel; without one the counts must match exactly.
+        if (has_inf) { if (known == 0 || n % known != 0) out.ok = false; else inferred = n / known; }
+        else         { if (known != n)                   out.ok = false; }
+        cs::array<index_type, M ? M : 1> te{}, ts{};
+        for (cs::size_t k = 0; k < M; ++k) te[k] = ne[k] < 0 ? inferred : static_cast<index_type>(ne[k]);
+        if (out.ok) out.ok = _detail::reshape_view_strides(se, ss, te, ts);
+        for (cs::size_t k = 0; k < M; ++k) { out.te[k] = te[k]; out.ts[k] = static_cast<cs::int64_t>(ts[k]); }
+        return out;
+    }
+    template <long... NewExt>
+    static constexpr _rs_static_t<sizeof...(NewExt)> _reshape_static() {
+        return _reshape_static_impl<NewExt...>(cs::make_index_sequence<rank()>{});
+    }
+    // Build the folded static-geometry view (extents + strides both compile-time) from
+    // the solved result — a pure static `strides<...>` view (pointer-only ctor).
+    template <class El, long... NewExt, cs::size_t... Ks>
+    static _TNY_API auto _make_static_reshape(El * p, cs::index_sequence<Ks...>) {
+        constexpr _rs_static_t<sizeof...(NewExt)> RS = _reshape_static<NewExt...>();
+        using NE = cs::extents<index_type, static_cast<cs::size_t>(RS.te[Ks])...>;
+        using SF = ::tny::strides< RS.ts[Ks]... >;   // qualify: the member strides() shadows the type
+        return tensor<El, NE, SF, storage_view_of(O)>(p);
+    }
+
     // shared reshape body: one axis may be `-1` (numpy-style, inferred from numel).
+    // View-when-stride-compatible (numpy semantics): a reshape is a VIEW whenever the
+    // source layout can be regrouped without a copy — any C-contiguous run split or
+    // merged — not only when the whole tensor is C-contiguous. The output strides come
+    // from numpy's no-copy walk and land in a folded `strides<...>` layout: folded to
+    // compile-time immediates when the SOURCE geometry is fully static (extents AND
+    // strides), all-runtime otherwise. A statically-decidable non-viewable reshape is a
+    // compile error (`static_assert`); the dynamic case is a debug `_TNY_CHECK`.
     template <class El, long... NewExt>
     _TNY_API auto _reshape(El * p) const noexcept {
         static_assert(((NewExt < 0 ? 1 : 0) + ... + 0) <= 1, "reshape: at most one inferred (-1) dimension");
-        using NE = cs::extents<index_type, (NewExt < 0 ? cs::dynamic_extent : static_cast<cs::size_t>(NewExt))...>;
-        constexpr index_type known = (index_type(1) * ... * (NewExt < 0 ? index_type(1) : index_type(NewExt)));
-        constexpr bool has_inferred = ((NewExt < 0) || ...);
-        _TNY_CHECK(is_contiguous<ccontiguous>(), "reshape: needs a C-contiguous tensor (clone() first)");
-        // With a `-1` the given extents must DIVIDE numel (the rest is inferred);
-        // without one they must equal it exactly — else reshape<2,3> of a 24-elem
-        // tensor would silently view only the first 6 (a divisor is not a reshape).
-        if constexpr (has_inferred)
-            _TNY_CHECK(known != 0 && numel() % known == 0, "reshape: numel not divisible by given extents");
-        else
-            _TNY_CHECK(known == numel(), "reshape: element count must match the given extents (no -1 to infer)");
-        const index_type inferred = numel() / (known ? known : index_type(1));
-        cs::array<index_type, sizeof...(NewExt)> ea{ (NewExt < 0 ? inferred : index_type(NewExt))... };
-        return tensor<El, NE, ccontiguous, storage_view_of(O)>(p, typename ccontiguous::template mapping<NE>(NE(ea)));
+        constexpr cs::size_t M = sizeof...(NewExt);
+        constexpr bool src_static = is_static &&
+            (_contiguous_layout<Layout>::value || _strides_all_static<Layout>::value);
+        if constexpr (src_static) {
+            // fully-static source: solve + fold entirely at compile time.
+            static_assert(_reshape_static<NewExt...>().ok,
+                "reshape: this static shape/layout cannot be viewed as the requested shape "
+                "without a copy — the element counts must match AND the layout must be "
+                "regroupable in C-order (clone() first, or query can_reshape_without_copy<...>()).");
+            return _make_static_reshape<El, NewExt...>(p, cs::make_index_sequence<M>{});
+        } else {
+            // dynamic source (or dynamic strides): compute the strides at run time. The
+            // target extents are still static where given as a literal; the inferred
+            // `-1` dim is dynamic (numel is runtime).
+            using NE = cs::extents<index_type, (NewExt < 0 ? cs::dynamic_extent : static_cast<cs::size_t>(NewExt))...>;
+            constexpr index_type known = (index_type(1) * ... * (NewExt < 0 ? index_type(1) : index_type(NewExt)));
+            constexpr bool has_inferred = ((NewExt < 0) || ...);
+            if constexpr (has_inferred)
+                _TNY_CHECK(known != 0 && numel() % known == 0, "reshape: numel not divisible by given extents");
+            else
+                _TNY_CHECK(known == numel(), "reshape: element count must match the given extents (no -1 to infer)");
+            const index_type inferred = numel() / (known ? known : index_type(1));
+            cs::array<index_type, rank()> se{}, ss{};
+            for (cs::size_t r = 0; r < rank(); ++r) { se[r] = static_cast<index_type>(extent(r)); ss[r] = static_cast<index_type>(stride(r)); }
+            cs::array<index_type, M> te{ (NewExt < 0 ? inferred : index_type(NewExt))... }, ts{};
+            const bool ok = _detail::reshape_view_strides(se, ss, te, ts);
+            _TNY_CHECK(ok, "reshape: this layout cannot be viewed as the requested shape without a "
+                           "copy (clone() first, or query can_reshape_without_copy<...>()).");
+            using SF = _runtime_strides_t<M>;
+            NE oe(te);
+            return tensor<El, NE, SF, storage_view_of(O)>(p, _detail::fold_mapping<SF>(oe, ts.data()));
+        }
     }
 public:
-    /** @brief View this tensor as a new shape — requires it be C-contiguous
-     *         (`clone()` first otherwise) and the element count to match. One
-     *         extent may be **`-1`** (numpy-style), inferred from the total size:
-     *         `t.reshape<6,-1>()`. */
+    /** @brief View this tensor as a new shape — numpy semantics: a **VIEW** whenever
+     *         the layout can be regrouped without a copy (not only when C-contiguous;
+     *         a strided/permuted source often still views — split a contiguous axis,
+     *         merge a contiguous run). The output is a folded `strides<...>` view
+     *         (compile-time strides when the source is fully static). One extent may
+     *         be **`-1`** (numpy-style), inferred from the total size: `t.reshape<6,-1>()`.
+     *         A non-viewable reshape is a compile error (static source) or a debug
+     *         check (dynamic) — `clone()` first, or query `can_reshape_without_copy`. */
     template <long... NewExt> _TNY_API auto reshape() noexcept       { return _reshape<T, NewExt...>(store_.data()); }
     template <long... NewExt> _TNY_API auto reshape() const noexcept { return _reshape<const T, NewExt...>(store_.data()); }
 
@@ -906,8 +979,10 @@ public:
     template <class NewShape, class NewLayout = keep_strides>
     _TNY_API auto recast() const { return _recast<const T, NewShape, NewLayout>(store_.data(), cs::make_index_sequence<rank()>{}); }
 
-    /** @brief View as 1-D (`ravel`) — requires C-contiguous (`clone()` first). Just
-     *         `reshape<-1>()` (one inferred dim), spelled out for discoverability. */
+    /** @brief View as 1-D (`ravel`) — a VIEW whenever the layout is mergeable into a
+     *         single contiguous run without a copy (numpy semantics; `clone()` first
+     *         otherwise). Just `reshape<-1>()` (one inferred dim), spelled out for
+     *         discoverability. */
     _TNY_API auto flatten() noexcept       { return reshape<-1>(); }
     _TNY_API auto flatten() const noexcept { return reshape<-1>(); }
 

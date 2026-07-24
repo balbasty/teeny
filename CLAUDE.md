@@ -203,7 +203,10 @@ t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1) -> view
 t.flip<1>();          // reverse an axis (negative-stride view; needs signed index)
 t.unsqueeze<2>();     // insert size-1 axis at pos 2 (numpy newaxis) -> rank+1 view
 t.squeeze<3>();       // drop a size-1 axis -> rank-1 view
-t.reshape<6,4>(); t.flatten();  // contiguous-view reshape / ravel (clone() first if not)
+t.reshape<6,4>(); t.flatten();  // reshape / ravel -> VIEW when regroupable without a copy
+                                //   (numpy: not just C-contiguous; strided/permuted often view too).
+                                //   Non-viewable = static_assert (static src) / debug-check (dyn); clone() first.
+                                //   can_reshape_without_copy<...>() queries it. Output is a folded strides<...>.
 t.recast<shape<-1,3,3>>();      // re-type extents (recover static dims), PRESERVE source strides (any
                                 //   layout, no copy). 2nd arg = layout override: recast<E,ccontiguous>()
                                 //   reinterprets AS contiguous (folds strides; "I promise"); strides<S> imposes.

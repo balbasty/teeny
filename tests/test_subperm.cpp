@@ -88,7 +88,9 @@ int main()
     auto fla = t.flatten();
     if (fla.extent(0) != 24 || fla(23) != t(1,2,3)) return 22;
     auto rin = t.reshape<6,-1>();                       // -1 = infer (4)
-    static_assert(decltype(rin)::extents_type::static_extent(1) == cs::dynamic_extent, "inferred dim dynamic");
+    // smart reshape (#129): for a fully-static source the inferred dim FOLDS to a
+    // compile-time extent (was dynamic before) — like every other static view op.
+    static_assert(decltype(rin)::extents_type::static_extent(1) == 4, "inferred dim folds to static 4");
     if (rin.extent(1) != 4 || rin(5,3) != t(1,2,3)) return 24;
     rs(0,0) = 88.0;                                    // reshape is a view
     if (t(0,0,0) != 88.0) return 23;
