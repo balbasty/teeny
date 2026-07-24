@@ -62,9 +62,21 @@ template <cs::size_t... A> _TNY_API constexpr bool _all_distinct() noexcept {
  * `slice(none, n)` starts at 0, `slice(m, none)` runs to the end, and
  * `slice(none, none)` **folds** to `full_extent` — so `all == slice(none, none)`,
  * keeping the axis and its static extent (`all` is built from it). Combined with
- * runtime bounds it resolves at run time, so the one sentinel covers both. */
+ * runtime bounds it resolves at run time, so the one sentinel covers both.
+ *
+ * A BARE `none` **argument** to `operator()`/`uget` is a different thing: numpy
+ * `newaxis` (`a[None]`), which inserts a size-1 axis — see `_is_newaxis` below. */
 struct none_t {};
 constexpr none_t none{};
+
+// A BARE `none` argument to operator()/uget is numpy `newaxis` (`a[None]`): it
+// inserts a new size-1 axis (static extent 1, stride 0) at its position while
+// consuming NO source axis — the mirror of an integer arg (consumes a source
+// axis, emits no output axis). A `none` INSIDE `slice(...)` stays a bound
+// sentinel (it becomes a `_slice_spec` member), so only a bare `none_t` argument
+// is newaxis; this trait keys on exactly that type.
+template <class A> struct _is_newaxis : cs::false_type {};
+template <> struct _is_newaxis<none_t> : cs::true_type {};
 
 /** @brief Ellipsis sentinel — teeny's `...` (python `a[..., 0]` / numpy `Ellipsis`).
  *
@@ -164,15 +176,18 @@ struct _str_compact<V0, Vs...> {
 // static output stride for source axis Ax under (Layout, Shape), given the arg.
 template <class Arg, cs::size_t Ax, class Layout, class Shape>
 _TNY_API constexpr cs::int64_t _out_sstride() {
-    constexpr cs::int64_t ss = _src_sstride<Ax, Layout, Shape>();
-    if constexpr (_is_index<Arg>::value)          return _sdrop;                 // dropped
-    else if constexpr (_is_full_slice<Arg>::value) return ss;                    // slice(none,none) == all
-    else if constexpr (_is_slice_spec<Arg>::value) {                             // range: ss × step
-        using S = typename _slice_step<Arg>::type;
-        if constexpr (ss == dynamic_stride)       return dynamic_stride;
-        else if constexpr (_is_ic<S>::value)      return ss * static_cast<cs::int64_t>(S::value);
-        else                                       return dynamic_stride;
-    } else return ss;                                                            // full_extent (all): step 1
+    if constexpr (_is_newaxis<Arg>::value)        return 0;                      // newaxis: inserted size-1 axis, stride 0 (static)
+    else {
+        constexpr cs::int64_t ss = _src_sstride<Ax, Layout, Shape>();
+        if constexpr (_is_index<Arg>::value)          return _sdrop;                 // dropped
+        else if constexpr (_is_full_slice<Arg>::value) return ss;                    // slice(none,none) == all
+        else if constexpr (_is_slice_spec<Arg>::value) {                             // range: ss × step
+            using S = typename _slice_step<Arg>::type;
+            if constexpr (ss == dynamic_stride)       return dynamic_stride;
+            else if constexpr (_is_ic<S>::value)      return ss * static_cast<cs::int64_t>(S::value);
+            else                                       return dynamic_stride;
+        } else return ss;                                                            // full_extent (all): step 1
+    }
 }
 
 // start / stop bound types of a slice arg (companions to _slice_step).
