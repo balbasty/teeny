@@ -57,7 +57,7 @@ Wrap existing memory (→ view):
 | `wrap(ptr, shape, {s0,s1,…})` | `view<T,E,dynamic_strides>` | **runtime** strides (elements; may be negative) |
 | `wrap<S...>(ptr, shape, {dyn…})` | `view<T,E,strides<S...>>` | **mixed** static/runtime strides (`dynamic_stride` slots) |
 | `wrap(ptr, shape, strides<S...>{})` | `view<T,E,strides<S...>>` | **compile-time** strides (fold into the type) |
-| `wrap(…, own_c<own::gpu_view>{})` | `view` in that space | trailing **memory-space** tag on any overload above (default `own::view`); `gpu_view` for a device pointer, `pinned_view`/`mapped_view` for page-locked host memory (must be a view kind) |
+| `wrap(…, own_v<own::gpu>)` | view in that space | trailing **memory-space** tag on any overload above (default `own::view`); pass the plain backend — `own::gpu`/`pinned`/`mapped` — and it folds to the view kind (`gpu_view`/…), since `wrap` always views. `own_c<S>{}` / `own_v<S>` are the braced / no-braces spellings |
 | `as_tensor(md)` | `view<…>` | wrap any `cs::mdspan`/`submdspan` result |
 | `make_view(ptr, shape)` | `view<T,E>` | an alias of `wrap` that deduces `E` (`make_view<Layout>` for the layout); takes the same trailing `own_c<Space>{}` tag |
 

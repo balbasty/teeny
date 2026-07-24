@@ -73,6 +73,9 @@ inline constexpr own own_deduce = static_cast<own>(-1);
 /** @brief Value-tag carrier for an ownership mode, for the factories' value-tag
  *         backend form, e.g. `empty<T>(shape, own_c<own::gpu>{})`. */
 template <own O> using own_c = cs::integral_constant<own, O>;
+/** @brief A ready-made `own_c<O>` VALUE — the no-braces spelling of the value tag:
+ *         `wrap(p, e, own_v<own::gpu>)` instead of `own_c<own::gpu>{}`. */
+template <own O> inline constexpr own_c<O> own_v{};
 /** @brief Resolve a factory's ownership: an explicitly named mode passes through,
  *         `own_deduce` becomes `stack` for a static shape / `heap` for a dynamic one. */
 _TNY_API constexpr own own_resolve(own o, bool static_shape) noexcept {
