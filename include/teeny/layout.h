@@ -129,6 +129,17 @@ struct strides {
 /** @brief Back-compat alias: the original all-static-stride layout name. */
 template <cs::int64_t... S> using layout_static_stride = strides<S...>;
 
+// strides<dynamic_stride × M> — the all-runtime-strided layout of a view whose
+// strides are only known at run time (e.g. a reshape of a dynamic source: the
+// no-copy walk yields the strides at run time). Built by index-sequence expansion
+// so its arity matches the view rank. (The name `_dyn_strides` above is the mapping's
+// storage struct — this is the *layout type*.)
+template <cs::size_t M, class Seq = cs::make_index_sequence<M>> struct _runtime_strides;
+template <cs::size_t M, cs::size_t... I> struct _runtime_strides<M, cs::index_sequence<I...>> {
+    using type = strides< ((void)I, dynamic_stride)... >;
+};
+template <cs::size_t M> using _runtime_strides_t = typename _runtime_strides<M>::type;
+
 /** @brief Sentinel `Layout` selector for `recast<NewShape, keep_strides>()` (the
  *         default): PRESERVE the source strides (fold where the source layout makes
  *         them derivable, keep runtime otherwise). Contrast an explicit layout —

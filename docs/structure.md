@@ -36,7 +36,7 @@ spellings compile to the same code; the tabs below **lead with the value form**.
     t.unsqueeze(Int<-1>());  // append a trailing axis, e.g. (H,W) -> (H,W,1)
     t.squeeze(Int<3>());     // drop a specific size-1 axis -> rank-1
     t.squeeze();             // drop EVERY statically-size-1 axis
-    t.reshape(Int<6>(), Int<4>());   // view as a new shape (needs C-contiguous, same numel)
+    t.reshape(Int<6>(), Int<4>());   // view as a new shape (same numel) — no copy when viewable
     t.reshape(Int<6>(), Int<-1>());  // one -1 dimension is inferred from numel
     t.flatten();             // view as 1-D (ravel)
     ```
@@ -48,25 +48,31 @@ spellings compile to the same code; the tabs below **lead with the value form**.
     t.unsqueeze<-1>();  // append a trailing axis, e.g. (H,W) -> (H,W,1)
     t.squeeze<3>();     // drop a specific size-1 axis -> rank-1
     t.squeeze();        // drop EVERY statically-size-1 axis
-    t.reshape<6,4>();   // view as a new shape (needs C-contiguous, same numel)
+    t.reshape<6,4>();   // view as a new shape (same numel) — no copy when viewable
     t.reshape<6,-1>();  // one -1 dimension is inferred from numel
     t.flatten();        // view as 1-D (ravel)
     ```
 
-`reshape`/`flatten` require the tensor to be **C-contiguous** (they reinterpret
-the same memory). If it isn't, materialise first:
+`reshape`/`flatten` follow **numpy semantics**: they return a **view** whenever the
+new shape is reachable without a copy — not only from a C-contiguous tensor, but any
+layout that regroups in C-order (splitting a contiguous axis, merging a contiguous
+run — so a strided or permuted source often still views). The output is a folded
+`strides<...>` view (compile-time strides when the source is fully static). When the
+requested regrouping genuinely needs a copy (e.g. it would cross a stride gap), it is
+a **compile error** for a static source and a debug check for a dynamic one — query
+first, or `clone()`:
 
 ```cpp
-t.is_dense();                     // dense block in SOME order (C, F, or a permuted view)
-t.is_contiguous();                // C-order specifically — what reshape/flatten need
-auto c = t.clone();               // a dense, row-major OWNING copy (static -> stack, dyn -> heap)
-c.flatten();                      // now contiguous
+t.can_reshape_without_copy<6,4>();  // will reshape<6,4>() be a view? (numpy's rule)
+auto c = t.clone();                 // a dense, row-major OWNING copy (static -> stack, dyn -> heap)
+c.reshape<6,4>();                   // guaranteed viewable now
 ```
 
 `is_dense()` with no argument asks only whether the elements occupy a dense block
 of memory in *some* axis order — so a *permuted* C-contiguous view still counts.
-`is_contiguous()` is the **C-order** question (numpy/pytorch's meaning) and is what
-`reshape`/`flatten` need; `is_contiguous<fcontiguous>()` asks F-order. Both are thin
+`is_contiguous()` is the **C-order** question (numpy/pytorch's meaning); a
+C-contiguous tensor is always reshapable to any matching shape. `is_contiguous<fcontiguous>()`
+asks F-order. Both are thin
 aliases of `is_dense<Layout>()` (the exact-layout check), so `is_contiguous()` ==
 `is_dense<ccontiguous>()`. The exact-layout check takes its layout either way — as
 an argument (value form) or as a template parameter:
