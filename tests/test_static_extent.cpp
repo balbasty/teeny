@@ -40,5 +40,23 @@ int main() {
     // `shape` aliases `extent(s)` (python-friendly)
     static_assert(t.shape(Int<1>()) == 3, "shape(Int) == extent(Int)");
     if (t.shape(0) != 2 || t.shape().extent(2) != 4) return 4;
+
+    // ---- shape()/strides() are array-like: Int<k>() folds, runtime stays runtime --
+    static_assert(cs::is_same<decltype(t.shape()[Int<1>()]), cs::integral_constant<long,3>>(),
+                  "shape()[Int] folds to integral_constant");
+    static_assert(cs::is_same<decltype(t.strides()[Int<2>()]), cs::integral_constant<long,1>>(),
+                  "strides()[Int] unit stride folds");
+    static_assert(decltype(t.strides()[Int<0>()])::value == 12, "ccontiguous outer stride folds (3*4)");
+    static_assert(decltype(t.shape()[Int<-1>()])::value == 4, "negative axis index folds (last)");
+    if (t.shape()[1] != 3 || t.strides()[1] != 4) return 5;              // runtime indices
+    if (t.shape().rank() != 3 || t.strides().rank() != 3) return 6;
+    { long p = 1; for (auto e : t.shape())   p *= e; if (p != 24) return 7; }   // iterate (runtime)
+    { long s = 0; for (auto v : t.strides()) s += v; if (s != 17) return 8; }
+    { shape<2,3,4> e = t.shape(); if (e.extent(0) != 2) return 9; }      // converts to raw extents
+
+    // dynamic_strides: no static fold, runtime values are correct
+    auto dv = wrap(buf, DynE{2,3,4}, {12,4,1});
+    static_assert(cs::is_same<decltype(dv.strides()[Int<1>()]), long>(), "dynamic stride stays runtime");
+    if (dv.shape()[0] != 2 || dv.strides()[0] != 12 || dv.strides()[2] != 1) return 10;
     return 0;
 }

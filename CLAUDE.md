@@ -146,6 +146,9 @@ t.extent(Int<0>());   // static lookup -> integral_constant when the extent is s
 t.extent(0);          // runtime lookup -> index_type   (t.shape(...) is a python-y alias)
 t.stride(Int<1>());   // static when derivable (static-stride layout; contiguous+static;
                       //   or a contiguous layout's UNIT stride even for a dynamic shape)
+t.shape()[Int<1>()];  t.strides()[Int<1>()];  // shape()/strides() are ARRAY-LIKE: [Int<k>()] folds
+                      //   to integral_constant where derivable, [i] (runtime) is a value; rank(),
+                      //   iterable, shape() converts to the raw extents. (extents()/mapping() = raw mdspan.)
 t.data();  t.view();  t.mdspan();  t.extents();  t.shape();  t.mapping();
                       //   view() = non-owning teeny view tensor (gpu_view if device);
                       //   mdspan() = the raw cuda::std::mdspan

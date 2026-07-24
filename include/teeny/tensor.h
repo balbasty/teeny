@@ -25,6 +25,80 @@ _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
                 typename MD::layout_type, OW>
 as_tensor(const MD & m);
 
+/* --- shared axis dispatch: a STATIC index (`Int<k>()`) folds to an
+ *     `integral_constant` where the value is known at compile time; a runtime index
+ *     stays a value. Lives ONCE here and is reused by `tensor::extent`/`stride` AND
+ *     the `shape()`/`strides()` accessor views below, so the fold rule can't drift. */
+template <class Shape, class Layout, long Ax, class Map>
+_TNY_API constexpr auto _axis_extent(const Map & m) noexcept {
+    using Idx = typename Shape::index_type;
+    constexpr cs::size_t D = _norm_axis(Ax, Shape::rank());      // -1 = last axis
+    if constexpr (Shape::static_extent(D) != cs::dynamic_extent)
+        return cs::integral_constant<Idx, static_cast<Idx>(Shape::static_extent(D))>{};
+    else
+        return static_cast<Idx>(m.extents().extent(D));
+}
+template <class Shape, class Layout, long Ax, class Map>
+_TNY_API constexpr auto _axis_stride(const Map & m) noexcept {
+    using Idx = typename Shape::index_type;
+    constexpr cs::size_t D = _norm_axis(Ax, Shape::rank());
+    if constexpr (_is_strides<Layout>::value && _static_stride_at<D, Layout>::value != dynamic_stride)
+        return cs::integral_constant<Idx, static_cast<Idx>(_static_stride_at<D, Layout>::value)>{};
+    else if constexpr (Shape::rank_dynamic() == 0 && _contiguous_layout<Layout>::value)
+        return cs::integral_constant<Idx, static_cast<Idx>(Map{}.stride(D))>{};
+    // the UNIT stride of a contiguous layout folds even with dynamic extents
+    else if constexpr (cs::is_same<Layout, ccontiguous>::value && D + 1 == Shape::rank())
+        return cs::integral_constant<Idx, 1>{};
+    else if constexpr (cs::is_same<Layout, fcontiguous>::value && D == 0)
+        return cs::integral_constant<Idx, 1>{};
+    else
+        return static_cast<Idx>(m.stride(D));
+}
+
+/* --- `shape()` / `strides()` accessor views: array-like, but static-index-aware.
+ *     `x[Int<k>()]` folds to a compile-time value where derivable, `x[i]` (runtime)
+ *     stays a value — the same rule `extent()`/`stride()` use. `Stride` selects
+ *     strides vs extents. Holds the mapping BY VALUE (small, POD-ish) so it never
+ *     dangles on a temporary; the shape view converts to the raw extents. */
+template <bool Stride, class Shape, class Layout>
+struct _geom_view {
+    using mapping_type = typename Layout::template mapping<Shape>;
+    using index_type   = typename Shape::index_type;
+    mapping_type m;
+
+    static constexpr cs::size_t rank() noexcept { return Shape::rank(); }
+
+    template <class Idx, cs::enable_if_t<_is_ic<Idx>::value, int> = 0>
+    _TNY_API constexpr auto operator[](Idx) const noexcept {
+        if constexpr (Stride) return _axis_stride<Shape, Layout, static_cast<long>(Idx::value)>(m);
+        else                  return _axis_extent<Shape, Layout, static_cast<long>(Idx::value)>(m);
+    }
+    template <class Idx, cs::enable_if_t<!_is_ic<Idx>::value, int> = 0>
+    _TNY_API constexpr index_type operator[](Idx d) const noexcept {
+        if constexpr (Stride) return static_cast<index_type>(m.stride(static_cast<cs::size_t>(d)));
+        else                  return static_cast<index_type>(m.extents().extent(static_cast<cs::size_t>(d)));
+    }
+    // named spellings, parity with extent()/stride() (only the relevant one exists)
+    template <bool S = Stride, class Idx, cs::enable_if_t<!S, int> = 0>
+    _TNY_API constexpr auto extent(Idx d) const noexcept { return (*this)[d]; }
+    template <bool S = Stride, class Idx, cs::enable_if_t<S, int> = 0>
+    _TNY_API constexpr auto stride(Idx d) const noexcept { return (*this)[d]; }
+
+    // the SHAPE view is interchangeable with the raw extents for interop.
+    template <bool S = Stride, cs::enable_if_t<!S, int> = 0>
+    _TNY_API constexpr operator const Shape &() const noexcept { return m.extents(); }
+
+    // range-for yields runtime values over [0, rank).
+    struct iterator {
+        const _geom_view * v; cs::size_t i;
+        _TNY_API constexpr index_type operator*() const noexcept { return (*v)[static_cast<index_type>(i)]; }
+        _TNY_API constexpr iterator & operator++() noexcept { ++i; return *this; }
+        _TNY_API constexpr bool operator!=(const iterator & o) const noexcept { return i != o.i; }
+    };
+    _TNY_API constexpr iterator begin() const noexcept { return { this, 0 }; }
+    _TNY_API constexpr iterator end()   const noexcept { return { this, rank() }; }
+};
+
 /**
  * @brief Accumulate `v` into `*p`, atomic **on the device only**.
  *
@@ -142,44 +216,31 @@ struct tensor : private Layout::template mapping<Shape> {
      *         a compile-time `integral_constant` when that extent is static,
      *         else a runtime `index_type`. */
     template <class Idx, cs::enable_if_t<_is_ic<Idx>::value, int> = 0>
-    _TNY_API constexpr auto extent(Idx) const noexcept {
-        constexpr cs::size_t D = _norm_axis(static_cast<long>(Idx::value), rank());   // -1 = last axis
-        if constexpr (Shape::static_extent(D) != cs::dynamic_extent)
-            return cs::integral_constant<index_type, static_cast<index_type>(Shape::static_extent(D))>{};
-        else
-            return mapping_type::extents().extent(D);
-    }
+    _TNY_API constexpr auto extent(Idx) const noexcept
+    { return _axis_extent<Shape, Layout, static_cast<long>(Idx::value)>(mapping()); }
     /** @brief Extent of an axis given by a RUNTIME index (`extent(0)`). */
     template <class Idx, cs::enable_if_t<!_is_ic<Idx>::value, int> = 0>
     _TNY_API constexpr index_type extent(Idx d) const noexcept
     { return mapping_type::extents().extent(static_cast<cs::size_t>(d)); }
 
-    /** @brief `shape()` / `shape(d)` — python-friendly aliases of `extents()` /
-     *         `extent(d)` (static index -> integral_constant, runtime -> value). */
-    _TNY_API constexpr const Shape & shape() const noexcept { return extents(); }
+    /** @brief `shape()` — the extents as an array-like accessor: `shape()[Int<k>()]`
+     *         folds to a compile-time value where static, `shape()[i]` (runtime) is a
+     *         value, and it converts to the raw `extents()` for interop. `shape(d)`
+     *         is the per-axis shorthand (== `extent(d)`). */
+    _TNY_API constexpr auto shape() const noexcept { return _geom_view<false, Shape, Layout>{ mapping() }; }
     template <class Idx> _TNY_API constexpr auto shape(Idx d) const noexcept { return extent(d); }
+    /** @brief `strides()` — the strides as an array-like accessor (twin of `shape()`):
+     *         `strides()[Int<k>()]` folds where the layout makes the stride derivable,
+     *         `strides()[i]` (runtime) is a value. `strides(d)` == `stride(d)`. */
+    _TNY_API constexpr auto strides() const noexcept { return _geom_view<true, Shape, Layout>{ mapping() }; }
 
     /** @brief Stride of an axis given by a STATIC index (`stride(Int<0>())`):
      *         a compile-time `integral_constant` when known statically (static-
      *         stride layout; a contiguous layout over static extents; or the
      *         always-unit stride of a contiguous layout even for dynamic shapes). */
     template <class Idx, cs::enable_if_t<_is_ic<Idx>::value, int> = 0>
-    _TNY_API constexpr auto stride(Idx) const noexcept {
-        constexpr cs::size_t D = _norm_axis(static_cast<long>(Idx::value), rank());   // -1 = last axis
-        // a strides<...> layout folds per-dim: static value if known, else runtime
-        if constexpr (is_strides_layout && _static_stride_at<D, Layout>::value != dynamic_stride)
-            return cs::integral_constant<index_type, static_cast<index_type>(_static_stride_at<D, Layout>::value)>{};
-        else if constexpr (is_static && is_contiguous_layout)
-            return cs::integral_constant<index_type, static_cast<index_type>(mapping_type{}.stride(D))>{};
-        // The unit stride of a contiguous layout is 1 regardless of dynamic
-        // extents: ccontiguous's last axis, fcontiguous's first axis.
-        else if constexpr (cs::is_same<Layout, ccontiguous>::value && D + 1 == rank())
-            return cs::integral_constant<index_type, 1>{};
-        else if constexpr (cs::is_same<Layout, fcontiguous>::value && D == 0)
-            return cs::integral_constant<index_type, 1>{};
-        else
-            return mapping_type::stride(D);
-    }
+    _TNY_API constexpr auto stride(Idx) const noexcept
+    { return _axis_stride<Shape, Layout, static_cast<long>(Idx::value)>(mapping()); }
     /** @brief Stride of an axis given by a RUNTIME index (`stride(0)`). */
     template <class Idx, cs::enable_if_t<!_is_ic<Idx>::value, int> = 0>
     _TNY_API constexpr index_type stride(Idx d) const noexcept
@@ -718,7 +779,7 @@ private:
             // static extents where the source layout makes them derivable, else
             // carried from the actual runtime strides. Works for ANY source layout
             // (contiguous, transposed, broadcast, strided) and can never mis-address.
-            using SF = strides< _src_sstride<D, Layout, NewE>()... >;
+            using SF = ::tny::strides< _src_sstride<D, Layout, NewE>()... >;   // ::tny:: — strides() member shadows the type
             const index_type rstr[rank() ? rank() : 1] = { static_cast<index_type>(stride(D))... };
             return tensor<El, NewE, SF, own_view_of(O)>(p, _detail::fold_mapping<SF>(oe, rstr));
         } else if constexpr (cs::is_same<NewL, ccontiguous>::value || cs::is_same<NewL, fcontiguous>::value) {
@@ -728,7 +789,7 @@ private:
             // not actually contiguous in that order — the caller's promise. Emit the
             // folded `strides<...>` (contiguous products, static where the trailing
             // extents are), filling any dynamic slot from the contiguous mapping.
-            using SF = strides< _src_sstride<D, NewL, NewE>()... >;
+            using SF = ::tny::strides< _src_sstride<D, NewL, NewE>()... >;   // ::tny:: — strides() member shadows the type
             typename NewL::template mapping<NewE> cm(oe);
             const index_type rstr[rank() ? rank() : 1] = { static_cast<index_type>(cm.stride(D))... };
             return tensor<El, NewE, SF, own_view_of(O)>(p, _detail::fold_mapping<SF>(oe, rstr));

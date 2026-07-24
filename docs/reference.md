@@ -87,7 +87,9 @@ stack (host+device), dynamic shape → heap (host only):
 | `t.numel()` | `integral_constant` if fully static, else `Idx` | product of extents; folds when static |
 | `t.extent(d)` | `Idx` | runtime axis size |
 | `t.extent(Int<k>())` | `integral_constant` if static, else `Idx` | folds when static |
-| `t.shape()` / `t.shape(d)` | `Extents` / `Idx` | python-y aliases of `extents()` / `extent(d)` |
+| `t.shape()` | array-like accessor | `shape()[Int<k>()]` folds (integral_constant), `shape()[i]` is runtime; `rank()`, iterable, converts to `Extents` |
+| `t.shape(d)` | `integral_constant`/`Idx` | per-axis shorthand (== `extent(d)`) |
+| `t.strides()` | array-like accessor | twin of `shape()` for strides: `strides()[Int<k>()]` folds where derivable, `strides()[i]` runtime |
 | `t.stride(d)` | `Idx` | runtime axis stride |
 | `t.stride(Int<k>())` | `integral_constant` if derivable, else `Idx` | folds for static-stride / contiguous layouts |
 | `t.is_contiguous()` | `bool` | dense in **some** order (C, F, or permuted) |
