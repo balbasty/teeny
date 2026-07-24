@@ -14,6 +14,12 @@
 
 #define _TNY_API _TNY_HOSTDEVICE
 
+// Restrict qualifier for a non-aliasing pointer. Used by the out-of-place
+// elementwise engines to mark a freshly-allocated DESTINATION that provably
+// cannot alias its (const) operands, unlocking the auto-vectorized linear write.
+// `__restrict__` is accepted by g++, clang++, and nvcc (device code included).
+#define _TNY_RESTRICT __restrict__
+
 // Debug-only precondition check (shape mismatches etc.). Active on the host in
 // non-NDEBUG builds; compiled out on the device and under NDEBUG so `_TNY_API`
 // code stays device-safe and release-fast.
