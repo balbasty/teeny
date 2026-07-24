@@ -61,6 +61,23 @@ Wrap existing memory (→ view):
 | `as_tensor(md)` | `view<…>` | wrap any `cs::mdspan`/`submdspan` result |
 | `make_view(ptr, shape)` | `view<T,E>` | an alias of `wrap` that deduces `E` (`make_view<Layout>` for the layout); takes the same trailing `storage_c<Space>{}` tag |
 
+**Input → output type — `wrap` view facets.** The element type `T` is deduced
+from the pointer (a `const T*` gives a read-only view); the extents come from the
+passed `shape` (each axis static/dynamic exactly as in its `E`); the ownership is
+**always a view**. Only the *layout* and the *space* vary with the call form
+(`storage_view_of` folds a named backend to its view kind, so `wrap` never yields
+an owner):
+
+| Argument form | Output layout | Output space |
+|---|---|---|
+| `wrap(ptr, e)` | `ccontiguous` | `storage::view` |
+| `wrap<Layout>(ptr, e)` | `Layout` (e.g. `fcontiguous`) | `storage::view` |
+| `wrap(ptr, e, {s0,s1,…})` | `dynamic_strides` (all runtime) | `storage::view` |
+| `wrap<S...>(ptr, e, {dyn…})` | `strides<S...>` (mixed; `dynamic_stride` slots runtime) | `storage::view` |
+| `wrap(ptr, e, strides<S...>{})` | `strides<S...>` (all compile-time, folded) | `storage::view` |
+| `wrap(…, storage_v<storage::gpu>)` | any of the above | `storage::gpu_view` |
+| `wrap(…, storage_v<storage::pinned>)` / `…<storage::mapped>` | any of the above | `pinned_view` / `mapped_view` |
+
 Allocate new storage — element type **`T` defaults to `float`**; static shape →
 stack (host+device), dynamic shape → heap (host only):
 
@@ -134,6 +151,25 @@ Assignment **into** a slice copies (broadcasts); on a **named** view it rebinds:
 | `a(ellipsis) = b` / `a(0,all) = b` | copy `b`'s elements into the region (broadcasts) |
 | `a(...) = 5.0` | fill the region |
 
+**Input → output type — `operator()` per-axis arg.** Element type is unchanged
+(`const` if the source is), the output layout is a folded `strides<...>`, and the
+space is `storage_view_of(O)`. Each axis argument independently decides whether
+that axis survives and, if so, its output extent/stride staticity. The output
+**rank** = source rank − (number of integer args); `ellipsis` expands to
+`rank − #other args` copies of `all` before this table applies:
+
+| Axis arg | Axis in output? | Output extent | Output stride |
+|---|---|---|---|
+| `i` (runtime int) | dropped (folded into base offset) | — | — |
+| `Int<k>()` (static int) | dropped | — | — |
+| `all` (== `slice(none,none)`) | kept | the source extent (static stays static) | source stride, folded where derivable |
+| `slice<a,b>()` / `slice<a,b,step>()` (static bounds) | kept | **static** when the source extent is static (`b−a`, ceil-div by `step`) | folded (`source_static_stride × step`) where derivable |
+| `slice(a,b)` / `slice(a,b,step)` (runtime bounds) | kept | **dynamic** (`-1`) | folded where derivable, else runtime |
+
+So `t(i, all, slice<1,4>())` on `<A,B,C>` → `<B,3>`; `t(i, all, slice(a,b))` on
+`<A,B,C>` → `<B,-1>`. A negative `step` (`slice(none,none,-1)`) reverses the axis
+(a negative folded stride); a `strides<...>` source stays fully sliceable.
+
 ---
 
 ## Structure (views)
@@ -180,6 +216,33 @@ Worked input→output shapes (`E` = source extents):
 `clone()` first if the source isn't. `recast` does **not** — it only re-types the
 extents and keeps the source strides, so it works on any layout.
 
+**Input → output type — `recast<NewE[, NewL]>()`.** No copy in any form; the
+element type `T` and the space are preserved (the result is `storage_view_of(O)`),
+the rank is unchanged, and every static dim of `NewE` recovers (folds into the
+type) a possibly-dynamic source dim — e.g. `<-1,-1>` → `.recast<shape<-1,3,3>>()`
+gives `<-1,3,3>`. The `NewL` argument chooses the *strides + layout type*:
+
+| `NewL` | Output extents | Output strides | Output layout type |
+|---|---|---|---|
+| `keep_strides` (default) | `NewE` | the source strides, unchanged | **the source `L`** (`ccontiguous`→`ccontiguous`, `strides<S...>`→`strides<S...>`, …) |
+| `ccontiguous` / `fcontiguous` | `NewE` | derived + folded from `NewE` (C / F packing) | `ccontiguous` / `fcontiguous` |
+| `strides<S...>` | `NewE` | the imposed `S...` (dynamic slots filled from the source) | `strides<S...>` |
+
+An explicit `NewL` is a *reinterpretation* ("I promise it's laid out this way");
+a debug build verifies the imposed/derived strides against the source's actual
+strides (symmetric with the static-extent check), UB only under `-DNDEBUG`.
+
+**Input → output type — `to` / `clone`.** Whether the result is a borrow or an
+owning copy, and its ownership, per call:
+
+| Call | Copy? | Output type | Notes |
+|---|---|---|---|
+| `t.to<>()` (same dtype, no `Force`) | no — borrow | `view` of `const T` (`gpu_view` if device), **source `L` kept** | read-only alias, no allocation |
+| `t.to<T2>()` (differing dtype) | yes | static → `local<T2,E>`; dynamic → `owned<T2,E>` (host) | dense `ccontiguous` copy |
+| `t.to<T2,true>()` (`Force`) | yes | as above (even when `T2==T`) | force-materialise |
+| `t.clone()` | yes | static → `local<T,E>`; dynamic → `owned<T,E>` (host) | dense row-major (`ccontiguous`) copy |
+| `to<Space>(t)` (`cuda.h`) | no-copy if already in `Space`, else yes | borrow (`view`-kind of `Space`) or owner in `Space` | memory-space move; `Space` ∈ `gpu`/`pinned`/`mapped`/`heap`/`stack`; rvalue source always copies |
+
 ### nd-peel (iteration)
 
 | Call | Returns | Notes |
@@ -189,6 +252,14 @@ extents and keeps the source strides, so it works on any layout.
 | `peel_front<N>(t)` | a range of views | `N≥0`: peel the first `N` axes; `N<0`: keep the last `|N|` |
 | `peel_front_at<N>(t, i)` | → view | the `i`-th (grid-stride style) |
 | `size_front<N>(t)` | → index | # cells `peel_front<N>` yields (product of the peeled extents), no range built |
+
+**Input → output type — peel cell.** Each yielded cell is a **view**
+(`storage_view_of(O)` — `gpu`/`gpu_view` source → `gpu_view`), element type `T`
+unchanged, layout a folded `strides<...>`. The *kept* axes carry their source
+extents (static stays static) and folded strides; a `peel_front<N>` cell over
+`<*batch(N), M, N>` is `<M, N>` with the trailing extents **and** strides static
+even when the batch is dynamic. `peel<Axes...>` drops the named axes; the cell
+rank is source rank − #peeled axes.
 
 ---
 
@@ -254,6 +325,24 @@ makes that type both the accumulator **and** the result.
 Axis reductions: a fully static result → stack (host+device); any dynamic result
 → heap (host only).
 
+**Input → output type — result element type.** The *accumulator* and the *result
+dtype* are separate. Default accumulator = `reduce_type_t<T>` (`double` for a
+small float `float`/`double`/`half`/`bfloat16`; a wider float keeps itself;
+`int64_t`/`uint64_t` for a narrow integer, so `sum`/`prod`/`dot` can't overflow
+mid-accumulation; an already-≥8-byte integer keeps itself). A leading **type**
+arg makes that type *both* the accumulator and the result.
+
+| Call | Default result dtype | With leading `Acc` |
+|---|---|---|
+| `sum(a)` `prod(a)` `max(a)` `min(a)` | `T` (item type — accumulate wide, cast back; `sum(int8)` → `int8`) | `Acc` (e.g. `sum<int64_t>(a)` keeps the untruncated wide value) |
+| `mean(a)` | `T` for a **floating** `T`; **`double`** for an **integer** `T` (numpy: integer mean is float64, divided in `double`) | `Acc` |
+| `dot(a, b)` | `promote(Ta,Tb)` | `Acc` |
+| `sum<Axes...>(a)` `prod`/`max`/`min<Axes...>` | `T` (lower-rank tensor) | `Acc` |
+| `mean<Axes...>(a)` | `T` for floating `T`; **`double`** for integer `T` (lower-rank tensor) | `Acc` |
+
+The axis forms follow the same element-type rule; only the shape changes (named
+axes removed) and the ownership splits static → stack / dynamic → heap.
+
 ---
 
 ## Half precision
@@ -278,6 +367,22 @@ Axis reductions: a fully static result → stack (host+device); any dynamic resu
 | `at.peel_front<N>()` / `at.peel_front_at<N>(i)` | range / view | batch idiom: keep the last `\|N\|` dims static, peel the rest (one kernel per `\|N\|`) |
 | `at.size_front<N>()` | → offset | flattened batch count `peel_front<N>` yields (product of the peeled leading extents), no range built; `N < 0` |
 | `dispatch_value<Vs...>(v, f)` | `bool` | call `f(Int<k>{})` for the matching candidate `k == v` |
+
+**Input → output type — fixed-rank views.** The rank-erased carrier hands out a
+`dyn_tensor<T, offset_t, R, Space>` = `tensor<T, cs::dextents<offset_t, R>,
+cs::layout_stride, Space>` — a **fully dynamic**, arbitrarily-strided view whose
+`Space` is the carrier's view space (`storage::view` by default; `storage::gpu_view`
+for a device carrier):
+
+| Call | Output type | Notes |
+|---|---|---|
+| `at.fixed<R>()` | `dyn_tensor<T, offset_t, R, Space>` | requires `ndim == R`; extents + strides all runtime |
+| `at.peel_front_at<-Sr>(i)` | `dyn_tensor<T, offset_t, Sr, Space>` | one batch cell (rank `Sr`); `.recast<shape<-1,c,c>>()` recovers static inner dims |
+| `from_dlpack<T, R[, Space]>(m)` | `dyn_tensor<T, offset_t, R, Space>` | rank-`R` view; `Space` checked against `m→device` |
+| `from_dlpack<T[, Space]>(m)` | `anyrank` (space-tagged) | rank-erased; call `fixed`/`peel_front`/`dispatch_rank` on it |
+
+Recover static extents with `.recast<NewE>()` at the kernel boundary (see the
+`recast` type mapping) to fold the inner shape back into the type.
 
 DLPack strides are in **elements**; numpy `__array_interface__` in **bytes**
 (divide by the itemsize first).
