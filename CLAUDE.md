@@ -148,8 +148,9 @@ output strides), so a strides<...> tensor is fully sliceable.
 t.rank();  t.numel();
 t.extent(Int<0>());   // static lookup -> integral_constant when the extent is static
 t.extent(0);          // runtime lookup -> index_type   (t.shape(...) is a python-y alias)
-t.stride(Int<1>());   // static when derivable (static-stride layout; contiguous+static;
-                      //   or a contiguous layout's UNIT stride even for a dynamic shape)
+t.stride(Int<1>());   // static when derivable (static-stride layout; or a contiguous
+                      //   stride = product of the STATIC extents it spans — so it folds
+                      //   even for a partially-dynamic shape, e.g. shape<-1,3,3> stride0=9)
 t.shape()[Int<1>()];  t.strides()[Int<1>()];  // shape()/strides() are ARRAY-LIKE: [Int<k>()] folds
                       //   to integral_constant where derivable, [i] (runtime) is a value; rank(),
                       //   iterable, shape() converts to the raw extents. (extents()/mapping() = raw mdspan.)

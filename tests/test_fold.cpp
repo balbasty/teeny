@@ -63,12 +63,16 @@ int main() {
     auto vv = wrap(buf, shape<-1,3,4>{2});     // (2,3,4) contiguous, dynamic outer
     auto rc = vv.recast<shape<2,3,4>>();        // all static now
     static_assert(decltype(rc.stride(Int<1>()))::value == 4, "recast folds inner stride");
+    // keep_strides PRESERVES the source layout TYPE (a contiguous source stays
+    // ccontiguous; the strides derive/fold in the accessor — no strides<> synthesis).
+    static_assert(cs::is_same<decltype(rc)::layout_type, ccontiguous>::value, "recast keeps ccontiguous layout");
     if (rc(1,2,3) != buf[12+8+3]) return 15;
 
     // ---- recast PRESERVES strides for a non-contiguous source (#116) ----------
     // (used to silently mis-address: it forced row-major, ignoring the real strides.)
     auto tp  = wrap(buf, shape<2,3>{}).permute<1,0>();   // 3x2, strides (1,3) — NOT row-major
     auto tpr = tp.recast<shape<3,2>>();
+    static_assert(cs::is_same<decltype(tpr)::layout_type, decltype(tp)::layout_type>::value, "recast keeps the strides<> layout");
     static_assert(decltype(tpr.stride(Int<0>()))::value == 1, "recast preserves+folds transposed stride 0");
     static_assert(decltype(tpr.stride(Int<1>()))::value == 3, "recast preserves+folds transposed stride 1");
     for (long i = 0; i < 3; ++i) for (long j = 0; j < 2; ++j)
