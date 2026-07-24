@@ -782,7 +782,21 @@ private:
         // `strides<S...>` imposes those strides (dynamic slots filled from the source).
         using OL = cs::conditional_t<cs::is_same<NewL, keep_strides>::value, Layout, NewL>;
         const index_type rstr[rank() ? rank() : 1] = { static_cast<index_type>(stride(D))... };
-        return tensor<El, NewE, OL, own_view_of(O)>(p, _detail::retype_mapping<OL>(oe, rstr));
+        auto m = _detail::retype_mapping<OL>(oe, rstr);
+        // An explicit layout OVERRIDE replaces the strides (derived for a contiguous
+        // NewL, imposed for a strides<...> one). Verify — host-debug, symmetric with
+        // the extent check above — that the imposed stride actually matches the
+        // source's: a false "I promise it's contiguous" would otherwise SILENTLY
+        // mis-address in every build. Axes of extent <= 1 impose no constraint (their
+        // stride is unobservable). keep_strides carries the real strides, so no check.
+        if constexpr (!cs::is_same<NewL, keep_strides>::value) {
+            ( _TNY_CHECK(static_cast<index_type>(oe.extent(D)) <= index_type(1) ||
+                         static_cast<index_type>(m.stride(D)) == rstr[D],
+                         "recast<E, Layout>: the imposed layout's stride does not match the "
+                         "source's actual stride — the data is not laid out as promised; "
+                         "use recast<E> (keep_strides) to preserve the real strides"), ... );
+        }
+        return tensor<El, NewE, OL, own_view_of(O)>(p, m);
     }
 public:
     /** @brief Reinterpret with a MORE-STATIC extents type of the same rank —
