@@ -269,14 +269,14 @@ public:
      *         permuted one (a permuted C-contiguous view still packs the same
      *         memory densely). Formally: the strides are a permutation of a dense
      *         nested packing (`1, e0, e0·e1, ...`). Size-1 axes are ignored (their
-     *         stride is unconstrained); an empty tensor is trivially contiguous.
+     *         stride is unconstrained); an empty tensor is trivially dense.
      *         Negative strides (flips) are *not* dense in this sense -> false.
      *
-     *         Pass a layout for an **exact** check: `is_contiguous<ccontiguous>()`
-     *         / `is_contiguous<fcontiguous>()` test C- /
-     *         F-contiguity specifically — or any layout whose mapping is derivable
-     *         from the extents. */
-    _TNY_API constexpr bool is_contiguous() const noexcept {
+     *         Pass a layout for an **exact** check: `is_dense<ccontiguous>()` /
+     *         `is_dense<fcontiguous>()` test C-/F-contiguity specifically (or any
+     *         layout whose mapping is derivable from the extents). For the C-order
+     *         question specifically, `is_contiguous()` (below) reads clearer. */
+    _TNY_API constexpr bool is_dense() const noexcept {
         constexpr cs::size_t R = rank();
         if constexpr (R == 0) {
             return true;                           // a rank-0 tensor is one element -> trivially dense
@@ -298,12 +298,12 @@ public:
             return true;
         }
     }
-    /** @brief Exact contiguity in layout `L` (e.g. `ccontiguous`/`fcontiguous`): the
+    /** @brief Exact denseness in layout `L` (e.g. `ccontiguous`/`fcontiguous`): the
      *         actual strides equal what `L` produces for these extents. Two spellings —
-     *         `t.is_contiguous<ccontiguous>()` (type form) and `t.is_contiguous(ccontiguous())`
+     *         `t.is_dense<ccontiguous>()` (type form) and `t.is_dense(ccontiguous())`
      *         (value form, layout deduced from the argument). */
     template <class L>
-    _TNY_API bool is_contiguous() const noexcept {
+    _TNY_API bool is_dense() const noexcept {
         if constexpr (rank() == 0) {
             return true;                           // rank-0: no strides -> matches any layout
         } else {
@@ -314,7 +314,17 @@ public:
         }
     }
     template <class L>
-    _TNY_API bool is_contiguous(L) const noexcept { return is_contiguous<L>(); }
+    _TNY_API bool is_dense(L) const noexcept { return is_dense<L>(); }
+
+    /** @brief Whether the elements are **contiguous in a specific order** — **C-order
+     *         by default** (numpy/pytorch's `is_contiguous`), or F-order via
+     *         `is_contiguous<fcontiguous>()`. A thin alias of `is_dense<Layout>()`;
+     *         this (not `is_dense()`) is what `reshape`/`flatten` need. Value form:
+     *         `is_contiguous(ccontiguous{})`. */
+    template <class L = ccontiguous>
+    _TNY_API bool is_contiguous() const noexcept { return is_dense<L>(); }
+    template <class L>
+    _TNY_API bool is_contiguous(L) const noexcept { return is_dense<L>(); }
 
     /* --- data / views -------------------------------------------- */
     _TNY_API T *       data()       noexcept { return store_.data(); }

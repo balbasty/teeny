@@ -98,11 +98,11 @@ int main() {
 
     double cb[6]; for (int i=0;i<6;++i) cb[i]=i;
     auto vp = wrap(cb, shape<2,3>{}).permute<1,0>();                  // dense, but NOT row-major
-    if (!vp.is_contiguous()) return 21;                              // dense in SOME order (permuted) -> true
-    if (vp.is_contiguous<cs::layout_right>()) return 24;             // ...but not exact C-contiguous
+    if (!vp.is_dense()) return 21;                                   // dense in SOME order (permuted) -> true
+    if (vp.is_contiguous()) return 24;                              // ...but NOT C-contiguous (the redefault)
     auto cl = vp.clone();                                            // dense copy
     static_assert(cs::is_same<decltype(cl)::layout_type, cs::layout_right>::value, "clone row-major");
-    if (!cl.is_contiguous() || cl(2,1) != vp(2,1)) return 22;
+    if (!cl.is_contiguous() || cl(2,1) != vp(2,1)) return 22;       // clone IS C-contiguous
 
     // ---- recast: recover static inner dims at the dynamic boundary -----
     double rb[18]; for (int i=0;i<18;++i) rb[i]=i;

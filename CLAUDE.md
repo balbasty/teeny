@@ -192,7 +192,8 @@ t.recast<shape<-1,3,3>>();      // re-type extents (recover static dims), PRESER
                                 //   layout, no copy). 2nd arg = layout override: recast<E,ccontiguous>()
                                 //   reinterprets AS contiguous (folds strides; "I promise"); strides<S> imposes.
                                 //   Functional: recast(shape<...>{}, ccontiguous{}).
-t.is_contiguous();              // dense in SOME order (C/F/permuted); <ccontiguous>() = exact C
+t.is_dense();                   // dense block in SOME order (C/F/permuted); is_dense<L>() = exact L
+t.is_contiguous();              // C-order (numpy/pytorch default); is_contiguous<fcontiguous>() = F. alias of is_dense<L>
 t.clone();                      // materialise a dense row-major copy
 t.to<double>();                 // pytorch-like dtype convert -> dense owning copy (static->stack, dyn->heap).
                                 //   NO-COPY when it already matches: t.to<>() (same dtype) borrows a read-only
