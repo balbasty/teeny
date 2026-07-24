@@ -27,6 +27,7 @@ nav = [
     {"Math & broadcasting" = "math.md"},
     {"Views & structure" = "structure.md"},
     {"Dispatch & the ndarray boundary" = "dispatch.md"},
+    {"Performance" = "performance.md"},
     {"Half precision" = "half.md"},
   ]},
   {"Tutorials" = [
