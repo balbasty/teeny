@@ -740,11 +740,22 @@ public:
 
     /** @brief A dense, row-major OWNING copy of this tensor (materialise a view /
      *         non-contiguous / permuted / flipped tensor). Static shape -> stack
-     *         (host+device); dynamic -> heap (host only). */
+     *         (host+device); dynamic -> heap (host only).
+     *
+     *  Copies on the HOST via `copy_`, so it cannot dereference DEVICE memory: the
+     *  dynamic-shape (`_TNY_HOST`) overload `static_assert`s that the source is
+     *  host-accessible. For a `gpu`/`gpu_view` tensor use the free `to<Space>(x)`
+     *  from `<teeny/cuda.h>` (e.g. `to<storage::heap>(x)`), which copies device-aware. */
     template <bool S = is_static, cs::enable_if_t<S, int> = 0>
     _TNY_API auto clone() const { tensor<T, Shape, ccontiguous, storage::stack> c{}; c.copy_(*this); return c; }
     template <bool S = is_static, cs::enable_if_t<!S, int> = 0>
-    _TNY_HOST auto clone() const { tensor<T, Shape, ccontiguous, storage::heap> c(extents()); c.copy_(*this); return c; }
+    _TNY_HOST auto clone() const {
+        static_assert(storage_is_host_accessible(O),
+            "clone()/to() copies on the host and cannot dereference device memory; "
+            "for a gpu/gpu_view tensor use the free to<Space>(x) (e.g. to<storage::heap>(x) "
+            "or to<storage::gpu>(x), from <teeny/cuda.h>) which does a device-aware copy.");
+        tensor<T, Shape, ccontiguous, storage::heap> c(extents()); c.copy_(*this); return c;
+    }
 
     /** @brief pytorch-like `.to<T2>()`: convert the element type to `T2`.
      *
@@ -767,9 +778,12 @@ public:
      *
      *  When a conversion IS needed (`T2` differs, or `Force`), the result is a
      *  dense, row-major OWNING copy cast elementwise (via `copy_`): static shape
-     *  -> stack (host+device), dynamic -> heap (host only). To also move across
-     *  memory spaces (host <-> CUDA) use the `to<storage::gpu, T2, Force>(x)` free
-     *  functions from `<teeny/cuda.h>`. */
+     *  -> stack (host+device), dynamic -> heap (host only). The copy runs on the
+     *  HOST, so it cannot dereference DEVICE memory: the dynamic-shape (`_TNY_HOST`)
+     *  copying overload `static_assert`s that the source is host-accessible. To also
+     *  move across memory spaces (host <-> CUDA) — or to convert a `gpu`/`gpu_view`
+     *  tensor at all — use the `to<storage::gpu, T2, Force>(x)` free functions from
+     *  `<teeny/cuda.h>`, which copy device-aware. */
     template <class T2 = element_type, bool Force = false,
               cs::enable_if_t<!Force && cs::is_same<T2, element_type>::value, int> = 0>
     _TNY_API auto to() const & {
@@ -780,7 +794,13 @@ public:
     _TNY_API auto to() const & { tensor<cs::remove_cv_t<T2>, Shape, ccontiguous, storage::stack> c{}; c.copy_(*this); return c; }
     template <class T2 = element_type, bool Force = false, bool S = is_static,
               cs::enable_if_t<(Force || !cs::is_same<T2, element_type>::value) && !S, int> = 0>
-    _TNY_HOST auto to() const & { tensor<cs::remove_cv_t<T2>, Shape, ccontiguous, storage::heap> c(extents()); c.copy_(*this); return c; }
+    _TNY_HOST auto to() const & {
+        static_assert(storage_is_host_accessible(O),
+            "clone()/to() copies on the host and cannot dereference device memory; "
+            "for a gpu/gpu_view tensor use the free to<Space>(x) (e.g. to<storage::heap>(x) "
+            "or to<storage::gpu>(x), from <teeny/cuda.h>) which does a device-aware copy.");
+        tensor<cs::remove_cv_t<T2>, Shape, ccontiguous, storage::heap> c(extents()); c.copy_(*this); return c;
+    }
     // Rvalue overloads. A non-owning VIEW temporary (view/gpu_view) borrows
     // storage owned elsewhere, so a borrow from it is as safe as from an lvalue
     // (and stays _TNY_API even for a dynamic shape — it carries only a pointer).
@@ -801,7 +821,13 @@ public:
     _TNY_API auto to() const && { tensor<cs::remove_cv_t<T2>, Shape, ccontiguous, storage::stack> c{}; c.copy_(*this); return c; }
     template <class T2 = element_type, bool Force = false, bool S = is_static,
               cs::enable_if_t<!(storage_is_view(O) && !Force && cs::is_same<T2, element_type>::value) && !S, int> = 0>
-    _TNY_HOST auto to() const && { tensor<cs::remove_cv_t<T2>, Shape, ccontiguous, storage::heap> c(extents()); c.copy_(*this); return c; }
+    _TNY_HOST auto to() const && {
+        static_assert(storage_is_host_accessible(O),
+            "clone()/to() copies on the host and cannot dereference device memory; "
+            "for a gpu/gpu_view tensor use the free to<Space>(x) (e.g. to<storage::heap>(x) "
+            "or to<storage::gpu>(x), from <teeny/cuda.h>) which does a device-aware copy.");
+        tensor<cs::remove_cv_t<T2>, Shape, ccontiguous, storage::heap> c(extents()); c.copy_(*this); return c;
+    }
 
 private:
     // POD the compile-time reshape solver returns (fully-static sources): whether the

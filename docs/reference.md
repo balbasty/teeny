@@ -219,8 +219,8 @@ Worked input→output shapes (`E` = source extents):
 | `t.reshape<NewExt...>()` | → view | contiguous reshape (one `-1` inferred) |
 | `t.flatten()` | → 1-D view | ravel; needs C-contiguous |
 | `t.recast<NewShape[, NewLayout]>()` | → view | reinterpret with a more-static same-rank extents; **`NewLayout` defaults to `keep_strides`** (preserve the source strides AND layout type, any layout, no copy). `ccontiguous`/`fcontiguous` = reinterpret AS that order (derive+fold the strides — the "I promise it's contiguous" form; a **debug build verifies** the imposed strides match the source's and aborts a false promise, symmetric with the extent check — UB only under `-DNDEBUG`); `strides<S...>` = impose them. Functional form `t.recast(shape{…}, layout{…})` |
-| `t.clone()` | owning (stack/heap) | materialise a dense row-major copy |
-| `t.to<T2>()` | view (no-copy) or owning | **dtype** convert. Matching dtype (no `Force`) → a read-only borrow (`gpu_view` if `t` is on the device, else `view`); differing dtype or `t.to<T2,true>()` → a dense owning copy (static→stack, dyn→heap) |
+| `t.clone()` | owning (stack/heap) | materialise a dense row-major copy. Copies on the HOST → the **dynamic-shape** overload `static_assert`s the source is host-accessible; for a `gpu`/`gpu_view` tensor use the free `to<Space>(t)` below |
+| `t.to<T2>()` | view (no-copy) or owning | **dtype** convert. Matching dtype (no `Force`) → a read-only borrow (`gpu_view` if `t` is on the device, else `view`); differing dtype or `t.to<T2,true>()` → a dense owning copy (static→stack, dyn→heap). The **dynamic-shape** copy runs on the HOST and `static_assert`s host-accessibility — convert a `gpu`/`gpu_view` tensor via the free `to<Space>(t)` |
 | `to<Space>(t)` (`cuda.h`) | view (no-copy) or owning | **memory-space** move: `to<Space, ET, Force>(t)` — `Space` ∈ `storage::gpu`/`pinned`/`mapped`/`heap`/`stack`. Same no-copy/`Force` rule; a device source (gpu/`gpu_view`) downloads via `cudaMemcpy`. rvalue source → always copies |
 
 `reshape`/`flatten` need exact C-contiguity (`is_contiguous()`);
@@ -253,6 +253,11 @@ owning copy, and its ownership, per call:
 | `t.to<T2,true>()` (`Force`) | yes | as above (even when `T2==T`) | force-materialise |
 | `t.clone()` | yes | static → `local<T,E>`; dynamic → `owned<T,E>` (host) | dense row-major (`ccontiguous`) copy |
 | `to<Space>(t)` (`cuda.h`) | no-copy if already in `Space`, else yes | borrow (`view`-kind of `Space`) or owner in `Space` | memory-space move; `Space` ∈ `gpu`/`pinned`/`mapped`/`heap`/`stack`; rvalue source always copies |
+
+The `to<T2>()`/`clone()` **copying** paths run `copy_` on the HOST, so they cannot
+dereference DEVICE memory; the dynamic-shape (`_TNY_HOST`) overloads `static_assert`
+the source is host-accessible. To copy or convert a `gpu`/`gpu_view` tensor use the
+free **`to<Space>(t)`** (`cuda.h`) above, which is device-aware.
 
 ### nd-peel (iteration)
 

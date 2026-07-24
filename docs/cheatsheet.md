@@ -136,12 +136,15 @@ x.flip<Ax>();                         // reverse an axis (negative-stride view)
 x.unsqueeze<Ax>();  x.squeeze<Ax>();  // insert / drop a size-1 axis
 x.reshape<NewExt...>();               // contiguous-view reshape (one -1 inferred)
 x.flatten();                          // 1-D contiguous view
-x.clone();                            // dense row-major OWNING copy
+x.clone();                            // dense row-major OWNING copy (copies on the HOST; a gpu/gpu_view
+                                      //   tensor must use the free to<Space>(x) below — dynamic clone static_asserts it)
 x.recast<NewExtents>();               // reinterpret w/ a more-static same-rank extents (keeps source strides)
 x.recast<NewExtents, ccontiguous>();  // ...AS contiguous (fold the strides; "I promise it's contiguous")
 x.recast(shape<...>{}, ccontiguous{}); // functional form (shape + layout, both may mix static/dynamic)
-x.to<T2>();                           // dtype convert (matching dtype -> no-copy borrow; else owning copy)
-to<storage::gpu>(x);                      // memory-space move: to<Space,ET,Force>(x) (from <teeny/cuda.h>)
+x.to<T2>();                           // dtype convert (matching dtype -> no-copy borrow; else owning copy).
+                                      //   The copy runs on the HOST; convert a gpu/gpu_view tensor via to<Space>(x)
+to<storage::gpu>(x);                      // memory-space move: to<Space,ET,Force>(x) (from <teeny/cuda.h>);
+                                      //   device-aware copy — use this (not clone()/member .to<>()) for a gpu source
 ```
 
 Axis template arguments are signed (negatives count from the back); each `<Ax>` op
