@@ -89,12 +89,19 @@ See [Shapes & strides](shapes-strides.md).
 
 ```cpp
 x.rank();  x.numel();  x.is_contiguous();  x.is_dense();  // is_contiguous = C-order; is_dense = any order
-x.extent(d);          x.extent(Int<d>());  // runtime value / static integral_constant
-x.shape(d);           x.shape();           // aliases of extent(d) / extents()
-x.stride(d);          x.stride(Int<d>());  // static when derivable
-x.data();  x.view();  x.mdspan();  x.extents();  x.mapping();
-                      // view() = non-owning teeny view (gpu_view if device); mdspan() = raw cs::mdspan
+x.shape();            x.shape(d);          // the teeny SHAPE: array-like accessor / size of axis d
+x.strides();          x.stride(d);         // the teeny STRIDES: array-like accessor / stride of axis d
+x.shape()[Int<k>()];  x.strides()[Int<k>()];  // static index folds to integral_constant; runtime [i] is a value
+x.data();  x.view();                       // base ptr / non-owning teeny view (gpu_view if device)
+// raw-mdspan escape hatch (interop only):
+x.mdspan();  x.extents();  x.mapping();     // raw cs::mdspan / raw cs::extents / layout mapping
+x.extent(d);  x.extent(Int<d>());          // mdspan-side per-axis size (== x.shape(d)); static Int<d> folds
 ```
+
+!!! note "mdspan equivalent"
+    `x.shape()`/`x.strides()` are teeny's array-like accessors and the primary
+    spelling; `x.extents()`/`x.mapping()` return the raw `cuda::std` mdspan
+    objects. Per-axis, `x.extent(d) == x.shape(d)`.
 
 ---
 
