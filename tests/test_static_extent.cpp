@@ -37,6 +37,18 @@ int main() {
     auto dl = wrap<cs::layout_left>(buf, DynE{2,3,4});     // layout_left
     static_assert(cs::is_same<decltype(dl.stride(Int<0>())), cs::integral_constant<long,1>>(), "left unit stride folds");
 
+    // a PARTIALLY-dynamic contiguous shape folds every stride derivable from its
+    // static extents (not just the unit one): shape<-1,3,3> row-major -> stride(0)
+    // = 3*3 = 9 and stride(1) = 3 fold, even though the OUTER extent is dynamic.
+    auto pc = wrap(buf, extents<long,dynamic_extent,3,3>{2});
+    static_assert(cs::is_same<decltype(pc.stride(Int<0>())), cs::integral_constant<long,9>>(), "partial-dyn outer stride folds (3*3)");
+    static_assert(cs::is_same<decltype(pc.stride(Int<1>())), cs::integral_constant<long,3>>(), "partial-dyn inner stride folds");
+    static_assert(cs::is_same<decltype(pc.stride(Int<2>())), cs::integral_constant<long,1>>(), "partial-dyn unit stride folds");
+    // but a dynamic INNER extent makes the outer stride genuinely runtime
+    auto pd = wrap(buf, extents<long,3,dynamic_extent,3>{4});   // shape<3,-1,3>
+    static_assert(cs::is_same<decltype(pd.stride(Int<0>())), long>(), "dyn inner extent -> outer stride runtime");
+    static_assert(cs::is_same<decltype(pd.stride(Int<2>())), cs::integral_constant<long,1>>(), "unit still folds");
+
     // `shape` aliases `extent(s)` (python-friendly)
     static_assert(t.shape(Int<1>()) == 3, "shape(Int) == extent(Int)");
     if (t.shape(0) != 2 || t.shape().extent(2) != 4) return 4;

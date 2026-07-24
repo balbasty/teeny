@@ -42,15 +42,14 @@ template <class Shape, class Layout, long Ax, class Map>
 _TNY_API constexpr auto _axis_stride(const Map & m) noexcept {
     using Idx = typename Shape::index_type;
     constexpr cs::size_t D = _norm_axis(Ax, Shape::rank());
-    if constexpr (_is_strides<Layout>::value && _static_stride_at<D, Layout>::value != dynamic_stride)
-        return cs::integral_constant<Idx, static_cast<Idx>(_static_stride_at<D, Layout>::value)>{};
-    else if constexpr (Shape::rank_dynamic() == 0 && _contiguous_layout<Layout>::value)
-        return cs::integral_constant<Idx, static_cast<Idx>(Map{}.stride(D))>{};
-    // the UNIT stride of a contiguous layout folds even with dynamic extents
-    else if constexpr (cs::is_same<Layout, ccontiguous>::value && D + 1 == Shape::rank())
-        return cs::integral_constant<Idx, 1>{};
-    else if constexpr (cs::is_same<Layout, fcontiguous>::value && D == 0)
-        return cs::integral_constant<Idx, 1>{};
+    // The compile-time stride is exactly what the layout + extents derive: a
+    // strides<> baked value, or the contiguous product of the trailing (C) /
+    // leading (F) STATIC extents — so it folds even for a partially-dynamic
+    // contiguous shape (shape<-1,3,3>'s stride(0) = 9, the unit stride = 1).
+    // `dynamic_stride` means only known at run time -> read it off the mapping.
+    constexpr cs::int64_t SS = _src_sstride<D, Layout, Shape>();
+    if constexpr (SS != dynamic_stride)
+        return cs::integral_constant<Idx, static_cast<Idx>(SS)>{};
     else
         return static_cast<Idx>(m.stride(D));
 }
@@ -774,33 +773,16 @@ private:
                      static_cast<index_type>(NewE::static_extent(D)) == static_cast<index_type>(extent(D)),
                      "recast: a static dim does not match the actual extent"), ... );
         NewE oe(cs::array<index_type, rank()>{ static_cast<index_type>(extent(D))... });
-        if constexpr (cs::is_same<NewL, keep_strides>::value) {
-            // DEFAULT — PRESERVE the source strides: folded via NewE's (now richer)
-            // static extents where the source layout makes them derivable, else
-            // carried from the actual runtime strides. Works for ANY source layout
-            // (contiguous, transposed, broadcast, strided) and can never mis-address.
-            using SF = ::tny::strides< _src_sstride<D, Layout, NewE>()... >;   // ::tny:: — strides() member shadows the type
-            const index_type rstr[rank() ? rank() : 1] = { static_cast<index_type>(stride(D))... };
-            return tensor<El, NewE, SF, own_view_of(O)>(p, _detail::fold_mapping<SF>(oe, rstr));
-        } else if constexpr (cs::is_same<NewL, ccontiguous>::value || cs::is_same<NewL, fcontiguous>::value) {
-            // EXPLICIT contiguous — reinterpret AS row/col-major: the strides are
-            // DERIVED FROM THE EXTENTS (the "I promise this is contiguous" form, e.g.
-            // to fold a dynamic_strides cell's inner unit stride). UB if the data is
-            // not actually contiguous in that order — the caller's promise. Emit the
-            // folded `strides<...>` (contiguous products, static where the trailing
-            // extents are), filling any dynamic slot from the contiguous mapping.
-            using SF = ::tny::strides< _src_sstride<D, NewL, NewE>()... >;   // ::tny:: — strides() member shadows the type
-            typename NewL::template mapping<NewE> cm(oe);
-            const index_type rstr[rank() ? rank() : 1] = { static_cast<index_type>(cm.stride(D))... };
-            return tensor<El, NewE, SF, own_view_of(O)>(p, _detail::fold_mapping<SF>(oe, rstr));
-        } else {
-            // EXPLICIT `strides<S...>` — bake its static strides; a dynamic_stride
-            // slot is filled from the SOURCE stride for that axis. (To impose wholly
-            // new runtime strides, `wrap(t.data(), shape, strides)` instead.)
-            using SF = NewL;
-            const index_type rstr[rank() ? rank() : 1] = { static_cast<index_type>(stride(D))... };
-            return tensor<El, NewE, SF, own_view_of(O)>(p, _detail::fold_mapping<SF>(oe, rstr));
-        }
+        // The OUTPUT layout: `keep_strides` (default) PRESERVES the source layout —
+        // its mapping already merges layout + extents, so we just retype the extents
+        // and let the strides be derived/carried (contiguous ones then fold in the
+        // accessor under NewE's richer static extents). An explicit `NewL` overrides:
+        // `ccontiguous`/`fcontiguous` reinterpret AS that order (strides derived from
+        // the extents — the "I promise it's contiguous" form, UB if it isn't), a
+        // `strides<S...>` imposes those strides (dynamic slots filled from the source).
+        using OL = cs::conditional_t<cs::is_same<NewL, keep_strides>::value, Layout, NewL>;
+        const index_type rstr[rank() ? rank() : 1] = { static_cast<index_type>(stride(D))... };
+        return tensor<El, NewE, OL, own_view_of(O)>(p, _detail::retype_mapping<OL>(oe, rstr));
     }
 public:
     /** @brief Reinterpret with a MORE-STATIC extents type of the same rank —

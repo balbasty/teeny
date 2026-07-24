@@ -41,6 +41,26 @@ _TNY_API auto fold_mapping(const OE & oe, const Idx * rstr) {
     }
 }
 
+// Rebuild layout `L`'s mapping over NEW extents `oe`, carrying the source per-axis
+// runtime strides `rstr`. This is `recast`'s primitive: it lets the mapping itself
+// merge layout + extents rather than synthesising a stride layout up front.
+//   - contiguous (ccontiguous/fcontiguous): re-DERIVE from the extents. A contiguous
+//     source's strides ARE those products, so this preserves them (and richer static
+//     extents then fold in the accessor); it is also the "reinterpret AS contiguous"
+//     path when `L` is an explicit override.
+//   - strides<...>: bake the static slots, fill the dynamic ones from `rstr`.
+//   - layout_stride: carry every stride at run time.
+template <class L, class OE, class Idx>
+_TNY_API auto retype_mapping(const OE & oe, const Idx * rstr) {
+    if constexpr (_contiguous_layout<L>::value) { (void)rstr; return typename L::template mapping<OE>(oe); }
+    else if constexpr (_is_strides<L>::value)   return fold_mapping<L>(oe, rstr);
+    else {   // layout_stride (or any runtime-strided mapping): carry all axes
+        cs::array<Idx, OE::rank()> st{};
+        for (cs::size_t r = 0; r < OE::rank(); ++r) st[r] = rstr[r];
+        return typename L::template mapping<OE>(oe, st);
+    }
+}
+
 // reorder axes P... -> a folded strides<...> view (output stride[i] = source
 // stride[P[i]], compile-time where the source stride is static).
 template <class MD, cs::size_t... P>
