@@ -7,6 +7,18 @@ immediates when shapes are static and stays generic when they are dynamic. It
 exists to make numeric C++/CUDA kernels (spline interpolation, distance
 transforms, small linear algebra) compact and readable.
 
+## Follow the contribution guidelines
+
+Read and follow [`CONTRIBUTING.md`](CONTRIBUTING.md) for the **process**: the
+issue-based workflow (file an issue first; **every issue carries ≥1 label** —
+`bug`/`enhancement`/`perf`/`maintainability`/`documentation`/`blocked`/`good first
+issue`; break big work into sub-issues under an umbrella), **one branch and one PR
+per task** (never bundle unrelated changes), conventional commit subjects that
+reference the issue and `Closes #NN` from the PR, the build/test gate (both
+compilers + sanitizers on touched host paths), and skeptical element-identity
+review for core-path diffs. This file (CLAUDE.md) is the *design* companion to
+that process guide.
+
 ## Golden rules
 
 1. **mdspan does the heavy lifting.** Extents, layouts, offset mapping, and
