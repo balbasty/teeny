@@ -389,7 +389,13 @@ value form (tracked separately for the numpy `sum(a, axis<...>{})` spelling).
 4. Add a `tests/test_<feature>.cpp` mixing `static_assert` (compile-time shape
    checks) and runtime asserts; wire it into `Makefile`'s `TESTS` list.
 5. `make CXX=clang++ run-test && make CXX=g++ run-test` — all green.
-6. Commit with a focused message.
+6. **Update the docs IN THE SAME change** (docs drift is a bug, not a follow-up):
+   the header **doc-comment** (feeds the autodoc API page) AND every hand-written
+   `docs/*.md` page that describes the touched API (`cheatsheet.md`, `reference.md`,
+   `structure.md`, `indexing.md`, … — grep the docs for the affected names) AND the
+   `CLAUDE.md` cheat-sheet. Updating only `CLAUDE.md` is not enough — the docs site
+   is separate and drifts silently.
+7. Commit with a focused message.
 
 ## Testing
 
