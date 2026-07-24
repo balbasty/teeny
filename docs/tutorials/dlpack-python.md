@@ -170,8 +170,8 @@ void invert_nd(const In & in, Out & out) {
 
 `anyrank` carries a compile-time memory **space** (see
 [Dynamic dispatch](../dispatch.md#memory-space-of-the-data)): a host pointer peels
-into host views, a device pointer (`as_anyrank<own::gpu_view>` / a `kDLCUDA`
-capsule via `from_dlpack<T, own::gpu_view>`) peels into `gpu_view` views. That is
+into host views, a device pointer (`as_anyrank<storage::gpu_view>` / a `kDLCUDA`
+capsule via `from_dlpack<T, storage::gpu_view>`) peels into `gpu_view` views. That is
 why `invert_nd` can branch on `In::is_device` — the space is in the type, not a
 runtime flag.
 
@@ -224,12 +224,12 @@ nb::ndarray<> invert(nb::ndarray<double> x) {     // any (*batch, C, C) float64,
 
     // Build the carriers and dispatch. A device carrier COPIES its shape/stride
     // inline (copy_meta) so it survives the trip into the kernel, and is tagged
-    // own::gpu_view so its peeled cells are device views; the host carrier WRAPS the
+    // storage::gpu_view so its peeled cells are device views; the host carrier WRAPS the
     // metadata (the vectors outlive the synchronous CPU call).
     if (on_cuda) {
 #ifdef __CUDACC__
-        auto in  = as_anyrank<TNY_MAX_RANK, own::gpu_view>(x.data(), shape.data(),  stride.data(),  ndim, copy_meta);
-        auto od  = as_anyrank<TNY_MAX_RANK, own::gpu_view>(out,      shape.data(),  ostride.data(), ndim, copy_meta);
+        auto in  = as_anyrank<TNY_MAX_RANK, storage::gpu_view>(x.data(), shape.data(),  stride.data(),  ndim, copy_meta);
+        auto od  = as_anyrank<TNY_MAX_RANK, storage::gpu_view>(out,      shape.data(),  ostride.data(), ndim, copy_meta);
         invert_nd(in, od);
         cudaDeviceSynchronize();                  // finish before Python reads the result
 #endif

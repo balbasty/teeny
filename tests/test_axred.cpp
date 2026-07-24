@@ -13,7 +13,7 @@ int main() {
     // sum over axis 0 -> shape (3): column sums [3,5,7]
     auto c = sum<0>(m);
     static_assert(decltype(c)::rank() == 1, "axis 0 removed");
-    static_assert(decltype(c)::ownership == own::stack, "static -> stack");
+    static_assert(decltype(c)::ownership == storage::stack, "static -> stack");
     static_assert(decltype(c.extent(Int<0>()))::value == 3, "kept extent static");
     if (c(0)!=3.0 || c(1)!=5.0 || c(2)!=7.0) return 1;
 
@@ -46,12 +46,12 @@ int main() {
     // reducing the DYNAMIC axis leaves a fully-static result -> stack
     auto d = owned<double, shape<-1,3>>(shape<-1,3>{2,3}); d.iota_(0.0,1.0);   // (2,3), 0..5
     auto dc = sum<0>(d);                       // axis0 (dynamic) removed -> shape<3> static
-    static_assert(decltype(dc)::ownership == own::stack, "reduced the dynamic axis -> static");
+    static_assert(decltype(dc)::ownership == storage::stack, "reduced the dynamic axis -> static");
     if (dc(0)!=3.0 || dc(2)!=7.0) return 9;
 
     // reducing a STATIC axis and keeping a dynamic one -> heap result
     auto dr = sum<1>(d);                        // axis1 (static 3) removed -> shape<-1> dynamic
-    static_assert(decltype(dr)::ownership == own::heap, "dynamic result -> heap");
+    static_assert(decltype(dr)::ownership == storage::heap, "dynamic result -> heap");
     if (dr(0)!=3.0 || dr(1)!=12.0) return 10;
 
     return 0;

@@ -43,16 +43,16 @@ int main() {
 
     // --- make_* factories (deduce the extents type) ---
     auto v = make_view(pad, shape<3,4>{});
-    static_assert(decltype(v)::ownership == own::view, "make_view -> view");
+    static_assert(decltype(v)::ownership == storage::view, "make_view -> view");
     if (v(1,1) != pad[1*4+1]) return 4;
 
     auto s = make_local<double>(shape<2,2>{});             // stack, static
-    static_assert(decltype(s)::ownership == own::stack, "make_local -> stack");
+    static_assert(decltype(s)::ownership == storage::stack, "make_local -> stack");
     s.fill_(7.0); if (s(1,1) != 7.0) return 5;
 
     using DynE = shape<-1,-1>;
     auto h = make_heap<float>(DynE{2,3});                   // heap, runtime shape deduced
-    static_assert(decltype(h)::ownership == own::heap, "make_heap -> heap");
+    static_assert(decltype(h)::ownership == storage::heap, "make_heap -> heap");
     if (h.extent(0) != 2 || h.extent(1) != 3) return 6;
 
     // --- wrap(ptr, shape, runtime strides) -> a layout_stride view ---

@@ -46,7 +46,7 @@ _TNY_API void peel_axis(const MD & v, const I * idx, I & off, I * ext, I * str, 
 
 // Build the peeled sub-view by hand (no submdspan -> works on ANY source layout,
 // incl. strides<...>) and fold kept strides to compile-time values where known.
-template <own OW, class MD, class I, class Seq, cs::size_t... A>
+template <storage OW, class MD, class I, class Seq, cs::size_t... A>
 _TNY_API auto gather_peel(const MD & v, const I * idx, Seq, cs::index_sequence<A...>) {
     using El  = typename MD::element_type;
     using Idx = typename MD::index_type;
@@ -65,9 +65,9 @@ _TNY_API auto gather_peel(const MD & v, const I * idx, Seq, cs::index_sequence<A
 }
 
 // Space-aware peel-at over an mdspan: `OW` is the view kind to tag the result
-// with (own_view_of the source: view for a host source, gpu_view for a device
+// with (storage_view_of the source: view for a host source, gpu_view for a device
 // one, pinned_view/mapped_view for page-locked host memory).
-template <own OW, cs::size_t... Axes, class MD>
+template <storage OW, cs::size_t... Axes, class MD>
 _TNY_API auto peel_at_ow(const MD & src, typename MD::index_type i) {
     using I = typename MD::index_type;
     constexpr cs::size_t nd = sizeof...(Axes);
@@ -88,24 +88,24 @@ _TNY_API auto peel_at_ow(const MD & src, typename MD::index_type i) {
  *         `tny::tensor` overloads below preserve the source's space. */
 template <cs::size_t... Axes, class MD>
 _TNY_API auto peel_at(const MD & src, typename MD::index_type i) {
-    return _md::peel_at_ow<own::view, Axes...>(src, i);
+    return _md::peel_at_ow<storage::view, Axes...>(src, i);
 }
 // convenience: peel from a tny::tensor (uses its view). Non-const -> mutable
 // peel; const -> read-only peel. A device source (gpu/gpu_view) yields gpu_view.
-template <long... Axes, class T, class E, class L, own O>
+template <long... Axes, class T, class E, class L, storage O>
 _TNY_API auto peel_at(tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i) {
     static_assert((_axis_in_range(Axes, tensor<T,E,L,O>::rank()) && ...), "peel_at: axis out of range");
-    return _md::peel_at_ow<own_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>(t.mdspan(), i);
+    return _md::peel_at_ow<storage_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>(t.mdspan(), i);
 }
-template <long... Axes, class T, class E, class L, own O>
+template <long... Axes, class T, class E, class L, storage O>
 _TNY_API auto peel_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i) {
     static_assert((_axis_in_range(Axes, tensor<T,E,L,O>::rank()) && ...), "peel_at: axis out of range");
-    return _md::peel_at_ow<own_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>(t.mdspan(), i);
+    return _md::peel_at_ow<storage_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>(t.mdspan(), i);
 }
 
 /** @brief A range of sub-views obtained by peeling `Axes...`. Supports
  *         `size()`, `operator[]`, and range-for. */
-template <class MD, own OW, cs::size_t... Axes>
+template <class MD, storage OW, cs::size_t... Axes>
 struct peel_range {
     using index_type = typename MD::index_type;
     MD src;
@@ -132,19 +132,19 @@ struct peel_range {
 
 /** @brief Build a range of sub-views by peeling `Axes...` of `t`. Non-const `t`
  *         yields mutable peel; const `t` yields read-only peel. */
-template <long... Axes, class T, class E, class L, own O>
+template <long... Axes, class T, class E, class L, storage O>
 _TNY_API auto peel(tensor<T,E,L,O> & t) {
     static_assert((_axis_in_range(Axes, tensor<T,E,L,O>::rank()) && ...), "peel: axis out of range");
-    return peel_range<decltype(t.mdspan()), own_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>{ t.mdspan() };
+    return peel_range<decltype(t.mdspan()), storage_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>{ t.mdspan() };
 }
-template <long... Axes, class T, class E, class L, own O>
+template <long... Axes, class T, class E, class L, storage O>
 _TNY_API auto peel(const tensor<T,E,L,O> & t) {
     static_assert((_axis_in_range(Axes, tensor<T,E,L,O>::rank()) && ...), "peel: axis out of range");
-    return peel_range<decltype(t.mdspan()), own_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>{ t.mdspan() };
+    return peel_range<decltype(t.mdspan()), storage_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>{ t.mdspan() };
 }
 /** @brief Build a range of sub-views over a raw mdspan. */
 template <cs::size_t... Axes, class MD>
-_TNY_API peel_range<MD, own::view, Axes...> peel_of(const MD & m) { return { m }; }
+_TNY_API peel_range<MD, storage::view, Axes...> peel_of(const MD & m) { return { m }; }
 
 namespace _md {
 template <class T, cs::size_t... A> _TNY_API auto sfront(T & t, cs::index_sequence<A...>) { return peel<A...>(t); }
@@ -163,16 +163,16 @@ template <long N, cs::size_t R> constexpr cs::size_t _front_count() {
  *         runtime-batch-rank half of `(*batch, *spatial, C)`. `N` is **signed**:
  *         `peel_front<3>` peels 3 leading dims; `peel_front<-1>` keeps the last
  *         axis (peels all but it), so negative = "keep the last |N|". */
-template <long N, class T, class E, class L, own O>
+template <long N, class T, class E, class L, storage O>
 _TNY_API auto peel_front(tensor<T,E,L,O> & t)       { return _md::sfront(t, cs::make_index_sequence<_front_count<N, tensor<T,E,L,O>::rank()>()>{}); }
-template <long N, class T, class E, class L, own O>
+template <long N, class T, class E, class L, storage O>
 _TNY_API auto peel_front(const tensor<T,E,L,O> & t) { return _md::sfront(t, cs::make_index_sequence<_front_count<N, tensor<T,E,L,O>::rank()>()>{}); }
 
 /** @brief The `i`-th sub-view obtained by peeling the first `N` axes (grid-stride style). */
-template <long N, class T, class E, class L, own O>
+template <long N, class T, class E, class L, storage O>
 _TNY_API auto peel_front_at(tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i)
 { return _md::sfront_at(t, i, cs::make_index_sequence<_front_count<N, tensor<T,E,L,O>::rank()>()>{}); }
-template <long N, class T, class E, class L, own O>
+template <long N, class T, class E, class L, storage O>
 _TNY_API auto peel_front_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i)
 { return _md::sfront_at(t, i, cs::make_index_sequence<_front_count<N, tensor<T,E,L,O>::rank()>()>{}); }
 
@@ -192,7 +192,7 @@ _TNY_API typename MD::index_type sfront_size(const MD & m, cs::index_sequence<A.
  *         the range. Same signed `N` as `peel_front`: `size_front<3>(t)`
  *         multiplies the first 3 extents; `size_front<-2>(t)` the all-but-last-two
  *         (the flattened batch count of a `(*batch, C, C)` tensor). */
-template <long N, class T, class E, class L, own O>
+template <long N, class T, class E, class L, storage O>
 _TNY_API typename tensor<T,E,L,O>::index_type size_front(const tensor<T,E,L,O> & t) {
     return _md::sfront_size(t.mdspan(), cs::make_index_sequence<_front_count<N, tensor<T,E,L,O>::rank()>()>{});
 }

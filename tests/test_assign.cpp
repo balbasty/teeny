@@ -59,7 +59,7 @@ int main()
     va(0) = 99.0; if (q[0] != 99.0)                 return 13;             // writes through to q
 
     // ---- views remain trivially copyable (kernel-passable) -----------------
-    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, ccontiguous, own::view>>::value,
+    static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, ccontiguous, storage::view>>::value,
                   "view still trivially copyable");
     static_assert(cs::is_trivially_copyable<decltype(x(slice(1,5)))>::value,
                   "slice view still trivially copyable");

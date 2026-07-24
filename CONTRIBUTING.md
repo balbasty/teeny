@@ -133,7 +133,7 @@ silent divergence there is how UB creeps in.
 
 ### Naming & layout
 
-- `snake_case` for functions, members, variables, and `own`/enum values.
+- `snake_case` for functions, members, variables, and `storage`/enum values.
 - `PascalCase` for public type aliases (`Int<>`, `Long<>`, `UInt<>`); `shape<…>`,
   `strides<…>`, `rank<N>` for the vocabulary types.
 - `_`-prefixed names are **internal**. Namespaces: `tny` is public; internal code

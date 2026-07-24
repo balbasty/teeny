@@ -48,7 +48,7 @@ int main() {
     using DynE = extents<long, dynamic_extent>;
     auto Da = owned<double, DynE>(DynE{3}); Da(0)=1; Da(1)=2; Da(2)=3;
     auto Dc = Da.mul(2.0);
-    static_assert(decltype(Dc)::ownership == own::heap, "dynamic -> heap");
+    static_assert(decltype(Dc)::ownership == storage::heap, "dynamic -> heap");
     if (Dc(2) != 6) return 16;
 
     return 0;

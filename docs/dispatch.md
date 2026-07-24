@@ -48,18 +48,18 @@ passed into a CUDA kernel by value. DLPack strides are in **elements**; numpy
 ### Memory space of the data
 
 The carrier also carries a compile-time **memory space** for the `data` pointer —
-`own::view` (host) by default. Every view it hands out (`fixed`, `peel_front`,
+`storage::view` (host) by default. Every view it hands out (`fixed`, `peel_front`,
 `peel_front_at`) inherits it, so a device pointer yields `gpu_view`-tagged views
 rather than host views over device memory:
 
 ```cpp
 auto hd = as_anyrank(data, shape, stride, ndim);              // host  -> view cells
-auto gd = as_anyrank<own::gpu_view>(dptr, shape, stride, n);  // device -> gpu_view cells
+auto gd = as_anyrank<storage::gpu_view>(dptr, shape, stride, n);  // device -> gpu_view cells
 ```
 
 `from_dlpack` sets this from the capsule and **checks it**: importing a `kDLCUDA`
 capsule with the default host space trips a `_TNY_CHECK` — spell it
-`from_dlpack<T, own::gpu_view>(m)` (or `dispatch_dlpack<own::gpu_view>(m, f)`) so
+`from_dlpack<T, storage::gpu_view>(m)` (or `dispatch_dlpack<storage::gpu_view>(m, f)`) so
 the views are correctly device-tagged. (The shape/stride *metadata* is host either
 way; the space labels the data.)
 

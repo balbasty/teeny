@@ -1,7 +1,7 @@
 #ifndef TNY_TEENY
 #define TNY_TEENY
 
-// teeny: an mdspan-based tensor library: one `tny::tensor<T, Extents, Layout, own>`
+// teeny: an mdspan-based tensor library: one `tny::tensor<T, Extents, Layout, storage>`
 // with view / stack / heap ownership, a valarray-like math layer, a custom
 // per-dimension static-stride layout, and small CUDA-kernel helpers. mdspan
 // (from CCCL) does the extents, layouts, and offset mapping.

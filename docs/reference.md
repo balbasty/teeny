@@ -10,14 +10,14 @@ Everything is in `namespace tny` (`namespace cs = cuda::std`). Include
 Legend: **`Idx`** = the extents' `index_type` (`int64_t` for `shape<...>`).
 **`T`** = element type. A *static index* is an `integral_constant` (`Int<k>()`);
 a *runtime index* is a plain integer. "→ view" means a non-owning
-`tensor<…, own::view>` aliasing the same memory (no copy).
+`tensor<…, storage::view>` aliasing the same memory (no copy).
 
 ---
 
 ## The tensor type
 
 ```cpp
-template <class T, class Extents, class Layout = ccontiguous, own O = own::view>
+template <class T, class Extents, class Layout = ccontiguous, storage O = storage::view>
 struct tensor;
 ```
 
@@ -26,12 +26,12 @@ struct tensor;
 | `T` | element type | any arithmetic type, `half`, `bfloat16` |
 | `Extents` | the **shape** | `shape<2,3>` (a `cs::extents<int64_t,…>`; `-1` = dynamic) |
 | `Layout` | memory order | `ccontiguous` (C, default), `fcontiguous` (F), `dynamic_strides` (runtime), `strides<S...>` (static/mixed) |
-| `O` | ownership | `own::view` (default), `own::stack`, `own::heap`, `own::gpu`/`pinned`/`mapped`, `own::gpu_view` |
+| `O` | ownership | `storage::view` (default), `storage::stack`, `storage::heap`, `storage::gpu`/`pinned`/`mapped`, `storage::gpu_view` |
 
-Slicing / permuting / peeling / `.at()` of a `gpu` tensor yields an `own::gpu_view`
+Slicing / permuting / peeling / `.at()` of a `gpu` tensor yields an `storage::gpu_view`
 (a non-owning view of *device* memory), so a device pointer is never mistaken for
-a host one in the type. Helpers: `own_is_device` (gpu/gpu_view),
-`own_is_host_accessible`, `own_is_view` (view/gpu_view), `own_view_of(O)` (the
+a host one in the type. Helpers: `storage_is_device` (gpu/gpu_view),
+`storage_is_host_accessible`, `storage_is_view` (view/gpu_view), `storage_view_of(O)` (the
 view kind that preserves a source's space). `pinned`/`mapped` are host-accessible,
 so their views are plain `view`.
 
@@ -42,7 +42,7 @@ so their views are plain `view`.
 | `view<T,E,L=ccontiguous>` | none (host view) | trivially copyable, kernel-passable; the bare `tensor` is this |
 | `local<T,E,L>` | stack | requires a fully static shape; `sizeof` == its data |
 | `owned<T,E,L>` | heap (host) | move-only |
-| `gpu<T,E,L>` / `pinned<T,E,L>` / `mapped<T,E,L>` | CUDA | from `<teeny/cuda.h>`; a view of a `gpu` is `own::gpu_view` |
+| `gpu<T,E,L>` / `pinned<T,E,L>` / `mapped<T,E,L>` | CUDA | from `<teeny/cuda.h>`; a view of a `gpu` is `storage::gpu_view` |
 
 ---
 
@@ -57,9 +57,9 @@ Wrap existing memory (→ view):
 | `wrap(ptr, shape, {s0,s1,…})` | `view<T,E,dynamic_strides>` | **runtime** strides (elements; may be negative) |
 | `wrap<S...>(ptr, shape, {dyn…})` | `view<T,E,strides<S...>>` | **mixed** static/runtime strides (`dynamic_stride` slots) |
 | `wrap(ptr, shape, strides<S...>{})` | `view<T,E,strides<S...>>` | **compile-time** strides (fold into the type) |
-| `wrap(…, own_v<own::gpu>)` | view in that space | trailing **memory-space** tag on any overload above (default `own::view`); pass the plain backend — `own::gpu`/`pinned`/`mapped` — and it folds to the view kind (`gpu_view`/…), since `wrap` always views. `own_c<S>{}` / `own_v<S>` are the braced / no-braces spellings |
+| `wrap(…, storage_v<storage::gpu>)` | view in that space | trailing **memory-space** tag on any overload above (default `storage::view`); pass the plain backend — `storage::gpu`/`pinned`/`mapped` — and it folds to the view kind (`gpu_view`/…), since `wrap` always views. `storage_c<S>{}` / `storage_v<S>` are the braced / no-braces spellings |
 | `as_tensor(md)` | `view<…>` | wrap any `cs::mdspan`/`submdspan` result |
-| `make_view(ptr, shape)` | `view<T,E>` | an alias of `wrap` that deduces `E` (`make_view<Layout>` for the layout); takes the same trailing `own_c<Space>{}` tag |
+| `make_view(ptr, shape)` | `view<T,E>` | an alias of `wrap` that deduces `E` (`make_view<Layout>` for the layout); takes the same trailing `storage_c<Space>{}` tag |
 
 Allocate new storage — element type **`T` defaults to `float`**; static shape →
 stack (host+device), dynamic shape → heap (host only):
@@ -67,16 +67,16 @@ stack (host+device), dynamic shape → heap (host only):
 | Call | Returns | Element type |
 |---|---|---|
 | `empty<T>(shape)` | `local`/`owned` (deduced) | `T` (=`float`); UNINITIALISED |
-| `empty<T, own::S>(shape)` | owner in space `S` | name a backend: `stack`/`heap`/`gpu`/`pinned`/`mapped` |
-| `empty<T>(shape, own_c<own::S>{})` | owner in space `S` | value-tag backend form (same result) |
-| `make_local<T>(shape)` | `local<T,E>` | `T` (=`float`); = `empty<T,own::stack>` |
-| `make_heap<T>(shape)` | `owned<T,E>` | `T` (=`float`); = `empty<T,own::heap>` |
-| `make_gpu<T>(shape)` / `make_pinned<T>` / `make_mapped<T>` | CUDA owner | `T` (=`float`); = `empty<T,own::gpu/…>` |
+| `empty<T, storage::S>(shape)` | owner in space `S` | name a backend: `stack`/`heap`/`gpu`/`pinned`/`mapped` |
+| `empty<T>(shape, storage_c<storage::S>{})` | owner in space `S` | value-tag backend form (same result) |
+| `make_local<T>(shape)` | `local<T,E>` | `T` (=`float`); = `empty<T,storage::stack>` |
+| `make_heap<T>(shape)` | `owned<T,E>` | `T` (=`float`); = `empty<T,storage::heap>` |
+| `make_gpu<T>(shape)` / `make_pinned<T>` / `make_mapped<T>` | CUDA owner | `T` (=`float`); = `empty<T,storage::gpu/…>` |
 | `zeros<T>(shape)` / `ones<T>(shape)` | stack or heap | `T` (=`float`) |
 | `full(shape, v)` | stack or heap | **the value's type** (`full<T>(…)` to force) |
 | `arange<T>(n)` | `owned<T, shape<-1>>` | `T` (=`int64_t`); 1-D `[0,n)` |
 | `arange<T,N>()` / `arange<T>(Int<N>())` | `local<T, shape<N>>` | static 1-D `[0,N)` |
-| `zeros<T, own::S>(shape)` (also `ones`/`full`/`arange`) | owner in space `S` | host-accessible backend (`stack`/`heap`/`pinned`/`mapped`); `own::gpu` `static_assert`s → `to<own::gpu>(zeros<T>(shape))`. Value-tag: `zeros<T>(shape, own_c<own::S>{})` |
+| `zeros<T, storage::S>(shape)` (also `ones`/`full`/`arange`) | owner in space `S` | host-accessible backend (`stack`/`heap`/`pinned`/`mapped`); `storage::gpu` `static_assert`s → `to<storage::gpu>(zeros<T>(shape))`. Value-tag: `zeros<T>(shape, storage_c<storage::S>{})` |
 
 ---
 
@@ -151,7 +151,7 @@ ops (no accidental fallback to runtime extents/strides):
 | **extents** | each *kept* axis keeps its source extent — static stays static. Peeling the batch dims off `shape<-1,-1,M,N>` yields a `<M,N>` cell; a *static-bounds* slice/range keeps a static extent, a runtime range is dynamic; `unsqueeze` inserts a static `1` |
 | **strides** | folded to a compile-time `strides<...>` slot wherever `source_stride × step` is known at compile time — a static source keeps folded strides, and a partially-dynamic *contiguous* stride folds from the static extents it spans (`shape<-1,3,3>` → `stride0 = 9`); otherwise runtime |
 | **layout** | the view ops (`operator()`, `take_along`, `permute`, `flip`, `un/squeeze`, `peel`) output a folded `strides<...>`. `recast<keep_strides>` (the default) instead **preserves the source layout type** (`ccontiguous` stays `ccontiguous`, `strides<>` stays `strides<>`) |
-| **space** | `own_view_of(source)`: a `gpu`/`gpu_view` source → `gpu_view`, `pinned`/`mapped` → the matching `_view`, else `view` — a view never loses its memory space |
+| **space** | `storage_view_of(source)`: a `gpu`/`gpu_view` source → `gpu_view`, `pinned`/`mapped` → the matching `_view`, else `view` — a view never loses its memory space |
 
 Worked input→output shapes (`E` = source extents):
 
@@ -174,7 +174,7 @@ Worked input→output shapes (`E` = source extents):
 | `t.recast<NewShape[, NewLayout]>()` | → view | reinterpret with a more-static same-rank extents; **`NewLayout` defaults to `keep_strides`** (preserve the source strides AND layout type, any layout, no copy). `ccontiguous`/`fcontiguous` = reinterpret AS that order (derive+fold the strides — the "I promise it's contiguous" form; a **debug build verifies** the imposed strides match the source's and aborts a false promise, symmetric with the extent check — UB only under `-DNDEBUG`); `strides<S...>` = impose them. Functional form `t.recast(shape{…}, layout{…})` |
 | `t.clone()` | owning (stack/heap) | materialise a dense row-major copy |
 | `t.to<T2>()` | view (no-copy) or owning | **dtype** convert. Matching dtype (no `Force`) → a read-only borrow (`gpu_view` if `t` is on the device, else `view`); differing dtype or `t.to<T2,true>()` → a dense owning copy (static→stack, dyn→heap) |
-| `to<Space>(t)` (`cuda.h`) | view (no-copy) or owning | **memory-space** move: `to<Space, ET, Force>(t)` — `Space` ∈ `own::gpu`/`pinned`/`mapped`/`heap`/`stack`. Same no-copy/`Force` rule; a device source (gpu/`gpu_view`) downloads via `cudaMemcpy`. rvalue source → always copies |
+| `to<Space>(t)` (`cuda.h`) | view (no-copy) or owning | **memory-space** move: `to<Space, ET, Force>(t)` — `Space` ∈ `storage::gpu`/`pinned`/`mapped`/`heap`/`stack`. Same no-copy/`Force` rule; a device source (gpu/`gpu_view`) downloads via `cudaMemcpy`. rvalue source → always copies |
 
 `reshape`/`flatten` need exact C-contiguity (`is_contiguous()`);
 `clone()` first if the source isn't. `recast` does **not** — it only re-types the
@@ -271,8 +271,8 @@ Axis reductions: a fully static result → stack (host+device); any dynamic resu
 |---|---|---|
 | `as_anyrank(data, shape, stride, ndim)` | `anyrank` (view store) | **wraps** the arrays, no copy (default; host only) |
 | `as_anyrank(data, shape, stride, ndim, copy_meta)` | `anyrank` (inline store) | **copies** into a `TNY_MAX_RANK` store (device-passable); `as_anyrank<N>(…,copy_meta)` sets capacity |
-| `as_anyrank<Space>(…)` | space-tagged `anyrank` | `Space` = the data's memory space (default `own::view` = host); pass `own::gpu_view` for a device pointer so `fixed`/`peel_front` yield `gpu_view` views |
-| `from_dlpack<T[, Space]>(m)` / `from_dlpack<T, R[, Space]>(m)` | `anyrank` / rank-`R` view | import a capsule; `Space` (default host) is **checked against `m→device`** — a `kDLCUDA` capsule needs `own::gpu_view` |
+| `as_anyrank<Space>(…)` | space-tagged `anyrank` | `Space` = the data's memory space (default `storage::view` = host); pass `storage::gpu_view` for a device pointer so `fixed`/`peel_front` yield `gpu_view` views |
+| `from_dlpack<T[, Space]>(m)` / `from_dlpack<T, R[, Space]>(m)` | `anyrank` / rank-`R` view | import a capsule; `Space` (default host) is **checked against `m→device`** — a `kDLCUDA` capsule needs `storage::gpu_view` |
 | `at.fixed<R>()` | rank-`R` `dynamic_strides` view | requires `ndim == R` |
 | `dispatch_rank(at, f)` | `bool` | call `f` with a fixed-rank view chosen by runtime `ndim` (one instantiation per total rank) |
 | `at.peel_front<N>()` / `at.peel_front_at<N>(i)` | range / view | batch idiom: keep the last `\|N\|` dims static, peel the rest (one kernel per `\|N\|`) |

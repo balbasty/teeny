@@ -48,7 +48,7 @@ include/teeny/
   defines.h        macros: _TNY_API / _TNY_HOST, namespace open/close
   alias.h          cs:: vocabulary into tny:: + Int<V>/... static ints + `all` + shape<...>
   half.h           `half` (IEEE binary16) + `bfloat16` element types + compute_type
-  storage.h        `own` enum + storage policies (owning_storage<T,Alloc>, cpp_alloc)
+  storage.h        `storage` enum + storage policies (owning_storage<T,Alloc>, cpp_alloc)
   layout.h         strides<S...> — per-dim static/dynamic strides (extents for strides)
   indexing.h       free indexing/slicing vocabulary: slice()/none, _norm_axis,
                    _wrap_idx, slice_spec + traits, _compact output-extents
@@ -83,7 +83,7 @@ helpers should follow that split. `namespace cs = cuda::std;` throughout.
 ## The tensor type
 
 ```cpp
-template <class T, class Shape, class Layout = ccontiguous, own O = own::view>
+template <class T, class Shape, class Layout = ccontiguous, storage O = storage::view>
 struct tensor;
 ```
 
@@ -111,8 +111,8 @@ struct tensor;
   device pointer is never mistaken for a host one in the type. `pinned`/`mapped`
   views likewise keep their space (`pinned_view`/`mapped_view`) so DLPack labels
   them `kDLCUDAHost`; they are still host-accessible and behave like `view`
-  otherwise. Helpers: `own_is_device(O)` (gpu/gpu_view), `own_is_host_accessible(O)`,
-  `own_is_view(O)` (view/gpu_view/pinned_view/mapped_view), `own_view_of(O)` (the
+  otherwise. Helpers: `storage_is_device(O)` (gpu/gpu_view), `storage_is_host_accessible(O)`,
+  `storage_is_view(O)` (view/gpu_view/pinned_view/mapped_view), `storage_view_of(O)` (the
   view kind that preserves a source's space — used by every view-producing op).
 
 The mapping lives in an **empty base** (private inheritance → EBO), so a
@@ -132,19 +132,19 @@ Factories: `wrap(ptr, extents)` / `wrap<Layout>(ptr, extents)`,
 `wrap<S...>(ptr, extents, {dyn...})` (mixed static/runtime strides),
 `wrap(ptr, extents, strides<S...>{})` (compile-time strides),
 `as_tensor(any_mdspan)` (wrap a submdspan/mdspan result as a view). Every `wrap`
-overload takes an optional trailing memory-space tag `own_c<Space>{}` (or the
-no-braces `own_v<Space>`), default `own::view` (host). Pass the plain BACKEND the
-memory lives in — `wrap(dptr, e, own_v<own::gpu>)` wraps a **device** pointer,
-`own::pinned`/`own::mapped` page-locked host memory. Since `wrap` always yields a
-VIEW, the space folds to its view kind (`gpu -> gpu_view`, …) via `own_view_of`, so
+overload takes an optional trailing memory-space tag `storage_c<Space>{}` (or the
+no-braces `storage_v<Space>`), default `storage::view` (host). Pass the plain BACKEND the
+memory lives in — `wrap(dptr, e, storage_v<storage::gpu>)` wraps a **device** pointer,
+`storage::pinned`/`storage::mapped` page-locked host memory. Since `wrap` always yields a
+VIEW, the space folds to its view kind (`gpu -> gpu_view`, …) via `storage_view_of`, so
 you never spell the `_view` kinds (symmetric with `as_anyrank<Space>` /
 `from_dlpack<T,Space>`). Functional
 factories that deduce the extents type: `make_view(ptr,e)`, `make_local<T>(e)`,
 `make_heap<T>(e)`, `make_gpu/pinned/mapped<T>(e)` (E deduced; **T defaults to
 `float`**, override explicitly). The `make_*` owning factories are thin spellings
-of one **`empty<T[, own::Space]>(e)`** factory: ownership is deduced from the
+of one **`empty<T[, storage::Space]>(e)`** factory: ownership is deduced from the
 shape (static→stack, dynamic→heap) unless a backend is named as a template arg
-(`empty<T, own::gpu>(e)`) or a value-tag (`empty<T>(e, own_c<own::gpu>{})`);
+(`empty<T, storage::gpu>(e)`) or a value-tag (`empty<T>(e, storage_c<storage::gpu>{})`);
 gpu/pinned/mapped need `<teeny/cuda.h>`.
 
 Custom strided layout: `strides<Sx, Sy, ...>` is the stride analogue of `shape`,
@@ -210,8 +210,8 @@ t.clone();                      // materialise a dense row-major copy
 t.to<double>();                 // pytorch-like dtype convert -> dense owning copy (static->stack, dyn->heap).
                                 //   NO-COPY when it already matches: t.to<>() (same dtype) borrows a read-only
                                 //   view; t.to<T,true>() forces a copy (clone() is the unconditional spelling).
-to<own::gpu>(t);                // MEMORY-SPACE move (cuda.h free fn): to<Space,ET,Force>(x). Same no-copy/force
-                                //   rule — to<own::gpu>(gpu_x) borrows; to<own::gpu,void,true>(x) force-clones.
+to<storage::gpu>(t);                // MEMORY-SPACE move (cuda.h free fn): to<Space,ET,Force>(x). Same no-copy/force
+                                //   rule — to<storage::gpu>(gpu_x) borrows; to<storage::gpu,void,true>(x) force-clones.
 t(all, slice(none,none,-1));    // reverse a range (negative step; a[::-1])
 // AXIS template args are signed: negatives count from the back (numpy). e.g.
 //   t.extent(Int<-1>()), t.unsqueeze<-1>() (append), t.permute<-1,0,1>(),
@@ -238,10 +238,10 @@ a.at(i, j).atomic_add_(v);                    // scatter-accumulate: a(i,j) += v
 auto z = zeros<T>(shape); ones<T>(sh); full(sh,v); arange<T>(n);  // creation. zeros/ones
                       //   default T=float; full's T = value type; arange defaults T=int64.
                       //   Static: arange<T,N>() / arange<T>(Int<N>()) -> stack [0..N-1].
-                      //   Backend selector (like empty): zeros<T,own::pinned>(sh),
-                      //   full<T>(sh,v,own_c<own::pinned>{}) — HOST-ACCESSIBLE only
+                      //   Backend selector (like empty): zeros<T,storage::pinned>(sh),
+                      //   full<T>(sh,v,storage_c<storage::pinned>{}) — HOST-ACCESSIBLE only
                       //   (stack/heap/pinned/mapped); a gpu fill static_asserts ->
-                      //   to<own::gpu>(zeros<T>(sh)).
+                      //   to<storage::gpu>(zeros<T>(sh)).
 
 // --- math (out-of-place -> NEW tensor; static shape -> stack, else heap/host) ---
 // result type = promote(A,B): C++ rules, but among floats the LOWER width wins
@@ -289,8 +289,8 @@ auto at = as_anyrank(data, shape, stride, ndim);    // -> anyrank: rank-erased c
                                              //   shape/stride arrays (1-D tensor views), NO copy; HOST only (default)
 auto ac = as_anyrank(data, shape, stride, ndim, copy_meta);  // COPIES into an inline TNY_MAX_RANK (default
                                              //   32) store -> trivially copyable, device-passable
-auto ag = as_anyrank<own::gpu_view>(dptr, shape, stride, ndim);  // DEVICE data: fixed()/peel_front yield
-                                             //   gpu_view cells (Space param; default own::view = host).
+auto ag = as_anyrank<storage::gpu_view>(dptr, shape, stride, ndim);  // DEVICE data: fixed()/peel_front yield
+                                             //   gpu_view cells (Space param; default storage::view = host).
                                              //   from_dlpack<T[,Space]>/dispatch_dlpack<Space> set+check it vs m->device
 dispatch_rank(at, [&](auto v){ kernel(v); });  // instantiates kernel once per TOTAL rank
 auto v3 = at.fixed<3>();                      // or force a known rank
@@ -330,8 +330,8 @@ fold**, a plain `int`/`long` when the value is only known at run time.
   stride 0 (it is stretched). The result extent per axis is computed at compile
   time by `bc1`/`bcast_extents` (`dynamic_extent` if either operand is dynamic).
   In-place `a.op_(b)` needs `rankB ≤ rankA` (can't grow the destination).
-  Out-of-place: a fully static result → `own::stack` (host+device); any dynamic →
-  `own::heap` (host only). The SFINAE keys on `bcast_extents<...>::rank_dynamic()`,
+  Out-of-place: a fully static result → `storage::stack` (host+device); any dynamic →
+  `storage::heap` (host only). The SFINAE keys on `bcast_extents<...>::rank_dynamic()`,
   **not** on instantiating a stack tensor (that would fire the "stack needs static
   shape" `static_assert`).
 - **The gather** (`tensor.h` `_slice_range`, `iterate.h` `gather_peel`): ALL
