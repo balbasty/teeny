@@ -96,6 +96,31 @@ dispatch_rank(at, [&](auto v) { kernel(v); });  // once per total rank
 auto v3 = at.fixed<3>();                        // or force a known rank
 ```
 
+### `dispatch_index` / `dispatch_rank<narrow_index>` — the int32 fast path
+
+At the kernel boundary you can narrow the **offset index width** to 32-bit when the
+element span provably fits (`index_fits`) — halving a dynamic view's by-value
+footprint and running address math in 32-bit (a device register/occupancy win). It's
+the [`reindex`](shapes-strides.md#the-index-type-shape32-reindex) transition made a
+runtime dispatch: `f` is instantiated for **both** widths and the right one is picked
+at run time.
+
+```cpp
+dispatch_index(v, [&](auto w) { kernel(w); });        // narrow a fixed-rank view (or a peel cell)
+dispatch_rank<narrow_index>(at, [&](auto v) { kernel(v); });  // fuse it into the rank dispatch
+```
+
+`dispatch_rank<narrow_index>` nests **rank outer, width inner**, so only the leaf
+instantiation doubles; plain `dispatch_rank(at, f)` (the default) is unchanged and
+adds nothing. For the batch idiom, narrow each cell:
+
+```cpp
+for (auto cell : at.peel_front<-Sr>()) dispatch_index(cell, [&](auto c) { kernel<Sr>(c); });
+```
+
+Opt in per launch site — narrowing everything would silently double instantiation
+counts. `dispatch_index<Idx2>` targets a width other than the `int32_t` default.
+
 ## The full boundary pattern
 
 For a `(*batch, *spatial, C)` array from numpy / torch / cupy / DLPack:

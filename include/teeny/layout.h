@@ -94,9 +94,23 @@ struct strides {
         template <cs::size_t M = strides::ndyn(), cs::enable_if_t<M == 0, int> = 0>
         _TNY_API constexpr mapping(const Shape & e) : Shape(e) {}
 
-        /** @brief Mixed strides: extents + the runtime strides (dim order, dynamic ones only). */
-        _TNY_API constexpr mapping(const Shape & e, const cs::array<index_type, strides::ndyn()> & dyn)
-            : _dyn{dyn}, Shape(e) {}
+        // Cast a dynamic-stride array to this mapping's index_type (each stride is a
+        // real value, so a narrower target must fit — the caller guarantees it, e.g.
+        // reindex via index_fits). Lets a reindex hand int64 strides to an int32 mapping.
+        template <class OtherIdx>
+        _TNY_API static constexpr cs::array<index_type, strides::ndyn()>
+        _narrow_dyn(const cs::array<OtherIdx, strides::ndyn()> & a) {
+            cs::array<index_type, strides::ndyn()> o{};
+            for (cs::size_t i = 0; i < strides::ndyn(); ++i) o[i] = static_cast<index_type>(a[i]);
+            return o;
+        }
+        /** @brief Mixed strides: extents + the runtime strides (dim order, dynamic ones
+         *         only). Templated on the array's element type so a `reindex` (narrowing
+         *         the offset index width) can pass its wider source strides — each is
+         *         cast to `index_type`; symmetric with mdspan's `layout_stride`. */
+        template <class OtherIdx>
+        _TNY_API constexpr mapping(const Shape & e, const cs::array<OtherIdx, strides::ndyn()> & dyn)
+            : _dyn{_narrow_dyn(dyn)}, Shape(e) {}
 
         _TNY_API constexpr const Shape & extents() const noexcept { return *this; }
         _TNY_API constexpr index_type stride(rank_type r) const noexcept {
