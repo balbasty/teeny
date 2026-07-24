@@ -22,28 +22,49 @@ int main()
     static_assert(cs::is_same<decltype(sum(P)), float>::value, "sum -> float");
     if (sum(P) != 1.f) return 10;                 // double accumulation -> 1, not 0
 
-    // reduce_type_t trait
+    // reduce_type_t trait: floats keep the double/wide-float rule; narrow INTEGERS
+    // widen to 64-bit (signed->int64_t, unsigned->uint64_t) so accumulation can't
+    // overflow, while integers already >=8 bytes keep themselves. RESULT stays T.
     static_assert(cs::is_same<reduce_type_t<float>,  double>::value, "float -> double");
     static_assert(cs::is_same<reduce_type_t<double>, double>::value, "double -> double");
     static_assert(cs::is_same<reduce_type_t<half>,   double>::value, "half -> double");
     static_assert(cs::is_same<reduce_type_t<long double>, long double>::value, "wide float kept");
-    static_assert(cs::is_same<reduce_type_t<int>,    int>::value,    "int -> int (item)");
-    static_assert(cs::is_same<reduce_type_t<long>,   long>::value,   "long -> long (item)");
+    static_assert(cs::is_same<reduce_type_t<signed char>,   cs::int64_t>::value,  "int8  -> int64 accumulator");
+    static_assert(cs::is_same<reduce_type_t<short>,         cs::int64_t>::value,  "int16 -> int64 accumulator");
+    static_assert(cs::is_same<reduce_type_t<int>,           cs::int64_t>::value,  "int32 -> int64 accumulator");
+    static_assert(cs::is_same<reduce_type_t<unsigned char>, cs::uint64_t>::value, "uint8 -> uint64 accumulator");
+    static_assert(cs::is_same<reduce_type_t<unsigned>,      cs::uint64_t>::value, "uint32 -> uint64 accumulator");
+    static_assert(cs::is_same<reduce_type_t<bool>,          cs::uint64_t>::value, "bool -> uint64 accumulator");
+    static_assert(cs::is_same<reduce_type_t<cs::int64_t>,   cs::int64_t>::value,  "int64 kept (already wide)");
+    static_assert(cs::is_same<reduce_type_t<cs::uint64_t>,  cs::uint64_t>::value, "uint64 kept (already wide)");
 
-    // ---- integers accumulate in the item type by default --------------------
+    // ---- integers: accumulate WIDE (64-bit) but RETURN the item type ---------
     int ibuf[3] = {10, 20, 30};
     auto ii = wrap(ibuf, shape<3>{});
-    static_assert(cs::is_same<decltype(sum(ii)), int>::value, "sum(int) -> int");
+    static_assert(cs::is_same<decltype(sum(ii)), int>::value, "sum(int) -> int (result = item type)");
     if (sum(ii) != 60) return 3;
 
     // ---- explicit accumulator override --------------------------------------
     static_assert(cs::is_same<decltype(sum<float>(f)), float>::value, "sum<float> -> float");
     static_assert(cs::is_same<decltype(sum<long>(ii)), long>::value, "sum<long>(int) -> long");
-    // small-int overflow avoided by a wider accumulator
-    signed char cbuf[4] = {100, 100, 100, 100};   // sum 400 overflows int8
+    // small-int overflow: the accumulator is now wide, so accumulation is DEFINED.
+    // The default result is still the item type, so the sum is cast back to int8 --
+    // a DEFINED truncation (int8(400)), NOT the signed-overflow UB of an int8 accumulator.
+    signed char cbuf[4] = {100, 100, 100, 100};   // true sum 400 exceeds int8 range
     auto cc = wrap(cbuf, shape<4>{});
-    if (sum<int>(cc) != 400) return 4;
     static_assert(cs::is_same<decltype(sum(cc)), signed char>::value, "sum(int8) -> int8 (item, default)");
+    if (sum(cc) != (signed char)400) return 4;     // defined wraparound, not garbage
+    if (sum<int>(cc) != 400) return 40;            // wide accumulator recovers the exact sum
+    if (sum<cs::int64_t>(cc) != 400) return 41;
+
+    // ---- mean of an integer tensor returns double (numpy: integer mean -> f64) --
+    signed char mbuf[3] = {1, 2, 2};               // true mean 5/3 = 1.666...
+    auto mc = wrap(mbuf, shape<3>{});
+    static_assert(cs::is_same<decltype(mean(mc)), double>::value, "mean(int8) -> double");
+    static_assert(cs::is_same<decltype(mean(ii)), double>::value, "mean(int32) -> double");
+    if (mean(mc) < 1.6666 || mean(mc) > 1.6667) return 42;   // fractional, not integer-truncated
+    static_assert(cs::is_same<decltype(mean<float>(mc)), float>::value, "mean<float>(int8) -> float (escape hatch)");
+    if (mean<float>(mc) < 1.666f || mean<float>(mc) > 1.667f) return 43;
 
     // ---- axis reductions: default result element type = T, explicit = Acc ----
     float m[6] = {1,2,3,4,5,6};
@@ -64,6 +85,19 @@ int main()
     auto is0 = sum<0>(IM);
     static_assert(cs::is_same<typename decltype(is0)::element_type, int>::value, "sum<0>(int) -> int result");
     if (is0(0) != 4 || is0(1) != 6) return 8;
+
+    // axis mean over integers -> a double-typed tensor (numpy), divided in double
+    auto imn = mean<0>(IM);                       // columns: (1+3)/2=2, (2+4)/2=3
+    static_assert(cs::is_same<typename decltype(imn)::element_type, double>::value, "mean<0>(int) -> double result");
+    if (imn(0) != 2.0 || imn(1) != 3.0) return 80;
+    int om[6] = {1,2,3,4,5,6};                    // rows [1,2,3],[4,5,6]; row means 2, 5
+    auto OM = wrap(om, shape<2,3>{});
+    auto imn1 = mean<1>(OM);
+    static_assert(cs::is_same<typename decltype(imn1)::element_type, double>::value, "mean<1>(int) -> double result");
+    if (imn1(0) != 2.0 || imn1(1) != 5.0) return 81;
+    auto imnf = mean<float, 1>(OM);               // escape hatch keeps working
+    static_assert(cs::is_same<typename decltype(imnf)::element_type, float>::value, "mean<float,1>(int) -> float result");
+    if (imnf(0) != 2.f || imnf(1) != 5.f) return 82;
 
     // ---- dot: default result = promote(Ta,Tb), explicit = Acc ----------------
     static_assert(cs::is_same<decltype(dot(f, f)), float>::value, "dot(float,float) -> float");

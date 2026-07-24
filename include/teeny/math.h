@@ -745,7 +745,12 @@ _TNY_API auto tensor<T,E,L,O>::map(F f) const { return _md::uop_out(*this, f); }
  * `double` for floating-point types of at most 8 bytes (`float`, `double`,
  * `half`, `bfloat16`) — enough headroom that summing many low-precision values
  * doesn't lose catastrophically; a *wider* floating type (`long double`) keeps
- * itself; every other type (integers, ...) accumulates in its own item type.
+ * itself. Integer types narrower than 8 bytes accumulate in 64-bit (`int64_t` if
+ * signed, `uint64_t` if unsigned — `bool` counts as unsigned) so that summing /
+ * multiplying many small integers can't overflow mid-accumulation (signed
+ * overflow is UB); integers already ≥8 bytes keep their own type. The RESULT is
+ * still cast back to the element type `T` (accumulate wide, cast down); a caller
+ * who wants the untruncated wide value uses the explicit accumulator (`sum<int64_t>(a)`).
  * Half types are spotted via `compute_type` (the only `T` whose compute type
  * differs from itself). Override per call, e.g. `sum<float>(a)`.
  */
@@ -753,7 +758,10 @@ template <class T>
 using reduce_type_t = cs::conditional_t<
     (cs::is_floating_point<T>::value || !cs::is_same<compute_type_t<T>, T>::value),
     cs::conditional_t<(sizeof(T) > 8), T, double>,
-    T>;
+    // integer T: widen a narrow item to 64-bit (signed/unsigned to match), keep
+    // an already-wide integer as-is. `is_signed` is false for `bool` -> uint64_t.
+    cs::conditional_t<(sizeof(T) >= 8), T,
+        cs::conditional_t<cs::is_signed<T>::value, cs::int64_t, cs::uint64_t>>>;
 // resolve an explicitly-requested accumulator (`void` -> the default above).
 template <class Acc, class T>
 using _acc_t = cs::conditional_t<cs::is_same<Acc, void>::value, reduce_type_t<T>, Acc>;
@@ -762,6 +770,12 @@ using _acc_t = cs::conditional_t<cs::is_same<Acc, void>::value, reduce_type_t<T>
 // accumulator `Acc` when one is given (that IS the requested output dtype).
 template <class Acc, class T>
 using _reduce_result_t = cs::conditional_t<cs::is_same<Acc, void>::value, T, Acc>;
+// `mean`'s default result element type: an INTEGER `T` yields `double` (numpy: the
+// mean of an integer array is float64, and it must divide in floating point rather
+// than truncate); a floating `T` (incl. half/bfloat16) keeps `T`. An explicit
+// accumulator (`mean<float>(a)`) overrides this and is honoured by `_reduce_result_t`.
+template <class T>
+using _mean_result_t = cs::conditional_t<cs::is_integral<T>::value, double, T>;
 
 // Seeds for max/min reductions. `cs::numeric_limits` is NOT specialized for
 // teeny's software half/bfloat16, so `numeric_limits<half>::lowest()` returns the
@@ -863,19 +877,29 @@ _TNY_MD_AXRED(min,  _reduce_seed_highest<R>(), r_min)
 #undef _TNY_MD_AXRED
 
 /** @brief Mean over the named axes -> a lower-rank tensor (sum / reduced count).
- *         Accumulates in the reduce type, result cast to `T`; `mean<Acc,
+ *         For a floating `T`, accumulates in the reduce type and the result is cast
+ *         to `T`. For an INTEGER `T` the result element type is `double` (numpy:
+ *         integer mean is float64; divides in `double`, not truncating). `mean<Acc,
  *         Axes...>(a)` makes `Acc` both the accumulator and result type. */
 template <long... Axes, class T,class E,class L,own O, class R = reduce_type_t<T>,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
 _TNY_API  auto mean(const tensor<T,E,L,O> & a) {
-    auto s = sum<R, Axes...>(a); s.div_(static_cast<R>(a.numel() / s.numel()));
-    return _md::reduce_to<T>(static_cast<decltype(s)&&>(s));   // accumulate in R, cast result to T
+    auto s = sum<R, Axes...>(a);                                          // sum in the (wide) reduce type
+    const auto cnt = a.numel() / s.numel();
+    if constexpr (cs::is_integral<T>::value) {                           // integer -> divide in double, return double
+        auto o = _md::reduce_to<double>(static_cast<decltype(s)&&>(s));
+        o.div_(static_cast<double>(cnt)); return o;
+    } else { s.div_(static_cast<R>(cnt)); return _md::reduce_to<T>(static_cast<decltype(s)&&>(s)); }
 }
 template <long... Axes, class T,class E,class L,own O, class R = reduce_type_t<T>,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
 _TNY_HOST auto mean(const tensor<T,E,L,O> & a) {
-    auto s = sum<R, Axes...>(a); s.div_(static_cast<R>(a.numel() / s.numel()));
-    return _md::reduce_to<T>(static_cast<decltype(s)&&>(s));   // accumulate in R, cast result to T
+    auto s = sum<R, Axes...>(a);                                          // sum in the (wide) reduce type
+    const auto cnt = a.numel() / s.numel();
+    if constexpr (cs::is_integral<T>::value) {                           // integer -> divide in double, return double
+        auto o = _md::reduce_to<double>(static_cast<decltype(s)&&>(s));
+        o.div_(static_cast<double>(cnt)); return o;
+    } else { s.div_(static_cast<R>(cnt)); return _md::reduce_to<T>(static_cast<decltype(s)&&>(s)); }
 }
 template <class Acc, long... Axes, class T,class E,class L,own O,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
@@ -945,14 +969,21 @@ _TNY_API auto maximum(const tensor<T,E,L,O> & a, S s) { return _md::oops(a, s, _
 template <class T,class E,class L,own O>
 _TNY_API auto clamp(const tensor<T,E,L,O> & a, T lo, T hi) { return a.map(_md::u_clamp{ static_cast<double>(lo), static_cast<double>(hi) }); }
 
-/** @brief Arithmetic mean of all elements. Accumulates in the reduce type
- *         (`double` for small floats), result cast to `T`; `mean<Acc>(a)` makes
- *         `Acc` both the accumulator and the result type. */
+/** @brief Arithmetic mean of all elements. For a floating `T`, accumulates in the
+ *         reduce type (`double` for small floats) and the result is cast to `T`.
+ *         For an INTEGER `T` the result is `double` (numpy: integer mean is
+ *         float64; the division runs in `double`, not truncating integer division).
+ *         `mean<Acc>(a)` makes `Acc` both the accumulator and the result type. */
 template <class Acc = void, class T, class E, class L, own O>
 _TNY_API auto mean(const tensor<T,E,L,O> & a) {
-    using R = _acc_t<Acc, T>;
-    const R m = static_cast<R>(sum<R>(a)) / static_cast<R>(a.numel());
-    return static_cast<_reduce_result_t<Acc,T>>(m);
+    using Res = _reduce_result_t<Acc, _mean_result_t<T>>;   // result dtype (double for integer T)
+    using R   = _acc_t<Acc, T>;                             // sum accumulator (wide for narrow ints)
+    // Divide in a floating type whenever the result is floating (so integer means
+    // keep their fractional part); an explicit integer `Acc` still divides in `Acc`.
+    using D = cs::conditional_t<cs::is_floating_point<R>::value, R,
+              cs::conditional_t<cs::is_floating_point<Res>::value, Res, R>>;
+    const D m = static_cast<D>(sum<R>(a)) / static_cast<D>(a.numel());
+    return static_cast<Res>(m);
 }
 
 _TNY_NAMESPACE_END(tny)
