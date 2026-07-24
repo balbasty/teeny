@@ -127,6 +127,43 @@ _TNY_API auto squeeze_md(const MD & v, cs::index_sequence<J...>) {
     return cs::mdspan<El, OE, SF>(v.data_handle(), fold_mapping<SF>(oe, rstr));
 }
 
+// numpy's `_attempt_nocopy_reshape` (C-order): can a source with extents `se` /
+// strides `ss` (ELEMENT units) be viewed as target extents `te` WITHOUT a copy? If
+// so, write the target strides into `ts` and return true; else return false (a copy
+// is required). Ranks are template params so the scratch arrays are fixed-size
+// (constexpr-friendly). Assumes numel(se) == numel(te) (the caller checks). Size-1
+// source axes impose no stride constraint and are dropped; the two-pointer walk
+// pairs equal-product source/target runs and requires each SOURCE run to be
+// C-contiguous within itself (`stride[k] == extent[k+1]*stride[k+1]`).
+template <cs::size_t R, cs::size_t M, class Idx>
+_TNY_API constexpr bool reshape_view_strides(const cs::array<Idx, R> & se,
+                                             const cs::array<Idx, R> & ss,
+                                             const cs::array<Idx, M> & te,
+                                             cs::array<Idx, M> & ts) {
+    Idx od[R ? R : 1]{}, os[R ? R : 1]{}; int on = 0;   // source dims minus size-1 axes
+    for (cs::size_t i = 0; i < R; ++i) {
+        if (se[i] == Idx(0)) { for (cs::size_t k = 0; k < M; ++k) ts[k] = Idx(1); return true; }  // empty -> trivially viewable
+        if (se[i] != Idx(1)) { od[on] = se[i]; os[on] = ss[i]; ++on; }
+    }
+    for (cs::size_t k = 0; k < M; ++k) ts[k] = Idx(1);
+    int oi = 0, oj = 1, ni = 0, nj = 1;
+    while (ni < static_cast<int>(M) && oi < on) {
+        Idx np = te[ni], op = od[oi];
+        while (np != op) {                              // grow the smaller run until products match
+            if (np < op) { if (nj >= static_cast<int>(M)) return false; np *= te[nj]; ++nj; }
+            else         { if (oj >= on)                 return false; op *= od[oj]; ++oj; }
+        }
+        for (int ok = oi; ok < oj - 1; ++ok)            // source run must be C-contiguous within itself
+            if (os[ok] != od[ok + 1] * os[ok + 1]) return false;
+        ts[nj - 1] = os[oj - 1];                         // derive the target run's strides from the source run
+        for (int nk = nj - 1; nk > ni; --nk) ts[nk - 1] = ts[nk] * te[nk];
+        ni = nj; nj = ni + 1; oi = oj; oj = oi + 1;
+    }
+    const Idx last = (ni >= 1) ? ts[ni - 1] : Idx(1);   // trailing size-1 target axes inherit the last stride
+    for (int nk = ni; nk < static_cast<int>(M); ++nk) ts[nk] = last;
+    return true;
+}
+
 } // namespace _detail
 
 _TNY_NAMESPACE_END(tny)
