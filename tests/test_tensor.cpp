@@ -7,14 +7,14 @@ using cs::extents;
 using cs::dynamic_extent;
 
 // A fully-static tensor view is exactly its data pointer (EBO on the mapping).
-using static_view = tensor<double, extents<long,2,3,4>, cs::layout_right, own::view>;
+using static_view = tensor<double, extents<long,2,3,4>, cs::layout_right, storage::view>;
 static_assert(static_view::rank() == 3, "rank");
 static_assert(static_view::is_static, "static");
 static_assert(cs::is_trivially_copyable<static_view>::value, "view trivially copyable");
 static_assert(sizeof(static_view) == sizeof(double*), "static view == just a pointer");
 
 // A stack tensor stores exactly its elements.
-using stack_33 = tensor<double, extents<long,3,3>, cs::layout_right, own::stack>;
+using stack_33 = tensor<double, extents<long,3,3>, cs::layout_right, storage::stack>;
 static_assert(sizeof(stack_33) == 9 * sizeof(double), "stack tensor == its data");
 static_assert(cs::is_trivially_copyable<stack_33>::value, "stack trivially copyable");
 
@@ -56,7 +56,7 @@ int main()
 
     // ---- .view() yields a non-owning teeny tensor view (not an mdspan) ---
     auto tv = v.view();
-    static_assert(decltype(tv)::ownership == own::view, "view() -> tensor view");
+    static_assert(decltype(tv)::ownership == storage::view, "view() -> tensor view");
     static_assert(cs::is_same<decltype(tv)::element_type, double>(), "view() keeps dtype");
     if (tv.data() != v.data() || tv(1,2,3) != v(1,2,3)) return 10;   // aliases the same storage
 

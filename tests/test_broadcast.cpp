@@ -37,7 +37,7 @@ int main() {
     auto Dc = owned<double,D2>(D2{3,1}); for(long i=0;i<3;++i) Dc(i,0)=i+1;
     auto Dm = owned<double,D2>(D2{3,4}); for(long i=0;i<3;++i)for(long j=0;j<4;++j) Dm(i,j)=i+j;
     auto Dr = Dc + Dm;
-    static_assert(decltype(Dr)::ownership==own::heap, "dynamic bcast -> heap");
+    static_assert(decltype(Dr)::ownership==storage::heap, "dynamic bcast -> heap");
     if (Dr.extent(0)!=3 || Dr.extent(1)!=4) return 5;
     if (Dr(2,3) != Dc(2,0)+Dm(2,3)) return 6;
 
@@ -70,7 +70,7 @@ int main() {
     auto Dv = owned<double, extents<long,dynamic_extent,4>>(extents<long,dynamic_extent,4>{3});
     for(long i=0;i<3;++i) for(long j=0;j<4;++j) Dv(i,j)=i*4+j;
     auto Rdyn = Dv + v;
-    static_assert(decltype(Rdyn)::ownership==own::heap, "dyn left-pad -> heap");
+    static_assert(decltype(Rdyn)::ownership==storage::heap, "dyn left-pad -> heap");
     if (Rdyn.extent(0)!=3 || Rdyn.extent(1)!=4 || Rdyn(2,3)!=Dv(2,3)+v(3)) return 16;
 
     // #32: a rank-0 (0-d) operand broadcasts as a scalar (numpy 0-d), and must

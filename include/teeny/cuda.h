@@ -51,19 +51,19 @@ struct cuda_mapped_alloc {
 };
 
 /* ------------------------------------------------------------------ *
- *     Storage specializations for the CUDA `own` modes               *
+ *     Storage specializations for the CUDA `storage` modes               *
  * ------------------------------------------------------------------ */
 
 template <class T, cs::size_t N>
-struct storage<T, own::gpu, N> : owning_storage<T, cuda_gpu_alloc> {
+struct storage_policy<T, storage::gpu, N> : owning_storage<T, cuda_gpu_alloc> {
     using owning_storage<T, cuda_gpu_alloc>::owning_storage;
 };
 template <class T, cs::size_t N>
-struct storage<T, own::pinned, N> : owning_storage<T, cuda_pinned_alloc> {
+struct storage_policy<T, storage::pinned, N> : owning_storage<T, cuda_pinned_alloc> {
     using owning_storage<T, cuda_pinned_alloc>::owning_storage;
 };
 template <class T, cs::size_t N>
-struct storage<T, own::mapped, N> : owning_storage<T, cuda_mapped_alloc> {
+struct storage_policy<T, storage::mapped, N> : owning_storage<T, cuda_mapped_alloc> {
     using owning_storage<T, cuda_mapped_alloc>::owning_storage;
 };
 
@@ -73,24 +73,24 @@ struct storage<T, own::mapped, N> : owning_storage<T, cuda_mapped_alloc> {
 
 /** @brief Owning tensor in device (GPU) memory (move-only). `gpu<T,E>(extents)`. */
 template <class T, class Shape, class Layout = ccontiguous>
-using gpu = tensor<T, Shape, Layout, own::gpu>;
+using gpu = tensor<T, Shape, Layout, storage::gpu>;
 /** @brief Owning tensor in page-locked ("pinned") host memory (move-only).
  *         `pinned<T,E>(extents)` — pytorch's `pin_memory`. */
 template <class T, class Shape, class Layout = ccontiguous>
-using pinned = tensor<T, Shape, Layout, own::pinned>;
+using pinned = tensor<T, Shape, Layout, storage::pinned>;
 /** @brief Owning tensor in mapped (zero-copy) host memory (move-only). `mapped<T,E>(extents)`. */
 template <class T, class Shape, class Layout = ccontiguous>
-using mapped = tensor<T, Shape, Layout, own::mapped>;
+using mapped = tensor<T, Shape, Layout, storage::mapped>;
 
 /* --- functional factories (deduce the Shape type from the argument; `T` defaults
  *     to `float`, like the host factories). Thin spellings of the unified
- *     `empty<T, own::gpu/pinned/mapped>` factory (tensor.h). --- */
+ *     `empty<T, storage::gpu/pinned/mapped>` factory (tensor.h). --- */
 template <class T = float, class Layout = ccontiguous, class Shape>
-_TNY_HOST auto make_gpu(Shape e)    { return empty<T, own::gpu,    Layout>(e); }
+_TNY_HOST auto make_gpu(Shape e)    { return empty<T, storage::gpu,    Layout>(e); }
 template <class T = float, class Layout = ccontiguous, class Shape>
-_TNY_HOST auto make_pinned(Shape e) { return empty<T, own::pinned, Layout>(e); }
+_TNY_HOST auto make_pinned(Shape e) { return empty<T, storage::pinned, Layout>(e); }
 template <class T = float, class Layout = ccontiguous, class Shape>
-_TNY_HOST auto make_mapped(Shape e) { return empty<T, own::mapped, Layout>(e); }
+_TNY_HOST auto make_mapped(Shape e) { return empty<T, storage::mapped, Layout>(e); }
 
 /* ------------------------------------------------------------------ *
  *     Memory-backend `to` — the CUDA half of pytorch's `.to`         *
@@ -123,11 +123,11 @@ namespace _detail {
 // gathers only the runs (#50). A view with NO unit-stride axis (e.g. a single
 // strided column) still over-copies its span — a general device gather kernel is
 // the remaining follow-up.
-template <class E2, class T, class Shape, class Layout, own O>
+template <class E2, class T, class Shape, class Layout, storage O>
 _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
     using Ts  = cs::remove_cv_t<T>;
     using Idx = typename tensor<T, Shape, Layout, O>::index_type;
-    if constexpr (own_is_device(O)) {
+    if constexpr (storage_is_device(O)) {
         // Signed extent of the addressed region relative to x.data(): [lo, hi].
         // Guard rank-0 (a single element, span 1): CCCL constrains the runtime
         // stride(r) to rank > 0, so the loop body must not instantiate for rank 0.
@@ -172,7 +172,7 @@ _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
         }
         auto raw = make_heap<Ts>(cs::dextents<cs::int64_t, 1>{ static_cast<cs::int64_t>(span) });   // 1-D host span buffer
         if (span) cudaMemcpy(raw.data(), x.data() + lo, span * sizeof(Ts), cudaMemcpyDeviceToHost);
-        tensor<Ts, Shape, Layout, own::view> hv(raw.data() - lo, x.mapping());   // re-impose x's layout; origin at -lo
+        tensor<Ts, Shape, Layout, storage::view> hv(raw.data() - lo, x.mapping());   // re-impose x's layout; origin at -lo
         return hv.template to<E2, true>();               // densify to row-major (owns its buffer; raw can die)
     } else {
         return x.template to<E2, true>();                // host-accessible: read + convert into a dense OWNING copy
@@ -181,13 +181,13 @@ _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
 } // namespace _detail
 
 /**
- * @brief Move `x` to memory space `Space` (`own::gpu`/`pinned`/`mapped`/`heap`),
+ * @brief Move `x` to memory space `Space` (`storage::gpu`/`pinned`/`mapped`/`heap`),
  *        optionally converting the element type to `ET` — the memory-backend half
  *        of pytorch's `.to`. `ET` defaults to the source type.
  *
- *            auto d = to<own::gpu>(h);           // upload host -> device
- *            auto e = to<own::gpu, half>(h);     // convert to half AND upload
- *            auto c = to<own::heap>(d);          // download device -> host
+ *            auto d = to<storage::gpu>(h);           // upload host -> device
+ *            auto e = to<storage::gpu, half>(h);     // convert to half AND upload
+ *            auto c = to<storage::heap>(d);          // download device -> host
  *
  * **Stays put when already there (#58):** with `Force` false and no dtype change,
  * a source already in a **compatible** space borrows instead of copying — the exact
@@ -196,8 +196,8 @@ _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
  * already on the device to the device" returns a `gpu_view`, NOT a host round-trip.
  * Pass `Force = true` for a fresh owning copy:
  *
- *            auto v = to<own::gpu>(g);              // g is gpu (or a gpu_view slice) -> a view, no copy
- *            auto k = to<own::gpu, void, true>(g);  // forced: a fresh gpu copy
+ *            auto v = to<storage::gpu>(g);              // g is gpu (or a gpu_view slice) -> a view, no copy
+ *            auto k = to<storage::gpu, void, true>(g);  // forced: a fresh gpu copy
  *
  * When a copy IS made: a **device -> device** copy (Force, same dtype) of a dense
  * row-major source is a single **device-to-device** `cudaMemcpy` — no host hop; a
@@ -214,19 +214,19 @@ _TNY_HOST auto dense_host(const tensor<T, Shape, Layout, O> & x) {
  * so nothing dangles. NB a **contiguous** device download copies exactly `numel`;
  * a **strided** device download still copies its full span (over-copies — #50).
  */
-template <own Space, class ET = void, bool Force = false, class T, class Shape, class Layout, own O>
+template <storage Space, class ET = void, bool Force = false, class T, class Shape, class Layout, storage O>
 _TNY_HOST auto to(const tensor<T, Shape, Layout, O> & x) {
-    static_assert(!own_is_view(Space), "to<Space>: Space must be an owning space or stack, not a view kind");
+    static_assert(!storage_is_view(Space), "to<Space>: Space must be an owning space or stack, not a view kind");
     using Tb = cs::remove_cv_t<T>;
     using E2 = cs::conditional_t<cs::is_same<ET, void>::value, Tb, ET>;
     if constexpr (!Force && cs::is_same<E2, Tb>::value
-                  && (O == Space || (own_is_device(O) && own_is_device(Space)))) {
+                  && (O == Space || (storage_is_device(O) && storage_is_device(Space)))) {
         // Already in a compatible space (exact same space, or both device) and
         // same dtype -> borrow, no copy. This covers the common "move to the
         // device data that's ALREADY on the device" (a gpu OR a gpu_view slice):
         // it returns a gpu_view instead of round-tripping through the host.
-        return tensor<const Tb, Shape, Layout, own_view_of(O)>(x.data(), x.mapping());
-    } else if constexpr (own_is_device(O) && own_is_device(Space) && cs::is_same<E2, Tb>::value) {
+        return tensor<const Tb, Shape, Layout, storage_view_of(O)>(x.data(), x.mapping());
+    } else if constexpr (storage_is_device(O) && storage_is_device(Space) && cs::is_same<E2, Tb>::value) {
         // Device -> device, same dtype, but a fresh owning copy is wanted (Force).
         // A DENSE row-major source densifies with a single device-to-device memcpy
         // — no host round-trip. A strided/permuted device source still needs a
@@ -240,15 +240,15 @@ _TNY_HOST auto to(const tensor<T, Shape, Layout, O> & x) {
             cudaMemcpy(dst.data(), host.data(), static_cast<cs::size_t>(dst.numel()) * sizeof(E2), cudaMemcpyHostToDevice);
         }
         return dst;
-    } else if constexpr (Space == own::stack) {
+    } else if constexpr (Space == storage::stack) {
         auto host = _detail::dense_host<E2>(x);
-        tensor<E2, Shape, ccontiguous, own::stack> dst{};   // static shape
+        tensor<E2, Shape, ccontiguous, storage::stack> dst{};   // static shape
         cudaMemcpy(dst.data(), host.data(), static_cast<cs::size_t>(dst.numel()) * sizeof(E2), cudaMemcpyHostToHost);
         return dst;
     } else {
         auto host = _detail::dense_host<E2>(x);
         tensor<E2, Shape, ccontiguous, Space> dst(x.extents());
-        const cudaMemcpyKind kind = (Space == own::gpu) ? cudaMemcpyHostToDevice : cudaMemcpyHostToHost;
+        const cudaMemcpyKind kind = (Space == storage::gpu) ? cudaMemcpyHostToDevice : cudaMemcpyHostToHost;
         cudaMemcpy(dst.data(), host.data(), static_cast<cs::size_t>(dst.numel()) * sizeof(E2), kind);
         return dst;
     }
@@ -260,11 +260,11 @@ _TNY_HOST auto to(const tensor<T, Shape, Layout, O> & x) {
  *  **moved** (its buffer stolen — no copy, no round-trip); otherwise this forces a
  *  fresh owning copy (which, for a device->device contiguous source, is the
  *  device-to-device path above, not a host round-trip). */
-template <own Space, class ET = void, bool Force = false, class T, class Shape, class Layout, own O>
+template <storage Space, class ET = void, bool Force = false, class T, class Shape, class Layout, storage O>
 _TNY_HOST auto to(tensor<T, Shape, Layout, O> && x) {
     using Tb = cs::remove_cv_t<T>;
     using E2 = cs::conditional_t<cs::is_same<ET, void>::value, Tb, ET>;
-    if constexpr (!Force && own_is_owning(O) && O == Space && cs::is_same<E2, Tb>::value
+    if constexpr (!Force && storage_is_owning(O) && O == Space && cs::is_same<E2, Tb>::value
                   && cs::is_same<T, Tb>::value   // non-const element: a const-T owning rvalue has no move ctor
                   && cs::is_same<Layout, ccontiguous>::value) {
         return tensor<Tb, Shape, Layout, O>(cs::move(x));   // steal the buffer (already dense in-place)

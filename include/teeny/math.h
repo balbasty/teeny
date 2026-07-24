@@ -330,14 +330,14 @@ template <class Op, class A, class B,
           cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() == 0, int> = 0>
 _TNY_API auto oop(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
-    tensor<promote_t<typename A::element_type, typename B::element_type>, RE, ccontiguous, own::stack> c{};
+    tensor<promote_t<typename A::element_type, typename B::element_type>, RE, ccontiguous, storage::stack> c{};
     bzip(c, a, b, op); return c;
 }
 template <class Op, class A, class B,
           cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() != 0, int> = 0>
 _TNY_HOST auto oop(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
-    tensor<promote_t<typename A::element_type, typename B::element_type>, RE, ccontiguous, own::heap>
+    tensor<promote_t<typename A::element_type, typename B::element_type>, RE, ccontiguous, storage::heap>
         c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<RE::rank()>{}));
     bzip(c, a, b, op); return c;
 }
@@ -345,12 +345,12 @@ _TNY_HOST auto oop(const A & a, const B & b, Op op) {
 /* ---- out-of-place tensor (op) scalar ----------------------------- */
 template <class Op, class A, class S, cs::enable_if_t<A::is_static, int> = 0>
 _TNY_API auto oops(const A & a, S s, Op op) {
-    tensor<promote_t<typename A::element_type, S>, typename A::extents_type, ccontiguous, own::stack> c{};
+    tensor<promote_t<typename A::element_type, S>, typename A::extents_type, ccontiguous, storage::stack> c{};
     scalo(c, a, s, op); return c;
 }
 template <class Op, class A, class S, cs::enable_if_t<!A::is_static, int> = 0>
 _TNY_HOST auto oops(const A & a, S s, Op op) {
-    tensor<promote_t<typename A::element_type, S>, typename A::extents_type, ccontiguous, own::heap> c(a.extents());
+    tensor<promote_t<typename A::element_type, S>, typename A::extents_type, ccontiguous, storage::heap> c(a.extents());
     scalo(c, a, s, op); return c;
 }
 
@@ -374,37 +374,37 @@ template <class Op, class A, class B,
 _TNY_API auto oop_cmp(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
     using Rc = compute_type_t<promote_t<typename A::element_type, typename B::element_type>>;
-    tensor<bool, RE, ccontiguous, own::stack> c{}; bcmp<Rc>(c, a, b, op); return c;
+    tensor<bool, RE, ccontiguous, storage::stack> c{}; bcmp<Rc>(c, a, b, op); return c;
 }
 template <class Op, class A, class B,
           cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() != 0, int> = 0>
 _TNY_HOST auto oop_cmp(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
     using Rc = compute_type_t<promote_t<typename A::element_type, typename B::element_type>>;
-    tensor<bool, RE, ccontiguous, own::heap> c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<RE::rank()>{}));
+    tensor<bool, RE, ccontiguous, storage::heap> c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<RE::rank()>{}));
     bcmp<Rc>(c, a, b, op); return c;
 }
 // tensor (cmp) scalar -> bool tensor
 template <class Op, class A, class S, cs::enable_if_t<A::is_static, int> = 0>
 _TNY_API auto oops_cmp(const A & a, S s, Op op) {
     using Rc = compute_type_t<promote_t<typename A::element_type, S>>;
-    tensor<bool, typename A::extents_type, ccontiguous, own::stack> c{}; scmp<Rc>(c, a, s, op); return c;
+    tensor<bool, typename A::extents_type, ccontiguous, storage::stack> c{}; scmp<Rc>(c, a, s, op); return c;
 }
 template <class Op, class A, class S, cs::enable_if_t<!A::is_static, int> = 0>
 _TNY_HOST auto oops_cmp(const A & a, S s, Op op) {
     using Rc = compute_type_t<promote_t<typename A::element_type, S>>;
-    tensor<bool, typename A::extents_type, ccontiguous, own::heap> c(a.extents()); scmp<Rc>(c, a, s, op); return c;
+    tensor<bool, typename A::extents_type, ccontiguous, storage::heap> c(a.extents()); scmp<Rc>(c, a, s, op); return c;
 }
 
 /* ---- out-of-place unary : static -> stack, dynamic -> heap ------- */
 template <class Uop, class A, cs::enable_if_t<A::is_static, int> = 0>
 _TNY_API auto uop_out(const A & a, Uop f) {
-    tensor<typename A::element_type, typename A::extents_type, ccontiguous, own::stack> c{};
+    tensor<typename A::element_type, typename A::extents_type, ccontiguous, storage::stack> c{};
     unaryo(c, a, f); return c;
 }
 template <class Uop, class A, cs::enable_if_t<!A::is_static, int> = 0>
 _TNY_HOST auto uop_out(const A & a, Uop f) {
-    tensor<typename A::element_type, typename A::extents_type, ccontiguous, own::heap> c(a.extents());
+    tensor<typename A::element_type, typename A::extents_type, ccontiguous, storage::heap> c(a.extents());
     unaryo(c, a, f); return c;
 }
 
@@ -489,17 +489,17 @@ _TNY_API void reduce_axes_(Out & out, const A & a, R init, Op op, const bool * r
 // fully static result -> stack (host+device). Output element type = R (the
 // accumulator), so accumulation runs in full `R` precision; the public reduction
 // (`sum<0>` etc.) then casts this down to the tensor's element type via reduce_to.
-template <long... Axes, class R, class Op, class T,class E,class L,own O,
+template <long... Axes, class R, class Op, class T,class E,class L,storage O,
           class OE = reduced_extents<E, Axes...>, cs::enable_if_t<OE::rank_dynamic() == 0, int> = 0>
 _TNY_API auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
     static_assert((_axis_in_range(Axes, E::rank()) && ...), "reduction axis out of range");
-    tensor<R, OE, ccontiguous, own::stack> out{};
+    tensor<R, OE, ccontiguous, storage::stack> out{};
     bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
     reduce_axes_<R>(out, a, init, op, red, cs::make_index_sequence<E::rank()>{});
     return out;
 }
 // any dynamic result -> heap (HOST ONLY: it must allocate; not callable on device)
-template <long... Axes, class R, class Op, class T,class E,class L,own O,
+template <long... Axes, class R, class Op, class T,class E,class L,storage O,
           class OE = reduced_extents<E, Axes...>, cs::enable_if_t<OE::rank_dynamic() != 0, int> = 0>
 _TNY_HOST auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
     static_assert((_axis_in_range(Axes, E::rank()) && ...), "reduction axis out of range");
@@ -508,7 +508,7 @@ _TNY_HOST auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
     cs::array<I, OE::rank()> ke{}; cs::size_t oi = 0;
     for (cs::size_t d = 0; d < E::rank(); ++d) if (!red[d]) ke[oi++] = static_cast<I>(a.extent(d));
     OE oe(ke);
-    tensor<R, OE, ccontiguous, own::heap> out(oe);
+    tensor<R, OE, ccontiguous, storage::heap> out(oe);
     reduce_axes_<R>(out, a, init, op, red, cs::make_index_sequence<E::rank()>{});
     return out;
 }
@@ -518,14 +518,14 @@ _TNY_HOST auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
 // when `Ret == RE`. Two overloads keep the stack path _TNY_API (host+device) and
 // the heap path _TNY_HOST, mirroring the `axreduce` overload that produced `r`.
 template <class Ret, class RE, class OE>
-_TNY_API auto reduce_to(tensor<RE, OE, ccontiguous, own::stack> && r) {
-    if constexpr (cs::is_same<Ret, RE>::value) return static_cast<tensor<RE,OE,ccontiguous,own::stack>&&>(r);
-    else { tensor<Ret, OE, ccontiguous, own::stack> o{}; o.copy_(r); return o; }
+_TNY_API auto reduce_to(tensor<RE, OE, ccontiguous, storage::stack> && r) {
+    if constexpr (cs::is_same<Ret, RE>::value) return static_cast<tensor<RE,OE,ccontiguous,storage::stack>&&>(r);
+    else { tensor<Ret, OE, ccontiguous, storage::stack> o{}; o.copy_(r); return o; }
 }
 template <class Ret, class RE, class OE>
-_TNY_HOST auto reduce_to(tensor<RE, OE, ccontiguous, own::heap> && r) {
-    if constexpr (cs::is_same<Ret, RE>::value) return static_cast<tensor<RE,OE,ccontiguous,own::heap>&&>(r);
-    else { tensor<Ret, OE, ccontiguous, own::heap> o(r.extents()); o.copy_(r); return o; }
+_TNY_HOST auto reduce_to(tensor<RE, OE, ccontiguous, storage::heap> && r) {
+    if constexpr (cs::is_same<Ret, RE>::value) return static_cast<tensor<RE,OE,ccontiguous,storage::heap>&&>(r);
+    else { tensor<Ret, OE, ccontiguous, storage::heap> o(r.extents()); o.copy_(r); return o; }
 }
 
 /* ---- allclose: |a-b| <= atol + rtol*|b| for every (broadcast) element ---- */
@@ -565,49 +565,49 @@ _TNY_API bool allclose_(const A & a, const B & b, R rtol, R atol, cs::index_sequ
 // tensor rhs (broadcasts). add_/sub_ take an `Atomic` flag: when true the write
 // is `fetch_add` (atomic on device) — the scatter/"push" accumulate — so the op
 // commits a DELTA (rhs, or -rhs for sub) rather than a read-modify-write.
-template <class T,class E,class L,own O> template <bool Atomic, class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+template <class T,class E,class L,storage O> template <bool Atomic, class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::add_(const B & b) {
     if constexpr (Atomic) _md::bzip<_md::w_add>(*this,*this,b,_md::rhs{});
     else                  _md::bzip(*this,*this,b,_md::add{});
     return *this;
 }
-template <class T,class E,class L,own O> template <bool Atomic, class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+template <class T,class E,class L,storage O> template <bool Atomic, class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::sub_(const B & b) {
     if constexpr (Atomic) _md::bzip<_md::w_add>(*this,*this,b,_md::nrhs{});
     else                  _md::bzip(*this,*this,b,_md::sub{});
     return *this;
 }
-template <class T,class E,class L,own O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+template <class T,class E,class L,storage O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::mul_(const B & b) { _md::bzip(*this,*this,b,_md::mul{}); return *this; }
-template <class T,class E,class L,own O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+template <class T,class E,class L,storage O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::div_(const B & b) { _md::bzip(*this,*this,b,_md::div{}); return *this; }
-template <class T,class E,class L,own O> template <bool Atomic>
+template <class T,class E,class L,storage O> template <bool Atomic>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::add_(T s) {
     if constexpr (Atomic) _md::scal<_md::w_add>(*this,s,_md::rhs{});
     else                  _md::scal(*this,s,_md::add{});
     return *this;
 }
-template <class T,class E,class L,own O> template <bool Atomic>
+template <class T,class E,class L,storage O> template <bool Atomic>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::sub_(T s) {
     if constexpr (Atomic) _md::scal<_md::w_add>(*this,s,_md::nrhs{});
     else                  _md::scal(*this,s,_md::sub{});
     return *this;
 }
-template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::mul_(T s) { _md::scal(*this,s,_md::mul{}); return *this; }
-template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::div_(T s) { _md::scal(*this,s,_md::div{}); return *this; }
+template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::mul_(T s) { _md::scal(*this,s,_md::mul{}); return *this; }
+template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::div_(T s) { _md::scal(*this,s,_md::div{}); return *this; }
 // atomic accumulate aliases: the readable spelling of add_<true>/sub_<true>
 // (atomic-on-device scatter/"push"). Thin forwarders over the Atomic form.
-template <class T,class E,class L,own O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+template <class T,class E,class L,storage O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::atomic_add_(const B & b) { return add_<true>(b); }
-template <class T,class E,class L,own O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+template <class T,class E,class L,storage O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::atomic_sub_(const B & b) { return sub_<true>(b); }
-template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::atomic_add_(T s) { return add_<true>(s); }
-template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::atomic_sub_(T s) { return sub_<true>(s); }
-template <class T,class E,class L,own O> template <class B>
+template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::atomic_add_(T s) { return add_<true>(s); }
+template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::atomic_sub_(T s) { return sub_<true>(s); }
+template <class T,class E,class L,storage O> template <class B>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::copy_(const B & b) { _md::bzip(*this,*this,b,_md::rhs{}); return *this; }
-template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::fill_(T s) { _md::scal(*this,s,_md::setc{}); return *this; }
-template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::zero_() { return fill_(T(0)); }
-template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::iota_(T start, T step) { _md::iota_(*this, start, step, cs::make_index_sequence<rank()>{}); return *this; }
+template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::fill_(T s) { _md::scal(*this,s,_md::setc{}); return *this; }
+template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::zero_() { return fill_(T(0)); }
+template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::iota_(T start, T step) { _md::iota_(*this, start, step, cs::make_index_sequence<rank()>{}); return *this; }
 
 /* ------------------------------------------------------------------ *
  *     Out-of-place operators                                         *
@@ -619,7 +619,7 @@ template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L
 
 // tensor (op) tensor operators -> the broadcasting out-of-place engine.
 #define _TNY_MD_BINOP(SYM, OP)                                                                    \
-template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>                   \
+template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>                   \
 _TNY_API auto operator SYM (const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b)        \
 { return _md::oop(a, b, OP{}); }
 _TNY_MD_BINOP(+, _md::add)
@@ -630,7 +630,7 @@ _TNY_MD_BINOP(/, _md::div)
 
 /* --- out-of-place binary methods (tensor OR scalar rhs) ----------- */
 #define _TNY_MD_METHOD(NAME, OP)                                                                 \
-template <class T,class E,class L,own O> template <class B>                                       \
+template <class T,class E,class L,storage O> template <class B>                                       \
 _TNY_API auto tensor<T,E,L,O>::NAME(const B & b) const {                                          \
     if constexpr (cs::is_arithmetic<B>::value) return _md::oops(*this, b, OP{});                  \
     else                                       return _md::oop (*this, b, OP{});                   \
@@ -644,7 +644,7 @@ _TNY_MD_METHOD(pow, _md::pw)
 
 /* --- tensor (op) scalar and scalar (op) tensor operators ---------- */
 #define _TNY_MD_SCALOP(SYM, OP)                                                                   \
-template <class T,class E,class L,own O, class S, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0> \
+template <class T,class E,class L,storage O, class S, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0> \
 _TNY_API auto operator SYM (const tensor<T,E,L,O> & a, S s) { return _md::oops(a, s, OP{}); }
 _TNY_MD_SCALOP(+, _md::add)
 _TNY_MD_SCALOP(-, _md::sub)
@@ -653,35 +653,35 @@ _TNY_MD_SCALOP(/, _md::div)
 #undef _TNY_MD_SCALOP
 // scalar (op) tensor. + and * are commutative; - and / need the reversed op
 // (s - a, s / a) so `2.0 - a` and `1.0 / a` do the right thing.
-template <class S, class T,class E,class L,own O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
+template <class S, class T,class E,class L,storage O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
 _TNY_API auto operator+(S s, const tensor<T,E,L,O> & a) { return _md::oops(a, s, _md::add{}); }
-template <class S, class T,class E,class L,own O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
+template <class S, class T,class E,class L,storage O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
 _TNY_API auto operator*(S s, const tensor<T,E,L,O> & a) { return _md::oops(a, s, _md::mul{}); }
-template <class S, class T,class E,class L,own O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
+template <class S, class T,class E,class L,storage O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
 _TNY_API auto operator-(S s, const tensor<T,E,L,O> & a) { return _md::oops(a, s, _md::rsub{}); }
-template <class S, class T,class E,class L,own O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
+template <class S, class T,class E,class L,storage O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
 _TNY_API auto operator/(S s, const tensor<T,E,L,O> & a) { return _md::oops(a, s, _md::rdiv{}); }
 
 // unary minus -> a fresh negated tensor.
-template <class T,class E,class L,own O>
+template <class T,class E,class L,storage O>
 _TNY_API auto operator-(const tensor<T,E,L,O> & a) { return _md::uop_out(a, _md::u_neg{}); }
 
 /* --- bitwise operators (INTEGER element types only) --------------- *
  * Out-of-place & | ^ (tensor or scalar rhs), unary ~, and in-place
  * &= |= ^= (free compound-assignment; tensor rhs broadcasts).         */
 #define _TNY_MD_BITOP(SYM, OP)                                                                     \
-template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob,                    \
+template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,                    \
           cs::enable_if_t<cs::is_integral<Ta>::value && cs::is_integral<Tb>::value, int> = 0>      \
 _TNY_API auto operator SYM (const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b)         \
 { return _md::oop(a, b, _md::OP{}); }                                                              \
-template <class T,class E,class L,own O, class S,                                                  \
+template <class T,class E,class L,storage O, class S,                                                  \
           cs::enable_if_t<cs::is_integral<T>::value && cs::is_integral<S>::value, int> = 0>        \
 _TNY_API auto operator SYM (const tensor<T,E,L,O> & a, S s) { return _md::oops(a, s, _md::OP{}); } \
-template <class T,class E,class L,own O, class B,                                                  \
+template <class T,class E,class L,storage O, class B,                                                  \
           cs::enable_if_t<cs::is_integral<T>::value && !cs::is_arithmetic<B>::value, int> = 0>     \
 _TNY_API tensor<T,E,L,O> & operator SYM##= (tensor<T,E,L,O> & a, const B & b)                      \
 { _md::bzip(a, a, b, _md::OP{}); return a; }                                                       \
-template <class T,class E,class L,own O, class S,                                                  \
+template <class T,class E,class L,storage O, class S,                                                  \
           cs::enable_if_t<cs::is_integral<T>::value && cs::is_integral<S>::value, int> = 0>        \
 _TNY_API tensor<T,E,L,O> & operator SYM##= (tensor<T,E,L,O> & a, S s)                              \
 { _md::scal(a, static_cast<T>(s), _md::OP{}); return a; }
@@ -690,19 +690,19 @@ _TNY_MD_BITOP(|, b_or)
 _TNY_MD_BITOP(^, b_xor)
 #undef _TNY_MD_BITOP
 // unary bitwise NOT -> a fresh tensor.
-template <class T,class E,class L,own O, cs::enable_if_t<cs::is_integral<T>::value, int> = 0>
+template <class T,class E,class L,storage O, cs::enable_if_t<cs::is_integral<T>::value, int> = 0>
 _TNY_API auto operator~(const tensor<T,E,L,O> & a) { return _md::uop_out(a, _md::u_bnot{}); }
 
 /* --- comparison operators -> a bool tensor (broadcast) ------------- *
  * tensor cmp tensor, tensor cmp scalar, and scalar cmp tensor (the last via the
  * reversed op: `s < a` == `a > s`). == and != are their own reverse.            */
 #define _TNY_MD_CMPOP(SYM, OP, ROP)                                                               \
-template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>                   \
+template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>                   \
 _TNY_API auto operator SYM (const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b)        \
 { return _md::oop_cmp(a, b, _md::OP{}); }                                                         \
-template <class T,class E,class L,own O, class S, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0> \
+template <class T,class E,class L,storage O, class S, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0> \
 _TNY_API auto operator SYM (const tensor<T,E,L,O> & a, S s) { return _md::oops_cmp(a, s, _md::OP{}); }   \
-template <class S, class T,class E,class L,own O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0> \
+template <class S, class T,class E,class L,storage O, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0> \
 _TNY_API auto operator SYM (S s, const tensor<T,E,L,O> & a) { return _md::oops_cmp(a, s, _md::ROP{}); }
 _TNY_MD_CMPOP(==, c_eq, c_eq)
 _TNY_MD_CMPOP(!=, c_ne, c_ne)
@@ -714,7 +714,7 @@ _TNY_MD_CMPOP(>=, c_ge, c_le)
 
 /* --- in-place unary methods --------------------------------------- */
 #define _TNY_MD_UNARY_(NAME, F)                                                                   \
-template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::NAME()        \
+template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::NAME()        \
 { _md::unary(*this, F{}); return *this; }
 _TNY_MD_UNARY_(neg_,   _md::u_neg)
 _TNY_MD_UNARY_(abs_,   _md::u_abs)
@@ -730,17 +730,17 @@ _TNY_MD_UNARY_(round_, _md::u_round)
 _TNY_MD_UNARY_(trunc_, _md::u_trunc)
 _TNY_MD_UNARY_(sign_,  _md::u_sign)
 #undef _TNY_MD_UNARY_
-template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::pow_(T e)
+template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::pow_(T e)
 { _md::scal(*this, e, _md::pw{}); return *this; }
-template <class T,class E,class L,own O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::clamp_(T lo, T hi)
+template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::clamp_(T lo, T hi)
 { _md::unary(*this, _md::u_clamp{ static_cast<double>(lo), static_cast<double>(hi) }); return *this; }
 
 /* --- generic elementwise with a user functor --------------------- */
-template <class T,class E,class L,own O> template <class F>
+template <class T,class E,class L,storage O> template <class F>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::map_(F f) { _md::unary(*this, f); return *this; }
-template <class T,class E,class L,own O> template <class G, class B>
+template <class T,class E,class L,storage O> template <class G, class B>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::zip_with_(G g, const B & b) { _md::bzip(*this, *this, b, g); return *this; }
-template <class T,class E,class L,own O> template <class F>
+template <class T,class E,class L,storage O> template <class F>
 _TNY_API auto tensor<T,E,L,O>::map(F f) const { return _md::uop_out(*this, f); }
 
 /* ------------------------------------------------------------------ *
@@ -813,7 +813,7 @@ template <class R> _TNY_API R _reduce_seed_highest() {
 /** @brief Sum of all elements (empty -> 0). Accumulates in the reduce type
  *         (`double` for small floats), result cast to `T`; `sum<Acc>(a)` returns
  *         `Acc`. */
-template <class Acc = void, class T, class E, class L, own O>
+template <class Acc = void, class T, class E, class L, storage O>
 _TNY_API auto sum(const tensor<T,E,L,O> & a) {
     using R = _acc_t<Acc, T>;
     return static_cast<_reduce_result_t<Acc,T>>(
@@ -821,7 +821,7 @@ _TNY_API auto sum(const tensor<T,E,L,O> & a) {
 }
 /** @brief Product of all elements (empty -> 1). Accumulates in the reduce type,
  *         result cast to `T`; `prod<Acc>(a)` returns `Acc`. */
-template <class Acc = void, class T, class E, class L, own O>
+template <class Acc = void, class T, class E, class L, storage O>
 _TNY_API auto prod(const tensor<T,E,L,O> & a) {
     using R = _acc_t<Acc, T>;
     return static_cast<_reduce_result_t<Acc,T>>(
@@ -829,7 +829,7 @@ _TNY_API auto prod(const tensor<T,E,L,O> & a) {
 }
 /** @brief Maximum element. Requires a non-empty tensor. Result type `T`
  *         (`max<Acc>(a)` returns `Acc`). */
-template <class Acc = void, class T, class E, class L, own O>
+template <class Acc = void, class T, class E, class L, storage O>
 _TNY_API auto max(const tensor<T,E,L,O> & a) {
     using R = _acc_t<Acc, T>;
     return static_cast<_reduce_result_t<Acc,T>>(
@@ -837,7 +837,7 @@ _TNY_API auto max(const tensor<T,E,L,O> & a) {
 }
 /** @brief Minimum element. Requires a non-empty tensor. Result type `T`
  *         (`min<Acc>(a)` returns `Acc`). */
-template <class Acc = void, class T, class E, class L, own O>
+template <class Acc = void, class T, class E, class L, storage O>
 _TNY_API auto min(const tensor<T,E,L,O> & a) {
     using R = _acc_t<Acc, T>;
     return static_cast<_reduce_result_t<Acc,T>>(
@@ -845,9 +845,9 @@ _TNY_API auto min(const tensor<T,E,L,O> & a) {
 }
 
 /* --- boolean reductions (members; chain after a comparison) -------- */
-template <class T,class E,class L,own O> _TNY_API bool tensor<T,E,L,O>::all() const
+template <class T,class E,class L,storage O> _TNY_API bool tensor<T,E,L,O>::all() const
 { return _md::reduce_<bool>(*this, true,  _md::r_all{}, cs::make_index_sequence<rank()>{}); }
-template <class T,class E,class L,own O> _TNY_API bool tensor<T,E,L,O>::any() const
+template <class T,class E,class L,storage O> _TNY_API bool tensor<T,E,L,O>::any() const
 { return _md::reduce_<bool>(*this, false, _md::r_any{}, cs::make_index_sequence<rank()>{}); }
 
 /* --- axis reductions: reduce over the named axes -> a lower-rank tensor ---- *
@@ -866,16 +866,16 @@ template <class T,class E,class L,own O> _TNY_API bool tensor<T,E,L,O>::any() co
 // dynamic (heap, host-only) to match `axreduce`; the result is accumulated in `R`
 // then cast to the public element type by `reduce_to`.
 #define _TNY_MD_AXRED(NAME, INIT, OP)                                                              \
-template <long... Axes, class T,class E,class L,own O, class R = reduce_type_t<T>,                 \
+template <long... Axes, class T,class E,class L,storage O, class R = reduce_type_t<T>,                 \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
 _TNY_API  auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<T>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); } \
-template <long... Axes, class T,class E,class L,own O, class R = reduce_type_t<T>,                 \
+template <long... Axes, class T,class E,class L,storage O, class R = reduce_type_t<T>,                 \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
 _TNY_HOST auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<T>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); } \
-template <class Acc, long... Axes, class T,class E,class L,own O, class R = Acc,                   \
+template <class Acc, long... Axes, class T,class E,class L,storage O, class R = Acc,                   \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
 _TNY_API  auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); } \
-template <class Acc, long... Axes, class T,class E,class L,own O, class R = Acc,                   \
+template <class Acc, long... Axes, class T,class E,class L,storage O, class R = Acc,                   \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
 _TNY_HOST auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); }
 _TNY_MD_AXRED(sum,  R(0),                          r_add)
@@ -889,7 +889,7 @@ _TNY_MD_AXRED(min,  _reduce_seed_highest<R>(), r_min)
  *         to `T`. For an INTEGER `T` the result element type is `double` (numpy:
  *         integer mean is float64; divides in `double`, not truncating). `mean<Acc,
  *         Axes...>(a)` makes `Acc` both the accumulator and result type. */
-template <long... Axes, class T,class E,class L,own O, class R = reduce_type_t<T>,
+template <long... Axes, class T,class E,class L,storage O, class R = reduce_type_t<T>,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
 _TNY_API  auto mean(const tensor<T,E,L,O> & a) {
     auto s = sum<R, Axes...>(a);                                          // sum in the (wide) reduce type
@@ -899,7 +899,7 @@ _TNY_API  auto mean(const tensor<T,E,L,O> & a) {
         o.div_(static_cast<double>(cnt)); return o;
     } else { s.div_(static_cast<R>(cnt)); return _md::reduce_to<T>(static_cast<decltype(s)&&>(s)); }
 }
-template <long... Axes, class T,class E,class L,own O, class R = reduce_type_t<T>,
+template <long... Axes, class T,class E,class L,storage O, class R = reduce_type_t<T>,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
 _TNY_HOST auto mean(const tensor<T,E,L,O> & a) {
     auto s = sum<R, Axes...>(a);                                          // sum in the (wide) reduce type
@@ -909,12 +909,12 @@ _TNY_HOST auto mean(const tensor<T,E,L,O> & a) {
         o.div_(static_cast<double>(cnt)); return o;
     } else { s.div_(static_cast<R>(cnt)); return _md::reduce_to<T>(static_cast<decltype(s)&&>(s)); }
 }
-template <class Acc, long... Axes, class T,class E,class L,own O,
+template <class Acc, long... Axes, class T,class E,class L,storage O,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
 _TNY_API  auto mean(const tensor<T,E,L,O> & a) {
     auto s = sum<Acc, Axes...>(a); s.div_(static_cast<Acc>(a.numel() / s.numel())); return s;
 }
-template <class Acc, long... Axes, class T,class E,class L,own O,
+template <class Acc, long... Axes, class T,class E,class L,storage O,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
 _TNY_HOST auto mean(const tensor<T,E,L,O> & a) {
     auto s = sum<Acc, Axes...>(a); s.div_(static_cast<Acc>(a.numel() / s.numel())); return s;
@@ -923,7 +923,7 @@ _TNY_HOST auto mean(const tensor<T,E,L,O> & a) {
 /** @brief Inner product over matching extents. Accumulates in the reduce type of
  *         the promoted element type (`double` for small floats), result cast to
  *         `promote(Ta,Tb)`; `dot<Acc>(a, b)` returns `Acc`. */
-template <class Acc = void, class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
 _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
     static_assert(tensor<Ta,Ea,La,Oa>::rank() == tensor<Tb,Eb,Lb,Ob>::rank(), "dot: rank mismatch");
     static_assert(_md::ext_static_eq<Ea, Eb>(cs::make_index_sequence<Ea::rank()>{}),
@@ -935,7 +935,7 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) 
 
 /** @brief True if every element satisfies `|a-b| <= atol + rtol*|b|` (numpy
  *         `allclose`; broadcasts, computes in the compute type). */
-template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>
+template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
 _TNY_API bool allclose(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b,
                        double rtol = 1e-5, double atol = 1e-8) {
     constexpr cs::size_t Rk = _md::bc_rank(Ea::rank(), Eb::rank());   // broadcast (left-pad)
@@ -947,7 +947,7 @@ _TNY_API bool allclose(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> 
 
 /* --- out-of-place unary free functions ---------------------------- */
 #define _TNY_MD_UNARY(NAME, F)                                                                    \
-template <class T,class E,class L,own O> _TNY_API auto NAME(const tensor<T,E,L,O> & a)             \
+template <class T,class E,class L,storage O> _TNY_API auto NAME(const tensor<T,E,L,O> & a)             \
 { return _md::uop_out(a, F{}); }
 _TNY_MD_UNARY(neg,   _md::u_neg)
 _TNY_MD_UNARY(abs,   _md::u_abs)
@@ -965,16 +965,16 @@ _TNY_MD_UNARY(sign,  _md::u_sign)
 #undef _TNY_MD_UNARY
 
 /* --- binary minimum/maximum (broadcast) + clamp -> new tensor ------ */
-template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>
+template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
 _TNY_API auto minimum(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) { return _md::oop(a, b, _md::b_min{}); }
-template <class Ta,class Ea,class La,own Oa, class Tb,class Eb,class Lb,own Ob>
+template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
 _TNY_API auto maximum(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) { return _md::oop(a, b, _md::b_max{}); }
-template <class T,class E,class L,own O, class S, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
+template <class T,class E,class L,storage O, class S, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
 _TNY_API auto minimum(const tensor<T,E,L,O> & a, S s) { return _md::oops(a, s, _md::b_min{}); }
-template <class T,class E,class L,own O, class S, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
+template <class T,class E,class L,storage O, class S, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
 _TNY_API auto maximum(const tensor<T,E,L,O> & a, S s) { return _md::oops(a, s, _md::b_max{}); }
 /** @brief `clamp(a, lo, hi)` -> a new tensor with each element clamped. */
-template <class T,class E,class L,own O>
+template <class T,class E,class L,storage O>
 _TNY_API auto clamp(const tensor<T,E,L,O> & a, T lo, T hi) { return a.map(_md::u_clamp{ static_cast<double>(lo), static_cast<double>(hi) }); }
 
 /** @brief Arithmetic mean of all elements. For a floating `T`, accumulates in the
@@ -982,7 +982,7 @@ _TNY_API auto clamp(const tensor<T,E,L,O> & a, T lo, T hi) { return a.map(_md::u
  *         For an INTEGER `T` the result is `double` (numpy: integer mean is
  *         float64; the division runs in `double`, not truncating integer division).
  *         `mean<Acc>(a)` makes `Acc` both the accumulator and the result type. */
-template <class Acc = void, class T, class E, class L, own O>
+template <class Acc = void, class T, class E, class L, storage O>
 _TNY_API auto mean(const tensor<T,E,L,O> & a) {
     using Res = _reduce_result_t<Acc, _mean_result_t<T>>;   // result dtype (double for integer T)
     using R   = _acc_t<Acc, T>;                             // sum accumulator (wide for narrow ints)

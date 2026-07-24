@@ -39,7 +39,7 @@ read), and to see how the existing csrc is structured and built.
 
 ## 2. What teeny gives you (idiom playbook)
 
-teeny is one tensor type, `tensor<T, Extents, Layout, own>`, with per-dimension
+teeny is one tensor type, `tensor<T, Extents, Layout, storage>`, with per-dimension
 static/dynamic shape and strides on `cuda::std::mdspan`. The kernel-relevant
 surface:
 

@@ -11,9 +11,9 @@ _TNY_NAMESPACE_BEGIN(tny)
 namespace cs = cuda::std;
 
 /** @brief A fixed-rank, fully-dynamic, arbitrarily-strided tensor view. `O` is the
- *         memory space of the view — `own::view` (host) by default, `own::gpu_view`
+ *         memory space of the view — `storage::view` (host) by default, `storage::gpu_view`
  *         when the pointer lives in device memory (see `anyrank`'s `Space`). */
-template <class T, class offset_t, cs::size_t R, own O = own::view>
+template <class T, class offset_t, cs::size_t R, storage O = storage::view>
 using dyn_tensor = tensor<T, cs::dextents<offset_t, R>, cs::layout_stride, O>;
 
 // The shape/stride store of an `anyrank` is itself a 1-D teeny tensor:
@@ -24,11 +24,11 @@ using dyn_tensor = tensor<T, cs::dextents<offset_t, R>, cs::layout_stride, O>;
 //     DLPack tensor's), so the carrier wraps them with NO copy. HOST use only —
 //     those pointers are not valid inside a device kernel.
 template <class offset_t, cs::size_t N>
-using _meta_store = tensor<offset_t, cs::extents<offset_t, N>, ccontiguous, own::stack>;
+using _meta_store = tensor<offset_t, cs::extents<offset_t, N>, ccontiguous, storage::stack>;
 template <class offset_t>
-using _meta_view = tensor<offset_t, cs::dextents<offset_t, 1>, ccontiguous, own::view>;
+using _meta_view = tensor<offset_t, cs::dextents<offset_t, 1>, ccontiguous, storage::view>;
 
-template <class T, class offset_t, class Meta, own Space, cs::size_t Sr> struct anyrank_front;  // fwd
+template <class T, class offset_t, class Meta, storage Space, cs::size_t Sr> struct anyrank_front;  // fwd
 
 /** @brief Tag for `as_anyrank(..., copy_meta)`: COPY shape/stride into an inline,
  *         device-passable store instead of wrapping the caller's arrays. Named
@@ -66,7 +66,7 @@ constexpr copy_meta_t copy_meta{};
  * view instead.
  */
 template <class T, class offset_t = cs::int64_t, class Meta = _meta_store<offset_t, TNY_MAX_RANK>,
-          own Space = own::view>
+          storage Space = storage::view>
 struct anyrank {
     T *  data = nullptr;
     Meta shape{};      // 1-D tensor of sizes   (inline, or a view of external memory)
@@ -76,12 +76,12 @@ struct anyrank {
     // The MEMORY SPACE the `data` pointer lives in (a compile-time tag, set at the
     // boundary — `from_dlpack` from the DLPack `device`, `as_anyrank<Space>` by
     // hand). `fixed()`/`peel_front` tag every view they hand out with the matching
-    // view kind (`own::view` for a host pointer, `own::gpu_view` for device), so a
+    // view kind (`storage::view` for a host pointer, `storage::gpu_view` for device), so a
     // `kDLCUDA` capsule no longer erases into a host-tagged view over device memory.
-    static constexpr own  space     = Space;
-    static constexpr bool is_device = own_is_device(Space);
+    static constexpr storage  space     = Space;
+    static constexpr bool is_device = storage_is_device(Space);
     // the view kind produced by fixed()/peel_front — preserves the carrier's space.
-    static constexpr own  view_space = own_view_of(Space);
+    static constexpr storage  view_space = storage_view_of(Space);
 
     // Largest rank the store can hold: the inline store's static length, else
     // (a view store) the compile-time dispatch bound TNY_MAX_RANK.
@@ -170,7 +170,7 @@ struct anyrank {
 /** @brief A range of fixed-rank-`Sr` sub-views over an `anyrank`'s batch axes.
  *         Inherits the carrier's `Space`, so each cell is a host or `gpu_view`
  *         view accordingly. */
-template <class T, class offset_t, class Meta, own Space, cs::size_t Sr>
+template <class T, class offset_t, class Meta, storage Space, cs::size_t Sr>
 struct anyrank_front {
     anyrank<T, offset_t, Meta, Space> src;
 
@@ -196,11 +196,11 @@ struct anyrank_front {
  *         below). DLPack strides are in ELEMENTS; numpy `__array_interface__` in
  *         BYTES (divide by the itemsize first).
  *
- *         `Space` is the memory space of `data` (default `own::view` = host); pass
- *         `as_anyrank<own::gpu_view>(...)` for a device pointer so the views peeled
+ *         `Space` is the memory space of `data` (default `storage::view` = host); pass
+ *         `as_anyrank<storage::gpu_view>(...)` for a device pointer so the views peeled
  *         off it are `gpu_view`-tagged. (The shape/stride metadata arrays are host
  *         either way — `Space` labels the DATA, not the metadata store.) */
-template <own Space = own::view, class T, class offset_t>
+template <storage Space = storage::view, class T, class offset_t>
 _TNY_HOST anyrank<T, offset_t, _meta_view<offset_t>, Space>
 as_anyrank(T * data, offset_t * shape, offset_t * stride, int ndim) {
     static_assert(!cs::is_const<offset_t>::value,
@@ -219,7 +219,7 @@ as_anyrank(T * data, offset_t * shape, offset_t * stride, int ndim) {
  *         passed into a CUDA kernel by value (peel on device). `MaxRank` sets the
  *         inline capacity (default `TNY_MAX_RANK`); pass it as
  *         `as_anyrank<64>(..., copy_meta)`. Accepts `const` arrays (it copies). */
-template <cs::size_t MaxRank = TNY_MAX_RANK, own Space = own::view, class T, class offset_t>
+template <cs::size_t MaxRank = TNY_MAX_RANK, storage Space = storage::view, class T, class offset_t>
 _TNY_HOST anyrank<T, offset_t, _meta_store<offset_t, MaxRank>, Space>
 as_anyrank(T * data, const offset_t * shape, const offset_t * stride, int ndim, copy_meta_t) {
     anyrank<T, offset_t, _meta_store<offset_t, MaxRank>, Space> t;
@@ -234,7 +234,7 @@ as_anyrank(T * data, const offset_t * shape, const offset_t * stride, int ndim, 
 }
 
 namespace _detail {
-template <cs::size_t R, class T, class offset_t, class Meta, own Space, class F>
+template <cs::size_t R, class T, class offset_t, class Meta, storage Space, class F>
 _TNY_HOST bool dispatch_from(const anyrank<T, offset_t, Meta, Space> & t, F & f) {
     if constexpr (R <= anyrank<T, offset_t, Meta, Space>::max_rank) {
         if (t.ndim == static_cast<int>(R)) { f(t.template fixed<R>()); return true; }
@@ -255,7 +255,7 @@ _TNY_HOST bool dispatch_from(const anyrank<T, offset_t, Meta, Space> & t, F & f)
  *
  *     dispatch_rank(as_anyrank(data, size, stride, ndim), [&](auto v){ kernel(v); });
  */
-template <class T, class offset_t, class Meta, own Space, class F>
+template <class T, class offset_t, class Meta, storage Space, class F>
 _TNY_HOST bool dispatch_rank(const anyrank<T, offset_t, Meta, Space> & t, F && f) {
     return _detail::dispatch_from<0>(t, f);   // R=0 handles a rank-0 (scalar) ndarray
 }

@@ -147,16 +147,16 @@ auto d = gpu<float, shape<-1,3,3>>(shape<-1,3,3>{n});
 auto v = d.view();  // view over d's memory — pass THIS to the kernel
 ```
 
-## The `own` template parameter
+## The `storage` template parameter
 
 The variants are one class template with a different final argument:
 
 ```cpp
-template <class T, class Extents, class Layout = ccontiguous, own O = own::view>
+template <class T, class Extents, class Layout = ccontiguous, storage O = storage::view>
 struct tensor;
 ```
 
-`own` is `{ view, stack, heap, gpu, pinned, mapped, gpu_view }` (`gpu_view` is a
+`storage` is `{ view, stack, heap, gpu, pinned, mapped, gpu_view }` (`gpu_view` is a
 non-owning view of *device* memory — what slicing/permuting a `gpu` tensor
 yields). Rarely named directly —
 use the aliases (`view`/`local`/`owned`) and factories (`make_*`,

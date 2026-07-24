@@ -15,7 +15,7 @@ int main()
     B(0,0)=10;B(0,1)=20;B(1,0)=30;B(1,1)=40;
 
     auto C = A + B;
-    static_assert(decltype(C)::ownership == own::stack, "out-of-place result is stack-owned");
+    static_assert(decltype(C)::ownership == storage::stack, "out-of-place result is stack-owned");
     static_assert(decltype(C)::is_static, "result extent statically known");
     static_assert(sizeof(C) == 4*sizeof(double), "result stores exactly its data");
     if (C(0,0)!=11 || C(0,1)!=22 || C(1,0)!=33 || C(1,1)!=44) return 1;
@@ -73,7 +73,7 @@ int main()
     Da(0,0)=1; Da(0,1)=2; Da(1,0)=3; Da(1,1)=4;
     Db(0,0)=10;Db(0,1)=20;Db(1,0)=30;Db(1,1)=40;
     auto Dc = Da + Db;                             // -> heap-owned (host)
-    static_assert(decltype(Dc)::ownership == own::heap, "dynamic out-of-place -> heap");
+    static_assert(decltype(Dc)::ownership == storage::heap, "dynamic out-of-place -> heap");
     if (Dc(0,0)!=11 || Dc(1,1)!=44) return 13;
 
     return 0;

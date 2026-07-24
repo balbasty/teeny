@@ -29,57 +29,57 @@ namespace cs = cuda::std;
 //                 view of page-locked host memory keeps its space (both are
 //                 host-dereferenceable, so they behave like `view` everywhere
 //                 except the DLPack device label, which stays `kDLCUDAHost`).
-// NB when adding an `own` kind, update EVERY classifier so it isn't silently
-// misclassified as a plain host view: `own_is_owning`, `own_is_view`,
-// `own_is_device`, `own_view_of` (below), and `_dl::device_of` (dlpack.h) — plus a
-// `storage<T, own::NEW, N>` specialization (its absence is at least a hard error).
-enum class own { view, stack, heap, gpu, pinned, mapped, gpu_view, pinned_view, mapped_view };
+// NB when adding a `storage` kind, update EVERY classifier so it isn't silently
+// misclassified as a plain host view: `storage_is_owning`, `storage_is_view`,
+// `storage_is_device`, `storage_view_of` (below), and `_dl::device_of` (dlpack.h) — plus a
+// `storage_policy<T, storage::NEW, N>` specialization (its absence is at least a hard error).
+enum class storage { view, stack, heap, gpu, pinned, mapped, gpu_view, pinned_view, mapped_view };
 
 /** @brief Whether the mode owns (and therefore allocates) its storage. */
-_TNY_API constexpr bool own_is_owning(own o) noexcept {
-    return o == own::heap || o == own::gpu || o == own::pinned || o == own::mapped;
+_TNY_API constexpr bool storage_is_owning(storage o) noexcept {
+    return o == storage::heap || o == storage::gpu || o == storage::pinned || o == storage::mapped;
 }
 /** @brief Whether the mode is a non-owning view (`view`/`gpu_view`/`pinned_view`/
  *         `mapped_view`) — the pointer-wrapping modes (vs `stack`'s inline array). */
-_TNY_API constexpr bool own_is_view(own o) noexcept {
-    return o == own::view || o == own::gpu_view
-        || o == own::pinned_view || o == own::mapped_view;
+_TNY_API constexpr bool storage_is_view(storage o) noexcept {
+    return o == storage::view || o == storage::gpu_view
+        || o == storage::pinned_view || o == storage::mapped_view;
 }
 /** @brief Whether the storage lives in device (GPU) memory (owning or view). */
-_TNY_API constexpr bool own_is_device(own o) noexcept {
-    return o == own::gpu || o == own::gpu_view;
+_TNY_API constexpr bool storage_is_device(storage o) noexcept {
+    return o == storage::gpu || o == storage::gpu_view;
 }
 /** @brief Whether the storage is dereferenceable from the host. */
-_TNY_API constexpr bool own_is_host_accessible(own o) noexcept {
-    return !own_is_device(o);
+_TNY_API constexpr bool storage_is_host_accessible(storage o) noexcept {
+    return !storage_is_device(o);
 }
 /** @brief The non-owning VIEW kind that preserves a source's memory space: a
  *         device source (`gpu`/`gpu_view`) -> `gpu_view`, a `pinned`/`mapped`
  *         source -> `pinned_view`/`mapped_view`, anything else -> `view`. Every
  *         view-producing op (slice / permute / peel / reshape / at) tags its
  *         result with this so a view never loses (or misreports) its space. */
-_TNY_API constexpr own own_view_of(own o) noexcept {
-    return own_is_device(o)                            ? own::gpu_view
-         : (o == own::pinned || o == own::pinned_view) ? own::pinned_view
-         : (o == own::mapped || o == own::mapped_view) ? own::mapped_view
-                                                       : own::view;
+_TNY_API constexpr storage storage_view_of(storage o) noexcept {
+    return storage_is_device(o)                            ? storage::gpu_view
+         : (o == storage::pinned || o == storage::pinned_view) ? storage::pinned_view
+         : (o == storage::mapped || o == storage::mapped_view) ? storage::mapped_view
+                                                       : storage::view;
 }
 
 /** @brief Factory sentinel meaning "deduce the ownership from the shape" — a fully
  *         static shape -> `stack` (host+device), any dynamic extent -> `heap`
  *         (host). It is the default backend of `empty` (and the creation
  *         factories), out of the enum's normal range so it never names storage. */
-inline constexpr own own_deduce = static_cast<own>(-1);
+inline constexpr storage storage_deduce = static_cast<storage>(-1);
 /** @brief Value-tag carrier for an ownership mode, for the factories' value-tag
- *         backend form, e.g. `empty<T>(shape, own_c<own::gpu>{})`. */
-template <own O> using own_c = cs::integral_constant<own, O>;
-/** @brief A ready-made `own_c<O>` VALUE — the no-braces spelling of the value tag:
- *         `wrap(p, e, own_v<own::gpu>)` instead of `own_c<own::gpu>{}`. */
-template <own O> inline constexpr own_c<O> own_v{};
+ *         backend form, e.g. `empty<T>(shape, storage_c<storage::gpu>{})`. */
+template <storage O> using storage_c = cs::integral_constant<storage, O>;
+/** @brief A ready-made `storage_c<O>` VALUE — the no-braces spelling of the value tag:
+ *         `wrap(p, e, storage_v<storage::gpu>)` instead of `storage_c<storage::gpu>{}`. */
+template <storage O> inline constexpr storage_c<O> storage_v{};
 /** @brief Resolve a factory's ownership: an explicitly named mode passes through,
- *         `own_deduce` becomes `stack` for a static shape / `heap` for a dynamic one. */
-_TNY_API constexpr own own_resolve(own o, bool static_shape) noexcept {
-    return o != own_deduce ? o : (static_shape ? own::stack : own::heap);
+ *         `storage_deduce` becomes `stack` for a static shape / `heap` for a dynamic one. */
+_TNY_API constexpr storage storage_resolve(storage o, bool static_shape) noexcept {
+    return o != storage_deduce ? o : (static_shape ? storage::stack : storage::heap);
 }
 
 /* ------------------------------------------------------------------ *
@@ -94,7 +94,7 @@ struct cpp_alloc {
 
 /**
  * @brief Generic owning storage (move-only, no ref-counting), parameterised by
- *        an allocator policy. Shared by all owning `own` modes.
+ *        an allocator policy. Shared by all owning `storage` modes.
  */
 template <class T, class Alloc>
 struct owning_storage {
@@ -114,14 +114,14 @@ struct owning_storage {
 };
 
 /* ------------------------------------------------------------------ *
- *     Storage policy per `own` mode                                  *
+ *     Storage policy per `storage` mode                                  *
  * ------------------------------------------------------------------ */
 
-template <class T, own O, cs::size_t N>
-struct storage;
+template <class T, storage O, cs::size_t N>
+struct storage_policy;
 
 /* --- the four non-owning VIEW kinds all wrap a bare pointer; they differ only in
- *     the `own` tag they carry (view = host; gpu_view = device memory; pinned_view
+ *     the `storage` tag they carry (view = host; gpu_view = device memory; pinned_view
  *     / mapped_view = page-locked host memory, so DLPack labels them kDLCUDAHost).
  *     Share one storage so a tweak can't land in three copies and miss the fourth.
  *     Trivially copyable (single pointer, defaulted specials) -> kernel-passable. */
@@ -132,14 +132,14 @@ struct ptr_storage {
     _TNY_API constexpr ptr_storage(T * q) noexcept : p(q) {}
     _TNY_API constexpr T * data() const noexcept { return p; }
 };
-template <class T, cs::size_t N> struct storage<T, own::view,        N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
-template <class T, cs::size_t N> struct storage<T, own::gpu_view,    N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
-template <class T, cs::size_t N> struct storage<T, own::pinned_view, N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
-template <class T, cs::size_t N> struct storage<T, own::mapped_view, N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
+template <class T, cs::size_t N> struct storage_policy<T, storage::view,        N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
+template <class T, cs::size_t N> struct storage_policy<T, storage::gpu_view,    N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
+template <class T, cs::size_t N> struct storage_policy<T, storage::pinned_view, N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
+template <class T, cs::size_t N> struct storage_policy<T, storage::mapped_view, N> : ptr_storage<T> { using ptr_storage<T>::ptr_storage; };
 
 /* --- stack: inline array (fully-static shape) --------------------- */
 template <class T, cs::size_t N>
-struct storage<T, own::stack, N> {
+struct storage_policy<T, storage::stack, N> {
     cs::array<T, N> a{};
     _TNY_API constexpr T *       data()       noexcept { return a.data(); }
     _TNY_API constexpr const T * data() const noexcept { return a.data(); }
@@ -147,7 +147,7 @@ struct storage<T, own::stack, N> {
 
 /* --- heap: C++ new/delete (host) ---------------------------------- */
 template <class T, cs::size_t N>
-struct storage<T, own::heap, N> : owning_storage<T, cpp_alloc> {
+struct storage_policy<T, storage::heap, N> : owning_storage<T, cpp_alloc> {
     using owning_storage<T, cpp_alloc>::owning_storage;
 };
 

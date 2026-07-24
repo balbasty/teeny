@@ -12,7 +12,7 @@ Everything is in `namespace tny`. `namespace cs = cuda::std`. Include
 ## The tensor type
 
 ```cpp
-template <class T, class Shape, class Layout = ccontiguous, own O = own::view>
+template <class T, class Shape, class Layout = ccontiguous, storage O = storage::view>
 struct tensor;  // Shape = any cuda::std::extents (spell it shape<...>); Layout: ccontiguous/fcontiguous/...
 ```
 
@@ -39,18 +39,18 @@ as_tensor(any_mdspan);                        // wrap an mdspan/submdspan result
 
 make_view(ptr, shape);           // alias of wrap that deduces the extents type
 empty<T>(shape);                 // UNINITIALISED; deduces stack (static) / heap (dynamic)
-empty<T, own::gpu>(shape);       // ...or name a backend: stack/heap/gpu/pinned/mapped
-empty<T>(shape, own_c<own::gpu>{});   // value-tag backend form (same result)
-make_local<T>(shape);  make_heap<T>(shape);            // thin spellings of empty<T,own::stack/heap>
-make_gpu<T>(shape); make_pinned<T>(shape); make_mapped<T>(shape);   // empty<T,own::gpu/...>; T defaults to float
+empty<T, storage::gpu>(shape);       // ...or name a backend: stack/heap/gpu/pinned/mapped
+empty<T>(shape, storage_c<storage::gpu>{});   // value-tag backend form (same result)
+make_local<T>(shape);  make_heap<T>(shape);            // thin spellings of empty<T,storage::stack/heap>
+make_gpu<T>(shape); make_pinned<T>(shape); make_mapped<T>(shape);   // empty<T,storage::gpu/...>; T defaults to float
 
 zeros<T>(shape);  ones<T>(shape);   // T defaults to float; static->stack, dyn->heap
 full(shape, v);                     // element type = the VALUE's type (full<T>(...) to force)
 arange<T>(n);                       // 1-D [0..n-1] (heap); T defaults to int64
 arange<T, N>();  arange<T>(Int<N>());  // static 1-D [0..N-1] (stack, folds)
-zeros<T, own::pinned>(shape);  arange<T>(n, own_c<own::pinned>{});   // ...or name a
+zeros<T, storage::pinned>(shape);  arange<T>(n, storage_c<storage::pinned>{});   // ...or name a
                     // host-accessible backend (stack/heap/pinned/mapped); a gpu fill
-                    // static_asserts -> use to<own::gpu>(zeros<T>(shape))
+                    // static_asserts -> use to<storage::gpu>(zeros<T>(shape))
 ```
 
 ---
@@ -134,7 +134,7 @@ x.recast<NewExtents>();               // reinterpret w/ a more-static same-rank 
 x.recast<NewExtents, ccontiguous>();  // ...AS contiguous (fold the strides; "I promise it's contiguous")
 x.recast(shape<...>{}, ccontiguous{}); // functional form (shape + layout, both may mix static/dynamic)
 x.to<T2>();                           // dtype convert (matching dtype -> no-copy borrow; else owning copy)
-to<own::gpu>(x);                      // memory-space move: to<Space,ET,Force>(x) (from <teeny/cuda.h>)
+to<storage::gpu>(x);                      // memory-space move: to<Space,ET,Force>(x) (from <teeny/cuda.h>)
 ```
 
 Axis template arguments are signed (negatives count from the back). **Every** view
