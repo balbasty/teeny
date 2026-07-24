@@ -73,5 +73,26 @@ int main()
     static_assert(decltype(bob)::ownership == storage::view, "chained .to<>() on a view stays a borrow");
     if (bob.data() != x.data()) return 11;
 
+    // ---- device-source guard (issue #126, finding #5): the dynamic-shape
+    //      clone()/to() copying overloads run copy_ on the HOST, so they
+    //      static_assert host-accessibility. A dynamic HOST tensor (view/heap)
+    //      is host-accessible -> both still compile and run correctly here. ----
+    double hb[6]; auto hv = wrap(hb, shape<-1,3>{2}); hv.iota_(0.0, 1.0);   // 0..5
+    auto hclone = hv.clone();                                  // dynamic host source -> heap clone
+    static_assert(decltype(hclone)::ownership == storage::heap, "dynamic host clone() -> heap");
+    if (hclone(1,2) != 5.0 || (void*)hclone.data() == (void*)hb) return 13;  // independent copy
+    hclone(0,0) = 77.0; if (hv(0,0) != 0.0) return 14;         // clone is independent of the source
+    auto hto = hv.to<double>();                                // same-dtype dynamic host -> heap copy? no: Force=false, same dtype -> borrow
+    static_assert(decltype(hto)::ownership == storage::view, "same-dtype dynamic host .to<>() borrows");
+    auto htoi = hv.to<int>();                                  // differing dtype -> host heap copy (guarded, host OK)
+    static_assert(decltype(htoi)::ownership == storage::heap, "dynamic host .to<int>() -> heap");
+    if (htoi(1,2) != 5) return 15;
+
+    // The guard rejects a DEVICE source at compile time. Left commented out
+    // because a static_assert failure cannot be exercised by the runtime suite;
+    // enabling either line is a compile error (use the free to<Space>(x) instead):
+    //   gpu<float, shape<-1,3>> g(shape<-1,3>{2}); auto bad = g.clone();
+    //   gpu<float, shape<-1,3>> g(shape<-1,3>{2}); auto bad = g.to<double>();
+
     return 0;
 }

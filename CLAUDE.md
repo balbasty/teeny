@@ -213,10 +213,14 @@ t.recast<shape<-1,3,3>>();      // re-type extents (recover static dims), PRESER
                                 //   Functional: recast(shape<...>{}, ccontiguous{}).
 t.is_dense();                   // dense block in SOME order (C/F/permuted); is_dense<L>() = exact L
 t.is_contiguous();              // C-order (numpy/pytorch default); is_contiguous<fcontiguous>() = F. alias of is_dense<L>
-t.clone();                      // materialise a dense row-major copy
+t.clone();                      // materialise a dense row-major copy. Copies on the HOST -> the dynamic-shape
+                                //   overload static_asserts host-accessibility; a gpu/gpu_view tensor must use
+                                //   the free to<storage::heap>(x)/to<storage::gpu>(x) (device-aware, <teeny/cuda.h>).
 t.to<double>();                 // pytorch-like dtype convert -> dense owning copy (static->stack, dyn->heap).
                                 //   NO-COPY when it already matches: t.to<>() (same dtype) borrows a read-only
                                 //   view; t.to<T,true>() forces a copy (clone() is the unconditional spelling).
+                                //   The copy runs on the HOST (dynamic overload static_asserts host-accessibility);
+                                //   convert a gpu/gpu_view tensor via the free to<Space>(x) instead.
 to<storage::gpu>(t);                // MEMORY-SPACE move (cuda.h free fn): to<Space,ET,Force>(x). Same no-copy/force
                                 //   rule — to<storage::gpu>(gpu_x) borrows; to<storage::gpu,void,true>(x) force-clones.
 t(all, slice(none,none,-1));    // reverse a range (negative step; a[::-1])
