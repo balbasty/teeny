@@ -779,7 +779,7 @@ private:
             // static extents where the source layout makes them derivable, else
             // carried from the actual runtime strides. Works for ANY source layout
             // (contiguous, transposed, broadcast, strided) and can never mis-address.
-            using SF = strides< _src_sstride<D, Layout, NewE>()... >;
+            using SF = ::tny::strides< _src_sstride<D, Layout, NewE>()... >;   // ::tny:: — strides() member shadows the type
             const index_type rstr[rank() ? rank() : 1] = { static_cast<index_type>(stride(D))... };
             return tensor<El, NewE, SF, own_view_of(O)>(p, _detail::fold_mapping<SF>(oe, rstr));
         } else if constexpr (cs::is_same<NewL, ccontiguous>::value || cs::is_same<NewL, fcontiguous>::value) {
@@ -789,7 +789,7 @@ private:
             // not actually contiguous in that order — the caller's promise. Emit the
             // folded `strides<...>` (contiguous products, static where the trailing
             // extents are), filling any dynamic slot from the contiguous mapping.
-            using SF = strides< _src_sstride<D, NewL, NewE>()... >;
+            using SF = ::tny::strides< _src_sstride<D, NewL, NewE>()... >;   // ::tny:: — strides() member shadows the type
             typename NewL::template mapping<NewE> cm(oe);
             const index_type rstr[rank() ? rank() : 1] = { static_cast<index_type>(cm.stride(D))... };
             return tensor<El, NewE, SF, own_view_of(O)>(p, _detail::fold_mapping<SF>(oe, rstr));
