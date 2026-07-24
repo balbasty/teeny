@@ -55,5 +55,36 @@ int main() {
     static_assert(decltype(ns)::rank() == 3, "no singletons -> unchanged rank");
     if (ns(1,2,3) != t(1,2,3)) return 7;
 
+    // ---- axis<...> value selectors (numpy-like `axis=`): the value form must yield
+    //      the SAME type as the template form (so a kernel avoids `.template`). ----
+    // peel_at<Axes...>(t, i) vs peel_at(t, i, axis<Axes...>{})
+    auto pa1 = peel_at<0,1>(t, 3);
+    auto pa2 = peel_at(t, 3, axis<0,1>{});
+    static_assert(cs::is_same<decltype(pa1), decltype(pa2)>::value, "peel_at value form == template form");
+    if (pa1(2) != pa2(2)) return 9;
+
+    // peel<Axes...>(t) range vs peel(t, axis<Axes...>{})
+    auto pr1 = peel<0,1>(t);
+    auto pr2 = peel(t, axis<0,1>{});
+    static_assert(cs::is_same<decltype(pr1), decltype(pr2)>::value, "peel value form == template form");
+    if (pr1.size() != pr2.size() || pr1[5](1) != pr2[5](1)) return 10;
+
+    // single-axis (numpy scalar `axis`): peel<1>(t) vs peel(t, axis<1>{})
+    auto ps1 = peel<1>(t);
+    auto ps2 = peel(t, axis<1>{});
+    static_assert(cs::is_same<decltype(ps1), decltype(ps2)>::value, "peel single-axis value form");
+    if (ps1.size() != ps2.size()) return 11;
+
+    // member take_along<Axes...>(args...) vs take_along(axis<Axes...>{}, args...) — the
+    // genuine `.template` gap on a dependent receiver; axis<...> also disambiguates it.
+    auto ta1 = t.take_along<0,2>(1, 2);
+    auto ta2 = t.take_along(axis<0,2>{}, 1, 2);
+    static_assert(cs::is_same<decltype(ta1), decltype(ta2)>::value, "take_along value form == template form");
+    for (long k = 0; k < (long)ta1.extent(0); ++k) if (ta1(k) != ta2(k) || ta1(k) != t(1,k,2)) return 12;
+
+    // both forms coexist: the explicit-template form still selects correctly
+    static_assert(cs::is_same<decltype(t.take_along<1>(2)), decltype(t.take_along(axis<1>{}, 2))>::value,
+                  "take_along explicit-template and value forms agree");
+
     return 0;
 }

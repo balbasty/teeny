@@ -102,6 +102,15 @@ _TNY_API auto peel_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index
     static_assert((_axis_in_range(Axes, tensor<T,E,L,O>::rank()) && ...), "peel_at: axis out of range");
     return _md::peel_at_ow<storage_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>(t.mdspan(), i);
 }
+// value form: peel_at(t, i, axis<0,1>{}) == peel_at<0,1>(t, i). The axis selector
+// is a single value tag, so a dependent receiver needs no `.template` (and it reads
+// better than a trailing `Int<>` list).
+template <long... Axes, class T, class E, class L, storage O>
+_TNY_API auto peel_at(tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i, axis<Axes...>)
+{ return peel_at<Axes...>(t, i); }
+template <long... Axes, class T, class E, class L, storage O>
+_TNY_API auto peel_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i, axis<Axes...>)
+{ return peel_at<Axes...>(t, i); }
 
 /** @brief A range of sub-views obtained by peeling `Axes...`. Supports
  *         `size()`, `operator[]`, and range-for. */
@@ -142,6 +151,13 @@ _TNY_API auto peel(const tensor<T,E,L,O> & t) {
     static_assert((_axis_in_range(Axes, tensor<T,E,L,O>::rank()) && ...), "peel: axis out of range");
     return peel_range<decltype(t.mdspan()), storage_view_of(O), _norm_axis(Axes, tensor<T,E,L,O>::rank())...>{ t.mdspan() };
 }
+// value form: peel(t, axis<0,1>{}) == peel<0,1>(t) (numpy-like axis selector; no
+// `.template` on a type-dependent receiver, and reads better than a trailing list).
+template <long... Axes, class T, class E, class L, storage O>
+_TNY_API auto peel(tensor<T,E,L,O> & t, axis<Axes...>)       { return peel<Axes...>(t); }
+template <long... Axes, class T, class E, class L, storage O>
+_TNY_API auto peel(const tensor<T,E,L,O> & t, axis<Axes...>) { return peel<Axes...>(t); }
+
 /** @brief Build a range of sub-views over a raw mdspan. */
 template <cs::size_t... Axes, class MD>
 _TNY_API peel_range<MD, storage::view, Axes...> peel_of(const MD & m) { return { m }; }

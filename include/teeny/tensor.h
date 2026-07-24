@@ -712,6 +712,14 @@ public:
         static_assert(_all_distinct<_norm_axis(Axes, rank())...>(), "take_along: axes must be distinct");
         return _ta_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
     }
+    /** @brief Value form: `t.take_along(axis<0,2>{}, i, slice(1,4))` ==
+     *         `t.take_along<0,2>(i, slice(1,4))`. The leading `axis<...>` selector is a
+     *         single distinct-typed argument, so it needs no `.template` on a dependent
+     *         receiver AND disambiguates cleanly from the template form. */
+    template <long... Axes, class... Args>
+    _TNY_API auto take_along(axis<Axes...>, Args... args) noexcept       { return take_along<Axes...>(args...); }
+    template <long... Axes, class... Args>
+    _TNY_API auto take_along(axis<Axes...>, Args... args) const noexcept { return take_along<Axes...>(args...); }
 
     /** @brief Reorder the axes (a permutation of 0..N-1; negatives wrap) -> a rank-N view. */
     template <long... Perm>
