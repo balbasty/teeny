@@ -1172,6 +1172,9 @@ public:
     template <class B> _TNY_API auto pow(const B & b) const;
 
     /* --- generic elementwise with a user functor (device-safe) ---- */
+    // `f` is applied per element; its APPLICATION ORDER is unspecified (a dense view is
+    // walked in physical, not logical, order — a transposed in-place map_ vectorizes).
+    // Use a pure functor; don't rely on a stateful `f` observing a particular order.
     template <class F> _TNY_API tensor & map_(F f);                    // *this = f(*this)
     template <class G, class B> _TNY_API tensor & zip_with_(G g, const B & b);  // *this = g(*this, b) (broadcasts)
     template <class F> _TNY_API auto map(F f) const;                   // -> new tensor = f(*this)

@@ -11,7 +11,8 @@ this repo:
   are transcribed from the jitfields source; §4 gives each kernel's mechanics.
 - **Working reference** — `examples/fastfields/{bounds,spline,pushpull}.hpp` +
   `examples/pushpull_adjoint.cpp` implement and validate pull/push on teeny.
-- **teeny idioms** — §2, and the repo's `CLAUDE.md` / `examples/`.
+- **teeny idioms** — §2, the repo's `CLAUDE.md`, `docs/efficient-kernels.md` (the
+  perf idioms consolidated), `docs/dispatch.md`, and `examples/`.
 
 The guiding instruction from the project owner: *understand the point of the
 algorithms and their "truthness"; simplify and abstract rather than copying
@@ -22,40 +23,55 @@ conditions, interpolation orders, arbitrary batch rank).*
 
 ## 1. Execution (read first)
 
-**Access constraint.** teeny/jitfields live under the `balbasty` owner; the
-`fastfields/*` repos are a different tier. A single Claude Code session cannot
-mix tiers (`add_repo` and the GitHub MCP both refuse cross-tier). To do the
-port, **start a session whose initial source is the `fastfields/*` repos**
-(optionally also `balbasty/teeny` if same-tier adds are allowed there; otherwise
-copy teeny's `include/` and `examples/fastfields/` in as vendored files).
+**Do the port in its own session.** teeny changes fast; this plan is written from
+the teeny side. Start a fresh session focused on the refactor — don't graft it onto a
+teeny-maintenance thread.
 
-**Branch.** Develop on `claude/teeny` in each fastfields repo you touch.
+**Getting the repos into scope.** Run `list_repos` to see what's reachable, then
+`add_repo` each `fastfields/*` repo you'll touch (and `balbasty/teeny` if it isn't
+already). If a repo is a different tier/org and `add_repo` refuses it, vendor teeny in
+instead — copy `include/teeny/` + `examples/fastfields/{bounds,spline,pushpull}.hpp`,
+or add teeny as a submodule / CMake dependency (teeny now ships a CMake `INTERFACE`
+target `teeny::teeny`, see its `README`).
 
-**First action in that session.** Read each fastfields repo's `README`/`CLAUDE.md`
-to confirm the role mapping in §7 (it is *inferred from repo names here*, not
-read), and to see how the existing csrc is structured and built.
+**Read teeny's docs first — they carry this week's semantics that this plan assumes:**
+`CLAUDE.md` (design + the API cheat-sheet), `docs/efficient-kernels.md` (the perf
+idioms in one place), `docs/dispatch.md` (the ndarray boundary + the batch idiom),
+`docs/shapes-strides.md` (int32 offsets), and `examples/` (`pushpull_adjoint.cpp` is
+the flagship).
+
+**Branch.** Develop on `claude/teeny` (or a task branch) in each fastfields repo.
+
+**First action in that session.** `list_repos` + read each fastfields repo's
+`README`/`CLAUDE.md` to confirm the role mapping in §7 — the org **may have changed**
+since this plan was written; treat §7 as a starting hypothesis, not fact — and to see
+how the existing csrc is structured and built.
 
 ---
 
 ## 2. What teeny gives you (idiom playbook)
 
-teeny is one tensor type, `tensor<T, Extents, Layout, storage>`, with per-dimension
-static/dynamic shape and strides on `cuda::std::mdspan`. The kernel-relevant
-surface:
+teeny is one tensor type, `tensor<T, Shape, Layout, storage>` (the shape is exposed
+as `shape_type`/`extents_type`), with per-dimension static/dynamic shape and strides on
+`cuda::std::mdspan`. The kernel-relevant surface (value-form sugar shown; every
+`method<...>()` also has a deduced value twin — `permute(Int<2>(),Int<0>(),Int<1>())`,
+`recast(shape<...>{})` — which avoids `.template` on a dependent receiver):
 
 | Need | teeny |
 |---|---|
 | kernel-passable strided view | `wrap(ptr, extents)`, `wrap<fcontiguous>(...)`, `wrap(ptr, ext, strides<S...>{})`, `as_tensor(submdspan_result)` |
 | element / folded stride | `t(i,j,k)`, `t.data()[off]`, `t.stride(Int<d>())` (static) / `t.stride(d)` (runtime) |
 | **scatter (push)** | `t.at(i...).atomic_add_(v)` — **atomic on device** |
-| assign / init | `t.copy_(src)` (broadcasts), `t.fill_(v)`, `t.zero_()` |
-| in-place / reduce math | `t.add_(x)/mul_(x)/…` (broadcasts), `sum/dot/min/max` |
-| **peel arbitrary batch** | `peel_front<Nbatch>(t)` → range of `(*spatial, C)` views; `peel_front_at<Nbatch>(t, i)` for a grid-stride index |
-| peel named axes | `peel<Axes...>(t)`, `take_along<Axes...>(...)`, `permute<...>()` |
-| add/drop size-1 axis | `unsqueeze<Ax>()`, `squeeze<Ax>()` |
-| **runtime→static dispatch** | `dispatch_value<1,2,3>(D, f)` (spatial rank / order / bound); `dispatch_rank(as_anyrank(...), f)` (total rank at the ndarray boundary) |
-| host ndarray boundary | `as_anyrank(data, shape, stride, ndim)` → `anyrank`; `.fixed<R>()` |
-| owning buffers | `local<T,E>` (stack, static), `owned<T,E>(e)` (heap host), `gpu/pinned/mapped<T,E>(e)` (from `teeny/cuda.h`) |
+| assign / init | `t.copy_(src)` (broadcasts), `t.fill_(v)`, `t.zero_()`, `t.iota_(a,b)` |
+| in-place / reduce math | `t.add_(x)/mul_(x)/…` (broadcasts), `sum/dot/min/max`. Contiguous out-of-place and in-place scalar/unary ops **auto-vectorize** (see `efficient-kernels.md`) |
+| **peel arbitrary batch** | `peel_front<-Sr>()` on an `anyrank` (keep the trailing `Sr` dims static, peel the runtime batch) → `dextents<_,Sr>` cells; `peel_front_at<-Sr>(i)` for a grid-stride index; `size_front<-Sr>()` = cell count. On a static-rank tensor with a *known* batch count, positive `peel_front<Nbatch>(t)` |
+| recover static inner dims | `cell.recast(shape<-1, C, C>{})` — fold the known trailing dims of a peeled cell (no copy, preserves strides) |
+| peel named axes | `peel(t, axis<0,1>{})`, `take_along(axis<0,2>{}, …)`, `permute(Int<...>()…)`, `flip(Int<d>())` |
+| add/drop size-1 axis | `unsqueeze(Int<Ax>())`, `squeeze(Int<Ax>())` |
+| **runtime→static dispatch** | `dispatch_value<1,2,3>(D, f)` (spatial rank / order / bound); `dispatch_rank(as_anyrank(...), f)` (total rank — prefer `peel_front<-Sr>` per §3) |
+| **narrow device offsets (int32)** | `dispatch_index(v, f)` at the launch site → int32 arm when `v.index_fits<int32_t>()`, else int64. Halves a dynamic view's register footprint + 32-bit address math (a GPU occupancy win). `reindex<int32_t>()` is the raw retype |
+| host ndarray boundary | `as_anyrank(data, shape, stride, ndim)` → `anyrank`; `.fixed<R>()`. **Device data:** `as_anyrank<storage::gpu_view>(dptr, …)` so cells are device-tagged; DLPack: `from_dlpack<T[,Space]>` / `dispatch_dlpack<Space>` set+check the space from the capsule |
+| owning buffers | `local<T,E>` (stack, static), `owned<T,E>(e)` (heap host), `gpu/pinned/mapped<T,E>(e)` (from `teeny/cuda.h`); `empty<T[,storage::Space]>(e)` deduces stack/heap from the shape |
 
 What teeny deliberately does **not** do (kept out to stay tiny) and therefore
 lives in the fastfields layer: boundary-condition index maps, spline weight
@@ -69,38 +85,49 @@ beyond `fetch_add`. The reference `examples/fastfields/*.hpp` is where these go.
 fastfields tensors are **`(*batch, *spatial, C)`**: an arbitrary number of batch
 dims, then 1/2/3 spatial dims, then a trailing channel `C`. jitfields does this
 with hand-written `index2offset` batch plumbing and giant per-rank switch
-statements. On teeny it becomes three nested dispatches:
+statements. On teeny it becomes: dispatch the *spatial rank* static, peel the
+runtime batch into the pointer, and keep the trailing `Sr = D+1` (spatial + channel)
+dims static — **the kernel instantiates once per `Sr`, not once per total rank.**
 
 ```
 host ndarray (numpy/cupy/torch/dlpack)  ──as_anyrank(data,shape,stride,ndim)──►  anyrank
-   │  strides are in ELEMENTS (dlpack); numpy gives BYTES — divide by itemsize first
+   │  strides are in ELEMENTS (dlpack); numpy's __array_interface__ gives BYTES — /itemsize first
+   │  device data: as_anyrank<storage::gpu_view>(dptr,…)  (or from_dlpack<T,storage::gpu_view>)
    ▼
-dispatch_rank / dispatch_value on TOTAL rank  ──►  fixed<R>()  (static rank R)
-   ▼
-dispatch_value<1,2,3>(spatial_ndim, [&](auto D){ ... })    // spatial rank -> static
-dispatch_value<0,1,2,3,...>(order,  [&](auto O){ ... })    // interp order -> static
-dispatch_value on boundary mode(s) if you specialise them  // bound -> static (optional)
-   ▼
-Nbatch = R - D.value - 1;                // batch dims = everything before spatial+channel
-for (auto cell : peel_front<Nbatch>(t))  // cell is (*spatial, C); parallelise this
-    kernel<D.value, O.value>(cell, grid_cell, ...);
+dispatch_value<1,2,3>(spatial_ndim, [&](auto D){       // spatial rank -> static D
+  dispatch_value<0,1,2,3,…>(order, [&](auto O){         // interp order -> static (optional)
+    constexpr long Sr = D.value + 1;                     // spatial + channel dims to keep static
+    for (auto cell : at.peel_front<-Sr>()) {             // NEGATIVE front: peel the runtime batch
+        auto v = cell.recast(shape<-1, …static inner…>{});   // fold known inner dims (e.g. C)
+        kernel<D.value, O.value>(v, grid_cell, …);       // parallelise this loop
+    }
+  });
+});
 ```
+
+- Note the **negative** `peel_front<-Sr>()` on `anyrank`: it keeps the last `Sr` dims
+  static and folds *however many* batch dims there are into each cell's data pointer.
+  (A *positive* front-count would leave a runtime rank — a `static_assert`.) If you
+  truly need the whole rank static, `dispatch_rank(at, f)` → `fixed<R>()` then a
+  positive `peel_front<R - Sr>(t)`, but that instantiates per total rank — avoid it.
+- On the **device**, wrap each `kernel(...)` launch in `dispatch_index(v, f)` so a view
+  whose element span fits int32 runs the kernel in 32-bit offsets (fewer registers per
+  thread → occupancy). Opt in per launch site.
 
 Key facts carried from jitfields (§4.1):
 - The **channel axis is never parallelised** — parallelise the flat
   `(*batch, *spatial)` index; loop channels *inside* the kernel. Neighbours and
   weights are computed once per spatial location and reused across channels.
-- **Only spatial strides** go to the interpolator; batch offset is folded into
-  the base pointer — which is exactly what `peel_front<Nbatch>` produces (each
-  peeled sub-view already has the batch offset baked into its data handle).
-- Choose **static specialisation for D ∈ {1,2,3}** (the common case, worth
-  folding) and fall back to a generic-D path otherwise. `dispatch_value` gives
-  you the static D with no hand-written switch.
+- **Only spatial strides** go to the interpolator; the batch offset is folded into the
+  base pointer — exactly what `peel_front<-Sr>` produces (each cell already has the
+  batch offset baked into its data handle).
+- Choose **static specialisation for D ∈ {1,2,3}** (the common case) and fall back to a
+  generic-D path otherwise. `dispatch_value` gives the static D with no hand switch.
 
-For the CPU driver, replace jitfields' `parallel_for(0, numel, grain, …)` with
-your platform's parallel-for over `peel_front`'s index range
-(`peel_front_at<Nbatch>(t, i)` gives the i-th cell for a grid-stride/worker
-split). For CUDA, one thread per cell; `fetch_add` handles push races.
+For the CPU driver, replace jitfields' `parallel_for(0, numel, grain, …)` with your
+platform's parallel-for over the cell range: `size_front<-Sr>()` is the cell count and
+`peel_front_at<-Sr>(i)` the i-th cell (grid-stride / worker split). For CUDA, one thread
+per cell; `fetch_add` handles push races.
 
 ---
 
