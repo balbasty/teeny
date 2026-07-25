@@ -28,6 +28,7 @@ nav = [
     {"Views & structure" = "structure.md"},
     {"Dispatch & the ndarray boundary" = "dispatch.md"},
     {"Performance" = "performance.md"},
+    {"Writing efficient kernels" = "efficient-kernels.md"},
     {"Half precision" = "half.md"},
   ]},
   {"Tutorials" = [
