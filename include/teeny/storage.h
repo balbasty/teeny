@@ -88,9 +88,16 @@ _TNY_API constexpr storage storage_resolve(storage o, bool static_shape) noexcep
 
 /** @brief Host allocator using C++ `new[]` / `delete[]`. */
 struct cpp_alloc {
-    template <class T> _TNY_HOST static T *  allocate(cs::size_t n) { return n ? new T[n]() : nullptr; }
-    template <class T> _TNY_HOST static void deallocate(T * p)      { delete[] p; }
+    template <class T> _TNY_HOST static T *  allocate(cs::size_t n)        { return n ? new T[n]() : nullptr; }
+    template <class T> _TNY_HOST static T *  allocate_uninit(cs::size_t n) { return n ? new T[n]   : nullptr; }
+    template <class T> _TNY_HOST static void deallocate(T * p)             { delete[] p; }
 };
+
+// Internal tag: construct owning/stack storage WITHOUT the value-initialisation, for
+// `empty()` (numpy `np.empty` semantics — the caller fills it). Not public API; the
+// public spelling is `empty<T>(...)` (uninitialised) vs `zeros<T>(...)` (zeroed).
+struct _uninit_t { explicit _uninit_t() = default; };
+inline constexpr _uninit_t _uninit{};
 
 /**
  * @brief Generic owning storage (move-only, no ref-counting), parameterised by
@@ -101,6 +108,7 @@ struct owning_storage {
     T * p = nullptr;
     owning_storage() = default;
     _TNY_HOST explicit owning_storage(cs::size_t n) : p(Alloc::template allocate<T>(n)) {}
+    _TNY_HOST owning_storage(cs::size_t n, _uninit_t) : p(Alloc::template allocate_uninit<T>(n)) {}   // no value-init
     owning_storage(const owning_storage &)             = delete;
     owning_storage & operator=(const owning_storage &) = delete;
     _TNY_HOST owning_storage(owning_storage && o) noexcept : p(o.p) { o.p = nullptr; }
@@ -140,7 +148,13 @@ template <class T, cs::size_t N> struct storage_policy<T, storage::mapped_view, 
 /* --- stack: inline array (fully-static shape) --------------------- */
 template <class T, cs::size_t N>
 struct storage_policy<T, storage::stack, N> {
-    cs::array<T, N> a{};
+    cs::array<T, N> a;
+    // Default construction VALUE-INITIALISES (zeros) — so `local<...>{}` / `zeros(...)`
+    // keep their zero-fill. `_uninit` leaves `a` indeterminate for `empty()` (the array
+    // has no NSDMI, so the uninit ctor's empty init-list really skips it). Copy/move/dtor
+    // stay implicit+trivial, so a stack tensor is still trivially copyable.
+    _TNY_API constexpr storage_policy() noexcept : a{} {}
+    _TNY_API storage_policy(_uninit_t) noexcept {}
     _TNY_API constexpr T *       data()       noexcept { return a.data(); }
     _TNY_API constexpr const T * data() const noexcept { return a.data(); }
 };
