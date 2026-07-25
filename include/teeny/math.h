@@ -187,8 +187,19 @@ _TNY_API constexpr bool bc_static_ok_r(cs::index_sequence<D...>) {
 template <class Idx, class Ea, class Eb, cs::size_t R, cs::size_t... D>
 cs::extents<Idx, bc1(bc_sext<Ea, R>(D), bc_sext<Eb, R>(D))...>
 bcast_ext_(cs::index_sequence<D...>);
+// The broadcast RESULT carries the WIDER of the two operands' offset index types
+// (by `sizeof`; a tie keeps the first operand's, so same-width mixes are unchanged).
+// The engine `bzip_` casts both operands' extents/strides to the result index type,
+// so broadening is lossless AND fixes the truncation that a narrow result would cause
+// to a wide operand's strides. (It does not — and cannot from the types alone — widen
+// two equal-narrow operands whose broadcast SPAN overflows: that stays the caller's
+// responsibility, guarded by index_fits/dispatch_index at the boundary.)
 template <class Ea, class Eb>
-using bcast_extents = decltype(bcast_ext_<typename Ea::index_type, Ea, Eb,
+using _wider_index_t = cs::conditional_t<
+    (sizeof(typename Eb::index_type) > sizeof(typename Ea::index_type)),
+    typename Eb::index_type, typename Ea::index_type>;
+template <class Ea, class Eb>
+using bcast_extents = decltype(bcast_ext_<_wider_index_t<Ea, Eb>, Ea, Eb,
     bc_rank(Ea::rank(), Eb::rank())>(cs::make_index_sequence<bc_rank(Ea::rank(), Eb::rank())>{}));
 
 // RUNTIME extent/stride of operand `x` for RESULT axis `d` in result rank `R`,

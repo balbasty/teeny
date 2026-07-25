@@ -106,8 +106,9 @@ loop, where they hoist for free.
   footprint (rank-2: 40→24 B) and runs offset math in 32-bit — the biggest device win.
   `dispatch_index(v, f)` instantiates the kernel for both widths and picks `reindex`
   when `v.index_fits<int32_t>()`; `dispatch_rank<narrow_index>(at, f)` fuses it into the
-  anyrank rank dispatch. Opt in per launch site. (Remaining: forbid cross-width
-  broadcasting — assert equal `Idx`.)
+  anyrank rank dispatch. Opt in per launch site. Cross-width broadcasting (#167) is
+  resolved by **broadening** — a mixed-width `a + b` takes the wider operand's index
+  type, which is lossless and avoids truncating the wide operand's strides.
 - **`restrict`/no-alias fast path (#161).** teeny's elementwise engines carry
   non-`restrict` pointers, so even contiguous host loops don't auto-vectorize (the
   compiler must assume the destination may alias a source). A `__restrict__` path — or

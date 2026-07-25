@@ -284,7 +284,9 @@ rank is source rank − #peeled axes.
 ## Math
 
 Element type of results follows `promote(A,B)` (C++ rules, but among floats the
-**lower** width wins — pytorch-style; `-DTNY_STD_PROMOTION` opts out).
+**lower** width wins — pytorch-style; `-DTNY_STD_PROMOTION` opts out). The result's
+offset **index type** is the *wider* of the two operands' (a mixed `int32`/`int64`
+broadcast → `int64`), independent of the element promotion.
 
 ### In-place (mutates `*this`, returns `tensor&`)
 

@@ -62,6 +62,10 @@ larger of the two. (In-place `a.op_(b)` still needs `b`'s rank ≤ `a`'s — it 
 grow the destination.) A size-1 axis stretches over its partner as usual;
 `unsqueeze` is only needed to align size-1 axes that aren't at the front.
 
+If the two operands have different offset [index widths](shapes-strides.md#mixing-widths-in-a-broadcast)
+(e.g. an `int32`-indexed view and an `int64`-indexed one), the result takes the
+**wider** of the two — lossless, and it never truncates the wide operand's strides.
+
 Broadcasting example — per-channel scale/bias over a `(C,H,W)` image with
 `(C,1,1)` parameters:
 
