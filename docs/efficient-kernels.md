@@ -48,33 +48,41 @@ Views also **preserve folded strides**: slicing a static tensor yields a
 stays static through a chain of views ([Views & structure](structure.md)). Only reach
 for a copy (`clone()` / `to<...>()`) when you genuinely need dense, owned memory.
 
-## 3. The `(*batch, *spatial, C)` batch idiom
+## 3. The `(*batch, …)` batch idiom
 
-The workhorse pattern for field kernels: an array with an arbitrary number of leading
-**batch** dims and a small, fixed trailing block (e.g. a `C×C` matrix, or `*spatial, C`).
-Peel the batch dims into the pointer so the inner kernel only ever sees the fixed block.
-`peel_front` bakes each batch offset into the sub-view's *data handle*, so the batch
-strides never enter the inner loop.
+The workhorse pattern for field kernels: leading **batch** dims and a small, fixed
+trailing block (a `C×C` matrix, or `*spatial, C`). Peel the batch dims into the pointer
+so the inner kernel only sees the fixed block — `peel_front` bakes each batch offset into
+the sub-view's *data handle*, so the batch strides never touch the inner loop. Which
+spelling you use depends on **whether the batch rank is known at compile time**.
+
+**Runtime batch rank — the general case** (a DLPack tensor of arbitrary rank). The input
+arrives rank-erased as an [`anyrank`](dispatch.md), so its rank is a *runtime* value. Peel
+with a **negative** front: `peel_front<-Sr>()` keeps the last `Sr` dims static and folds
+*however many* batch dims there are into the pointer. Each `cell` is a `dextents<_,Sr>`
+view (rank `Sr`, dynamic inner extents); `recast` folds the known inner dims:
 
 ```cpp
-// A batched C×C op: peel the (arbitrary-rank) batch, each `cell` is a C×C view.
-for (auto cell : peel_front<Nbatch>(t))   // Nbatch leading dims folded into the pointer
+auto at = as_anyrank(data, shape, stride, ndim);   // rank-erased carrier (runtime rank, no copy)
+for (auto cell : at.peel_front<-2>())              // keep the trailing 2 dims; peel the rest
+    op(cell.recast(shape<C, C>{}));                // cell: dextents<_,2> view -> folded C×C
+```
+
+Combine with `dispatch_value<1,2,3>(spatial_ndim, …)` to also turn a runtime *spatial
+rank* into a static one — the full `(*batch, *spatial, C)` walk-through is in
+[Dispatch & the ndarray boundary](dispatch.md).
+
+**Known batch rank** (a plain tensor). A `tensor` always has a *static rank* — the rank is
+a compile-time property even when the extents are dynamic — so if you know the batch count
+you can peel a **positive** front directly. `peel_front<Nbatch>(t)` drops the first
+`Nbatch` dims; each `cell` is a rank-`(rank − Nbatch)` view with the trailing extents
+(folded where the source is static):
+
+```cpp
+auto t = wrap(data, shape<-1,-1,C,C>{b0, b1});  // static rank 4, dynamic batch extents
+for (auto cell : peel_front<2>(t))              // peel the 2 batch dims -> cell is a C×C view
     op(cell);
 ```
-
-At the **runtime** boundary (a DLPack tensor with a runtime rank), turn the runtime
-count into a static one and recover the known inner dims so the inner kernel compiles
-against folded extents:
-
-```cpp
-auto at = as_anyrank(data, shape, stride, ndim);      // rank-erased carrier (no copy)
-for (auto cell : at.peel_front<-2>())                 // keep the trailing 2 dims (C,C)
-    op(cell.recast(shape<C, C>{}));                   // fold the inner block to a static C×C
-```
-
-Use `dispatch_value<1,2,3>(spatial_ndim, …)` to also turn a runtime **spatial rank**
-into a static one. The full walk-through — including the `(*batch, *spatial, C)` case —
-is in [Dispatch & the ndarray boundary](dispatch.md).
 
 ## 4. Narrow the offset width at the boundary (device)
 
