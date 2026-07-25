@@ -232,7 +232,13 @@ _TNY_HOST RE bcast_runtime_(const A & a, const B & b, cs::index_sequence<D...>) 
 // `Cv` is the type the op runs in: the destination's compute type for arithmetic
 // (default via the `bzip` wrapper), or the operands' compare type for a comparison
 // whose result is a bool mask (the `bcmp` wrapper passes it) — one engine, two uses.
-template <class W, class Cv, class C, class A, class B, class Op, cs::size_t... D>
+// `Restrict` (set only by the OUT-OF-PLACE callers, where `c` is a fresh
+// allocation that provably cannot alias `a`/`b`) enables an auto-vectorizable
+// linear fast path: when the plain-store writer `w_set` is in use and every
+// operand has the SAME rank + extents as `c` and is C-contiguous, offsets are
+// just `i`, so the write goes through a `__restrict__` destination and the
+// per-element mixed-radix decode is skipped. Any mismatch falls back unchanged.
+template <class W, bool Restrict, class Cv, class C, class A, class B, class Op, cs::size_t... D>
 _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
     using I = typename C::index_type;
     constexpr cs::size_t R = C::rank();   // c has the result (largest) rank; a,b right-align into it
@@ -246,6 +252,20 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
         _TNY_CHECK(be[r] == ce[r] || be[r] == 1, "broadcast: rhs extent mismatch");
     }
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= ce[r];
+    // Contiguous linear fast path (out-of-place only, plain store, no broadcast).
+    if constexpr (Restrict && cs::is_same<W, w_set>::value && A::rank() == R && B::rank() == R) {
+        bool lin = c.is_contiguous() && a.is_contiguous() && b.is_contiguous();
+        for (cs::size_t r = 0; lin && r < sizeof...(D); ++r) lin = (ae[r] == ce[r]) && (be[r] == ce[r]);
+        if (lin) {
+            using Ce = typename C::element_type;
+            Ce * _TNY_RESTRICT cp = c.data();                    // fresh dest: cannot alias a/b -> restrict
+            const typename A::element_type * ap = a.data();      // a and b may alias each other (e.g. a+a): NOT restrict
+            const typename B::element_type * bp = b.data();
+            for (I i = 0; i < n; ++i)
+                cp[i] = static_cast<Ce>(op(static_cast<Cv>(ap[i]), static_cast<Cv>(bp[i])));   // mirrors w_set exactly
+            return;
+        }
+    }
     for (I lin = 0; lin < n; ++lin) {
         I rem = lin, oa = 0, ob = 0, oc = 0;
         for (int d = (int)sizeof...(D)-1; d >= 0; --d) {
@@ -271,7 +291,10 @@ _TNY_API void check_dest_no_overlap(const C & c, cs::index_sequence<D...>) {
         "the update aliases and is applied multiple times to the same element — clone() to a "
         "dense tensor first, or write into a non-overlapping destination."), ... );
 }
-template <class W = w_set, class C, class A, class B, class Op>
+// `Restrict` defaults to false so every IN-PLACE caller (add_/sub_/.../copy_,
+// where `c` IS the destination and may alias the rhs) takes the safe decode path
+// byte-for-byte unchanged; the out-of-place `oop` passes true.
+template <class W = w_set, bool Restrict = false, class C, class A, class B, class Op>
 _TNY_API void bzip(C & c, const A & a, const B & b, Op op) {
     // C holds the RESULT (largest) rank; operands may be shorter (left-padded).
     check_dest_no_overlap(c, cs::make_index_sequence<C::rank()>{});
@@ -279,7 +302,7 @@ _TNY_API void bzip(C & c, const A & a, const B & b, Op op) {
     static_assert(bc_static_ok_r<typename A::extents_type, typename B::extents_type, C::rank()>(
                       cs::make_index_sequence<C::rank()>{}),
                   "broadcast: incompatible static extents");
-    bzip_<W, compute_type_t<typename C::element_type>>(c, a, b, op, cs::make_index_sequence<C::rank()>{});
+    bzip_<W, Restrict, compute_type_t<typename C::element_type>>(c, a, b, op, cs::make_index_sequence<C::rank()>{});
 }
 
 /* ---- c = op(c, scalar), elementwise ------------------------------ */
@@ -322,34 +345,55 @@ _TNY_API void iota_(C & c, typename C::element_type start, typename C::element_t
 }
 
 /* ---- c(i) = op(a(i), scalar) ------------------------------------- */
-template <class Cv, class C, class A, class S, class Op, cs::size_t... D>
+template <bool Restrict, class Cv, class C, class A, class S, class Op, cs::size_t... D>
 _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
     using I = typename C::index_type;   // `Cv` = the op's compute type (arithmetic: dest compute type; compare: Rc)
     const I e[] = { a.extent(D)... }, sa[] = { a.stride(D)... }, sc[] = { c.stride(D)... };
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
+    // Contiguous linear fast path (out-of-place only; `c` fresh, cannot alias `a`).
+    if constexpr (Restrict) {
+        if (c.is_contiguous() && a.is_contiguous()) {
+            typename C::element_type * _TNY_RESTRICT cp = c.data();
+            const typename A::element_type * ap = a.data();
+            const Cv sv = static_cast<Cv>(s);
+            for (I i = 0; i < n; ++i) cp[i] = op(static_cast<Cv>(ap[i]), sv);   // mirrors the slow store
+            return;
+        }
+    }
     for (I lin = 0; lin < n; ++lin) {
         I rem = lin, oa = 0, oc = 0;
         for (int d = (int)sizeof...(D)-1; d >= 0; --d) { I k = rem%e[d]; rem/=e[d]; oa+=k*sa[d]; oc+=k*sc[d]; }
         c.data()[oc] = op(static_cast<Cv>(a.data()[oa]), static_cast<Cv>(s));
     }
 }
-template <class C, class A, class S, class Op> _TNY_API void scalo(C & c, const A & a, S s, Op op)
-{ scalo_<compute_type_t<typename C::element_type>>(c, a, s, op, cs::make_index_sequence<C::rank()>{}); }
+template <bool Restrict = false, class C, class A, class S, class Op> _TNY_API void scalo(C & c, const A & a, S s, Op op)
+{ scalo_<Restrict, compute_type_t<typename C::element_type>>(c, a, s, op, cs::make_index_sequence<C::rank()>{}); }
 
 /* ---- c(i) = uop(a(i))  and  c(i) = uop(c(i)) (in place) ---------- */
-template <class C, class A, class Uop, cs::size_t... D>
+template <bool Restrict, class C, class A, class Uop, cs::size_t... D>
 _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
     const I e[] = { a.extent(D)... }, sa[] = { a.stride(D)... }, sc[] = { c.stride(D)... };
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
+    // Contiguous linear fast path (out-of-place only; `c` fresh, cannot alias `a`).
+    if constexpr (Restrict) {
+        if (c.is_contiguous() && a.is_contiguous()) {
+            typename C::element_type * _TNY_RESTRICT cp = c.data();
+            const typename A::element_type * ap = a.data();
+            for (I i = 0; i < n; ++i) cp[i] = static_cast<Cv>(f(static_cast<Cv>(ap[i])));   // mirrors the slow store
+            return;
+        }
+    }
     for (I lin = 0; lin < n; ++lin) {
         I rem = lin, oa = 0, oc = 0;
         for (int d = (int)sizeof...(D)-1; d >= 0; --d) { I k = rem%e[d]; rem/=e[d]; oa+=k*sa[d]; oc+=k*sc[d]; }
         c.data()[oc] = static_cast<Cv>(f(static_cast<Cv>(a.data()[oa])));
     }
 }
-template <class C, class A, class Uop> _TNY_API void unaryo(C & c, const A & a, Uop f)
-{ unaryo_(c, a, f, cs::make_index_sequence<C::rank()>{}); }
+// `Restrict` is false for `unary` (in-place: c===a, must not restrict) and true
+// for `uop_out` (out-of-place: fresh dest).
+template <bool Restrict = false, class C, class A, class Uop> _TNY_API void unaryo(C & c, const A & a, Uop f)
+{ unaryo_<Restrict>(c, a, f, cs::make_index_sequence<C::rank()>{}); }
 template <class C, class Uop> _TNY_API void unary(C & c, Uop f) { unaryo(c, c, f); }
 
 /* ---- out-of-place tensor (op) tensor, broadcasting --------------- *
@@ -359,7 +403,7 @@ template <class Op, class A, class B,
 _TNY_API auto oop(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
     tensor<promote_t<typename A::element_type, typename B::element_type>, RE, ccontiguous, storage::stack> c{};
-    bzip(c, a, b, op); return c;
+    bzip<w_set, true>(c, a, b, op); return c;   // fresh dest -> restrict + linear fast path
 }
 template <class Op, class A, class B,
           cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() != 0, int> = 0>
@@ -367,19 +411,19 @@ _TNY_HOST auto oop(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
     tensor<promote_t<typename A::element_type, typename B::element_type>, RE, ccontiguous, storage::heap>
         c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<RE::rank()>{}));
-    bzip(c, a, b, op); return c;
+    bzip<w_set, true>(c, a, b, op); return c;   // fresh dest -> restrict + linear fast path
 }
 
 /* ---- out-of-place tensor (op) scalar ----------------------------- */
 template <class Op, class A, class S, cs::enable_if_t<A::is_static, int> = 0>
 _TNY_API auto oops(const A & a, S s, Op op) {
     tensor<promote_t<typename A::element_type, S>, typename A::extents_type, ccontiguous, storage::stack> c{};
-    scalo(c, a, s, op); return c;
+    scalo<true>(c, a, s, op); return c;   // fresh dest -> restrict + linear fast path
 }
 template <class Op, class A, class S, cs::enable_if_t<!A::is_static, int> = 0>
 _TNY_HOST auto oops(const A & a, S s, Op op) {
     tensor<promote_t<typename A::element_type, S>, typename A::extents_type, ccontiguous, storage::heap> c(a.extents());
-    scalo(c, a, s, op); return c;
+    scalo<true>(c, a, s, op); return c;   // fresh dest -> restrict + linear fast path
 }
 
 /* ---- comparisons -> a bool tensor (broadcast; computed in Rc) ----- *
@@ -387,14 +431,14 @@ _TNY_HOST auto oops(const A & a, S s, Op op) {
  * (so `a < b` compares the values, not their bool cast) with a plain-store writer
  * (`w_set`) into the bool result — so they reuse those engines directly rather
  * than duplicating the broadcast decode. */
-template <class Rc, class C, class A, class B, class Op>
+template <class Rc, bool Restrict = false, class C, class A, class B, class Op>
 _TNY_API void bcmp(C & c, const A & a, const B & b, Op op) {
     static_assert(A::rank() <= C::rank() && B::rank() <= C::rank(), "compare: operand rank exceeds result");
     static_assert(bc_static_ok_r<typename A::extents_type, typename B::extents_type, C::rank()>(cs::make_index_sequence<C::rank()>{}), "compare: incompatible static extents");
-    bzip_<w_set, Rc>(c, a, b, op, cs::make_index_sequence<C::rank()>{});   // compare in Rc; op returns bool -> stored
+    bzip_<w_set, Restrict, Rc>(c, a, b, op, cs::make_index_sequence<C::rank()>{});   // compare in Rc; op returns bool -> stored
 }
-template <class Rc, class C, class A, class S, class Op> _TNY_API void scmp(C & c, const A & a, S s, Op op)
-{ scalo_<Rc>(c, a, s, op, cs::make_index_sequence<C::rank()>{}); }
+template <class Rc, bool Restrict = false, class C, class A, class S, class Op> _TNY_API void scmp(C & c, const A & a, S s, Op op)
+{ scalo_<Restrict, Rc>(c, a, s, op, cs::make_index_sequence<C::rank()>{}); }
 
 // tensor (cmp) tensor -> bool tensor (static -> stack, dynamic -> heap)
 template <class Op, class A, class B,
@@ -402,7 +446,7 @@ template <class Op, class A, class B,
 _TNY_API auto oop_cmp(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
     using Rc = compute_type_t<promote_t<typename A::element_type, typename B::element_type>>;
-    tensor<bool, RE, ccontiguous, storage::stack> c{}; bcmp<Rc>(c, a, b, op); return c;
+    tensor<bool, RE, ccontiguous, storage::stack> c{}; bcmp<Rc, true>(c, a, b, op); return c;
 }
 template <class Op, class A, class B,
           cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() != 0, int> = 0>
@@ -410,30 +454,30 @@ _TNY_HOST auto oop_cmp(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
     using Rc = compute_type_t<promote_t<typename A::element_type, typename B::element_type>>;
     tensor<bool, RE, ccontiguous, storage::heap> c(bcast_runtime_<RE>(a, b, cs::make_index_sequence<RE::rank()>{}));
-    bcmp<Rc>(c, a, b, op); return c;
+    bcmp<Rc, true>(c, a, b, op); return c;
 }
 // tensor (cmp) scalar -> bool tensor
 template <class Op, class A, class S, cs::enable_if_t<A::is_static, int> = 0>
 _TNY_API auto oops_cmp(const A & a, S s, Op op) {
     using Rc = compute_type_t<promote_t<typename A::element_type, S>>;
-    tensor<bool, typename A::extents_type, ccontiguous, storage::stack> c{}; scmp<Rc>(c, a, s, op); return c;
+    tensor<bool, typename A::extents_type, ccontiguous, storage::stack> c{}; scmp<Rc, true>(c, a, s, op); return c;
 }
 template <class Op, class A, class S, cs::enable_if_t<!A::is_static, int> = 0>
 _TNY_HOST auto oops_cmp(const A & a, S s, Op op) {
     using Rc = compute_type_t<promote_t<typename A::element_type, S>>;
-    tensor<bool, typename A::extents_type, ccontiguous, storage::heap> c(a.extents()); scmp<Rc>(c, a, s, op); return c;
+    tensor<bool, typename A::extents_type, ccontiguous, storage::heap> c(a.extents()); scmp<Rc, true>(c, a, s, op); return c;
 }
 
 /* ---- out-of-place unary : static -> stack, dynamic -> heap ------- */
 template <class Uop, class A, cs::enable_if_t<A::is_static, int> = 0>
 _TNY_API auto uop_out(const A & a, Uop f) {
     tensor<typename A::element_type, typename A::extents_type, ccontiguous, storage::stack> c{};
-    unaryo(c, a, f); return c;
+    unaryo<true>(c, a, f); return c;   // fresh dest -> restrict + linear fast path
 }
 template <class Uop, class A, cs::enable_if_t<!A::is_static, int> = 0>
 _TNY_HOST auto uop_out(const A & a, Uop f) {
     tensor<typename A::element_type, typename A::extents_type, ccontiguous, storage::heap> c(a.extents());
-    unaryo(c, a, f); return c;
+    unaryo<true>(c, a, f); return c;   // fresh dest -> restrict + linear fast path
 }
 
 /* ---- reduce a . b elementwise into a scalar (for dot) ------------ */

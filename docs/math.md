@@ -93,7 +93,10 @@ scatter/"push" kernel (`atomicAdd` on device).
 
 `a + b`, `a.add(b)`, unary free functions, `minimum`/`maximum`, `clamp`, and
 `dot` return a new tensor. A fully-static result is stack-owned (host and
-device); a dynamic result is heap-owned (host only).
+device); a dynamic result is heap-owned (host only). When every operand is
+C-contiguous and the same shape as the result (no broadcast), these ops take a
+`__restrict__` linear fast path over the fresh result and **auto-vectorize**
+(#161); a broadcast or strided operand falls back to the general decode.
 
 ```cpp
 auto c = a + b;    auto d = a.add(b);  // tensor+tensor (broadcasts) or +scalar

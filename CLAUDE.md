@@ -382,6 +382,14 @@ template-only.
   operands' (`_wider_index_t`, by `sizeof`; tie → first operand), so a mixed-width
   broadcast (int32 view + int64 view) yields an int64 result — lossless, and it stops
   the engine truncating the wide operand's strides to a narrow result width.
+  **Contiguous linear fast path (#161):** the OUT-OF-PLACE engines (`oop`/`oops`/
+  `uop_out`/`oop_cmp`/`oops_cmp`) thread `Restrict=true` into `bzip_`/`scalo_`/`unaryo_`.
+  When the writer is the plain store AND every operand has the result's rank+extents
+  and is C-contiguous, the per-element mixed-radix decode is replaced by a flat
+  `for(i) cp[i]=op(ap[i],…)` loop whose destination `cp` is `_TNY_RESTRICT`-qualified
+  (the fresh result can't alias the operands; the sources stay un-restricted so `a+a`
+  is safe) — this is what auto-vectorizes. In-place ops keep `Restrict=false` (the
+  destination IS an operand → restrict would be UB) and are byte-for-byte unchanged.
 - **The gather** (`tensor.h` `_slice_range`, `iterate.h` `gather_peel`): ALL
   view-making ops — `operator()` slicing, `take_along`, `peel` — route through
   one hand-built gather (NO `cs::submdspan`). Per axis: an integer drops it (into
