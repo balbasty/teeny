@@ -136,6 +136,33 @@ _TNY_HOST DLManagedTensor * make_managed(const tensor<T, Shape, Layout, O> & t, 
     return &h->mt;
 }
 
+// Dispatch on the DLPack **dtype** only: pick the teeny element type from
+// `(code, bits)` and call `g(T{})` (a generic callable) -> bool. Shared by the
+// rank-collapsing `dispatch_dlpack` and the rank-preserving `dispatch_dlpack_dtype`
+// so the supported-dtype table lives in exactly one place. Returns false for an
+// unsupported dtype (lanes != 1, or a code/bits teeny has no element type for).
+template <class G>
+_TNY_HOST bool dispatch_dtype(const DLDataType & d, G && g) {
+    if (d.lanes != 1) return false;
+    if (d.code == kDLBool  && d.bits ==  8) return g(bool{});
+    if (d.code == kDLFloat && d.bits == 32) return g(float{});
+    if (d.code == kDLFloat && d.bits == 64) return g(double{});
+    if (d.code == kDLFloat && d.bits == 16) return g(half{});
+    if (d.code == kDLBfloat && d.bits == 16) return g(bfloat16{});
+    if (d.code == kDLInt) {
+        if (d.bits ==  8) return g((cs::int8_t)0);
+        if (d.bits == 16) return g((cs::int16_t)0);
+        if (d.bits == 32) return g((cs::int32_t)0);
+        if (d.bits == 64) return g((cs::int64_t)0);
+    }
+    if (d.code == kDLUInt) {
+        if (d.bits ==  8) return g((cs::uint8_t)0);
+        if (d.bits == 16) return g((cs::uint16_t)0);
+        if (d.bits == 32) return g((cs::uint32_t)0);
+        if (d.bits == 64) return g((cs::uint64_t)0);
+    }
+    return false;
+}
 } // namespace _dl
 
 /* ============================ export (teeny -> DLPack) ============================ */
@@ -235,31 +262,27 @@ _TNY_HOST dyn_tensor<T, cs::int64_t, R, storage_view_of(Space)> from_dlpack(cons
  *         capsule with `dispatch_dlpack<storage::gpu_view>(m, f)`. */
 template <storage Space = storage::view, class F>
 _TNY_HOST bool dispatch_dlpack(const DLManagedTensor * m, F && f) {
-    const DLDataType d = m->dl_tensor.dtype;
-    auto by_rank = [&](auto tag) -> bool {
+    return _dl::dispatch_dtype(m->dl_tensor.dtype, [&](auto tag) -> bool {
         using T = decltype(tag);
-        if (!_dl::dtype_matches<T>(d)) return false;
-        return dispatch_rank(from_dlpack<T, Space>(m), f);
-    };
-    if (d.lanes != 1) return false;
-    if (d.code == kDLBool && d.bits == 8) return by_rank(bool{});
-    if (d.code == kDLFloat && d.bits == 32) return by_rank(float{});
-    if (d.code == kDLFloat && d.bits == 64) return by_rank(double{});
-    if (d.code == kDLFloat && d.bits == 16) return by_rank(half{});
-    if (d.code == kDLBfloat && d.bits == 16) return by_rank(bfloat16{});
-    if (d.code == kDLInt) {
-        if (d.bits == 8)  return by_rank((cs::int8_t)0);
-        if (d.bits == 16) return by_rank((cs::int16_t)0);
-        if (d.bits == 32) return by_rank((cs::int32_t)0);
-        if (d.bits == 64) return by_rank((cs::int64_t)0);
-    }
-    if (d.code == kDLUInt) {
-        if (d.bits == 8)  return by_rank((cs::uint8_t)0);
-        if (d.bits == 16) return by_rank((cs::uint16_t)0);
-        if (d.bits == 32) return by_rank((cs::uint32_t)0);
-        if (d.bits == 64) return by_rank((cs::uint64_t)0);
-    }
-    return false;
+        return dispatch_rank(from_dlpack<T, Space>(m), f);   // dtype x total rank -> static view
+    });
+}
+
+/** @brief Import + **dtype-only** dispatch that PRESERVES the rank: read the dtype
+ *         from the capsule and call `f` with the **typed `anyrank`** (rank still
+ *         dynamic), instead of collapsing to a fixed rank like `dispatch_dlpack`.
+ *         The caller then peels its own axes — the `(*batch, *spatial, C)` batch
+ *         idiom `for (auto cell : at.peel_front<-Sr>()) …`, which instantiates the
+ *         kernel **once per `Sr`**, not once per total rank. Returns false for an
+ *         unsupported dtype. Data borrowed; caller owns `m`. `Space` tags the carrier
+ *         and is checked against the capsule's device (see `from_dlpack`). */
+template <storage Space = storage::view, class F>
+_TNY_HOST bool dispatch_dlpack_dtype(const DLManagedTensor * m, F && f) {
+    return _dl::dispatch_dtype(m->dl_tensor.dtype, [&](auto tag) -> bool {
+        using T = decltype(tag);
+        f(from_dlpack<T, Space>(m));   // typed anyrank; caller does peel_front<-Sr>
+        return true;
+    });
 }
 
 _TNY_NAMESPACE_END(tny)
