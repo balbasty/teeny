@@ -316,14 +316,18 @@ _TNY_API void scal_(C & c, typename C::element_type s, Op op, cs::index_sequence
     const I sc[] = { c.stride(D)... };
     I n = 1;
     for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
-    // Contiguous linear fast path. An in-place SCALAR op is a SINGLE-array
-    // read-modify-write (the rhs is a register value, not a second pointer), so there
-    // is no aliasing to defeat — one pointer vectorizes with NO `__restrict__`. Gated
-    // to the plain store `w_set`, so an atomic writer keeps the decode path.
+    // Linear fast path. An in-place SCALAR op is a SINGLE-array read-modify-write (the
+    // rhs is a register value, not a second pointer), so there is no aliasing to defeat
+    // — one pointer vectorizes with NO `__restrict__`. It is also ORDER-INDEPENDENT, so
+    // ANY dense view works: `is_dense()` (dense in some axis order — C/F/permuted) has
+    // offsets exactly [0,numel) and excludes stride-0 overlap and negative strides, so
+    // the physical block can be walked linearly. Gated to the plain store `w_set`, so
+    // an atomic writer keeps the decode path.
     if constexpr (cs::is_same<W, w_set>::value) {
-        if (c.is_contiguous()) {
-            typename C::element_type * cp = c.data();
-            for (I i = 0; i < n; ++i) cp[i] = op(static_cast<Cv>(cp[i]), sv);   // mirrors the w_set store
+        if (c.is_dense()) {
+            using Ce = typename C::element_type;
+            Ce * cp = c.data();
+            for (I i = 0; i < n; ++i) cp[i] = static_cast<Ce>(op(static_cast<Cv>(cp[i]), sv));   // explicit store, mirrors w_set
             return;
         }
     }
@@ -414,11 +418,13 @@ template <bool Restrict = false, class C, class A, class Uop> _TNY_API void unar
 { unaryo_<Restrict>(c, a, f, cs::make_index_sequence<C::rank()>{}); }
 // In-place unary (`a.neg_()`/`exp_()`/`map_(f)`/…) is a SINGLE-array read-modify-write:
 // `a[i] = f(a[i])`. One pointer, so it vectorizes with NO `__restrict__` (nothing to
-// alias). Contiguous fast path over the one handle; a strided/overlapping view falls
-// back to the general decode (`unaryo`, unchanged).
+// alias), and being ORDER-INDEPENDENT it walks the physical block of ANY dense view.
+// A stride-0 destination would apply `f` twice to an aliased element, so guard it like
+// `scal_`/`iota_`; a genuinely strided view falls back to the general decode.
 template <class C, class Uop> _TNY_API void unary(C & c, Uop f) {
+    check_dest_no_overlap(c, cs::make_index_sequence<C::rank()>{});
     using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
-    if (c.is_contiguous()) {
+    if (c.is_dense()) {
         typename C::element_type * cp = c.data();
         const I n = static_cast<I>(c.numel());
         for (I i = 0; i < n; ++i) cp[i] = static_cast<Cv>(f(static_cast<Cv>(cp[i])));   // mirrors the store

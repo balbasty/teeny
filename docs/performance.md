@@ -123,9 +123,12 @@ loop, where they hoist for free.
       sources are left un-`restrict`ed so `a + a` stays correct.
     - **In-place scalar / unary / iota / fill** (`a *= 2`, `a.add_(1)`, `a.exp_()`,
       `a.iota_(…)`) is a **single-array** read-modify-write — one pointer, so it
-      vectorizes with **no `__restrict__` at all** (nothing to alias). `scal_`'s fast
-      path is gated to the plain store `w_set`, so an atomic scalar (`a.atomic_add_`)
-      keeps the decode path.
+      vectorizes with **no `__restrict__` at all** (nothing to alias). The scalar and
+      unary ops are order-independent, so they take the fast path over **any dense
+      view** (`is_dense()` — C/F/permuted; a *transposed* in-place op vectorizes too);
+      `iota_` is order-dependent so it keeps the exact-C-contiguous gate. `scal_`'s
+      fast path is gated to the plain store `w_set`, so an atomic scalar
+      (`a.atomic_add_`) keeps the decode path.
   The one case that stays scalar is an **in-place op with a tensor rhs** (`a.add_(b)`):
   `b` may alias/overlap the destination, so neither a `restrict` (UB) nor a plain loop
   (the compiler assumes overlap) can safely vectorize it. Codegen proof (`-O3 -S`): the

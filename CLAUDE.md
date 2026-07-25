@@ -392,8 +392,13 @@ template-only.
   `a+a` is safe).
   (b) IN-PLACE SINGLE-ARRAY ops — `scal_` (scalar rhs: `add_`/`mul_`/compound/`fill_`/
   `zero_`), the in-place `unary` (`neg_`/`exp_`/`map_`), and `iota_` — are one-pointer
-  read-modify-writes, so they take a contiguous fast path with NO restrict (nothing to
-  alias). `scal_`'s is gated to `w_set` so atomic scalars keep the decode.
+  read-modify-writes, so they take a fast path with NO restrict (nothing to alias).
+  `scal_` and `unary` are ORDER-INDEPENDENT, so they gate on `is_dense()` (dense in ANY
+  axis order — C/F/permuted; excludes stride-0 overlap + negative strides, offsets are
+  exactly [0,numel)) and walk the physical block linearly — a transposed in-place op
+  still vectorizes. `iota_` is order-DEPENDENT so it keeps the exact-C-order
+  `is_contiguous()` gate. `scal_`'s is also gated to `w_set` so atomic scalars keep the
+  decode; `unary` runs `check_dest_no_overlap` (like `scal_`/`iota_`).
   The ONLY case left on the decode is an in-place op with a TENSOR rhs (`add_(b)`/
   `copy_`): `b` may overlap the destination, so it can't vectorize (restrict = UB, a
   plain loop = assumed-overlap). Those stay byte-for-byte unchanged.
