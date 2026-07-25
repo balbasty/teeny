@@ -316,6 +316,17 @@ _TNY_API void scal_(C & c, typename C::element_type s, Op op, cs::index_sequence
     const I sc[] = { c.stride(D)... };
     I n = 1;
     for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
+    // Contiguous linear fast path. An in-place SCALAR op is a SINGLE-array
+    // read-modify-write (the rhs is a register value, not a second pointer), so there
+    // is no aliasing to defeat — one pointer vectorizes with NO `__restrict__`. Gated
+    // to the plain store `w_set`, so an atomic writer keeps the decode path.
+    if constexpr (cs::is_same<W, w_set>::value) {
+        if (c.is_contiguous()) {
+            typename C::element_type * cp = c.data();
+            for (I i = 0; i < n; ++i) cp[i] = op(static_cast<Cv>(cp[i]), sv);   // mirrors the w_set store
+            return;
+        }
+    }
     for (I lin = 0; lin < n; ++lin) {
         I rem = lin, oc = 0;
         for (int d = static_cast<int>(sizeof...(D)) - 1; d >= 0; --d) {
@@ -337,6 +348,13 @@ _TNY_API void iota_(C & c, typename C::element_type start, typename C::element_t
     const I e[]  = { c.extent(D)... };
     const I sc[] = { c.stride(D)... };
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
+    // Contiguous linear fast path: a pure single-array write (no read, no second
+    // pointer) — vectorizes with one pointer, no `__restrict__` needed.
+    if (c.is_contiguous()) {
+        typename C::element_type * cp = c.data();
+        for (I i = 0; i < n; ++i) cp[i] = static_cast<Cv>(start) + static_cast<Cv>(i) * static_cast<Cv>(step);
+        return;
+    }
     for (I lin = 0; lin < n; ++lin) {
         I rem = lin, oc = 0;
         for (int d = static_cast<int>(sizeof...(D)) - 1; d >= 0; --d) { I k = rem % e[d]; rem /= e[d]; oc += k * sc[d]; }
@@ -394,7 +412,20 @@ _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
 // for `uop_out` (out-of-place: fresh dest).
 template <bool Restrict = false, class C, class A, class Uop> _TNY_API void unaryo(C & c, const A & a, Uop f)
 { unaryo_<Restrict>(c, a, f, cs::make_index_sequence<C::rank()>{}); }
-template <class C, class Uop> _TNY_API void unary(C & c, Uop f) { unaryo(c, c, f); }
+// In-place unary (`a.neg_()`/`exp_()`/`map_(f)`/…) is a SINGLE-array read-modify-write:
+// `a[i] = f(a[i])`. One pointer, so it vectorizes with NO `__restrict__` (nothing to
+// alias). Contiguous fast path over the one handle; a strided/overlapping view falls
+// back to the general decode (`unaryo`, unchanged).
+template <class C, class Uop> _TNY_API void unary(C & c, Uop f) {
+    using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
+    if (c.is_contiguous()) {
+        typename C::element_type * cp = c.data();
+        const I n = static_cast<I>(c.numel());
+        for (I i = 0; i < n; ++i) cp[i] = static_cast<Cv>(f(static_cast<Cv>(cp[i])));   // mirrors the store
+        return;
+    }
+    unaryo(c, c, f);
+}
 
 /* ---- out-of-place tensor (op) tensor, broadcasting --------------- *
  * static -> stack (host+device), else heap (host only).              */
