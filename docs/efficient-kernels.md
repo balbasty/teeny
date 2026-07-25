@@ -138,6 +138,32 @@ auto s = sum(h);               // accumulated in double, returned as half
 
 See [Half precision](half.md) and [Math → reductions](math.md#accumulator-type-vs-result-type).
 
+## 7. Small static-C kernels — two codegen rules
+
+A per-voxel kernel over a static `C` (a `C×C` solve, a packed-symmetric gather) folds to
+hand-written quality *only* if you help the compiler in two places (both measured via
+`-O2 -S`):
+
+- **Snapshot inputs through a `local` before writing outputs.** If a kernel reads `in`
+  and writes `out` where the two *could* alias, the compiler reloads `in` after every
+  store. Copy the inputs into a `local` workspace first, compute from that, then write
+  `out` — the reloads vanish (a probe dropped one clang kernel 68 → 37 instructions).
+  (This is the read-side analogue of the out-of-place `__restrict__` fast path in §5.)
+- **Fully unroll the small static loops with `TNY_UNROLL`.** A packed index like
+  `sub2pak(C,i,j)` folds to an immediate offset only when its loop unrolls. clang and
+  nvcc honour a bare `#pragma unroll`; **gcc silently ignores it** and needs
+  `#pragma GCC unroll N`. Use the portable `TNY_UNROLL` (`defines.h`) immediately before
+  the `for`:
+
+  ```cpp
+  TNY_UNROLL
+  for (int j = 0; j < C; ++j) acc += L(i,j) * x(j);   // static C -> folds to immediates
+  ```
+
+  `TNY_UNROLL` is a full unroll with a generous fixed count (gcc's pragma needs a
+  *literal*, so a per-count macro can't take a template-parameter `C`); for a partial
+  unroll write the compiler pragma directly.
+
 ## Checklist
 
 Before a kernel is "fast", check:
@@ -149,3 +175,5 @@ Before a kernel is "fast", check:
 - [ ] Batch dims are **peeled into the pointer** (`peel_front`), not carried in the inner loop.
 - [ ] On the device, offsets are **narrowed** (`dispatch_index`) where the span fits.
 - [ ] Bulk elementwise work uses the **out-of-place** form when shapes already match.
+- [ ] Small static-C inner loops are marked **`TNY_UNROLL`**, and inputs are **snapshotted
+      through a `local`** before writing outputs (§7).

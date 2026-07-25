@@ -20,6 +20,23 @@
 // `__restrict__` is accepted by g++, clang++, and nvcc (device code included).
 #define _TNY_RESTRICT __restrict__
 
+// Portable full-unroll hint for a SMALL STATIC-trip-count loop (a downstream
+// static-C kernel's packed-index / per-axis inner loop) so it folds to immediates
+// instead of runtime imul/cmov. clang & nvcc honour `#pragma unroll`; **gcc silently
+// ignores it** and needs `#pragma GCC unroll N`. Place immediately before the `for`.
+// No-op on unknown compilers. Public spelling — downstream kernels use it too.
+//   NB: gcc's `#pragma GCC unroll` needs a LITERAL count, so a per-count macro
+//   (`TNY_UNROLL_N(N)`) can't take a *template-parameter* count on gcc (the exact
+//   static-C case) — hence a single full-unroll spelling with a generous fixed
+//   count. For a partial unroll, write the compiler pragma directly.
+#if defined(__clang__) || defined(__CUDACC__)
+#   define TNY_UNROLL _Pragma("unroll")
+#elif defined(__GNUC__)
+#   define TNY_UNROLL _Pragma("GCC unroll 16")
+#else
+#   define TNY_UNROLL
+#endif
+
 // Debug-only precondition check (shape mismatches etc.). Active on the host in
 // non-NDEBUG builds; compiled out on the device and under NDEBUG so `_TNY_API`
 // code stays device-safe and release-fast.
