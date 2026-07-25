@@ -17,23 +17,24 @@ a *runtime index* is a plain integer. "→ view" means a non-owning
 ## The tensor type
 
 ```cpp
-template <class T, class Extents, class Layout = ccontiguous, storage O = storage::view>
+template <class T, class Shape, class Layout = ccontiguous, storage O = storage::view>
 struct tensor;
 ```
 
 | Parameter | Meaning | Typical value |
 |---|---|---|
 | `T` | element type | any arithmetic type, `half`, `bfloat16` |
-| `Extents` | the **shape** | `shape<2,3>` (a `cs::extents<int64_t,…>`; `-1` = dynamic) |
+| `Shape` | the **shape** (exposed as `shape_type` / `extents_type`) | `shape<2,3>` (a `cs::extents<int64_t,…>`; `-1` = dynamic) |
 | `Layout` | memory order | `ccontiguous` (C, default), `fcontiguous` (F), `dynamic_strides` (runtime), `strides<S...>` (static/mixed) |
 | `O` | ownership | `storage::view` (default), `storage::stack`, `storage::heap`, `storage::gpu`/`pinned`/`mapped`, `storage::gpu_view` |
 
-Slicing / permuting / peeling / `.at()` of a `gpu` tensor yields an `storage::gpu_view`
+Slicing / permuting / peeling / `.at()` of a `gpu` tensor yields a `storage::gpu_view`
 (a non-owning view of *device* memory), so a device pointer is never mistaken for
 a host one in the type. Helpers: `storage_is_device` (gpu/gpu_view),
-`storage_is_host_accessible`, `storage_is_view` (view/gpu_view), `storage_view_of(O)` (the
-view kind that preserves a source's space). `pinned`/`mapped` are host-accessible,
-so their views are plain `view`.
+`storage_is_host_accessible`, `storage_is_view` (view/gpu_view/pinned_view/mapped_view),
+`storage_view_of(O)` (the view kind that preserves a source's space). `pinned`/`mapped`
+are host-accessible, but a view of one keeps its space — `pinned_view` / `mapped_view`
+(so DLPack can label it `kDLCUDAHost`) — while behaving like a plain `view` otherwise.
 
 ### Ownership aliases
 
@@ -107,8 +108,8 @@ stack (host+device), dynamic shape → heap (host only):
 | `t.shape(d)` | `integral_constant`/`Idx` | size of axis `d` — static `Int<k>()` folds, runtime `d` is a value |
 | `t.strides()` | array-like accessor | the tensor's **strides**: twin of `shape()` — `strides()[Int<k>()]` folds where derivable, `strides()[i]` is runtime |
 | `t.stride(d)` | `integral_constant` if derivable, else `Idx` | stride of axis `d`; static-stride / contiguous layouts fold |
-| `t.is_contiguous()` | `bool` | **C-order** (numpy/pytorch default) — what `reshape`/`flatten` need; `is_contiguous<fcontiguous>()` for F |
-| `t.is_dense()` | `bool` | dense block in **some** axis order (C, F, or permuted); `is_dense<L>()` is the exact-layout check and `is_contiguous()` == `is_dense<ccontiguous>()` |
+| `t.is_contiguous()` | `bool` | **C-order** (numpy/pytorch default) — what `reshape`/`flatten` need; `is_contiguous(fcontiguous{})` for F |
+| `t.is_dense()` | `bool` | dense block in **some** axis order (C, F, or permuted); `is_dense(L{})` is the exact-layout check and `is_contiguous()` == `is_dense(ccontiguous{})` |
 | `t.data()` | `T*` | base pointer |
 | `t.view()` | `view<T,E,L>` (`gpu_view` if device) | non-owning teeny view aliasing `t`'s memory (no copy) |
 | `t.extent(d)` / `t.extent(Int<k>())` | `Idx` / `integral_constant` if static | mdspan-side per-axis size (== `t.shape(d)`); folds when static |

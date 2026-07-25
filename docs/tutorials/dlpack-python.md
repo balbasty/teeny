@@ -71,12 +71,14 @@ layout — nothing is flattened or copied.
 
 ```cpp
 // Invert the i-th batch element. peel_front_at<-2> folds the batch index `i` into
-// the pointer and leaves a rank-2 view; recast<shape<c,c>> restores the two static
+// the pointer and leaves a rank-2 view; recast(shape<c,c>{}) restores the two static
 // extents so `invert` sees a compile-time C×C. (`c` is the static C from §3.)
+// The value-form recast(shape<c,c>{}) needs no `.template`; peel_front_at is a
+// count selector, so it keeps it on this dependent receiver.
 template <long c, class In, class Out>
 _TNY_API void invert_cell(const In & in, Out & out, long i) {
-    auto A  = in .template peel_front_at<-2>(i).template recast<shape<c, c>>();
-    auto Oi = out.template peel_front_at<-2>(i).template recast<shape<c, c>>();
+    auto A  = in .template peel_front_at<-2>(i).recast(shape<c, c>{});
+    auto Oi = out.template peel_front_at<-2>(i).recast(shape<c, c>{});
     invert(A, Oi);
 }
 ```

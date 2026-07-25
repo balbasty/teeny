@@ -82,7 +82,7 @@ auto cell = at.peel_front_at<-Sr>(i);                     // i-th (grid-stride)
 ```
 
 Each `cell` is a `dextents<_,Sr>` view (inner extents dynamic). Follow with
-[`recast<shape<-1,c,c>>()`](structure.md#recover-static-inner-dims) to fold known
+[`recast(shape<-1,c,c>{})`](structure.md#recover-static-inner-dims) to fold known
 inner dims.
 
 ### `dispatch_rank` / `fixed<R>` — general (per total rank)
@@ -131,7 +131,7 @@ DLPack / ndarray  ──as_anyrank(data, shape, stride, ndim)──►  anyrank
    ▼  dispatch_value<1,2,3>(spatial_ndim)  -> static spatial rank D
    ▼  Sr = D + 1  (spatial + channel)
    for (auto cell : at.peel_front<-Sr>()) {   // negative: keep the last Sr dims
-       kernel<D>(cell.recast<shape<-1,…static inner…>>(), …);  // parallelise this
+       kernel<D>(cell.recast(shape<-1,…static inner…>{}), …);  // parallelise this
    }
 ```
 

@@ -79,10 +79,10 @@ sum(m); prod(m); max(m); min(m); dot(a,b);
 // indexing / slicing (python-like: negatives wrap; none = open end; 3rd arg = step):
 t(0, -1, slice(1,4));                                // element, or a sub-view
 t(all, slice(none,4), slice(1,none,2));              // keep axis / open ends / strided
-t.take_along<0,2>(i, all);                           // bind named axes, keep the rest
-t.permute<2,0,1>();                                  // reorder axes
-t.unsqueeze<2>();                                    // insert a size-1 axis (numpy newaxis)
-for (auto line : peel<0,1>(t)) work(line);           // nd-peel: iterate a subset of axes
+t.take_along(axis<0,2>{}, i, all);                   // bind named axes, keep the rest
+t.permute(Int<2>(), Int<0>(), Int<1>());             // reorder axes
+t.unsqueeze(Int<2>());                               // insert a size-1 axis (numpy newaxis)
+for (auto line : peel(t, axis<0,1>{})) work(line);   // nd-peel: iterate a subset of axes
 for (auto v : peel_front<Nbatch>(t)) work(v);        // peel arbitrary leading batch dims
 dispatch_value<1,2,3>(D, [&](auto d){ kernel<d.value>(v); });  // runtime -> static
 
