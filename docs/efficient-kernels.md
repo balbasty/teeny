@@ -138,10 +138,10 @@ auto s = sum(h);               // accumulated in double, returned as half
 
 See [Half precision](half.md) and [Math → reductions](math.md#accumulator-type-vs-result-type).
 
-## 7. Small static-C kernels — two codegen rules
+## 7. Small static-C kernels — three codegen rules
 
 A per-voxel kernel over a static `C` (a `C×C` solve, a packed-symmetric gather) folds to
-hand-written quality *only* if you help the compiler in two places (both measured via
+hand-written quality *only* if you help the compiler in a few places (all measured via
 `-O2 -S`):
 
 - **Snapshot inputs through a `local` before writing outputs.** If a kernel reads `in`
@@ -164,6 +164,21 @@ hand-written quality *only* if you help the compiler in two places (both measure
   *literal*, so a per-count macro can't take a template-parameter `C`); for a partial
   unroll write the compiler pragma directly.
 
+- **Don't zero a workspace you're about to overwrite.** A `local<T, shape<C,C>> ws{};`
+  value-*initialises* — a `C²` zero-fill on every voxel. When the kernel fills `ws` before
+  reading it, use the uninitialised `empty` factory instead:
+
+  ```cpp
+  auto ws = empty<T>(shape<C,C>{});   // np.empty — no zero-fill; you write every cell
+  ```
+
+  The optimizer's dead-store elimination removes the zero-fill *when it can prove* the
+  buffer is fully written first — but under conditional or triangular writes (a Cholesky
+  factor's lower triangle) it often can't, and the `C²` stores survive in the hot loop.
+  `empty` (and `make_local`/`make_heap`, which are `empty` spellings) skips them outright;
+  `zeros`/`ones`/`full`/`arange` and a braced `local<...>{}`/`owned(e)` stay zeroed for when
+  you *do* want the fill.
+
 ## Checklist
 
 Before a kernel is "fast", check:
@@ -177,3 +192,5 @@ Before a kernel is "fast", check:
 - [ ] Bulk elementwise work uses the **out-of-place** form when shapes already match.
 - [ ] Small static-C inner loops are marked **`TNY_UNROLL`**, and inputs are **snapshotted
       through a `local`** before writing outputs (§7).
+- [ ] A workspace the kernel fully overwrites is created with **`empty`** (no zero-fill),
+      not a value-initialised `local<...>{}` (§7).
