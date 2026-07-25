@@ -202,6 +202,10 @@ diag-then-rows), `Full`(C²). Port:
   and the `1.000001` diagonal ridge for conditioning.
 - Static-C specialisation via `dispatch_value<1,2,3,4,...>(C, …)`; the 2×2/3×3
   closed-form inverses are worth keeping as specialisations.
+- For the per-voxel `C×C` inner loops to fold to hand quality, follow the two static-C
+  codegen rules in [efficient-kernels §7](efficient-kernels.md): mark the small static
+  loops `TNY_UNROLL` (gcc ignores bare `#pragma unroll`), and **snapshot inputs through
+  a `local`** before writing outputs so the compiler doesn't reload them per store.
 
 ### 4.4 splinc (spline prefilter)
 

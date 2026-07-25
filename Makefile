@@ -58,6 +58,7 @@ TESTS = \
 	$(BUILDDIR)/test_broadcast \
 	$(BUILDDIR)/test_broadcast_index \
 	$(BUILDDIR)/test_inplace_vectorize \
+	$(BUILDDIR)/test_unroll \
 	$(BUILDDIR)/test_restrict_fastpath \
 	$(BUILDDIR)/test_api \
 	$(BUILDDIR)/test_half \
