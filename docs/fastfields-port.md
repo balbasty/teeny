@@ -71,6 +71,7 @@ as `shape_type`/`extents_type`), with per-dimension static/dynamic shape and str
 | **runtime→static dispatch** | `dispatch_value<1,2,3>(D, f)` (spatial rank / order / bound); `dispatch_rank(as_anyrank(...), f)` (total rank — prefer `peel_front<-Sr>` per §3) |
 | **narrow device offsets (int32)** | `dispatch_index(v, f)` at the launch site → int32 arm when `v.index_fits<int32_t>()`, else int64. Halves a dynamic view's register footprint + 32-bit address math (a GPU occupancy win). `reindex<int32_t>()` is the raw retype |
 | host ndarray boundary | `as_anyrank(data, shape, stride, ndim)` → `anyrank`; `.fixed<R>()`. **Device data:** `as_anyrank<storage::gpu_view>(dptr, …)` so cells are device-tagged; DLPack: `from_dlpack<T[,Space]>` / `dispatch_dlpack<Space>` set+check the space from the capsule |
+| **DLPack dtype dispatch (batch idiom)** | `dispatch_dlpack_dtype<Space>(m, f)` — dtype-dispatch that hands `f` the **typed `anyrank`** (rank preserved), so `f` drives `peel_front<-Sr>` (kernel per `Sr`, not per total rank). `dispatch_dlpack<Space>(m, f)` is the rank-collapsing sibling. `f` must be generic over its element type |
 | owning buffers | `local<T,E>` (stack, static), `owned<T,E>(e)` (heap host), `gpu/pinned/mapped<T,E>(e)` (from `teeny/cuda.h`); `empty<T[,storage::Space]>(e)` deduces stack/heap from the shape |
 
 What teeny deliberately does **not** do (kept out to stay tiny) and therefore

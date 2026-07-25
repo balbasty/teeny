@@ -63,6 +63,21 @@ capsule with the default host space trips a `_TNY_CHECK` — spell it
 the views are correctly device-tagged. (The shape/stride *metadata* is host either
 way; the space labels the data.)
 
+### Importing from DLPack: two dispatch flavours
+
+`from_dlpack<T[,Space]>(m)` returns the typed `anyrank`; two helpers add the dtype
+dispatch on top of it:
+
+- **`dispatch_dlpack<Space>(m, f)`** reads dtype **and** rank and hands `f` a
+  **fixed-rank** view — one instantiation per (dtype × total rank).
+- **`dispatch_dlpack_dtype<Space>(m, f)`** reads only the dtype and hands `f` the
+  **typed `anyrank`** (rank still dynamic), so `f` drives the batch idiom below —
+  the kernel instantiates **once per `Sr`**, not once per total rank. Prefer this for
+  `(*batch, *spatial, C)` data.
+
+Both instantiate `f` for every supported dtype (only the matching one runs), so `f`
+must be generic over its element type.
+
 ### `peel_front<-Sr>` — the batch pattern (preferred)
 
 For `(*batch, *spatial, C)` data, peel the runtime number of leading batch dims

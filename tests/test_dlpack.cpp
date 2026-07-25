@@ -124,5 +124,55 @@ int main()
         if (gf.extent(0) != 2 || gf.extent(2) != 4) return 22;    // extents only (no deref)
     }
 
+    // ---- #181: dispatch_dlpack_dtype PRESERVES the rank (typed anyrank) --------
+    // dispatch_dlpack collapses to a fixed rank (f per dtype x total rank); this
+    // sibling hands f the TYPED anyrank (rank still dynamic) so the caller drives
+    // the (*batch, *spatial, C) batch idiom with peel_front<-Sr>.
+    {
+        float vol[2*3*4];
+        for (int i = 0; i < 24; ++i) vol[i] = float(i);
+        int64_t vsh[3] = {2,3,4};                          // (batch=2, spatial=3, C=4)
+        DLManagedTensor mv{};
+        mv.dl_tensor.data = vol; mv.dl_tensor.device = {kDLCPU, 0};
+        mv.dl_tensor.ndim = 3; mv.dl_tensor.dtype = {kDLFloat, 32, 1};
+        mv.dl_tensor.shape = vsh; mv.dl_tensor.strides = nullptr; mv.dl_tensor.byte_offset = 0;
+        mv.deleter = nullptr;
+
+        // NB: dtype dispatch instantiates f for EVERY supported type (only the
+        // matching one runs), so f must be compile-valid for all — no static_assert
+        // on a specific element type here. `space`/`rank()` hold for every type.
+        int ndim_seen = -1; double s = 0; int ncells = 0;
+        bool ok = dispatch_dlpack_dtype(&mv, [&](auto at) {
+            static_assert(decltype(at)::space == storage::view, "typed anyrank, host-tagged (rank not collapsed)");
+            ndim_seen = int(at.ndim);                       // RUNTIME rank -> still dynamic (3)
+            for (auto cell : at.template peel_front<-2>()) {   // keep trailing (spatial,C); peel the 1 batch dim
+                static_assert(decltype(cell)::rank() == 2, "cell keeps the trailing 2 dims");
+                ++ncells; s += static_cast<double>(sum(cell));
+            }
+        });
+        if (!ok || ndim_seen != 3 || ncells != 2) return 23;   // float ran: 2 batch cells
+        double expect = 0; for (int i = 0; i < 24; ++i) expect += vol[i];
+        if (s != expect) return 24;
+
+        // the dtype really dispatches: a float64 capsule lands in the double arm.
+        double dvol[6]; for (int i = 0; i < 6; ++i) dvol[i] = i + 0.5;
+        int64_t dsh[2] = {2,3};
+        DLManagedTensor mdd{};
+        mdd.dl_tensor.data = dvol; mdd.dl_tensor.device = {kDLCPU, 0};
+        mdd.dl_tensor.ndim = 2; mdd.dl_tensor.dtype = {kDLFloat, 64, 1};
+        mdd.dl_tensor.shape = dsh; mdd.dl_tensor.strides = nullptr; mdd.deleter = nullptr;
+        bool got_double = false;
+        dispatch_dlpack_dtype(&mdd, [&](auto at) {
+            got_double = cs::is_same<typename decltype(at.template fixed<2>())::element_type, double>::value;
+        });
+        if (!got_double) return 25;
+
+        // unsupported dtype (lanes != 1) -> false, f never called.
+        DLManagedTensor mu = mv; mu.dl_tensor.dtype = {kDLFloat, 32, 2};
+        bool called = false;
+        bool ok2 = dispatch_dlpack_dtype(&mu, [&](auto){ called = true; });
+        if (ok2 || called) return 26;
+    }
+
     return 0;
 }
