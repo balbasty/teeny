@@ -99,22 +99,30 @@ run time; it halves a dynamic view's footprint and runs address math in 32-bit. 
 opt-in per launch site — see [Shapes & strides](shapes-strides.md#the-index-type-shape32-reindex)
 and [Dispatch](dispatch.md#dispatch_index-dispatch_ranknarrow_index-the-int32-fast-path).
 
-## 5. Contiguous out-of-place math auto-vectorizes
+## 5. Contiguous elementwise math auto-vectorizes
 
-An out-of-place op (`a + b`, `a * 2`, `exp(a)`, `a < b`) writes a **fresh** result that
-can't alias its operands, so when every operand is C-contiguous and the same shape (no
-broadcast), teeny takes a `__restrict__` linear fast path that **auto-vectorizes**:
+Contiguous elementwise ops take a linear fast path (in place of the per-element decode)
+that **auto-vectorizes**. Two flavours, by whether a second array is involved:
 
 ```cpp
-auto c = a + b;     // contiguous, same shape -> SIMD write
-auto d = exp(a);    // likewise
-a.add_(b);          // IN-PLACE: destination is an operand, so this stays scalar (safe)
+auto c = a + b;     // OUT-OF-PLACE: fresh result, can't alias -> SIMD write
+auto d = exp(a);    // likewise (needs operands same-shape + contiguous, no broadcast)
+a *= 2;  a.add_(1); // IN-PLACE SCALAR: one array, nothing to alias -> SIMD
+a.exp_(); a.neg_(); // IN-PLACE UNARY: same — and over ANY dense view (transposed too)
+a.add_(b);          // IN-PLACE TENSOR rhs: `b` may overlap `a`, so this stays scalar
 ```
 
-A broadcast, a strided/permuted operand, or an in-place op falls back to the general
-element-by-element path (correct, just not vectorized). So: for a bulk elementwise
-pass, prefer the **out-of-place** form over a broadcast when the shapes already match.
-Mechanism and codegen: [Performance](performance.md#open-work).
+- **Out-of-place** (`a + b`, `exp(a)`, `a < b`) writes a **fresh** result that can't alias
+  its operands — vectorizes when every operand is C-contiguous and the same shape.
+- **In-place scalar / unary** (`a *= 2`, `a.exp_()`), plus `iota_`/`fill_`/`zero_`, is a
+  single-array read-modify-write — one pointer, nothing to alias. The scalar/unary ones
+  are order-independent, so they vectorize over **any dense view** (C/F/permuted — a
+  transposed in-place op still SIMDs); `iota_` needs exact C-order.
+- The **only** case left scalar is an in-place op with a **tensor rhs** (`a.add_(b)`):
+  `b` may overlap the destination, so the compiler must assume aliasing.
+
+A broadcast or a strided operand also falls back to the decode (correct, just not
+vectorized). Mechanism and codegen: [Performance](performance.md#open-work).
 
 ## 6. Compute wide, store narrow
 
