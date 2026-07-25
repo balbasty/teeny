@@ -382,14 +382,21 @@ template-only.
   operands' (`_wider_index_t`, by `sizeof`; tie → first operand), so a mixed-width
   broadcast (int32 view + int64 view) yields an int64 result — lossless, and it stops
   the engine truncating the wide operand's strides to a narrow result width.
-  **Contiguous linear fast path (#161):** the OUT-OF-PLACE engines (`oop`/`oops`/
-  `uop_out`/`oop_cmp`/`oops_cmp`) thread `Restrict=true` into `bzip_`/`scalo_`/`unaryo_`.
-  When the writer is the plain store AND every operand has the result's rank+extents
-  and is C-contiguous, the per-element mixed-radix decode is replaced by a flat
-  `for(i) cp[i]=op(ap[i],…)` loop whose destination `cp` is `_TNY_RESTRICT`-qualified
-  (the fresh result can't alias the operands; the sources stay un-restricted so `a+a`
-  is safe) — this is what auto-vectorizes. In-place ops keep `Restrict=false` (the
-  destination IS an operand → restrict would be UB) and are byte-for-byte unchanged.
+  **Contiguous linear fast path (#161, #175):** contiguous elementwise ops replace the
+  per-element mixed-radix decode with a flat `for(i) cp[i]=…` loop that auto-vectorizes.
+  Two flavours by whether a second array is in play:
+  (a) OUT-OF-PLACE (`oop`/`oops`/`uop_out`/`oop_cmp`/`oops_cmp`) thread `Restrict=true`
+  into `bzip_`/`scalo_`/`unaryo_`; when the writer is `w_set` AND every operand has the
+  result's rank+extents and is C-contiguous, `cp=op(ap[i],…)` with `cp` `_TNY_RESTRICT`-
+  qualified (the fresh result can't alias the operands; sources stay un-restricted so
+  `a+a` is safe).
+  (b) IN-PLACE SINGLE-ARRAY ops — `scal_` (scalar rhs: `add_`/`mul_`/compound/`fill_`/
+  `zero_`), the in-place `unary` (`neg_`/`exp_`/`map_`), and `iota_` — are one-pointer
+  read-modify-writes, so they take a contiguous fast path with NO restrict (nothing to
+  alias). `scal_`'s is gated to `w_set` so atomic scalars keep the decode.
+  The ONLY case left on the decode is an in-place op with a TENSOR rhs (`add_(b)`/
+  `copy_`): `b` may overlap the destination, so it can't vectorize (restrict = UB, a
+  plain loop = assumed-overlap). Those stay byte-for-byte unchanged.
 - **The gather** (`tensor.h` `_slice_range`, `iterate.h` `gather_peel`): ALL
   view-making ops — `operator()` slicing, `take_along`, `peel` — route through
   one hand-built gather (NO `cs::submdspan`). Per axis: an integer drops it (into

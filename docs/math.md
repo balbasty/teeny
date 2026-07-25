@@ -48,6 +48,11 @@ a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_();  // sign_ -> -1/0/+1
 a.clamp_(lo, hi);                                          // clamp to [lo,hi]
 ```
 
+A contiguous in-place op with a **scalar** rhs (`a *= 2`, `a.add_(1)`) or a **unary**
+op (`a.exp_()`), plus `iota_`/`fill_`/`zero_`, is a single-array read-modify-write and
+**auto-vectorizes** (one pointer, nothing to alias — see [Performance](performance.md#open-work)).
+Only an in-place op with a *tensor* rhs (`a.add_(b)`) can't, since `b` may overlap `a`.
+
 Bitwise ops are available for **integer element types only**:
 
 ```cpp

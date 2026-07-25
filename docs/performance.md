@@ -60,12 +60,15 @@ dynamic strides cost nothing per element.**
 1. **Register pressure / GPU occupancy** — the footprint above. The real, measurable
    cost, and the reason to prefer static strides and (soon) 32-bit indexing.
 2. **Vectorization** — an unknown stride can never be proven contiguous, so it can't
-   SIMD. For *contiguous* ops the story splits by direction: an **out-of-place** op
-   writes a fresh, non-aliasing result, so it now takes a `__restrict__` linear fast
-   path and auto-vectorizes (#161, *Open work* below). An **in-place** op can't — its
-   destination is also an operand, so the compiler must assume overlap and stays
-   scalar (restricting there would be UB). (Measured: at `-O3`, a `__restrict__`
-   pointer loop vectorizes; the may-alias version stays scalar.)
+   SIMD. For *contiguous* ops teeny takes a linear fast path that auto-vectorizes in
+   every case except one (#161, *Open work* below): an **out-of-place** op writes a
+   fresh, non-aliasing result (`__restrict__` destination), and an **in-place scalar
+   or unary** op (`a *= 2`, `a.exp_()`) is a single-array read-modify-write with no
+   second pointer — so both vectorize. The lone exception is an **in-place op with a
+   tensor rhs** (`a.add_(b)`): `b` may alias or overlap the destination (`a.add_(a)`),
+   so the compiler must assume overlap and stays scalar — restricting there would be
+   UB. (Measured: at `-O3`, the fresh/single-array loops emit packed SIMD; the
+   may-alias tensor case stays scalar.)
 3. **ND random-access gather** — the one place loop-invariant hoisting can't help.
    A spline pull/push inner neighborhood computes `base + Σ idxₖ·strideₖ` at scattered
    points, not a linear march. With dynamic spatial strides that is N runtime
@@ -110,20 +113,24 @@ loop, where they hoist for free.
   anyrank rank dispatch. Opt in per launch site. Cross-width broadcasting (#167) is
   resolved by **broadening** — a mixed-width `a + b` takes the wider operand's index
   type, which is lossless and avoids truncating the wide operand's strides.
-- **`restrict`/no-alias fast path (#161) — landed (out-of-place).** An out-of-place
-  op (`a + b`, `a * 2`, `exp(a)`, `a < b`) writes into a **freshly allocated** result
-  that provably can't alias its operands, so the engines (`bzip_`/`scalo_`/`unaryo_`)
-  now take a **contiguous linear fast path**: when the writer is the plain store, and
-  every operand has the same rank + extents as the result and is C-contiguous, the
-  per-element mixed-radix decode is replaced by a flat `for (i) cp[i] = op(ap[i], …)`
-  loop whose destination `cp` is `__restrict__` (`_TNY_RESTRICT`, defines.h). The
-  restrict is UB-free *because* the destination is fresh — the sources are left
-  un-`restrict`ed so `a + a` (operands aliasing each other) stays correct. Anything
-  else (a broadcast, a strided/permuted operand, any in-place op) falls back to the
-  unchanged decode. Codegen proof (`-O3 -S`, dynamic-shape `double` add): the write
-  loop that emitted scalar `addsd` on both g++ and clang++ now emits packed `addpd`.
-  The in-place ops (`add_`/`copy_`/…) are deliberately excluded — there the
-  destination *is* an operand, so restricting it would be UB.
+- **`restrict`/no-alias fast path (#161, #175) — landed.** Contiguous elementwise ops
+  now take a **linear fast path** in place of the per-element mixed-radix decode, which
+  auto-vectorizes. Two flavours, by whether a second array is in play:
+    - **Out-of-place** (`a + b`, `a * 2`, `exp(a)`, `a < b`) writes a **freshly
+      allocated** result, so the engines (`bzip_`/`scalo_`/`unaryo_`) run a flat
+      `for (i) cp[i] = op(ap[i], …)` with the destination `cp` marked `__restrict__`
+      (`_TNY_RESTRICT`, defines.h). UB-free *because* the destination is fresh; the
+      sources are left un-`restrict`ed so `a + a` stays correct.
+    - **In-place scalar / unary / iota / fill** (`a *= 2`, `a.add_(1)`, `a.exp_()`,
+      `a.iota_(…)`) is a **single-array** read-modify-write — one pointer, so it
+      vectorizes with **no `__restrict__` at all** (nothing to alias). `scal_`'s fast
+      path is gated to the plain store `w_set`, so an atomic scalar (`a.atomic_add_`)
+      keeps the decode path.
+  The one case that stays scalar is an **in-place op with a tensor rhs** (`a.add_(b)`):
+  `b` may alias/overlap the destination, so neither a `restrict` (UB) nor a plain loop
+  (the compiler assumes overlap) can safely vectorize it. Codegen proof (`-O3 -S`): the
+  write loops that emitted scalar `addsd` on both g++ and clang++ now emit packed
+  `addpd`; a broadcast or strided operand falls back to the unchanged decode.
 
 !!! note "Measurement over intuition"
     The numbers here (`sizeof`, loop bodies, SIMD) are from `g++ -O2/-O3` on the host.
