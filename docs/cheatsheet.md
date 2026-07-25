@@ -38,7 +38,8 @@ wrap(ptr, shape, strides<S...>{});           // view with COMPILE-TIME strides (
 as_tensor(any_mdspan);                        // wrap an mdspan/submdspan result
 
 make_view(ptr, shape);           // alias of wrap that deduces the extents type
-empty<T>(shape);                 // UNINITIALISED; deduces stack (static) / heap (dynamic)
+empty<T>(shape);                 // UNINITIALISED (np.empty); deduces stack (static) / heap (dynamic)
+                                 //   (a value-initialised local<...>{} / owned(e) stays zeroed; empty opts out)
 empty<T, storage::gpu>(shape);       // ...or name a backend: stack/heap/gpu/pinned/mapped
 empty<T>(shape, storage_c<storage::gpu>{});   // value-tag backend form (same result)
 make_local<T>(shape);  make_heap<T>(shape);            // thin spellings of empty<T,storage::stack/heap>

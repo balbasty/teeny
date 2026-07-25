@@ -206,6 +206,14 @@ struct tensor : private Layout::template mapping<Shape> {
     _TNY_HOST explicit tensor(Shape e)
         : mapping_type(e), store_(_alloc_size(mapping_type(e))) {}
 
+    /** @brief UNINITIALISED constructors (numpy `np.empty`) used by `empty()`: the
+     *         buffer is left indeterminate — fill before reading. `local<...>{}` and
+     *         `zeros(...)` keep their zero-fill; this is the opt-out. */
+    template <storage OO = O, cs::enable_if_t<OO == storage::stack, int> = 0>
+    _TNY_API explicit tensor(_uninit_t) : store_(_uninit) {}
+    template <storage OO = O, cs::enable_if_t<storage_is_owning(OO) && cs::is_constructible<mapping_type, Shape>::value, int> = 0>
+    _TNY_HOST tensor(Shape e, _uninit_t) : mapping_type(e), store_(_alloc_size(mapping_type(e)), _uninit) {}
+
     /* --- geometry ------------------------------------------------- */
     static constexpr cs::size_t rank() noexcept { return Shape::rank(); }
     _TNY_API constexpr const mapping_type & mapping() const noexcept { return *this; }
@@ -1345,13 +1353,13 @@ _TNY_API auto make_view(T * p, Shape e, storage_c<Space> tag = {}) { return wrap
  *  while the allocating cases are `_TNY_HOST`. */
 template <class T = float, storage O = storage_deduce, class Layout = ccontiguous, class Shape,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API auto empty(Shape = Shape{}) { return tensor<T, Shape, Layout, storage::stack>{}; }
+_TNY_API auto empty(Shape = Shape{}) { return tensor<T, Shape, Layout, storage::stack>(_uninit); }
 template <class T = float, storage O = storage_deduce, class Layout = ccontiguous, class Shape,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
 _TNY_HOST auto empty(Shape e) {
     constexpr storage R = storage_resolve(O, Shape::rank_dynamic() == 0);
     static_assert(!storage_is_view(R), "empty(): a non-owning view kind (view/gpu_view/pinned_view/mapped_view) has no storage to allocate — use wrap()/make_view() for a view.");
-    return tensor<T, Shape, Layout, R>(e);
+    return tensor<T, Shape, Layout, R>(e, _uninit);
 }
 /** @brief Value-tag backend form: `empty<T>(extents, storage_c<storage::gpu>{})`. Always
  *  `_TNY_HOST` (a host-side convenience); for a device-usable static-shape build

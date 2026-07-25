@@ -31,6 +31,7 @@ struct cuda_gpu_alloc {
     template <class T> _TNY_HOST static T * allocate(cs::size_t n) {
         void * p = nullptr; cudaMalloc(&p, n * sizeof(T)); _TNY_CHECK(p, "cudaMalloc failed"); return static_cast<T *>(p);
     }
+    template <class T> _TNY_HOST static T * allocate_uninit(cs::size_t n) { return allocate<T>(n); }   // cudaMalloc doesn't zero anyway
     template <class T> _TNY_HOST static void deallocate(T * p) { cudaFree(p); }
 };
 
@@ -39,6 +40,7 @@ struct cuda_pinned_alloc {
     template <class T> _TNY_HOST static T * allocate(cs::size_t n) {
         void * p = nullptr; cudaMallocHost(&p, n * sizeof(T)); _TNY_CHECK(p, "cudaMallocHost failed"); return static_cast<T *>(p);
     }
+    template <class T> _TNY_HOST static T * allocate_uninit(cs::size_t n) { return allocate<T>(n); }
     template <class T> _TNY_HOST static void deallocate(T * p) { cudaFreeHost(p); }
 };
 
@@ -47,6 +49,7 @@ struct cuda_mapped_alloc {
     template <class T> _TNY_HOST static T * allocate(cs::size_t n) {
         void * p = nullptr; cudaHostAlloc(&p, n * sizeof(T), cudaHostAllocMapped); _TNY_CHECK(p, "cudaHostAlloc failed"); return static_cast<T *>(p);
     }
+    template <class T> _TNY_HOST static T * allocate_uninit(cs::size_t n) { return allocate<T>(n); }
     template <class T> _TNY_HOST static void deallocate(T * p) { cudaFreeHost(p); }
 };
 

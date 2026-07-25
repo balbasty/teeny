@@ -81,5 +81,24 @@ int main()
     static_assert(decltype(asr)::ownership == storage::stack, "arange<T,N>() still -> stack");
     if (asr(2) != 2.0) return 12;
 
+    // ---- empty is UNINITIALISED (numpy np.empty), but the zero-init paths stay zeroed ----
+    // The storage_policy ctor split (value-init default + `_uninit` ctor) must NOT
+    // cost stack triviality (only copy/move/dtor matter) — a stack empty is still
+    // kernel-passable by value.
+    static_assert(cs::is_trivially_copyable<decltype(s)>::value, "empty stack stays trivially copyable");
+
+    // `local<...>{}` / `local(...)` / `zeros` VALUE-INITIALISE — every element zero.
+    local<double, shape<3,3>> lz{};                            // brace-init -> zeroed
+    for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) if (lz(i,j) != 0.0) return 13;
+    auto lz2 = local<int, shape<4>>();                         // ()-init -> zeroed
+    for (int i = 0; i < 4; ++i) if (lz2(i) != 0) return 14;
+    auto zbig = zeros<double>(shape<-1>{16});                  // heap zeros -> zeroed
+    for (int i = 0; i < 16; ++i) if (zbig(i) != 0.0) return 15;
+
+    // `empty` yields real, writable storage of the right shape (contents indeterminate).
+    auto eu = empty<double>(shape<-1,4>{3});
+    static_assert(decltype(eu)::ownership == storage::heap, "dynamic empty -> heap");
+    eu.fill_(2.5); if (eu(2,3) != 2.5) return 16;              // usable after a write
+
     return 0;
 }
