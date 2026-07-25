@@ -53,5 +53,26 @@ int main() {
     { auto a = arange<int>(8); a |= 1;
       for (long i = 0; i < 8; ++i) if (a(i) != (int(i) | 1)) return 13; }
 
+    // (8) PERMUTED-dense destination: a scalar/unary in-place op is order-independent,
+    //     so a transposed view (dense in a permuted order) takes the fast path and is
+    //     still correct — every element is touched exactly once.
+    { double buf[12]; auto m = wrap(buf, shape<3,4>{}); m.iota_(0.0, 1.0);   // row-major 0..11
+      auto tr = m.permute(Int<1>(), Int<0>());   // (4,3), strides (1,4): dense, not C-order
+      tr.mul_(2.0);                               // fast path via is_dense()
+      for (long r = 0; r < 3; ++r) for (long c = 0; c < 4; ++c)
+        if (!feq(m(r,c), 2.0 * (r*4 + c))) return 14;    // every element doubled
+      tr.neg_();                                  // in-place unary, permuted-dense
+      for (long r = 0; r < 3; ++r) for (long c = 0; c < 4; ++c)
+        if (!feq(m(r,c), -2.0 * (r*4 + c))) return 15; }
+
+    // (9) F-order (fcontiguous) dense destination — also dense, so the scalar in-place
+    //     op takes the fast path; add is order-independent, so every logical element
+    //     (iota fills logical row-major: f(i,j) = i*3 + j) gets +10.
+    { double buf[6]; auto f = wrap<fcontiguous>(buf, shape<2,3>{});
+      f.iota_(0.0, 1.0);       // logical row-major fill via decode (F-order isn't C-order)
+      f.add_(10.0);            // scalar in-place: dense -> fast path
+      for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j)
+        if (!feq(f(i,j), 10.0 + (i*3 + j))) return 16; }
+
     return 0;
 }

@@ -59,6 +59,20 @@ int main() {
     int status2 = 0;
     if (waitpid(pid2, &status2, 0) < 0) return 5;
     if (!(WIFSIGNALED(status2) && WTERMSIG(status2) == SIGABRT)) return 6;
+
+    // an in-place UNARY into the overlapping dest trips it too (unary applies f twice
+    // to an aliased element) — the guard is now symmetric with scal_/iota_.
+    pid_t pid3 = fork();
+    if (pid3 == 0) {
+        if (!freopen("/dev/null", "w", stderr)) _exit(2);
+        double b[6];
+        auto bad = wrap(b, shape<2,3>{}, {0,1});
+        bad.neg_();                                        // in-place unary write into aliased dest
+        _exit(0);
+    }
+    int status3 = 0;
+    if (waitpid(pid3, &status3, 0) < 0) return 7;
+    if (!(WIFSIGNALED(status3) && WTERMSIG(status3) == SIGABRT)) return 8;
 #endif
     return 0;
 }
