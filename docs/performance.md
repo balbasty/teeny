@@ -70,8 +70,9 @@ dynamic strides cost nothing per element.**
    UB. (Measured: at `-O3`, the fresh/single-array loops emit packed SIMD; the
    may-alias tensor case stays scalar.)
 3. **ND random-access gather** — the one place loop-invariant hoisting can't help.
-   A spline pull/push inner neighborhood computes `base + Σ idxₖ·strideₖ` at scattered
-   points, not a linear march. With dynamic spatial strides that is N runtime
+   An interpolation/resampling gather (reading a window of neighbours around each
+   arbitrary sample point) computes `base + Σ idxₖ·strideₖ` at scattered points, not a
+   linear march. With dynamic spatial strides that is N runtime
    multiply-adds per gather; with **static** strides they fold to immediates. Keep the
    spatial strides static (below) and the gather folds.
 4. **Index width** — dynamic offset math in `int64` is slower and uses more registers

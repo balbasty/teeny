@@ -13,10 +13,10 @@ namespace cs = cuda::std;
  *  nd-peel: iterate over a SUBSET of axes, yielding a lower-rank view *
  *  over the remaining axes.                                          *
  *                                                                    *
- *  Replaces the ndindex<->linear plumbing (jitfields index2offset /  *
- *  sub2offset): a linear index over the peeled axes is decoded for   *
- *  you, and the corresponding sub-view (a `tny::tensor` view into the  *
- *  original data) is returned.                                       *
+ *  Replaces the hand-written ndindex<->linear-offset plumbing: a     *
+ *  linear index over the peeled axes is decoded for you, and the     *
+ *  matching sub-view (a `tny::tensor` view into the original data) is *
+ *  returned.                                                         *
  *                                                                    *
  *  Two entry points:                                                 *
  *    peel_at<Axes...>(t, i)  -> the i-th sub-view  (grid-stride loop) *

@@ -1926,7 +1926,7 @@ Defined in include/teeny/half.h:136
 
 The type math should ACCUMULATE / compute in for element type `T`.
 
-Half types compute in `float` (16-bit accumulation loses precision fast — jitfields' `reduce_t` pattern — and it lets the engines avoid depending on native half host operators). Everything else computes in itself.
+Half types compute in `float` (16-bit accumulation loses precision fast, the usual mixed-precision rule: accumulate wider than you store — and it lets the engines avoid depending on native half host operators). Everything else computes in itself.
 
 ### List of all members
 
@@ -3164,7 +3164,7 @@ Defined in include/teeny/layout.h:66
 
 An mdspan layout policy with **per-dimension static or dynamic strides** — the stride analogue of `extents`/`shape`.
 
-`layout_right`/`layout_left` give contiguous (extent-derived) strides; `layout_stride` stores every stride at run time. `strides<S...>` bakes the KNOWN strides into the type (folding to immediates, like jitfields' posdef `Pointer<T,S>`) — **including negative strides** — while any dimension marked `dynamic_stride` is supplied at run time: 
+`layout_right`/`layout_left` give contiguous (extent-derived) strides; `layout_stride` stores every stride at run time. `strides<S...>` bakes the KNOWN strides into the type (folding to immediates) — **including negative strides** — while any dimension marked `dynamic_stride` is supplied at run time: 
 ```
 tensor<float, shape<3,4>, strides<4,1>>(ptr);                    // static, folds
 tensor<float, shape<3,4>, strides<-4,1>>(ptr);                   // reversed rows

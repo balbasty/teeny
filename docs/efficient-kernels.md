@@ -50,7 +50,7 @@ for a copy (`clone()` / `to<...>()`) when you genuinely need dense, owned memory
 
 ## 3. The `(*batch, …)` batch idiom
 
-The workhorse pattern for field kernels: leading **batch** dims and a small, fixed
+The workhorse pattern for batched array kernels: leading **batch** dims and a small, fixed
 trailing block (a `C×C` matrix, or `*spatial, C`). Peel the batch dims into the pointer
 so the inner kernel only sees the fixed block — `peel_front` bakes each batch offset into
 the sub-view's *data handle*, so the batch strides never touch the inner loop. Which
@@ -223,13 +223,13 @@ it moves the needle:
   **heavy work the compiler can't see through** — e.g. materialising a sub-view per
   iteration, which is exactly why the batch `peel`/`peel_front` range-for walks the
   pointer incrementally for you (§3) rather than decoding each cell.
-- **Precompute the per-axis neighbour table in a gather/scatter.** A separable stencil
-  (spline pull/push) touches `K^D` neighbours at `base + Σ_d idx_d·stride_d`, where each
-  axis's indices/weights come from a bound + a spline-weight evaluation the compiler can't
-  hoist out of the `K^D` inner sweep. Compute each axis's `{idx[k], weight[k]}` **once**
-  into a small per-axis `local` (the reference `ff::pull`/`ff::push` kernels' `axis_nb`
-  struct), then combine the precomputed terms in the nested loop — the bound/weight work
-  runs `D·K` times, not `K^D`.
+- **Precompute the per-axis neighbour table in a gather/scatter.** A separable stencil —
+  for example resampling an image at arbitrary coordinates, where each output point reads a
+  `K`-wide window along every axis — touches `K^D` neighbours at `base + Σ_d idx_d·stride_d`.
+  The per-axis indices and weights come from a boundary rule + a weight evaluation the
+  compiler can't hoist out of the `K^D` inner sweep. Compute each axis's `{idx[k], weight[k]}`
+  **once** into a small per-axis `local`, then combine the precomputed terms in the nested
+  loop — the boundary/weight work runs `D·K` times, not `K^D`.
 
 Net: **loop order + dense-collapse** are the real strided-loop levers; static geometry
 matters for the *small unrolled* blocks (§1, §7), and the incremental pointer walk is a
