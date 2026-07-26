@@ -74,5 +74,24 @@ int main() {
       for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j)
         if (!feq(f(i,j), 10.0 + (i*3 + j))) return 16; }
 
+    // (10) NEGATIVE-stride (flipped) destination — the fast path's safety hinges on
+    //      is_dense() EXCLUDING negative strides: a reversed view's physical block sits
+    //      BEHIND data(), so a forward cp[i] walk would read out of bounds. is_dense()
+    //      must return false here, sending scalar/unary in-place ops down the decode
+    //      fallback, which handles the negative stride correctly. Guards that invariant.
+    { double buf[6]; auto m = wrap(buf, shape<6>{}); m.iota_(0.0, 1.0);   // 0..5
+      auto r = m.flip<0>();               // stride -1, data() at the last element
+      r.mul_(2.0);                        // scalar in-place: NOT dense -> decode fallback
+      for (long i = 0; i < 6; ++i) if (!feq(m(i), 2.0 * i)) return 17;    // every element doubled once
+      r.neg_();                           // unary in-place on the same reversed view
+      for (long i = 0; i < 6; ++i) if (!feq(m(i), -2.0 * i)) return 18; }
+
+    // (11) a 2-D flip (negative stride on one axis, permuted) also falls back cleanly.
+    { double buf[12]; auto m = wrap(buf, shape<3,4>{}); m.iota_(0.0, 1.0);
+      auto r = m.flip<1>();               // reverse columns: stride (4,-1)
+      r.add_(100.0);
+      for (long i = 0; i < 3; ++i) for (long j = 0; j < 4; ++j)
+        if (!feq(m(i,j), 100.0 + (i*4 + j))) return 19; }
+
     return 0;
 }
