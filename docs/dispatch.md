@@ -161,6 +161,30 @@ for (auto cell : at.peel_front<-Sr>()) dispatch_index(cell, [&](auto c) { kernel
 Opt in per launch site — narrowing everything would silently double instantiation
 counts. `dispatch_index<Idx2>` targets a width other than the `int32_t` default.
 
+### `dispatch_layout` — recover static contiguity
+
+The rank-erased boundary drops the producer's contiguity into `layout_stride`
+(`dynamic_strides`), so a cell's `recast<shape<-1,c,c>>()` can only keep *runtime*
+strides. `dispatch_layout` is the layout sibling of `dispatch_index`: it cheaply
+classifies the runtime strides (`is_dense<ccontiguous>()` / `<fcontiguous>()` — a
+stride compare, no data touched) and hands `f` the view **retyped** to
+`ccontiguous` / `fcontiguous` / (else) `dynamic_strides`. In the contiguous arms the
+strides are extent-derived, so the inner `recast` folds them to immediates **safely** —
+no `recast<…, ccontiguous>()` "I promise it's contiguous" (which is UB under `-DNDEBUG`
+if wrong).
+
+```cpp
+for (auto cell : at.peel_front<-Sr>())
+    dispatch_layout(cell, [&](auto v) { kernel<Sr>(v.recast(shape<-1,c,c>{})); });
+```
+
+The **C-order arm is the payoff** — C-order inner strides depend only on the static
+inner extents, so `shape<-1,c,c>` folds them; an F-order inner stride multiplies the
+*dynamic* batch, so the F arm mainly gives a typed extent-derived view. **Opt-in**: `f`
+runs on up to 3 view types, and it composes multiplicatively with the rank/width
+dispatchers — reach for it only where the inner block's folded strides matter (a small
+static-`C` kernel).
+
 ## The full boundary pattern
 
 For a `(*batch, *spatial, C)` array from numpy / torch / cupy / DLPack:

@@ -333,6 +333,11 @@ dispatch_rank<narrow_index>(at, f);           // ...+ int32 offsets when the spa
 dispatch_index<Idx2=int32_t>(v, f);           // the primitive: narrow ONE fixed view's offset width when
                                               //   index_fits, else keep it; f instantiated for both widths.
                                               //   Batch: for (cell : at.peel_front<-Sr>()) dispatch_index(cell, f);
+dispatch_layout(v, f);                        // LAYOUT sibling: runtime-classify a dyn view's strides as
+                                              //   ccontiguous / fcontiguous / (else) dynamic_strides and hand f
+                                              //   the RETYPED view — so recast<shape<-1,c,c>>() folds the inner
+                                              //   strides SAFELY (no "I promise"). C-order arm is the win (inner
+                                              //   strides fold); opt-in (triples instantiations), don't default it.
 auto v3 = at.fixed<3>();                      // or force a known rank
 dispatch_value<1,2,3>(D, [&](auto d){ kern<d.value>(v); });  // runtime value -> static
 // BATCH idiom (one kernel per Sr, not per total rank): peel the runtime batch
