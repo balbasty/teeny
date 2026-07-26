@@ -22,6 +22,55 @@ using dyn_tensor = tensor<T, cs::dextents<offset_t, R>, cs::layout_stride, O>;
 template <class> struct _is_extents : cs::false_type {};
 template <class I, cs::size_t... E> struct _is_extents<cs::extents<I, E...>> : cs::true_type {};
 
+// --- static trailing geometry (#208/#209) ------------------------------------
+// An `anyrank` can carry a compile-time `Tail` (a `shape<...>`) describing its
+// static TRAILING extents — the only dims with stable identity under rank
+// erasure (anchored at `ndim`, like `peel_front<-Sr>` and numpy right-alignment).
+// A kept-`Sr` window is filled RIGHT-ALIGNED from `Tail`: cell dim `j` maps to
+// tail slot `j - (Sr - K)` (K = Tail::rank()); `< 0` is a leading batch-kept dim
+// (dynamic). Covers `Sr > K` (partial), `Sr == K` (fully folded), `Sr < K` (peel
+// into the suffix, keeping its last `Sr` dims). Extents only for now — the cell
+// LAYOUT stays `cs::layout_stride` (runtime strides), so an empty `Tail` yields
+// EXACTLY today's `dyn_tensor` (`dextents` + `layout_stride`); strides fold in a
+// follow-up (#210).
+template <cs::size_t Sr, class Tail>
+struct _tail_ext {
+    static constexpr cs::size_t K = Tail::rank();
+    static constexpr cs::size_t at(cs::size_t j) noexcept {
+        const long tj = static_cast<long>(j) - (static_cast<long>(Sr) - static_cast<long>(K));
+        return tj < 0 ? cs::dynamic_extent : Tail::static_extent(static_cast<cs::size_t>(tj));
+    }
+};
+// The cell's EXTENTS type for a kept-`Sr` window over `Tail` (index type `offset_t`,
+// static where `Tail` says so, dynamic elsewhere).
+template <class offset_t, cs::size_t Sr, class Tail, class Seq = cs::make_index_sequence<Sr>>
+struct _cell_ext;
+template <class offset_t, cs::size_t Sr, class Tail, cs::size_t... J>
+struct _cell_ext<offset_t, Sr, Tail, cs::index_sequence<J...>> {
+    using type = cs::extents<offset_t, _tail_ext<Sr, Tail>::at(J)...>;
+};
+// The cell TYPE `fixed`/`_keep_last`/`peel_front` hand out (== `dyn_tensor` when
+// `Tail` is empty; the folded extents recover static inner dims otherwise).
+template <class T, class offset_t, cs::size_t Sr, class Tail, storage O>
+using _tail_cell = tensor<T, typename _cell_ext<offset_t, Sr, Tail>::type, cs::layout_stride, O>;
+
+// Debug-check that the runtime shape's trailing `Tail::rank()` dims agree with the
+// static `Tail` extents — run ONCE at the boundary (`as_anyrank`/`from_dlpack`),
+// then trusted (same contract class as `recast`, hoisted host-side to the import).
+// Reads the ORIGINAL shape array (so it validates even when a copy-meta store is
+// clamped to TNY_MAX_RANK). `shp` is const so it accepts a DLPack `const int64_t *`.
+template <class Tail, class Idx>
+_TNY_HOST void _check_tail(const Idx * shp, int ndim) {
+    constexpr cs::size_t K = Tail::rank();
+    _TNY_CHECK(ndim >= static_cast<int>(K), "as_anyrank/from_dlpack: ndim < the static tail rank");
+    for (cs::size_t j = 0; j < K; ++j) {
+        const int d = ndim - static_cast<int>(K) + static_cast<int>(j);
+        _TNY_CHECK(Tail::static_extent(j) == cs::dynamic_extent ||
+                   static_cast<Idx>(Tail::static_extent(j)) == shp[d],
+                   "as_anyrank/from_dlpack: a static tail extent does not match the runtime shape");
+    }
+}
+
 // The shape/stride store of an `anyrank` is itself a 1-D teeny tensor:
 //   - `_meta_store` : an INLINE stack tensor of `TNY_MAX_RANK` (default) — the
 //     sizes travel WITH the carrier, so it stays trivially copyable and can be
@@ -34,7 +83,7 @@ using _meta_store = tensor<offset_t, cs::extents<offset_t, N>, ccontiguous, stor
 template <class offset_t>
 using _meta_view = tensor<offset_t, cs::dextents<offset_t, 1>, ccontiguous, storage::view>;
 
-template <class T, class offset_t, class Meta, storage Space, cs::size_t Sr> struct anyrank_front;  // fwd
+template <class T, class offset_t, class Meta, storage Space, class Tail, cs::size_t Sr> struct anyrank_front;  // fwd
 
 /** @brief Tag for `as_anyrank(..., copy_meta)`: COPY shape/stride into an inline,
  *         device-passable store instead of wrapping the caller's arrays. Named
@@ -72,12 +121,22 @@ constexpr copy_meta_t copy_meta{};
  * view instead.
  */
 template <class T, class offset_t = cs::int64_t, class Meta = _meta_store<offset_t, TNY_MAX_RANK>,
-          storage Space = storage::view>
+          storage Space = storage::view, class Tail = shape<>>
 struct anyrank {
     T *  data = nullptr;
     Meta shape{};      // 1-D tensor of sizes   (inline, or a view of external memory)
     Meta stride{};     // 1-D tensor of strides
     int  ndim = 0;
+
+    // The static TRAILING geometry (a `shape<...>`; empty by default == today's
+    // fully-dynamic carrier). Its extents fold into every cell `fixed`/`peel_front`
+    // hand out — recovering static inner dims (`(*batch, *spatial, C)` with a
+    // static `C`) WITHOUT a per-call `recast`. Set at the boundary via the trailing
+    // tag on `as_anyrank`/`from_dlpack`, which debug-checks it against the runtime
+    // shape ONCE, then trusts it (same contract class as `recast`). Pure type info:
+    // the members above are unchanged, so size/layout/trivial-copyability hold.
+    using tail_type = Tail;
+    static constexpr cs::size_t tail_rank = Tail::rank();
 
     // The MEMORY SPACE the `data` pointer lives in (a compile-time tag, set at the
     // boundary — `from_dlpack` from the DLPack `device`, `as_anyrank<Space>` by
@@ -111,30 +170,33 @@ struct anyrank {
     _TNY_API offset_t size(int i)  const noexcept { return shape(i); }   // size of dim i
     _TNY_API offset_t step(int i)  const noexcept { return stride(i); }  // stride of dim i
 
-    /** @brief View this tensor as a fixed rank `R` (requires `ndim == R`). */
+    /** @brief View this tensor as a fixed rank `R` (requires `ndim == R`). The static
+     *         `Tail` extents fold into the last `tail_rank` dims of the result. */
     template <cs::size_t R>
-    _TNY_API dyn_tensor<T, offset_t, R, view_space> fixed() const {
+    _TNY_API _tail_cell<T, offset_t, R, Tail, view_space> fixed() const {
+        static_assert(R >= tail_rank, "fixed<R>(): R must be >= the static tail rank");
         _TNY_CHECK(static_cast<cs::size_t>(ndim) == R, "fixed<R>(): R must equal ndim (else reads past the shape/stride arrays)");
-        using E = cs::dextents<offset_t, R>;
+        using E = typename _cell_ext<offset_t, R, Tail>::type;
         cs::array<offset_t, R> ext{}, st{};
         for (cs::size_t i = 0; i < R; ++i) { ext[i] = shape(i); st[i] = stride(i); }
         cs::layout_stride::mapping<E> m(E(ext), st);
-        return dyn_tensor<T, offset_t, R, view_space>(data, m);
+        return _tail_cell<T, offset_t, R, Tail, view_space>(data, m);
     }
 
     // internal: the lin-th sub-view keeping the last `Sr` axes static (peeling
-    // the leading `ndim - Sr` runtime batch axes into the pointer offset).
+    // the leading `ndim - Sr` runtime batch axes into the pointer offset). The
+    // static `Tail` extents fold into the kept window (right-aligned).
     template <cs::size_t Sr>
-    _TNY_API dyn_tensor<T, offset_t, Sr, view_space> _keep_last(offset_t lin) const {
+    _TNY_API _tail_cell<T, offset_t, Sr, Tail, view_space> _keep_last(offset_t lin) const {
         const int nb = ndim - static_cast<int>(Sr);          // # batch dims (runtime)
         _TNY_CHECK(nb >= 0, "peel_front: keep-count exceeds ndim");
         offset_t off = 0, rem = lin;                          // decode lin over batch axes
         for (int d = nb - 1; d >= 0; --d) { offset_t k = rem % shape(d); rem /= shape(d); off += k * stride(d); }
-        using E = cs::dextents<offset_t, Sr>;
+        using E = typename _cell_ext<offset_t, Sr, Tail>::type;
         cs::array<offset_t, Sr> ext{}, st{};
         for (cs::size_t i = 0; i < Sr; ++i) { ext[i] = shape(nb + i); st[i] = stride(nb + i); }
         cs::layout_stride::mapping<E> m(E(ext), st);
-        return dyn_tensor<T, offset_t, Sr, view_space>(data + off, m);
+        return _tail_cell<T, offset_t, Sr, Tail, view_space>(data + off, m);
     }
 
     /** @brief The `lin`-th sub-view keeping the last `|N|` axes static (grid-stride
@@ -180,7 +242,7 @@ struct anyrank {
      *         one kernel instantiation for `|N|`, not one per total rank.
      *         `N` is negative (keep the last |N| dims), as on the tensor. */
     template <long N>
-    _TNY_API anyrank_front<T, offset_t, Meta, Space, static_cast<cs::size_t>(N < 0 ? -N : 0)> peel_front() const {
+    _TNY_API anyrank_front<T, offset_t, Meta, Space, Tail, static_cast<cs::size_t>(N < 0 ? -N : 0)> peel_front() const {
         static_assert(N < 0, "anyrank::peel_front needs a NEGATIVE index (keep the last |N| dims)");
         return { *this };
     }
@@ -202,11 +264,11 @@ struct anyrank {
 /** @brief A range of fixed-rank-`Sr` sub-views over an `anyrank`'s batch axes.
  *         Inherits the carrier's `Space`, so each cell is a host or `gpu_view`
  *         view accordingly. */
-template <class T, class offset_t, class Meta, storage Space, cs::size_t Sr>
+template <class T, class offset_t, class Meta, storage Space, class Tail, cs::size_t Sr>
 struct anyrank_front {
-    anyrank<T, offset_t, Meta, Space> src;
-    using Cell = dyn_tensor<T, offset_t, Sr, storage_view_of(Space)>;
-    static constexpr cs::size_t MaxNb = anyrank<T, offset_t, Meta, Space>::max_rank;
+    anyrank<T, offset_t, Meta, Space, Tail> src;
+    using Cell = _tail_cell<T, offset_t, Sr, Tail, storage_view_of(Space)>;
+    static constexpr cs::size_t MaxNb = anyrank<T, offset_t, Meta, Space, Tail>::max_rank;
 
     _TNY_API offset_t size() const noexcept { return src.template size_front<-static_cast<long>(Sr)>(); }
     // Random access (grid-stride `i += nthreads`): decode the batch index from scratch.
@@ -314,6 +376,43 @@ as_anyrank(T * data, const offset_t * shape, const offset_t * stride, int ndim, 
     return t;
 }
 
+/** @brief `as_anyrank(..., anyshape<etc,c,c>{})` — carry a STATIC TRAILING shape in the
+ *         carrier's type, so `fixed`/`peel_front` hand out cells with those inner
+ *         extents already folded (no per-call `recast`). The runtime shape's trailing
+ *         dims are debug-checked against the tag once, here, then trusted. Wraps the
+ *         caller's arrays (no copy), like the tag-less form. `etc` = the erased batch;
+ *         the dims after it are the static tail (see `anyshape`). */
+template <storage Space = storage::view, class T, class offset_t, class S,
+          cs::enable_if_t<_is_anyshape<S>::value, int> = 0>
+_TNY_HOST auto as_anyrank(T * data, offset_t * shape, offset_t * stride, int ndim, S) {
+    static_assert(!cs::is_const<offset_t>::value,
+        "as_anyrank: the default WRAPS mutable shape/stride arrays; for `const` arrays "
+        "(or to build a device-passable carrier) pass the `copy_meta` tag");
+    using TailR = _reindex_extents_t<offset_t, typename S::tail>;
+    anyrank<T, offset_t, _meta_view<offset_t>, Space, TailR> t;
+    t.data = data; t.ndim = ndim;
+    cs::dextents<offset_t, 1> e{ static_cast<offset_t>(ndim) };
+    t.shape  = _meta_view<offset_t>(shape,  e);
+    t.stride = _meta_view<offset_t>(stride, e);
+    _check_tail<TailR>(shape, ndim);
+    return t;
+}
+
+/** @brief `as_anyrank(..., copy_meta, anyshape<etc,c,c>{})` — the static-tail carrier
+ *         over an INLINE (device-passable) meta store. */
+template <cs::size_t MaxRank = TNY_MAX_RANK, storage Space = storage::view, class T, class offset_t, class S,
+          cs::enable_if_t<_is_anyshape<S>::value, int> = 0>
+_TNY_HOST auto as_anyrank(T * data, const offset_t * shape, const offset_t * stride, int ndim, copy_meta_t, S) {
+    using TailR = _reindex_extents_t<offset_t, typename S::tail>;
+    anyrank<T, offset_t, _meta_store<offset_t, MaxRank>, Space, TailR> t;
+    t.data = data; t.ndim = ndim;
+    _TNY_CHECK(ndim <= static_cast<int>(MaxRank), "as_anyrank(copy_meta): ndim exceeds MaxRank (raise -DTNY_MAX_RANK)");
+    const int n = ndim < static_cast<int>(MaxRank) ? ndim : static_cast<int>(MaxRank);
+    for (int i = 0; i < n; ++i) { t.shape(i) = shape[i]; t.stride(i) = stride[i]; }
+    _check_tail<TailR>(shape, ndim);
+    return t;
+}
+
 /**
  * @brief Narrow a fixed-rank view's OFFSET INDEX WIDTH to `Idx2` (default `int32_t`)
  *        when its element span fits, then call `f` — else call `f` with the view as-is.
@@ -366,9 +465,9 @@ _TNY_HOST void dispatch_layout(tensor<T, E, dynamic_strides, O> v, F && f) {
 inline constexpr bool narrow_index = true;
 
 namespace _detail {
-template <cs::size_t R, bool Narrow, class T, class offset_t, class Meta, storage Space, class F>
-_TNY_HOST bool dispatch_from(const anyrank<T, offset_t, Meta, Space> & t, F & f) {
-    if constexpr (R <= anyrank<T, offset_t, Meta, Space>::max_rank) {
+template <cs::size_t R, bool Narrow, class T, class offset_t, class Meta, storage Space, class Tail, class F>
+_TNY_HOST bool dispatch_from(const anyrank<T, offset_t, Meta, Space, Tail> & t, F & f) {
+    if constexpr (R <= anyrank<T, offset_t, Meta, Space, Tail>::max_rank) {
         if (t.ndim == static_cast<int>(R)) {
             if constexpr (Narrow) dispatch_index(t.template fixed<R>(), f);   // width innermost
             else                  f(t.template fixed<R>());
@@ -398,9 +497,13 @@ _TNY_HOST bool dispatch_from(const anyrank<T, offset_t, Meta, Space> & t, F & f)
  *
  *     dispatch_rank<narrow_index>(at, [&](auto v){ kernel(v); });   // int32 cells when they fit
  */
-template <bool Narrow = false, class T, class offset_t, class Meta, storage Space, class F>
-_TNY_HOST bool dispatch_rank(const anyrank<T, offset_t, Meta, Space> & t, F && f) {
-    return _detail::dispatch_from<0, Narrow>(t, f);   // R=0 handles a rank-0 (scalar) ndarray
+template <bool Narrow = false, class T, class offset_t, class Meta, storage Space, class Tail, class F>
+_TNY_HOST bool dispatch_rank(const anyrank<T, offset_t, Meta, Space, Tail> & t, F && f) {
+    // Start the recursion at `tail_rank`: a rank below the static tail can never
+    // equal `ndim` (the boundary check guaranteed `ndim >= tail_rank`), and
+    // `fixed<R < tail_rank>()` is a hard static_assert. For an empty tail this is 0
+    // (unchanged — R=0 still handles a rank-0 scalar ndarray).
+    return _detail::dispatch_from<anyrank<T, offset_t, Meta, Space, Tail>::tail_rank, Narrow>(t, f);
 }
 
 /**

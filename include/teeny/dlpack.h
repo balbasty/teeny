@@ -157,9 +157,10 @@ _TNY_HOST inline const DLTensor & as_dltensor(const DLManagedTensorVersioned & m
 // Core import (shared by every carrier): borrow the DATA, copy the shape/stride
 // METADATA into a self-contained carrier. A null `strides` (DLPack's C-contiguous
 // shorthand) expands to row-major; `byte_offset` folds into the pointer.
-template <class T, storage Space>
-_TNY_HOST anyrank<T, cs::int64_t, _meta_store<cs::int64_t, TNY_MAX_RANK>, Space>
+template <class T, storage Space, class S = anyshape<etc>>
+_TNY_HOST auto
 import_anyrank(const DLTensor & dt) {
+    static_assert(_is_anyshape<S>::value, "import_anyrank: the tail tag must be an anyshape<etc,...>");
     _TNY_CHECK(dtype_matches<T>(dt.dtype), "from_dlpack: DLPack dtype does not match T");
     _TNY_CHECK(storage_is_host_accessible(Space) == device_is_host_accessible(dt.device.device_type),
         "from_dlpack: Space host/device does not match the tensor's device — import a kDLCUDA tensor as from_dlpack<T, storage::gpu_view>(...)");
@@ -173,7 +174,11 @@ import_anyrank(const DLTensor & dt) {
     cs::int64_t st[TNY_MAX_RANK];
     if (dt.strides) { for (int i = 0; i < n; ++i) st[i] = dt.strides[i]; }
     else { cs::int64_t s = 1; for (int i = n - 1; i >= 0; --i) { st[i] = s; s *= dt.shape[i]; } }  // C-contiguous
-    return as_anyrank<TNY_MAX_RANK, Space>(data, dt.shape, st, nd, copy_meta);
+    // The optional static tail (spelled `anyshape<etc,...>`; default `anyshape<etc>`
+    // == today's fully-dynamic carrier) is checked against the payload's trailing
+    // shape by the tail `as_anyrank` overload, here at the import boundary, then
+    // folded into every peeled cell. The spec passes straight through.
+    return as_anyrank<TNY_MAX_RANK, Space>(data, dt.shape, st, nd, copy_meta, S{});
 }
 template <class T, cs::size_t R, storage Space>
 _TNY_HOST dyn_tensor<T, cs::int64_t, R, storage_view_of(Space)>
@@ -278,6 +283,23 @@ _TNY_HOST auto from_dlpack(const DLTensor * dt)               { return _dl::impo
  *         the classic capsule the caller keeps `m` alive and calls `m->deleter(m)`. */
 template <class T, storage Space = storage::view>
 _TNY_HOST auto from_dlpack(const DLManagedTensorVersioned * m) { return _dl::import_anyrank<T, Space>(_dl::as_dltensor(*m)); }
+
+/** @brief Import with a STATIC TRAILING shape baked into the carrier's type —
+ *         `from_dlpack<float, anyshape<etc,-1,-1,3>>(m)` for a `(*batch, *spatial, C)`
+ *         tensor with a static channel count. The payload's trailing dims are
+ *         debug-checked against the tag once, here at the import boundary (next to the
+ *         producer), then folded into every `fixed`/`peel_front` cell — no per-call
+ *         `recast`. `etc` = the erased batch (see `anyshape`); the `Space` device
+ *         check is the same as the tag-less overloads. Accepts all three carriers. */
+template <class T, class S, storage Space = storage::view,
+          cs::enable_if_t<_is_anyshape<S>::value, int> = 0>
+_TNY_HOST auto from_dlpack(const DLManagedTensor * m)          { return _dl::import_anyrank<T, Space, S>(_dl::as_dltensor(*m)); }
+template <class T, class S, storage Space = storage::view,
+          cs::enable_if_t<_is_anyshape<S>::value, int> = 0>
+_TNY_HOST auto from_dlpack(const DLTensor * dt)               { return _dl::import_anyrank<T, Space, S>(_dl::as_dltensor(*dt)); }
+template <class T, class S, storage Space = storage::view,
+          cs::enable_if_t<_is_anyshape<S>::value, int> = 0>
+_TNY_HOST auto from_dlpack(const DLManagedTensorVersioned * m) { return _dl::import_anyrank<T, Space, S>(_dl::as_dltensor(*m)); }
 
 /** @brief Import as a **fixed-rank** view (requires the payload's `ndim == R`).
  *         Returns a `layout_stride` tensor view borrowing the data. `Space` (default

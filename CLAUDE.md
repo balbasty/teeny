@@ -327,6 +327,18 @@ auto ac = as_anyrank(data, shape, stride, ndim, copy_meta);  // COPIES into an i
 auto ag = as_anyrank<storage::gpu_view>(dptr, shape, stride, ndim);  // DEVICE data: fixed()/peel_front yield
                                              //   gpu_view cells (Space param; default storage::view = host).
                                              //   from_dlpack<T[,Space]>/dispatch_dlpack<Space> set+check it vs m->device
+auto af = as_anyrank(data, shape, stride, ndim, anyshape<etc,-1,-1,3>{});  // STATIC TRAILING shape baked into
+                                             //   the TYPE (anyshape<etc,...>: `etc` = the erased batch, the dims after
+                                             //   it = the static tail). fixed()/peel_front()/the peel_front<-Sr>()
+                                             //   iterator hand out cells with those inner EXTENTS already folded — no
+                                             //   per-call recast. The runtime trailing dims are debug-checked vs the
+                                             //   tag ONCE here (at the boundary, next to the producer), then trusted.
+                                             //   Bare `anyshape<etc>` (empty tail) == today's fully-dynamic carrier,
+                                             //   byte-identical. Also on the copy_meta form (…, copy_meta,
+                                             //   anyshape<etc,-1,-1,3>{}) and from_dlpack<T, anyshape<etc,-1,-1,3>>(m).
+                                             //   STRIDES stay runtime for now (extents-only); a static contiguous inner
+                                             //   block folds its strides too in the follow-up (#210). A static leading
+                                             //   Head (dims BEFORE etc: anyshape<A,B,etc,C,D>) is reserved for later.
 dispatch_rank(at, [&](auto v){ kernel(v); });  // instantiates kernel once per TOTAL rank
 dispatch_rank<narrow_index>(at, f);           // ...+ int32 offsets when the span fits (rank OUTER, width INNER;
                                               //   only the leaf doubles). Default Narrow=false == plain dispatch.

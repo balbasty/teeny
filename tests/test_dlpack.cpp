@@ -55,6 +55,13 @@ int main()
     auto av = a.fixed<2>();
     if (av(2,3) != fbuf[2*4+3]) return 10;
 
+    // #209: import with a STATIC TRAILING shape — anyshape<etc, C=4>. The last dim
+    // folds into every peeled cell (checked vs the payload's shape at the boundary).
+    auto at = from_dlpack<float, anyshape<etc, 4>>(&mm);
+    static_assert(decltype(at)::tail_rank == 1, "tail rank 1");
+    static_assert(decltype(at.fixed<2>())::shape_type::static_extent(1) == 4, "inner C=4 folds");
+    if (at.fixed<2>()(2,3) != fbuf[2*4+3]) return 14;
+
     // dispatch_dlpack: pick dtype + rank from the struct
     double total = 0; int rank_seen = -1;
     bool ok = dispatch_dlpack(&mm, [&](auto view){ rank_seen = decltype(view)::rank(); total = sum(view); });
