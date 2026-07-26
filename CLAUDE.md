@@ -376,6 +376,12 @@ for (auto cell : at.peel_front<-Sr>()) kernel<Sr>(cell);  // Sr=2 -> peel_front<
                                               //   reuses the cell mapping, O(1)/batch-cell, not an
                                               //   O(#batch) decode). For a CPU thread / device block that
                                               //   owns a chunk: for (cell : at.peel_front<-Sr>().subrange(lo,hi)).
+for (auto [m, cell] : at.peel_front<-Sr>().enumerate()) f(m[0], cell);  // ALSO yield the BATCH multi-index
+                                              //   m (m[d] = coord of batch axis d, m.rank() runtime, m.linear()
+                                              //   the flat batch idx) — for a per-batch-axis table param[d][m[d]].
+                                              //   OPT-IN (bare cell stays lean); m is a VIEW of the live odometer
+                                              //   (don't store past the body). Or it.index(d)/nbatch()/linear()
+                                              //   on the raw iterator. Composes with .subrange(lo,hi).
 auto cell = at.peel_front_at<-Sr>(i);         // i-th — random access (grid-stride i += nthreads, whose
                                               //   stride the odometer can't express — keep this path)
 auto cell = at.peel_front_at(i, shape<-1,c,c>{});  // FUSED peel+recast: cell has the target trailing shape

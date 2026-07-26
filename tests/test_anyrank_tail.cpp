@@ -192,5 +192,31 @@ int main() {
     static_assert(cs::is_same<decltype(as_anyrank(buf, shp, strd, 4, anyshape<etc,2,2>{}).fixed<4>()),
                               decltype(t2.fixed<4>())>::value, "empty-Head trailing type unchanged vs #209/#210");
 
+    // ---- #217: enumerate() on the peel_front<-Sr> range yields the BATCH multi-index
+    // carrier is (*batch=2x3, C×C=2x2); peel_front<-2> keeps the (2,2) tail, batch rank 2
+    long ecount = 0;
+    for (auto [m, cell] : t2.peel_front<-2>().enumerate()) {
+        if (m.rank() != 2) return 20;                        // batch rank (runtime) = ndim - Sr = 2
+        // batch cell base offset = m[0]*12 + m[1]*4 (source strides 12,4 for dims 0,1)
+        if (cell(0,0) != buf[m[0]*12 + m[1]*4]) return 21;
+        if (m.linear() != m[0]*3 + m[1]) return 22;          // row-major flat batch index
+        ++ecount;
+    }
+    if (ecount != 6) return 23;
+
+    // raw iterator index(d)/nbatch()/linear()
+    auto eit = t2.peel_front<-2>().begin();
+    if (eit.nbatch() != 2 || eit.index(0) != 0 || eit.index(1) != 0 || eit.linear() != 0) return 24;
+    ++eit; if (eit.index(0) != 0 || eit.index(1) != 1 || eit.linear() != 1) return 25;
+
+    // enumerate composes with subrange, and the folded (ccontiguous) cell survives
+    long echunk = 0;
+    for (auto [m, cell] : t2c.peel_front<-2>().enumerate().subrange(2, 5)) {
+        static_assert(sizeof(cell) == sizeof(double *), "enumerate keeps the EBO cell lean");
+        if (cell(1,1) != buf[m[0]*12 + m[1]*4 + 1*2 + 1]) return 26;
+        ++echunk;
+    }
+    if (echunk != 3) return 27;
+
     return 0;
 }

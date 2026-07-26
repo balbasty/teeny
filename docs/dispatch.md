@@ -213,6 +213,20 @@ Use `peel_front_at` (random access) for grid-stride — the odometer can't expre
 `+= nthreads` stride. Use `subrange(lo, hi)` when a worker owns a contiguous block
 of cells: it seeds the cursor once at `lo`, then advances incrementally.
 
+Need the **batch coordinates** (a per-batch-axis table `param[d][m[d]]`)? `enumerate()`
+pairs each cell with the batch multi-index — opt-in, so the bare `peel_front<-Sr>()` cell
+stays lean (the tensor-side `peel` has the same `enumerate`, [#213](#nd-peel-tensor-side)):
+
+```cpp
+for (auto [m, cell] : at.peel_front<-Sr>().enumerate())
+    kernel<Sr>(m[0], cell);   // m[d] = coord of batch axis d; m.rank() (runtime); m.linear() = flat batch idx
+```
+
+`m` is a lightweight **view of the live odometer** — valid within the loop body, don't store
+it past the iteration. The raw iterator also exposes `it.index(d)` / `it.nbatch()` /
+`it.linear()`. Composes with `subrange` (`.enumerate().subrange(lo,hi)`). The batch rank is
+runtime, so there is no fixed-size `index()` tuple — read coordinates per axis with `m[d]`.
+
 ### `dispatch_rank` / `fixed<R>` — general (per total rank)
 
 When the whole rank must be static, dispatch on the runtime `ndim`. `f` is
