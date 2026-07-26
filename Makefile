@@ -39,6 +39,7 @@ TESTS = \
 	$(BUILDDIR)/test_reduce_dtype \
 	$(BUILDDIR)/test_iterate \
 	$(BUILDDIR)/test_peel_recast \
+	$(BUILDDIR)/test_peel_shape \
 	$(BUILDDIR)/test_recast_guard \
 	$(BUILDDIR)/test_overlap_guard \
 	$(BUILDDIR)/test_reindex \

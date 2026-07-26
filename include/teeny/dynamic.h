@@ -16,6 +16,12 @@ namespace cs = cuda::std;
 template <class T, class offset_t, cs::size_t R, storage O = storage::view>
 using dyn_tensor = tensor<T, cs::dextents<offset_t, R>, cs::layout_stride, O>;
 
+// Is `E` a `cs::extents<...>` (a teeny `shape<...>`)? Gates the shape-form
+// `peel_front[_at]<NewE>` overloads apart from the negative-`long` ones so a
+// mis-typed `peel_front_at<Int<3>>` gives a clear message, not a deep recast error.
+template <class> struct _is_extents : cs::false_type {};
+template <class I, cs::size_t... E> struct _is_extents<cs::extents<I, E...>> : cs::true_type {};
+
 // The shape/stride store of an `anyrank` is itself a 1-D teeny tensor:
 //   - `_meta_store` : an INLINE stack tensor of `TNY_MAX_RANK` (default) — the
 //     sizes travel WITH the carrier, so it stays trivially copyable and can be
@@ -141,6 +147,32 @@ struct anyrank {
         static_assert(N < 0, "anyrank::peel_front_at needs a NEGATIVE index (keep the last |N| dims)");
         return _keep_last<static_cast<cs::size_t>(-N)>(lin);
     }
+
+    /** @brief The `lin`-th cell peeled DIRECTLY to a target trailing shape — fuses
+     *         `peel_front_at<-NewE::rank()>(lin).recast<NewE, NewL>()` into one call, so
+     *         no separate `recast` in the caller. `NewE`'s rank = the number of KEPT
+     *         trailing dims (the batch is the leading `ndim - rank` dims, decoded into
+     *         the pointer); a static extent in `NewE` folds, a `-1` extent stays
+     *         dynamic (read from the carrier). `(*batch, *spatial, C)` -> 2-D pull with
+     *         C=3 is `peel_front_at<shape<-1,-1,3>>(i)`. Removes the hand-kept `Sr ==
+     *         recast-shape rank` invariant. STRIDES: `NewL` defaults to `keep_strides`
+     *         so the cell keeps the carrier's RUNTIME strides (`layout_stride`) — an
+     *         anyrank has no compile-time stride info to fold. To fold the inner
+     *         strides, either pass a layout (`peel_front_at<shape<-1,c,c>, ccontiguous>`
+     *         — a debug-checked "I promise it's contiguous") or use the runtime-proven
+     *         `dispatch_layout` on the result. UB if a baked static extent doesn't match
+     *         the carrier (debug-checked in `recast`, same contract). */
+    template <class NewE, class NewL = keep_strides, cs::enable_if_t<_is_extents<NewE>::value, int> = 0>
+    _TNY_API auto peel_front_at(offset_t lin) const {
+        return _keep_last<NewE::rank()>(lin).template recast<NewE, NewL>();
+    }
+    /** @brief Value-form twins (no `.template` on a dependent receiver): pass the target
+     *         shape (and optional layout) as a tag — `at.peel_front_at(i, shape<-1,c,c>{})`
+     *         / `at.peel_front_at(i, shape<-1,c,c>{}, ccontiguous{})`. */
+    template <class NewE, cs::enable_if_t<_is_extents<NewE>::value, int> = 0>
+    _TNY_API auto peel_front_at(offset_t lin, NewE) const { return peel_front_at<NewE>(lin); }
+    template <class NewE, class NewL, cs::enable_if_t<_is_extents<NewE>::value, int> = 0>
+    _TNY_API auto peel_front_at(offset_t lin, NewE, NewL) const { return peel_front_at<NewE, NewL>(lin); }
 
     /** @brief Peel the leading batch axes -> an iterable of fixed-rank-`|N|`
      *         sub-views (range-for, `size()`, `operator[]`). The
