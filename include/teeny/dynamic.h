@@ -300,6 +300,36 @@ _TNY_HOST void dispatch_index(V && v, F && f) {
     if (v.template index_fits<Idx2>()) f(v.template reindex<Idx2>());   // int32 arm
     else                               f(v);                            // wide (int64) arm
 }
+
+/**
+ * @brief Runtime-classify a DYNAMIC-strided view's contiguity and hand `f` a view whose
+ *        LAYOUT is baked into the type — `ccontiguous` (C-order) or `fcontiguous`
+ *        (F-order) when the runtime strides match, else the original `dynamic_strides`.
+ *
+ * The layout counterpart of `dispatch_index`. An `anyrank` boundary erases the
+ * producer's contiguity into `layout_stride`, so a later `recast<shape<…>>` can only
+ * KEEP runtime strides. `dispatch_layout` cheaply checks (`is_dense<ccontiguous>()` /
+ * `<fcontiguous>()` — a stride compare, no data touched) and, in the contiguous arms,
+ * hands `f` a view whose strides are EXTENT-DERIVED — so `recast<shape<-1,c,c>>()` then
+ * folds the inner strides to immediates SAFELY (no "I promise it's contiguous" — the
+ * runtime check already proved it). `f` is instantiated up to 3× (only the matching arm
+ * runs), so make it generic over the view type.
+ *
+ * OPT-IN per call site (like `dispatch_index`): do NOT wrap `from_dlpack` in it by
+ * default — it triples instantiations and composes multiplicatively with the rank/width
+ * dispatchers. Reach for it when the inner block's folded strides actually matter (a
+ * small static-`C` kernel; see the efficient-kernels guide).
+ *
+ *     for (auto cell : at.peel_front<-Sr>())
+ *         dispatch_layout(cell, [&](auto v){ kernel<Sr>(v.recast(shape<-1,c,c>{})); });
+ */
+template <class T, class E, storage O, class F>
+_TNY_HOST void dispatch_layout(tensor<T, E, dynamic_strides, O> v, F && f) {
+    static_assert(storage_is_view(O), "dispatch_layout: expects a view (an anyrank fixed()/peel cell)");
+    if      (v.template is_dense<ccontiguous>()) f(tensor<T, E, ccontiguous, O>(v.data(), v.extents()));  // C-order strides fold
+    else if (v.template is_dense<fcontiguous>()) f(tensor<T, E, fcontiguous, O>(v.data(), v.extents()));  // F-order strides fold
+    else                                         f(v);                                                    // genuinely strided
+}
 /** @brief The spelling for `dispatch_rank`'s opt-in flag: `dispatch_rank<narrow_index>(at, f)`. */
 inline constexpr bool narrow_index = true;
 
