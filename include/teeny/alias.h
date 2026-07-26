@@ -139,6 +139,39 @@ using _reindex_extents_t = typename _reindex_extents<Idx2, E, cs::make_index_seq
  *  `rank<0>` is the rank-0 (scalar) shape. */
 template <cs::size_t N> using rank = cs::dextents<cs::int64_t, N>;
 
+/** @brief The dynamic-rank marker (`etc`, "and so on") for an `anyshape<...>` — the
+ *  ONE rank-erased region of a rank-erased shape. It has no compile-time width (the
+ *  rank it stands for is only known at run time, as the carrier's `ndim`), so it can
+ *  live only in an `anyshape<...>` boundary tag, never in a fixed-rank `shape<...>`.
+ *  Its own type (an empty enum) keeps it distinct from any real extent value. */
+enum class _etc_t {};
+constexpr _etc_t etc{};
+
+/** @brief The shape spelling for the rank-erased `anyrank` boundary: exactly one
+ *  `etc` marks the dynamic-rank region, the dims AFTER it are the static **Tail**
+ *  (anchored at `ndim`), the dims BEFORE it are the static **Head** (anchored at 0).
+ *  Each non-`etc` slot is a per-dim static extent or `-1` (dynamic), exactly like
+ *  `shape<...>`. Hand it to `as_anyrank(..., anyshape<etc,-1,-1,3>{})` or
+ *  `from_dlpack<T, anyshape<etc,-1,-1,3>>(m)` so the peeled cells fold those inner
+ *  dims — `anyshape<etc,-1,-1,3>` == `(*batch, spatial, spatial, C=3)`.
+ *
+ *  Unlike a plain `shape<...>` (a concrete fixed-rank `extents`), an `anyshape` is a
+ *  SPEC, not a tensor type — a runtime-rank object needs the data + runtime arrays,
+ *  not just a type. A `Head` (static leading dims BEFORE `etc`) is reserved for a
+ *  follow-up; for now `etc` must come first (empty Head). */
+template <auto First, auto... Rest>
+struct anyshape {
+    static_assert(cs::is_same<decltype(First), _etc_t>::value,
+        "anyshape: a static leading Head (dims before `etc`) is not supported yet — "
+        "put `etc` first: anyshape<etc, ...trailing static dims...>");
+    static_assert(((!cs::is_same<decltype(Rest), _etc_t>::value) && ...),
+        "anyshape: at most one `etc`");
+    using head = shape<>;          // reserved: static leading dims (a follow-up)
+    using tail = shape<Rest...>;   // static trailing dims (anchored at ndim)
+};
+template <class> struct _is_anyshape : cs::false_type {};
+template <auto F, auto... R> struct _is_anyshape<anyshape<F, R...>> : cs::true_type {};
+
 /** @brief Compile-time **axis selector** — a value tag carrying a list of axes,
  *  the sibling of `shape<...>` for axis arguments. It lets axis-taking ops be
  *  spelled by VALUE (deducing the axes from the argument type) instead of an

@@ -121,6 +121,40 @@ them (a debug-checked promise) or run [`dispatch_layout`](#dispatch_layout--reco
 on the result for a runtime-proven fold. Fusing also drops the hand-kept
 `Sr ≡ recast-shape rank` invariant.
 
+### Static trailing shape — carry the static inner dims in the carrier's type
+
+The per-call `peel_front_at<shape<-1,c,c>>(i)` (and `recast`) is a *promise re-made
+at every call site*. When the inner geometry is a **property of the data** — known at
+the import boundary, e.g. `(*batch, *spatial, C)` with a static channel count `C` — bake
+it into the carrier once instead:
+
+The tag is an **`anyshape<...>`** — a single `etc` marks the erased dynamic-rank region,
+and the dims after it are the static tail (anchored at `ndim`). `anyshape<etc,-1,-1,3>`
+reads as `(*batch, spatial, spatial, C=3)`; the leading `etc` makes "this is a rank-erased
+tail spec" unmistakable (versus a concrete rank-3 `shape<-1,-1,3>`).
+
+```cpp
+auto at = as_anyrank(data, shape, stride, ndim, anyshape<etc,-1,-1,3>{});   // static trailing (…,…,3)
+// from a DLPack capsule:  auto at = from_dlpack<float, anyshape<etc,-1,-1,3>>(m);
+for (auto cell : at.peel_front<-3>()) kernel(cell);   // every cell's inner extent is 3 — folded
+auto v = at.fixed<4>();                               // extent(3) == 3 at compile time
+```
+
+The runtime trailing dims are **debug-checked against the tag once, here at the boundary**
+(next to the producer), then trusted — the same contract class as `recast`, but asserted
+in one place rather than re-promised per kernel. Every view the carrier hands out —
+`fixed()`, `peel_front_at`, and the incremental `peel_front<-Sr>()` iterator (its cell is
+*born* folded, so its mapping shrinks) — carries the folded extents automatically, and it
+composes with `dispatch_rank`/`dispatch_value` (the static `C` types once, every rank arm
+inherits it). Bare `anyshape<etc>` (empty tail) is exactly today's fully-dynamic carrier,
+byte-identical.
+
+Extents fold now; **strides stay runtime** (extents-only) — a statically-contiguous inner
+block will fold its strides in a follow-up. A static leading **Head** (dims *before* `etc`,
+`anyshape<A,B,etc,C,D>` for `(C_in, *spatial, C_out)`) is reserved for later — for now `etc`
+must come first. Keep the per-call
+`peel_front_at<shape<…>>(i)` as the escape hatch for a carrier imported without a tag.
+
 The **range-for is incremental**: it advances the base pointer by the batch
 strides and reuses the loop-invariant cell mapping, so each step is O(1) rather
 than an O(#batch) index decode. Two ways to parallelize:

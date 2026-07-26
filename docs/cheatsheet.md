@@ -243,6 +243,11 @@ as_anyrank(data, shape, stride, ndim);        // -> anyrank WRAPPING the arrays,
                                               //   (default; host only, arrays must outlive it)
 as_anyrank(data, shape, stride, ndim, copy_meta);  // -> anyrank COPYING into an inline
                                               //   TNY_MAX_RANK store (device-passable)
+as_anyrank(data, shape, stride, ndim, anyshape<etc,-1,-1,3>{});  // STATIC TRAILING shape in the type
+                                              //   (anyshape<etc,...>: etc = erased batch, the rest = static tail):
+                                              //   peeled cells fold the inner extents (no per-call recast). Checked
+                                              //   vs the runtime shape once here, then trusted. `anyshape<etc>` (bare)
+                                              //   == today's carrier. Also from_dlpack<T, anyshape<etc,-1,-1,3>>(m).
 at.peel_front<-Sr>();  at.peel_front_at<-Sr>(i);  // batch idiom (arg NEGATIVE: keep last Sr); 1 kernel per Sr
 at.size_front<-Sr>();                             // flattened batch count (no range built)
 dispatch_rank(at, f);                    // runtime rank -> fixed-rank view (per total rank)
