@@ -84,6 +84,22 @@ for (auto cell : peel_front<2>(t))              // peel the 2 batch dims -> cell
     op(cell);
 ```
 
+The batch **range-for is incremental**: it advances the pointer by the batch strides and
+reuses the (loop-invariant) cell mapping, so each step is O(1) rather than an O(#batch)
+index decode — measured 2–3.7× over the random-access decode for a light per-cell body.
+Two ways to parallelize the batch:
+
+```cpp
+// device grid-stride: random access, each thread strides by nthreads
+for (offset_t i = tid; i < size_front<2>(t); i += nthreads) op(peel_front_at<2>(t, i));
+// CPU thread / device BLOCK owning a contiguous chunk: incremental sweep of [lo,hi)
+for (auto cell : peel_front<2>(t).subrange(lo, hi)) op(cell);
+```
+
+Use `peel_front_at(i)` (random access) for a grid-stride loop — the incremental odometer
+can't express a `+= nthreads` stride; use `subrange(lo, hi)` when a worker owns a
+contiguous block of cells (it seeds once, then advances incrementally).
+
 ## 4. Narrow the offset width at the boundary (device)
 
 Public tensors index in `int64` (matching DLPack). On the **device**, a dynamic view's
@@ -179,6 +195,46 @@ hand-written quality *only* if you help the compiler in a few places (all measur
   `zeros`/`ones`/`full`/`arange` and a braced `local<...>{}`/`owned(e)` stay zeroed for when
   you *do* want the fill.
 
+## 8. Strided kernel loops — what actually helps
+
+A kernel that walks a **non-contiguous** view (a padded window, a permuted axis, a
+sliced channel) is often assumed to need hand-tuning. Measured on `-O2` (gcc 13 /
+clang 18), most of the folklore is already done for you — so spend effort only where
+it moves the needle:
+
+- **Loop order: put the unit-stride axis INNERMOST.** This is the one big win. Summing
+  a `1024×1024` dynamic-strided view with the stride-1 axis inner vs outer measured
+  **1.3–1.4× faster** — the inner unit stride is what lets the compiler vectorize and
+  keeps the cache lines hot. teeny hands you `t.stride(d)` / `t.is_contiguous()` to
+  find the contiguous axis; nest your loops so it runs last.
+- **Collapse a dense view to ONE linear loop.** If the block is dense in *some* order
+  (`t.is_dense()` — C, F, or permuted; offsets tile `[0, numel)`), an order-independent
+  pass (a fill, a unary map, a reduction) can walk `t.data()[0..numel)` as a flat loop
+  instead of a nested strided one — exactly what the elementwise engine does (§5). One
+  vectorizable stream beats N strided ones. (Order-*dependent* writes need C-contiguity;
+  see `iota_` in §5.)
+- **Don't hand-roll a pointer walk for simple access — the compiler already does it.**
+  Replacing `t(i,j)` with a manual `p += stride` inner loop measured **1.00×**: for a
+  straightforward nested loop the optimizer strength-reduces the index arithmetic itself,
+  and a big sweep is memory-bound anyway. Likewise **static vs dynamic strides made no
+  difference for a big sweep** (1.00×) — `strides<...>` in the type pays off in the
+  *small, fully-unrolled* loops of §7 (where combined offsets fold to immediates), not
+  in a large streaming loop. Reach for a manual pointer walk only when each step does
+  **heavy work the compiler can't see through** — e.g. materialising a sub-view per
+  iteration, which is exactly why the batch `peel`/`peel_front` range-for walks the
+  pointer incrementally for you (§3) rather than decoding each cell.
+- **Precompute the per-axis neighbour table in a gather/scatter.** A separable stencil
+  (spline pull/push) touches `K^D` neighbours at `base + Σ_d idx_d·stride_d`, where each
+  axis's indices/weights come from a bound + a spline-weight evaluation the compiler can't
+  hoist out of the `K^D` inner sweep. Compute each axis's `{idx[k], weight[k]}` **once**
+  into a small per-axis `local` (the reference `ff::pull`/`ff::push` kernels' `axis_nb`
+  struct), then combine the precomputed terms in the nested loop — the bound/weight work
+  runs `D·K` times, not `K^D`.
+
+Net: **loop order + dense-collapse** are the real strided-loop levers; static geometry
+matters for the *small unrolled* blocks (§1, §7), and the incremental pointer walk is a
+tool for heavy-per-step iteration (§3, `peel`), not for plain element access.
+
 ## Checklist
 
 Before a kernel is "fast", check:
@@ -194,3 +250,6 @@ Before a kernel is "fast", check:
       through a `local`** before writing outputs (§7).
 - [ ] A workspace the kernel fully overwrites is created with **`empty`** (no zero-fill),
       not a value-initialised `local<...>{}` (§7).
+- [ ] Strided loops nest with the **unit-stride axis innermost**, and an order-independent
+      pass over a **dense** view collapses to one linear loop (§8).
+- [ ] A separable gather/scatter **precomputes per-axis offsets** once, not per neighbour (§8).

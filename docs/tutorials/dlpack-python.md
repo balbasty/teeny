@@ -83,12 +83,16 @@ _TNY_API void invert_cell(const In & in, Out & out, long i) {
 }
 ```
 
-!!! note "The peel cost"
+!!! note "Random access vs. the incremental range-for"
     `peel_front_at<-2>(i)` re-derives the cell's pointer by decoding `i` over the
-    batch dims — `O(#batch dims)` integer ops **per call**. Next to a `C×C`
-    inversion that's noise, but for a trivial per-cell body you'd hoist it; an
-    incremental range iterator that advances the pointer instead of re-decoding is
-    tracked in [#110](https://github.com/balbasty/teeny/issues/110).
+    batch dims — `O(#batch dims)` integer ops **per call**. That's the right tool for
+    a **grid-stride** loop (`i += nthreads`), where consecutive `i` for one worker are
+    a stride apart. When a worker instead sweeps a **contiguous** block, prefer the
+    range-for `for (auto cell : in.peel_front<-2>())`, which is *incremental* — it
+    advances the pointer and reuses the cell mapping (O(1) per cell, no re-decode) — and
+    `.subrange(lo, hi)` for one worker's chunk. Next to a `C×C` inversion the decode is
+    noise, but for a light per-cell body it's a 2–3× swing. See
+    [Efficient kernels §3](../efficient-kernels.md#3-the-batch-batch-idiom).
 
 ---
 
@@ -135,6 +139,25 @@ void invert_cuda(const In & in, Out & out) {
 }
 #endif
 ```
+
+!!! tip "Random access vs. contiguous chunks"
+    The grid-stride split above (`i += nthreads`) is right when each worker's cells are
+    a stride apart — it needs the random-access `peel_front_at(i)`, used here for *both*
+    `in` and `out` at the same index. If a worker instead owns a **contiguous** block of
+    the batch, a single-tensor sweep can use the incremental range-for and
+    `for (auto cell : t.peel_front<-2>().subrange(lo, hi))` — seed once, then O(1) per
+    cell (a 2–3× swing for a light body; see
+    [Efficient kernels §3](../efficient-kernels.md#3-the-batch-batch-idiom)). For a two-input
+    kernel like this one, either keep the shared index (as above) or advance one range
+    incrementally alongside a running index for the other.
+
+This tutorial deliberately applies the [Efficient-kernels](../efficient-kernels.md)
+playbook: a **static inner block** via `recast(shape<c,c>{})` (§1), the **`peel_front`
+batch idiom** (§3), **snapshotting inputs through a `local`** before writing the result
+(§7), and **`dispatch_value`/`dispatch_index`** at the boundary (§4). The `C×C` body
+nests its unit-stride axis innermost and its `m`/`inv` workspaces are fully overwritten
+(so an [`empty`](../efficient-kernels.md#7-small-static-c-kernels-three-codegen-rules)
+scratch would skip the zero-fill) — the §8 strided-loop rules.
 
 ---
 
