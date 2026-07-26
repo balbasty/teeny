@@ -145,6 +145,55 @@ _TNY_HOST bool dispatch_dtype(const DLDataType & d, G && g) {
     }
     return false;
 }
+
+// The `DLTensor` payload of any DLPack carrier — the classic managed tensor, a
+// bare (unmanaged) `DLTensor`, or the versioned managed tensor. Import/dispatch
+// read only this payload; the carrier differs only in who frees it (nobody, for a
+// bare DLTensor; `m->deleter` for either managed form — the CALLER's job).
+_TNY_HOST inline const DLTensor & as_dltensor(const DLManagedTensor & m)          { return m.dl_tensor; }
+_TNY_HOST inline const DLTensor & as_dltensor(const DLTensor & d)                 { return d; }
+_TNY_HOST inline const DLTensor & as_dltensor(const DLManagedTensorVersioned & m) { return m.dl_tensor; }
+
+// Core import (shared by every carrier): borrow the DATA, copy the shape/stride
+// METADATA into a self-contained carrier. A null `strides` (DLPack's C-contiguous
+// shorthand) expands to row-major; `byte_offset` folds into the pointer.
+template <class T, storage Space>
+_TNY_HOST anyrank<T, cs::int64_t, _meta_store<cs::int64_t, TNY_MAX_RANK>, Space>
+import_anyrank(const DLTensor & dt) {
+    _TNY_CHECK(dtype_matches<T>(dt.dtype), "from_dlpack: DLPack dtype does not match T");
+    _TNY_CHECK(storage_is_host_accessible(Space) == device_is_host_accessible(dt.device.device_type),
+        "from_dlpack: Space host/device does not match the tensor's device — import a kDLCUDA tensor as from_dlpack<T, storage::gpu_view>(...)");
+    const int nd = dt.ndim;
+    // Trust boundary: `ndim` is the producer's (torch allows 64). CLAMP the local
+    // fills to TNY_MAX_RANK UNCONDITIONALLY (must hold under -DNDEBUG too); an
+    // oversized ndim then simply never matches dispatch_rank / fixed<R>.
+    _TNY_CHECK(nd <= static_cast<int>(TNY_MAX_RANK), "from_dlpack: ndim exceeds TNY_MAX_RANK (raise -DTNY_MAX_RANK)");
+    const int n = nd < static_cast<int>(TNY_MAX_RANK) ? nd : static_cast<int>(TNY_MAX_RANK);
+    T * data = reinterpret_cast<T *>(reinterpret_cast<char *>(dt.data) + dt.byte_offset);
+    cs::int64_t st[TNY_MAX_RANK];
+    if (dt.strides) { for (int i = 0; i < n; ++i) st[i] = dt.strides[i]; }
+    else { cs::int64_t s = 1; for (int i = n - 1; i >= 0; --i) { st[i] = s; s *= dt.shape[i]; } }  // C-contiguous
+    return as_anyrank<TNY_MAX_RANK, Space>(data, dt.shape, st, nd, copy_meta);
+}
+template <class T, cs::size_t R, storage Space>
+_TNY_HOST dyn_tensor<T, cs::int64_t, R, storage_view_of(Space)>
+import_fixed(const DLTensor & dt) {
+    _TNY_CHECK(dtype_matches<T>(dt.dtype), "from_dlpack<T,R>: DLPack dtype does not match T");
+    _TNY_CHECK(dt.ndim == static_cast<int>(R),  "from_dlpack<T,R>: ndim != R");
+    _TNY_CHECK(storage_is_host_accessible(Space) == device_is_host_accessible(dt.device.device_type),
+        "from_dlpack<T,R>: Space host/device does not match the tensor's device — use from_dlpack<T, R, storage::gpu_view>(...)");
+    T * data = reinterpret_cast<T *>(reinterpret_cast<char *>(dt.data) + dt.byte_offset);
+    // Read only min(R, ndim) so a wrong-rank call can never read out of bounds
+    // (the check above is debug-only under NDEBUG).
+    const cs::size_t n = (dt.ndim >= 0 && static_cast<cs::size_t>(dt.ndim) < R) ? static_cast<cs::size_t>(dt.ndim) : R;
+    cs::array<cs::int64_t, R> ext{}, st{};
+    for (cs::size_t i = 0; i < n; ++i) ext[i] = dt.shape[i];
+    if (dt.strides) { for (cs::size_t i = 0; i < n; ++i) st[i] = dt.strides[i]; }
+    else { cs::int64_t s = 1; for (int i = int(n) - 1; i >= 0; --i) { st[i] = s; s *= dt.shape[i]; } }
+    using E = cs::dextents<cs::int64_t, R>;
+    cs::layout_stride::mapping<E> mp(E(ext), st);
+    return dyn_tensor<T, cs::int64_t, R, storage_view_of(Space)>(data, mp);
+}
 } // namespace _dl
 
 /* ============================ export (teeny -> DLPack) ============================ */
@@ -174,6 +223,32 @@ _TNY_HOST DLManagedTensor * to_dlpack(tensor<T, Shape, Layout, O> && t) {
     return _dl::make_managed(static_cast<const Owner &>(t), dev, static_cast<Owner &&>(t));
 }
 
+/** @brief Export to a **bare `DLTensor`** (unmanaged — no capsule, no deleter, no
+ *         allocation). Borrows both the data AND the shape/stride arrays: the caller
+ *         supplies `shape_out`/`strides_out` (each ≥ `t.rank()` `int64_t`s), which
+ *         this fills, and the returned `DLTensor` points at them + `t.data()`. The
+ *         caller must keep the tensor's memory *and* those two buffers alive for as
+ *         long as the `DLTensor` is used. Use for a consumer that takes a plain
+ *         `DLTensor` rather than a managed capsule. Device defaults to the tensor's
+ *         memory space (override with `dev`). Works for any storage (a pure borrow). */
+template <class T, class Shape, class Layout, storage O>
+_TNY_HOST DLTensor to_dltensor(const tensor<T, Shape, Layout, O> & t,
+                               cs::int64_t * shape_out, cs::int64_t * strides_out,
+                               DLDevice dev = { _dl::device_of<O>(), 0 }) {
+    const int nd = static_cast<int>(t.rank());
+    if constexpr (Shape::rank() > 0) {   // rank-0: skip the runtime-index stride() (CCCL constrains it to rank>0)
+        for (int i = 0; i < nd; ++i) {
+            shape_out[i]   = static_cast<cs::int64_t>(t.extent(i));
+            strides_out[i] = static_cast<cs::int64_t>(t.stride(i));   // DLPack strides are in ELEMENTS
+        }
+    }
+    DLTensor dt;
+    dt.data = const_cast<void *>(static_cast<const void *>(t.data()));
+    dt.device = dev; dt.ndim = nd; dt.dtype = _dl::dtype_of<T>();
+    dt.shape = shape_out; dt.strides = strides_out; dt.byte_offset = 0;
+    return dt;
+}
+
 /* ============================ import (DLPack -> teeny) ============================ */
 
 /** @brief Import a `DLManagedTensor` of known element type `T` as an `anyrank`
@@ -191,50 +266,30 @@ _TNY_HOST DLManagedTensor * to_dlpack(tensor<T, Shape, Layout, O> && t) {
  *         device pointer). (Closes the #38 hole where the device field was ignored
  *         and a device capsule silently became a host view.) */
 template <class T, storage Space = storage::view>
-_TNY_HOST anyrank<T, cs::int64_t, _meta_store<cs::int64_t, TNY_MAX_RANK>, Space>
-from_dlpack(const DLManagedTensor * m) {
-    const DLTensor & dt = m->dl_tensor;
-    _TNY_CHECK(_dl::dtype_matches<T>(dt.dtype), "from_dlpack: DLPack dtype does not match T");
-    _TNY_CHECK(storage_is_host_accessible(Space) == _dl::device_is_host_accessible(dt.device.device_type),
-        "from_dlpack: Space host/device does not match the capsule's device — import a kDLCUDA capsule as from_dlpack<T, storage::gpu_view>(m)");
-    const int nd = dt.ndim;
-    // Trust boundary: `ndim` comes straight from the producer (torch allows 64
-    // dims). CLAMP the local fills to TNY_MAX_RANK UNCONDITIONALLY — this must
-    // hold even under -DNDEBUG, where _TNY_CHECK is compiled out. An oversized
-    // ndim then simply never matches dispatch_rank / fixed<R>.
-    _TNY_CHECK(nd <= static_cast<int>(TNY_MAX_RANK), "from_dlpack: ndim exceeds TNY_MAX_RANK (raise -DTNY_MAX_RANK)");
-    const int n = nd < static_cast<int>(TNY_MAX_RANK) ? nd : static_cast<int>(TNY_MAX_RANK);
-    T * data = reinterpret_cast<T *>(reinterpret_cast<char *>(dt.data) + dt.byte_offset);
-    cs::int64_t st[TNY_MAX_RANK];
-    if (dt.strides) { for (int i = 0; i < n; ++i) st[i] = dt.strides[i]; }
-    else { cs::int64_t s = 1; for (int i = n - 1; i >= 0; --i) { st[i] = s; s *= dt.shape[i]; } }  // C-contiguous
-    return as_anyrank<TNY_MAX_RANK, Space>(data, dt.shape, st, nd, copy_meta);
-}
+_TNY_HOST auto from_dlpack(const DLManagedTensor * m)          { return _dl::import_anyrank<T, Space>(_dl::as_dltensor(*m)); }
+/** @brief Import a **bare `DLTensor`** (unmanaged — no deleter). Borrows the data,
+ *         copies the metadata; the CALLER owns the whole lifetime (there is nothing
+ *         to free). Use when a producer hands you a plain `DLTensor*` rather than a
+ *         capsule. Same `Space`/device check as the managed overload. */
+template <class T, storage Space = storage::view>
+_TNY_HOST auto from_dlpack(const DLTensor * dt)               { return _dl::import_anyrank<T, Space>(_dl::as_dltensor(*dt)); }
+/** @brief Import a **versioned** managed tensor (DLPack 1.0+, what a modern
+ *         `__dlpack__(max_version=…)` emits). Reads its `dl_tensor` payload; as with
+ *         the classic capsule the caller keeps `m` alive and calls `m->deleter(m)`. */
+template <class T, storage Space = storage::view>
+_TNY_HOST auto from_dlpack(const DLManagedTensorVersioned * m) { return _dl::import_anyrank<T, Space>(_dl::as_dltensor(*m)); }
 
-/** @brief Import as a **fixed-rank** view (requires `m->dl_tensor.ndim == R`).
- *         Returns a `layout_stride` tensor view borrowing the data; the caller
- *         owns `m`'s lifetime. `Space` (default host `storage::view`) tags the view and
- *         is checked against the capsule's device, as in the `anyrank` overload —
- *         `from_dlpack<T, R, storage::gpu_view>(m)` for a device capsule. */
+/** @brief Import as a **fixed-rank** view (requires the payload's `ndim == R`).
+ *         Returns a `layout_stride` tensor view borrowing the data. `Space` (default
+ *         host `storage::view`) tags the view and is checked against the device, as in
+ *         the `anyrank` overloads — `from_dlpack<T, R, storage::gpu_view>(m)` for a
+ *         device tensor. Accepts all three carriers (managed / bare / versioned). */
 template <class T, cs::size_t R, storage Space = storage::view>
-_TNY_HOST dyn_tensor<T, cs::int64_t, R, storage_view_of(Space)> from_dlpack(const DLManagedTensor * m) {
-    const DLTensor & dt = m->dl_tensor;
-    _TNY_CHECK(_dl::dtype_matches<T>(dt.dtype), "from_dlpack<T,R>: DLPack dtype does not match T");
-    _TNY_CHECK(dt.ndim == static_cast<int>(R),  "from_dlpack<T,R>: ndim != R");
-    _TNY_CHECK(storage_is_host_accessible(Space) == _dl::device_is_host_accessible(dt.device.device_type),
-        "from_dlpack<T,R>: Space host/device does not match the capsule's device — use from_dlpack<T, R, storage::gpu_view>(m)");
-    T * data = reinterpret_cast<T *>(reinterpret_cast<char *>(dt.data) + dt.byte_offset);
-    // Read only min(R, ndim) from the producer's arrays so a wrong-rank call can
-    // never read out of bounds (the check above is debug-only under NDEBUG).
-    const cs::size_t n = (dt.ndim >= 0 && static_cast<cs::size_t>(dt.ndim) < R) ? static_cast<cs::size_t>(dt.ndim) : R;
-    cs::array<cs::int64_t, R> ext{}, st{};
-    for (cs::size_t i = 0; i < n; ++i) ext[i] = dt.shape[i];
-    if (dt.strides) { for (cs::size_t i = 0; i < n; ++i) st[i] = dt.strides[i]; }
-    else { cs::int64_t s = 1; for (int i = int(n) - 1; i >= 0; --i) { st[i] = s; s *= dt.shape[i]; } }
-    using E = cs::dextents<cs::int64_t, R>;
-    cs::layout_stride::mapping<E> mp(E(ext), st);
-    return dyn_tensor<T, cs::int64_t, R, storage_view_of(Space)>(data, mp);
-}
+_TNY_HOST auto from_dlpack(const DLManagedTensor * m)          { return _dl::import_fixed<T, R, Space>(_dl::as_dltensor(*m)); }
+template <class T, cs::size_t R, storage Space = storage::view>
+_TNY_HOST auto from_dlpack(const DLTensor * dt)               { return _dl::import_fixed<T, R, Space>(_dl::as_dltensor(*dt)); }
+template <class T, cs::size_t R, storage Space = storage::view>
+_TNY_HOST auto from_dlpack(const DLManagedTensorVersioned * m) { return _dl::import_fixed<T, R, Space>(_dl::as_dltensor(*m)); }
 
 /** @brief Import + dispatch: read the dtype/rank from the `DLManagedTensor` and
  *         call `f` with a fixed-rank typed view (one instantiation per (dtype,
@@ -242,9 +297,9 @@ _TNY_HOST dyn_tensor<T, cs::int64_t, R, storage_view_of(Space)> from_dlpack(cons
  *         Data borrowed; caller owns `m`. `Space` (default host `storage::view`) tags
  *         the views and is checked against the capsule's device — dispatch a device
  *         capsule with `dispatch_dlpack<storage::gpu_view>(m, f)`. */
-template <storage Space = storage::view, class F>
-_TNY_HOST bool dispatch_dlpack(const DLManagedTensor * m, F && f) {
-    return _dl::dispatch_dtype(m->dl_tensor.dtype, [&](auto tag) -> bool {
+template <storage Space = storage::view, class Carrier, class F>
+_TNY_HOST bool dispatch_dlpack(const Carrier * m, F && f) {
+    return _dl::dispatch_dtype(_dl::as_dltensor(*m).dtype, [&](auto tag) -> bool {
         using T = decltype(tag);
         return dispatch_rank(from_dlpack<T, Space>(m), f);   // dtype x total rank -> static view
     });
@@ -258,9 +313,9 @@ _TNY_HOST bool dispatch_dlpack(const DLManagedTensor * m, F && f) {
  *         kernel **once per `Sr`**, not once per total rank. Returns false for an
  *         unsupported dtype. Data borrowed; caller owns `m`. `Space` tags the carrier
  *         and is checked against the capsule's device (see `from_dlpack`). */
-template <storage Space = storage::view, class F>
-_TNY_HOST bool dispatch_dlpack_dtype(const DLManagedTensor * m, F && f) {
-    return _dl::dispatch_dtype(m->dl_tensor.dtype, [&](auto tag) -> bool {
+template <storage Space = storage::view, class Carrier, class F>
+_TNY_HOST bool dispatch_dlpack_dtype(const Carrier * m, F && f) {
+    return _dl::dispatch_dtype(_dl::as_dltensor(*m).dtype, [&](auto tag) -> bool {
         using T = decltype(tag);
         f(from_dlpack<T, Space>(m));   // typed anyrank; caller does peel_front<-Sr>
         return true;

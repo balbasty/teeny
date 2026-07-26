@@ -384,7 +384,8 @@ axes removed) and the ownership splits static → stack / dynamic → heap.
 | `as_anyrank(data, shape, stride, ndim)` | `anyrank` (view store) | **wraps** the arrays, no copy (default; host only) |
 | `as_anyrank(data, shape, stride, ndim, copy_meta)` | `anyrank` (inline store) | **copies** into a `TNY_MAX_RANK` store (device-passable); `as_anyrank<N>(…,copy_meta)` sets capacity |
 | `as_anyrank<Space>(…)` | space-tagged `anyrank` | `Space` = the data's memory space (default `storage::view` = host); pass `storage::gpu_view` for a device pointer so `fixed`/`peel_front` yield `gpu_view` views |
-| `from_dlpack<T[, Space]>(m)` / `from_dlpack<T, R[, Space]>(m)` | `anyrank` / rank-`R` view | import a capsule; `Space` (default host) is **checked against `m→device`** — a `kDLCUDA` capsule needs `storage::gpu_view` |
+| `from_dlpack<T[, Space]>(m)` / `from_dlpack<T, R[, Space]>(m)` | `anyrank` / rank-`R` view | import; `m` may be a `DLManagedTensor*`, a **bare `DLTensor*`** (unmanaged — nothing to free, caller owns all lifetime), or a **`DLManagedTensorVersioned*`** (DLPack 1.0+). `Space` (default host) is **checked against `m→device`** — a `kDLCUDA` tensor needs `storage::gpu_view` |
+| `to_dltensor(t, shape_out, strides_out[, dev])` | `DLTensor` | export to a **bare `DLTensor`** (no capsule/deleter/alloc): borrows `t`'s data AND the two caller-supplied `int64_t[≥rank]` buffers it fills. Caller keeps the tensor + buffers alive. (`to_dlpack(t)` is the managed-capsule export.) |
 | `at.fixed<R>()` | rank-`R` `dynamic_strides` view | requires `ndim == R` |
 | `dispatch_rank(at, f)` | `bool` | call `f` with a fixed-rank view chosen by runtime `ndim` (one instantiation per total rank) |
 | `dispatch_rank<narrow_index>(at, f)` | `bool` | ...and narrow each fixed cell's offset width to `int32` when `index_fits` (rank outer, width inner; the leaf doubles). Default `Narrow=false` is the plain dispatch |
