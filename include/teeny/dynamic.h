@@ -453,6 +453,14 @@ struct anyrank_front {
         }
         _TNY_API bool operator!=(const iterator & o) const { return lin != o.lin; }
         _TNY_API bool operator==(const iterator & o) const { return lin == o.lin; }
+        // The current cell's BATCH multi-index / flat index — the odometer the cursor
+        // already maintains, surfaced for free (#217). `index(d)` = coord of batch axis
+        // d (d in [0, nbatch())); `linear()` = the flat batch index. NB the batch rank
+        // `nbatch()` is RUNTIME (ndim - Sr), so there is no fixed-size `index()` tuple —
+        // use `index(d)` per axis, or `enumerate()`'s coord proxy.
+        _TNY_API offset_t index(int d)  const noexcept { return ctr[d]; }
+        _TNY_API int      nbatch()      const noexcept { return nb; }
+        _TNY_API offset_t linear()      const noexcept { return lin; }
     };
     _TNY_API iterator _iter_at(offset_t i) const {
         iterator it{};
@@ -483,6 +491,44 @@ struct anyrank_front {
         iterator e = b; e.lin = hi;   // end sentinel: only `lin` is compared
         return { b, e };
     }
+
+    // --- enumerate: batch-cell range-for that ALSO yields the batch multi-index (#217)
+    // Mirrors the tensor-side peel `enumerate()` (#213). Opt-in: the bare
+    // `for (auto cell : at.peel_front<-Sr>())` cell stays lean; enumerate pairs each
+    // cell with the batch coordinates for a per-batch-axis table `param[d][m[d]]`:
+    //   for (auto [m, cell] : at.peel_front<-Sr>().enumerate()) use(m[0], m[1], cell);
+    // `m` is a lightweight VIEW of the live odometer (valid THIS iteration — don't store
+    // it past the loop body); `m[d]` = coord of batch axis d, `m.rank()` = #batch axes,
+    // `m.linear()` = the flat batch index. Composes with `subrange` for chunked sweeps.
+    struct coord {
+        const offset_t * ctr; int nb; offset_t lin;
+        _TNY_API offset_t operator[](int d) const noexcept { return ctr[d]; }
+        _TNY_API int      rank()    const noexcept { return nb; }
+        _TNY_API offset_t linear()  const noexcept { return lin; }
+    };
+    struct item { coord index; Cell cell; };
+    struct enum_iterator {
+        iterator it;
+        _TNY_API item operator*() const { return { coord{ it.ctr, it.nb, it.lin }, *it }; }
+        _TNY_API enum_iterator & operator++() { ++it; return *this; }
+        _TNY_API bool operator!=(const enum_iterator & o) const { return it != o.it; }
+        _TNY_API bool operator==(const enum_iterator & o) const { return it == o.it; }
+    };
+    struct enum_range {
+        anyrank_front r;   // by VALUE -> safe on a `peel_front<-Sr>().enumerate()` temporary
+        _TNY_API enum_iterator begin() const { return { r.begin() }; }
+        _TNY_API enum_iterator end()   const { return { r.end() }; }
+        struct enum_subrange {
+            enum_iterator b, e;
+            _TNY_API enum_iterator begin() const { return b; }
+            _TNY_API enum_iterator end()   const { return e; }
+        };
+        _TNY_API enum_subrange subrange(offset_t lo, offset_t hi) const {
+            subrange_t s = r.subrange(lo, hi);
+            return { { s.b }, { s.e } };
+        }
+    };
+    _TNY_API enum_range enumerate() const { return { *this }; }
 };
 
 /** @brief Build an `anyrank` that **wraps** the caller's shape/stride arrays with
