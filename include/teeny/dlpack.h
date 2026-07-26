@@ -97,14 +97,14 @@ _TNY_HOST DLManagedTensor * make_managed(const tensor<T, Shape, Layout, O> & t, 
     auto * h  = new holder<Owner>{};
     h->shape  = new cs::int64_t[nd ? nd : 1];
     h->stride = new cs::int64_t[nd ? nd : 1];
-    // Read ALL of `t` (data, extents, strides) BEFORE moving `owner` in — for an
+    // Read ALL of `t` (data, shape, strides) BEFORE moving `owner` in — for an
     // owning export `owner` aliases `t`, and the move would leave `t` empty. The
     // `if constexpr` is needed for a rank-0 (scalar) tensor: `t.stride(i)` with a
     // runtime index would still instantiate `layout::mapping::stride`, which CCCL
     // constrains to rank > 0.
     if constexpr (Shape::rank() > 0) {
         for (int i = 0; i < nd; ++i) {
-            h->shape[i]  = static_cast<cs::int64_t>(t.extent(i));
+            h->shape[i]  = static_cast<cs::int64_t>(t.shape(i));
             h->stride[i] = static_cast<cs::int64_t>(t.stride(i));   // DLPack strides are in ELEMENTS
         }
     }
@@ -238,7 +238,7 @@ _TNY_HOST DLTensor to_dltensor(const tensor<T, Shape, Layout, O> & t,
     const int nd = static_cast<int>(t.rank());
     if constexpr (Shape::rank() > 0) {   // rank-0: skip the runtime-index stride() (CCCL constrains it to rank>0)
         for (int i = 0; i < nd; ++i) {
-            shape_out[i]   = static_cast<cs::int64_t>(t.extent(i));
+            shape_out[i]   = static_cast<cs::int64_t>(t.shape(i));
             strides_out[i] = static_cast<cs::int64_t>(t.stride(i));   // DLPack strides are in ELEMENTS
         }
     }
