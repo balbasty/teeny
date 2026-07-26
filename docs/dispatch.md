@@ -104,9 +104,22 @@ for (auto cell : at.peel_front<-Sr>()) kernel<Sr>(cell);  // Sr=2 -> peel_front<
 auto cell = at.peel_front_at<-Sr>(i);                     // i-th (grid-stride)
 ```
 
-Each `cell` is a `dextents<_,Sr>` view (inner extents dynamic). Follow with
-[`recast(shape<-1,c,c>{})`](structure.md#recover-static-inner-dims) to fold known
-inner dims.
+Each `cell` is a `dextents<_,Sr>` view (inner extents dynamic). Recover the static
+inner dims by peeling **directly** to the target shape — one call, no separate
+`recast`:
+
+```cpp
+auto cell = at.peel_front_at(i, shape<-1,c,c>{});     // rank-3 cell, inner (c,c) static
+```
+
+`peel_front_at<NewE[, NewL]>(i)` (and its `peel_front_at(i, shape<…>{}[, layout{}])`
+value form) fuses `peel_front_at<-NewE::rank()>(i).recast<NewE, NewL>()`. `NewE`'s rank
+is the number of KEPT trailing dims; a static extent folds, a `-1` stays dynamic
+(`shape<-1,-1,3>` = 2-D spatial + static C). It keeps the carrier's **runtime strides**
+by default (an `anyrank` has no compile-time stride info); pass `,ccontiguous{}` to fold
+them (a debug-checked promise) or run [`dispatch_layout`](#dispatch_layout--recover-static-contiguity)
+on the result for a runtime-proven fold. Fusing also drops the hand-kept
+`Sr ≡ recast-shape rank` invariant.
 
 The **range-for is incremental**: it advances the base pointer by the batch
 strides and reuses the loop-invariant cell mapping, so each step is O(1) rather

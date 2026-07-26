@@ -349,9 +349,14 @@ for (auto cell : at.peel_front<-Sr>()) kernel<Sr>(cell);  // Sr=2 -> peel_front<
                                               //   O(#batch) decode). For a CPU thread / device block that
                                               //   owns a chunk: for (cell : at.peel_front<-Sr>().subrange(lo,hi)).
 auto cell = at.peel_front_at<-Sr>(i);         // i-th — random access (grid-stride i += nthreads, whose
-                                              //   stride the odometer can't express — keep this path);
-                                              //   .recast<shape<-1,c,c>>() folds inner EXTENTS (add
-                                              //   ,ccontiguous> to also fold the strides)
+                                              //   stride the odometer can't express — keep this path)
+auto cell = at.peel_front_at(i, shape<-1,c,c>{});  // FUSED peel+recast: cell has the target trailing shape
+                                              //   DIRECTLY (static inner EXTENTS fold, -1 stays dynamic), no
+                                              //   separate recast. == peel_front_at<-Sr>(i).recast<shape<-1,c,c>>()
+                                              //   with Sr=NewE::rank(). value-form -> no `.template`. STRIDES:
+                                              //   keeps runtime (layout_stride) by default — an anyrank has no
+                                              //   static stride info; add a layout (,ccontiguous{}) to fold them
+                                              //   (debug-checked promise) or dispatch_layout for a proven fold.
 auto nb = at.size_front<-Sr>();               // flattened batch count (no range built), same NEGATIVE arg
 ```
 

@@ -405,6 +405,7 @@ for a device carrier):
 |---|---|---|
 | `at.fixed<R>()` | `dyn_tensor<T, offset_t, R, Space>` | requires `ndim == R`; extents + strides all runtime |
 | `at.peel_front_at<-Sr>(i)` | `dyn_tensor<T, offset_t, Sr, Space>` | one batch cell (rank `Sr`); `.recast<shape<-1,c,c>>()` recovers static inner dims |
+| `at.peel_front_at<NewE[, NewL]>(i)` / `at.peel_front_at(i, shape<-1,c,c>{}[, ccontiguous{}])` | cell with shape `NewE` | **fused** peel+recast: the cell has the target trailing shape (rank = `NewE::rank()`) DIRECTLY — static inner extents fold, `-1` stays dynamic, no separate `recast`. Removes the hand-kept `Sr ≡ shape-rank` invariant. **Strides**: `keep_strides` (default) keeps the carrier's runtime strides; a layout arg folds them (debug-checked promise), or `dispatch_layout` proves it |
 | `from_dlpack<T, R[, Space]>(m)` | `dyn_tensor<T, offset_t, R, Space>` | rank-`R` view; `Space` checked against `m→device` |
 | `from_dlpack<T[, Space]>(m)` | `anyrank` (space-tagged) | rank-erased; call `fixed`/`peel_front`/`dispatch_rank` on it |
 

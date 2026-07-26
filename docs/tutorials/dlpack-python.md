@@ -70,21 +70,20 @@ axes, peel everything in front"* — so this is rank-agnostic: `(C,C)`, `(B,C,C)
 layout — nothing is flattened or copied.
 
 ```cpp
-// Invert the i-th batch element. peel_front_at<-2> folds the batch index `i` into
-// the pointer and leaves a rank-2 view; recast(shape<c,c>{}) restores the two static
-// extents so `invert` sees a compile-time C×C. (`c` is the static C from §3.)
-// The value-form recast(shape<c,c>{}) needs no `.template`; peel_front_at is a
-// count selector, so it keeps it on this dependent receiver.
+// Invert the i-th batch element. `peel_front_at(i, shape<c,c>{})` folds the batch
+// index `i` into the pointer AND recovers the compile-time C×C in ONE step: the shape
+// tag says "keep the last 2 dims, and they're (c,c)". The value form (a tag, not a
+// `<...>` arg) needs no `.template` on the dependent receiver, and there's no separate
+// recast. (`c` is the static C from §4.)
 template <long c, class In, class Out>
 _TNY_API void invert_cell(const In & in, Out & out, long i) {
-    auto A  = in .template peel_front_at<-2>(i).recast(shape<c, c>{});
-    auto Oi = out.template peel_front_at<-2>(i).recast(shape<c, c>{});
-    invert(A, Oi);
+    auto Oi = out.peel_front_at(i, shape<c, c>{});                 // rank-2 (c,c) view, static extents
+    invert(in.peel_front_at(i, shape<c, c>{}), Oi);               // A binds as const&
 }
 ```
 
 !!! note "Random access vs. the incremental range-for"
-    `peel_front_at<-2>(i)` re-derives the cell's pointer by decoding `i` over the
+    `peel_front_at(i, …)` re-derives the cell's pointer by decoding `i` over the
     batch dims — `O(#batch dims)` integer ops **per call**. That's the right tool for
     a **grid-stride** loop (`i += nthreads`), where consecutive `i` for one worker are
     a stride apart. When a worker instead sweeps a **contiguous** block, prefer the
@@ -152,7 +151,7 @@ void invert_cuda(const In & in, Out & out) {
     incrementally alongside a running index for the other.
 
 This tutorial deliberately applies the [Efficient-kernels](../efficient-kernels.md)
-playbook: a **static inner block** via `recast(shape<c,c>{})` (§1), the **`peel_front`
+playbook: a **static inner block** via `peel_front_at(i, shape<c,c>{})` (§2), the **`peel_front`
 batch idiom** (§3), **snapshotting inputs through a `local`** before writing the result
 (§7), and **`dispatch_value`/`dispatch_index`** at the boundary (§4). The `C×C` body
 nests its unit-stride axis innermost and its `m`/`inv` workspaces are fully overwritten
