@@ -42,9 +42,8 @@ struct _dyn_strides<Index, 0> {
  *
  * `ccontiguous`/`fcontiguous` (mdspan `layout_right`/`layout_left`) give contiguous (extent-derived) strides;
  * `layout_stride` stores every stride at run time. `strides<S...>` bakes the
- * KNOWN strides into the type (folding to immediates, like jitfields' posdef
- * `Pointer<T,S>`) — **including negative strides** — while any dimension marked
- * `dynamic_stride` is supplied at run time:
+ * KNOWN strides into the type (folding to immediates) — **including negative
+ * strides** — while any dimension marked `dynamic_stride` is supplied at run time:
  *
  *     tensor<float, shape<3,4>, strides<4,1>>(ptr);                    // static, folds
  *     tensor<float, shape<3,4>, strides<-4,1>>(ptr);                   // reversed rows

@@ -129,9 +129,10 @@ static_assert(sizeof(half) == 2 && sizeof(bfloat16) == 2, "half types are 16-bit
 /**
  * @brief The type math should ACCUMULATE / compute in for element type `T`.
  *
- * Half types compute in `float` (16-bit accumulation loses precision fast —
- * jitfields' `reduce_t` pattern — and it lets the engines avoid depending on
- * native half host operators). Everything else computes in itself.
+ * Half types compute in `float` (16-bit accumulation loses precision fast, the
+ * usual mixed-precision rule: accumulate wider than you store — and it lets the
+ * engines avoid depending on native half host operators). Everything else computes
+ * in itself.
  */
 template <class T> struct compute_type          { using type = T; };
 template <>        struct compute_type<half>     { using type = float; };
