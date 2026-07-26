@@ -346,9 +346,15 @@ auto af = as_anyrank(data, shape, stride, ndim, anyshape<etc,-1,-1,3>{});  // ST
                                              //   arg): ,ccontiguous{} bakes a contiguous inner block (folds strides;
                                              //   fully-static tail -> EBO cell), checked vs the runtime strides at the
                                              //   boundary — subsumes dispatch_layout for the "input is contiguous"
-                                             //   precondition. Default keep_strides = strides stay runtime (#209). A
-                                             //   static leading Head (dims BEFORE etc: anyshape<A,B,etc,C,D>) is later.
+                                             //   precondition. Default keep_strides = strides stay runtime (#209).
 auto af2 = from_dlpack<T, anyshape<etc,-1,-1,3>>(m, ccontiguous{});  // ...and straight off DLPack (layout by value)
+auto af3 = as_anyrank(data, shape, stride, ndim, anyshape<3,etc,5>{});  // static leading HEAD too (#219):
+                                             //   anyshape<A,B,etc,C,D> = (A,B,*middle,C,D). e.g. anyshape<3,etc,5> =
+                                             //   (C_in=3, *spatial, C_out=5). The Head folds in fixed()/dispatch_rank
+                                             //   (full-rank window); peel_front<-Sr> stays trailing (the Head is peeled
+                                             //   into the batch — inert there). Head EXTENTS fold; head STRIDES stay
+                                             //   runtime (a leading stride spans the dynamic middle). Empty Head (etc
+                                             //   first) == the trailing-only carrier, byte-identical.
 dispatch_rank(at, [&](auto v){ kernel(v); });  // instantiates kernel once per TOTAL rank
 dispatch_rank<narrow_index>(at, f);           // ...+ int32 offsets when the span fits (rank OUTER, width INNER;
                                               //   only the leaf doubles). Default Narrow=false == plain dispatch.
