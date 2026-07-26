@@ -599,6 +599,55 @@ _TNY_API void reduce_axes_(Out & out, const A & a, R init, Op op, const bool * r
     }
 }
 
+// STATIC fast path (#218): when the input extents are all static AND it is
+// C-contiguous, the per-element decode of `reduce_axes_` folds to nothing — the input
+// offset IS the linear index (contiguous), and the OUTPUT offset is a compile-time
+// function of it. Unrolling over the (static) element count then emits straight-line
+// FMA-style code with no loop back-edge and no runtime `%`/`/` — matching a
+// hand-written nested loop (the axis reduction was 3-7x slower otherwise, since the
+// runtime radix decode did not fold). `_red_oo` is the compile-time output offset for
+// input linear index `lin`: decode `lin` over the static input extents, weight each
+// kept axis by the (ccontiguous) output stride, drop the reduced axes.
+template <class E, class OE, long... Axes>
+_TNY_API constexpr typename E::index_type _red_oo(typename E::index_type lin) noexcept {
+    using I = typename E::index_type;
+    constexpr int N = static_cast<int>(E::rank());
+    I so[N ? N : 1]{};                                         // output-offset stride per INPUT axis
+    I ostr[OE::rank() ? OE::rank() : 1]{};                     // ccontiguous output strides
+    { I s = 1; for (int i = static_cast<int>(OE::rank()) - 1; i >= 0; --i) { ostr[i] = s; s *= static_cast<I>(OE::static_extent(i)); } }
+    int oi = 0;
+    for (int d = 0; d < N; ++d) {
+        const bool red = ( (d == _norm_axis(Axes, E::rank())) || ... );
+        if (red) so[d] = 0; else { so[d] = ostr[oi]; ++oi; }
+    }
+    I rem = lin, oo = 0;
+    for (int d = N - 1; d >= 0; --d) { const I ext = static_cast<I>(E::static_extent(d)); const I k = rem % ext; rem /= ext; oo += k * so[d]; }
+    return oo;
+}
+template <class E, cs::size_t... D>
+constexpr cs::size_t _static_numel_(cs::index_sequence<D...>) { return (cs::size_t(1) * ... * E::static_extent(D)); }
+template <class E>
+constexpr cs::size_t _static_numel() { return _static_numel_<E>(cs::make_index_sequence<E::rank()>{}); }
+
+// one unrolled step for input linear index `Lin` (a TEMPLATE arg, so the output
+// offset `oo` is bound as a `constexpr` — computed once, at compile time; clang would
+// otherwise re-evaluate the `_red_oo` call for the read and the write).
+template <cs::size_t Lin, class E, class OE, long... Axes, class R, class Out, class A, class Op>
+_TNY_API void reduce_axes_one_(Out & out, const A & a, R, Op op) {
+    using Tout = typename Out::element_type;
+    constexpr auto oo = _red_oo<E, OE, Axes...>(static_cast<typename E::index_type>(Lin));
+    out.data()[oo] = static_cast<Tout>(op(static_cast<R>(out.data()[oo]), a.data()[Lin]));
+}
+template <long... Axes, class R, class Out, class A, class Op, cs::size_t... Lin>
+_TNY_API void reduce_axes_static_(Out & out, const A & a, R init, Op op, cs::index_sequence<Lin...>) {
+    using E = typename A::extents_type; using OE = typename Out::extents_type;
+    using Tout = typename Out::element_type;
+    constexpr cs::size_t ON = _static_numel<OE>();
+    for (cs::size_t k = 0; k < ON; ++k) out.data()[k] = static_cast<Tout>(init);
+    // fully unrolled: input offset == Lin (contiguous), output offset is compile-time.
+    ( reduce_axes_one_<Lin, E, OE, Axes...>(out, a, init, op), ... );
+}
+
 // fully static result -> stack (host+device). Output element type = R (the
 // accumulator), so accumulation runs in full `R` precision; the public reduction
 // (`sum<0>` etc.) then casts this down to the tensor's element type via reduce_to.
@@ -607,8 +656,13 @@ template <long... Axes, class R, class Op, class T,class E,class L,storage O,
 _TNY_API auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
     static_assert((_axis_in_range(Axes, E::rank()) && ...), "reduction axis out of range");
     tensor<R, OE, ccontiguous, storage::stack> out{};
-    bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
-    reduce_axes_<R>(out, a, init, op, red, cs::make_index_sequence<E::rank()>{});
+    if constexpr (E::rank_dynamic() == 0 && cs::is_same<L, ccontiguous>::value) {
+        // static + C-contiguous: unroll (input offset == linear index; output offset folds)
+        reduce_axes_static_<Axes...>(out, a, init, op, cs::make_index_sequence<_static_numel<E>()>{});
+    } else {
+        bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
+        reduce_axes_<R>(out, a, init, op, red, cs::make_index_sequence<E::rank()>{});
+    }
     return out;
 }
 // any dynamic result -> heap (HOST ONLY: it must allocate; not callable on device)
