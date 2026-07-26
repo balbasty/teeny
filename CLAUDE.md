@@ -336,9 +336,13 @@ auto af = as_anyrank(data, shape, stride, ndim, anyshape<etc,-1,-1,3>{});  // ST
                                              //   Bare `anyshape<etc>` (empty tail) == today's fully-dynamic carrier,
                                              //   byte-identical. Also on the copy_meta form (…, copy_meta,
                                              //   anyshape<etc,-1,-1,3>{}) and from_dlpack<T, anyshape<etc,-1,-1,3>>(m).
-                                             //   STRIDES stay runtime for now (extents-only); a static contiguous inner
-                                             //   block folds its strides too in the follow-up (#210). A static leading
-                                             //   Head (dims BEFORE etc: anyshape<A,B,etc,C,D>) is reserved for later.
+                                             //   A trailing LAYOUT tag folds the inner STRIDES too (like recast's 2nd
+                                             //   arg): ,ccontiguous{} bakes a contiguous inner block (folds strides;
+                                             //   fully-static tail -> EBO cell), checked vs the runtime strides at the
+                                             //   boundary — subsumes dispatch_layout for the "input is contiguous"
+                                             //   precondition. Default keep_strides = strides stay runtime (#209). A
+                                             //   static leading Head (dims BEFORE etc: anyshape<A,B,etc,C,D>) is later.
+auto af2 = from_dlpack<T, anyshape<etc,-1,-1,3>>(m, ccontiguous{});  // ...and straight off DLPack (layout by value)
 dispatch_rank(at, [&](auto v){ kernel(v); });  // instantiates kernel once per TOTAL rank
 dispatch_rank<narrow_index>(at, f);           // ...+ int32 offsets when the span fits (rank OUTER, width INNER;
                                               //   only the leaf doubles). Default Narrow=false == plain dispatch.
