@@ -104,5 +104,32 @@ int main()
     if (dot(f, f) != 30.f) return 9;              // 1+4+9+16, accumulated in double
     static_assert(cs::is_same<decltype(dot<double>(f, f)), double>::value, "dot<double> -> double");
 
+    // ---- #218: the static + C-contiguous fast path == the reference, every axis ----
+    // (a 4x4x4 iota, the case that was 3-7x slow; the static unroll must match a hand loop)
+    auto P3 = zeros<double>(shape<4,4,4>{}); P3.iota_(1, 1);   // 1..64, row-major
+    auto s1 = sum<double,1>(P3);                              // reduce the MIDDLE axis -> (4,4)
+    for (int i = 0; i < 4; ++i) for (int k = 0; k < 4; ++k) {
+        double ref = 0; for (int j = 0; j < 4; ++j) ref += P3(i,j,k);
+        if (s1(i,k) != ref) return 90;
+    }
+    auto s0 = sum<double,0>(P3);                              // reduce the OUTER axis
+    for (int j = 0; j < 4; ++j) for (int k = 0; k < 4; ++k) {
+        double ref = 0; for (int i = 0; i < 4; ++i) ref += P3(i,j,k);
+        if (s0(j,k) != ref) return 91;
+    }
+    auto s02 = sum<double,0,2>(P3);                           // multi-axis (0 and 2) -> (4,)
+    for (int j = 0; j < 4; ++j) {
+        double ref = 0; for (int i = 0; i < 4; ++i) for (int k = 0; k < 4; ++k) ref += P3(i,j,k);
+        if (s02(j) != ref) return 92;
+    }
+    if (max<1>(P3)(3,3) != P3(3,3,3)) return 93;               // max over the middle axis (fast path too)
+    // a NON-contiguous static source falls to the runtime path — must still be correct
+    auto P3t = P3.permute<2,1,0>();                            // static extents, strided (not ccontiguous)
+    auto st = sum<double,1>(P3t);
+    for (int a2 = 0; a2 < 4; ++a2) for (int c = 0; c < 4; ++c) {
+        double ref = 0; for (int b = 0; b < 4; ++b) ref += P3t(a2,b,c);
+        if (st(a2,c) != ref) return 94;
+    }
+
     return 0;
 }
