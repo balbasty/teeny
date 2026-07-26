@@ -78,6 +78,14 @@ dispatch on top of it:
 Both instantiate `f` for every supported dtype (only the matching one runs), so `f`
 must be generic over its element type.
 
+`m` may be any DLPack carrier: a classic `DLManagedTensor*`, a **bare `DLTensor*`**
+(unmanaged — nothing to free, the caller owns all lifetime), or a
+**`DLManagedTensorVersioned*`** (DLPack 1.0+, what a modern `__dlpack__(max_version=…)`
+emits). `from_dlpack` and both dispatchers accept all three; only who frees the carrier
+differs. To hand teeny data *out* to a consumer that wants a bare `DLTensor`, use
+`to_dltensor(t, shape_out, strides_out)` (borrowed — you own the two `int64_t` buffers);
+`to_dlpack(t)` is the owning managed-capsule export.
+
 ### `peel_front<-Sr>` — the batch pattern (preferred)
 
 For `(*batch, *spatial, C)` data, peel the runtime number of leading batch dims

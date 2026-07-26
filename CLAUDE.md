@@ -62,8 +62,11 @@ include/teeny/
   cuda.h           gpu/pinned/mapped memory. Self-guarded (__has_include /
                    __CUDACC__): a no-op unless the CUDA runtime is reachable, so
                    teeny.h includes it unconditionally. TNY_NO_CUDA forces it off.
-  dlpack.h         DLPack interchange (to_dlpack / from_dlpack / dispatch_dlpack /
-                   dispatch_dlpack_dtype — the rank-preserving dtype dispatch).
+  dlpack.h         DLPack interchange (to_dlpack -> managed capsule; to_dltensor ->
+                   bare unmanaged DLTensor; from_dlpack / dispatch_dlpack /
+                   dispatch_dlpack_dtype). from_dlpack + the dispatchers accept ALL
+                   THREE carriers: DLManagedTensor*, bare DLTensor* (no deleter,
+                   caller owns lifetime), DLManagedTensorVersioned* (DLPack 1.0+).
                    Uses the OFFICIAL DLPack header — the app's / a system
                    <dlpack/dlpack.h> if present, else the complete upstream copy
                    vendored under external/dlpack/ (never a hand-rolled subset).

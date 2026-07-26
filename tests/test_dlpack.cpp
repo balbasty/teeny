@@ -181,5 +181,57 @@ int main()
         if (ok2 || called) return 26;
     }
 
+    // ---- #201: import a BARE DLTensor (unmanaged, no deleter) ----------------
+    {
+        double d[6]; for (int i = 0; i < 6; ++i) d[i] = 10 + i;
+        int64_t shp[2] = {2, 3}, str[2] = {3, 1};
+        DLTensor dt{};
+        dt.data = d; dt.device = {kDLCPU, 0}; dt.ndim = 2;
+        dt.dtype = {kDLFloat, 64, 1}; dt.shape = shp; dt.strides = str; dt.byte_offset = 0;
+        auto at = from_dlpack<double>(&dt);                 // anyrank over a bare DLTensor
+        if (at.ndim != 2 || at.size(0) != 2 || at.size(1) != 3) return 27;
+        auto v = at.fixed<2>();
+        if (v(1, 2) != 15) return 28;                       // 10 + 1*3 + 2
+        auto vr = from_dlpack<double, 2>(&dt);              // fixed-rank over a bare DLTensor
+        if (vr(0, 1) != 11) return 29;
+        // null strides -> C-contiguous shorthand
+        dt.strides = nullptr;
+        auto v2 = from_dlpack<double, 2>(&dt);
+        if (v2(1, 0) != 13) return 30;                      // row-major: 10 + 1*3
+    }
+
+    // ---- #201: import a VERSIONED managed tensor -----------------------------
+    {
+        float f[4]; for (int i = 0; i < 4; ++i) f[i] = i * 2.0f;
+        int64_t shp[1] = {4}, str[1] = {1};
+        DLManagedTensorVersioned mv{};
+        mv.version = {DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
+        mv.dl_tensor.data = f; mv.dl_tensor.device = {kDLCPU, 0}; mv.dl_tensor.ndim = 1;
+        mv.dl_tensor.dtype = {kDLFloat, 32, 1}; mv.dl_tensor.shape = shp;
+        mv.dl_tensor.strides = str; mv.dl_tensor.byte_offset = 0;
+        auto v = from_dlpack<float, 1>(&mv);
+        if (v(3) != 6.0f) return 31;
+        // dtype-preserving dispatch accepts the versioned carrier too
+        bool got = false;
+        bool ok = dispatch_dlpack_dtype(&mv, [&](auto view) {
+            if (view.ndim == 1) got = true; (void)view;
+        });
+        if (!ok || !got) return 32;
+    }
+
+    // ---- #201: export to a bare DLTensor and round-trip ----------------------
+    {
+        double src[6]; for (int i = 0; i < 6; ++i) src[i] = i + 100;
+        auto x2 = wrap(src, shape<2,3>{});
+        int64_t shp[2], str[2];
+        DLTensor dt = to_dltensor(x2, shp, str);            // borrowed, caller owns shp/str
+        if (dt.data != src || dt.ndim != 2) return 33;
+        if (dt.shape[0] != 2 || dt.shape[1] != 3) return 34;
+        if (dt.strides[0] != 3 || dt.strides[1] != 1) return 35;
+        if (dt.dtype.code != kDLFloat || dt.dtype.bits != 64) return 36;
+        auto back = from_dlpack<double, 2>(&dt);            // re-import the bare DLTensor
+        if (back(1, 2) != 105) return 37;                   // 100 + 1*3 + 2
+    }
+
     return 0;
 }
