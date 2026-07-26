@@ -176,6 +176,16 @@ struct peel_range {
         _TNY_API iterator & operator++() { cur.advance(); return *this; }
         _TNY_API bool operator!=(const iterator & o) const { return cur.lin != o.cur.lin; }
         _TNY_API bool operator==(const iterator & o) const { return cur.lin == o.cur.lin; }
+        // The current cell's multi-index over the PEELED axes (in `Axes...` order) —
+        // the odometer the incremental cursor already maintains, surfaced for free.
+        // `index(d)` is coordinate d; `index()` is the whole tuple. Lets a table-indexed
+        // kernel read `axtab[d][it.index(d)]` without a separate manual decode. (#213)
+        _TNY_API index_type index(cs::size_t d) const noexcept { return cur.ctr[d]; }
+        _TNY_API cs::array<index_type, Nd ? Nd : 1> index() const noexcept {
+            cs::array<index_type, Nd ? Nd : 1> m{};
+            for (cs::size_t d = 0; d < Nd; ++d) m[d] = cur.ctr[d];
+            return m;
+        }
     };
     _TNY_API iterator _iter_at(index_type i) const {
         iterator it{ _md::peel_at_ow<OW, Axes...>(src, index_type(0)), nullptr, {} };   // template cell at offset 0
@@ -202,6 +212,37 @@ struct peel_range {
         iterator e = b; e.cur.lin = hi;   // end sentinel: only `lin` is compared
         return { b, e };
     }
+
+    // --- enumerate: range-for that ALSO yields the peeled multi-index (#213) -----
+    // The default `for (auto cell : peel(...))` keeps the cell LEAN (no coordinate
+    // words in the view type). When a kernel needs the coords (e.g. a per-axis table
+    // `axtab[d][m[d]]`), `enumerate()` pairs each cell with the odometer's multi-index
+    // WITHOUT bloating the cell — you opt in, and only then pay for the tuple:
+    //   for (auto [m, cell] : peel(out, axis<...>{}).enumerate()) ...   // m[d] = coord d
+    // Composes with `subrange` for chunked/threaded sweeps: `.enumerate().subrange(lo,hi)`.
+    struct item { cs::array<index_type, Nd ? Nd : 1> index; Cell cell; };
+    struct enum_iterator {
+        iterator it;
+        _TNY_API item operator*() const { return { it.index(), *it }; }
+        _TNY_API enum_iterator & operator++() { ++it; return *this; }
+        _TNY_API bool operator!=(const enum_iterator & o) const { return it != o.it; }
+        _TNY_API bool operator==(const enum_iterator & o) const { return it == o.it; }
+    };
+    struct enum_range {
+        peel_range r;   // by VALUE (just an mdspan) -> safe on a `peel(t).enumerate()` temporary
+        _TNY_API enum_iterator begin() const { return { r.begin() }; }
+        _TNY_API enum_iterator end()   const { return { r.end() }; }
+        struct enum_subrange {
+            enum_iterator b, e;
+            _TNY_API enum_iterator begin() const { return b; }
+            _TNY_API enum_iterator end()   const { return e; }
+        };
+        _TNY_API enum_subrange subrange(index_type lo, index_type hi) const {
+            subrange_t s = r.subrange(lo, hi);
+            return { { s.b }, { s.e } };
+        }
+    };
+    _TNY_API enum_range enumerate() const { return { *this }; }
 };
 
 /** @brief Build a range of sub-views by peeling `Axes...` of `t`. Non-const `t`

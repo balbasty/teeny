@@ -178,6 +178,10 @@ peel(x, axis<Axes...>{}); peel_at(x, i, axis<Axes...>{});  // value form (numpy-
 peel_front<N>(x);       peel_front_at<N>(x, i);  // peel the first N axes (COUNT -> template-only)
 peel<Axes...>(x).subrange(lo, hi);               // a [lo,hi) chunk for a CPU thread / device block
                                                  //   (seed once, then O(1)/step); peel_front<N>(x) too
+for (auto [m, cell] : peel<Axes...>(x).enumerate()) ...;  // ALSO yield the peeled multi-index m
+                                                 //   (m[d] = coord of peeled axis d) for a per-axis table
+                                                 //   axtab[d][m[d]]. OPT-IN (bare cell stays lean); composes
+                                                 //   with .subrange(lo,hi). Or it.index(d) on the raw iterator.
 size_front<N>(x);                                // # cells peel_front<N> yields (no range built)
 ```
 

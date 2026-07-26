@@ -38,6 +38,7 @@ TESTS = \
 	$(BUILDDIR)/test_factory_dtype \
 	$(BUILDDIR)/test_reduce_dtype \
 	$(BUILDDIR)/test_iterate \
+	$(BUILDDIR)/test_peel_enumerate \
 	$(BUILDDIR)/test_peel_recast \
 	$(BUILDDIR)/test_peel_shape \
 	$(BUILDDIR)/test_anyrank_tail \

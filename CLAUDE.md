@@ -310,6 +310,12 @@ auto s = peel_at<0,1>(t, i);               // the i-th peeled sub-view — rando
 for (auto v : peel<0,1>(t).subrange(lo,hi)) f(v);  // a [lo,hi) chunk: seed the cursor once at lo, then
                                           //   O(1)/step. Split [0,size()) across threads/blocks — each
                                           //   sweeps its chunk incrementally (CPU threads / device blocks).
+for (auto [m, v] : peel<0,1>(t).enumerate()) g(m[0], m[1], v);  // ALSO yield the peeled multi-index m
+                                          //   (m[d] = coord of peeled axis d) — for a per-axis table
+                                          //   axtab[d][m[d]] or a write-by-coord. OPT-IN: the bare range's
+                                          //   cell stays LEAN (no coord words); enumerate composes with
+                                          //   subrange (.enumerate().subrange(lo,hi)). Or it.index(d) on the
+                                          //   raw iterator. Peeled axes vary row-major (last listed fastest).
 
 // --- nd-peel: peel the FIRST N axes (arbitrary batch rank) ---
 for (auto v : peel_front<N>(t)) f(v);      // v is (*spatial, C); N = #batch dims. Incremental (as above);
