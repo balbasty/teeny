@@ -5,13 +5,15 @@
 // data itself, so import/export are pure host-side struct work — no CUDA needed
 // (the device field just LABELS where the pointer lives).
 //
-// We VENDOR the DLPack C structs (below) rather than depend on the user's include
-// path. They sit behind DLPack's own include guard (`DLPACK_DLPACK_H_`), so if the
-// user also includes a framework's <dlpack/dlpack.h> only one copy is used — and
-// the core `DLManagedTensor` layout is ABI-stable, so a torch `DLManagedTensor*`
-// matches this one field-for-field either way. We target the classic
-// `DLManagedTensor` (what torch's `__dlpack__` emits); the newer
-// `DLManagedTensorVersioned` is a later add.
+// DLPack's C structs come from the OFFICIAL header, so teeny never ships an
+// incomplete shadow of the ABI. Precedence:
+//   1. the app already included <dlpack/dlpack.h>  -> use it (guard is set);
+//   2. a system/framework <dlpack/dlpack.h> exists -> include it;
+//   3. neither                                     -> the complete upstream copy
+//      teeny vendors under external/dlpack/ (pinned; same as CCCL).
+// Whichever wins, `DLManagedTensor` / `DLTensor` / `DLManagedTensorVersioned` and
+// the version macros are all defined field-for-field — so teeny composes with any
+// framework that imports the real header, in any include order.
 #include <cuda/std/cstdint>
 #include <cuda/std/type_traits>
 #include <teeny/defines.h>
@@ -19,34 +21,14 @@
 #include <teeny/dynamic.h>
 #include <teeny/half.h>
 
-/* ============================ vendored DLPack ============================ */
-#ifndef DLPACK_DLPACK_H_
-#define DLPACK_DLPACK_H_
-#include <stdint.h>
-#ifdef __cplusplus
-extern "C" {
+/* =========================== official DLPack ============================ */
+#if defined(DLPACK_DLPACK_H_)
+    // Already included by the application — use its definitions.
+#elif defined(__has_include) && __has_include(<dlpack/dlpack.h>)
+#   include <dlpack/dlpack.h>          // a system / framework header is available
+#else
+#   include "../../external/dlpack/dlpack/dlpack.h"   // vendored complete upstream copy
 #endif
-typedef enum {
-    kDLCPU = 1, kDLCUDA = 2, kDLCUDAHost = 3, kDLOpenCL = 4, kDLVulkan = 7,
-    kDLMetal = 8, kDLVPI = 9, kDLROCM = 10, kDLROCMHost = 11, kDLExtDev = 12,
-    kDLCUDAManaged = 13, kDLOneAPI = 14, kDLWebGPU = 15, kDLHexagon = 16,
-} DLDeviceType;
-typedef struct { DLDeviceType device_type; int32_t device_id; } DLDevice;
-typedef enum { kDLInt = 0U, kDLUInt = 1U, kDLFloat = 2U, kDLOpaqueHandle = 3U,
-               kDLBfloat = 4U, kDLComplex = 5U, kDLBool = 6U } DLDataTypeCode;
-typedef struct { uint8_t code; uint8_t bits; uint16_t lanes; } DLDataType;
-typedef struct {
-    void * data; DLDevice device; int32_t ndim; DLDataType dtype;
-    int64_t * shape; int64_t * strides; uint64_t byte_offset;
-} DLTensor;
-typedef struct DLManagedTensor {
-    DLTensor dl_tensor; void * manager_ctx;
-    void (*deleter)(struct DLManagedTensor * self);
-} DLManagedTensor;
-#ifdef __cplusplus
-}  // extern "C"
-#endif
-#endif  // DLPACK_DLPACK_H_
 
 _TNY_NAMESPACE_BEGIN(tny)
 

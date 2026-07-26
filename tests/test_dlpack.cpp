@@ -6,6 +6,13 @@
 using namespace tny;
 namespace cs = cuda::std;
 
+// #199: teeny now uses the OFFICIAL DLPack header (vendored complete, or the app's).
+// These symbols only exist in the full header — a hand-rolled subset would omit them,
+// so referencing them pins that teeny no longer ships an incomplete shadow.
+static_assert(sizeof(DLManagedTensorVersioned) > 0, "official header: versioned struct present");
+static_assert(DLPACK_MAJOR_VERSION >= 1, "official header: version macros present");
+static_assert(sizeof(DLPackVersion) > 0, "official header: DLPackVersion present");
+
 int main()
 {
     // ---- export a VIEW: metadata owned by the capsule, data borrowed ---------
