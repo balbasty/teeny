@@ -64,7 +64,9 @@ include/teeny/
                    teeny.h includes it unconditionally. TNY_NO_CUDA forces it off.
   dlpack.h         DLPack interchange (to_dlpack / from_dlpack / dispatch_dlpack /
                    dispatch_dlpack_dtype — the rank-preserving dtype dispatch).
-                   Vendors the DLManagedTensor structs (guard DLPACK_DLPACK_H_).
+                   Uses the OFFICIAL DLPack header — the app's / a system
+                   <dlpack/dlpack.h> if present, else the complete upstream copy
+                   vendored under external/dlpack/ (never a hand-rolled subset).
                    OPT-IN: include <teeny/dlpack.h> explicitly (not in teeny.h).
   teeny.h          umbrella (includes everything, cuda.h included + self-guarded)
 tests/             one file per feature; `make run-test` builds + runs all
