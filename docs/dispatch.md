@@ -149,11 +149,34 @@ composes with `dispatch_rank`/`dispatch_value` (the static `C` types once, every
 inherits it). Bare `anyshape<etc>` (empty tail) is exactly today's fully-dynamic carrier,
 byte-identical.
 
-Extents fold now; **strides stay runtime** (extents-only) — a statically-contiguous inner
-block will fold its strides in a follow-up. A static leading **Head** (dims *before* `etc`,
-`anyshape<A,B,etc,C,D>` for `(C_in, *spatial, C_out)`) is reserved for later — for now `etc`
-must come first. Keep the per-call
-`peel_front_at<shape<…>>(i)` as the escape hatch for a carrier imported without a tag.
+**Folding the inner strides too.** Pass a **layout tag** after the shape (like `recast`'s
+2nd argument) to also bake the trailing strides into the type:
+
+```cpp
+auto at = as_anyrank(data, shape, stride, ndim, anyshape<etc,-1,-1,3>{}, ccontiguous{});
+// DLPack:  auto at = from_dlpack<float, anyshape<etc,-1,-1,3>>(m, ccontiguous{});
+```
+
+- `keep_strides` (default) — strides stay runtime (`layout_stride` cell), exactly the
+  extents-only behaviour above.
+- `ccontiguous`/`fcontiguous` — the inner block's strides fold to immediates
+  (`shape<-1,-1,3>` C-order → `strides<9,3,1>` — the outer stride is static because it is
+  the product of the *static* trailing extents, even though its own extent is dynamic). A
+  fully-static contiguous tail makes the cell's mapping **empty (EBO)** — the cell loses its
+  stride words, fewer registers per thread.
+- `strides<S...>` — impose those strides.
+
+The runtime strides are **checked against the tag once, here at the boundary** (with
+`recast`'s "extent ≤ 1 ⇒ stride unobservable" exemption). This is where the tail
+**subsumes `dispatch_layout`** for the common *"the input must be C-contiguous"* precondition:
+the fold is backed by a check that actually ran, at the boundary, versus `dispatch_layout`'s
+per-call 2–3× runtime branch. Reach for `dispatch_layout` only when the layout is genuinely
+unknown per call (accept-anything); use the tag when contiguity is a precondition you can
+assert at import.
+
+A static leading **Head** (dims *before* `etc`, `anyshape<A,B,etc,C,D>` for
+`(C_in, *spatial, C_out)`) is reserved for later — for now `etc` must come first. Keep the
+per-call `peel_front_at<shape<…>>(i)` as the escape hatch for a carrier imported without a tag.
 
 The **range-for is incremental**: it advances the base pointer by the batch
 strides and reuses the loop-invariant cell mapping, so each step is O(1) rather

@@ -1,8 +1,9 @@
-// #209: anyrank carries a STATIC TRAILING shape in its type — spelled
-// `anyshape<etc, ...>` at the boundary (etc = the erased batch) — so fixed()/
-// peel_front() hand out cells whose inner extents are already folded, no per-call
-// recast. Extents only (PR1): the cell LAYOUT stays layout_stride, so an EMPTY tail
-// is byte-identical to today's dyn_tensor. Strides fold in the follow-up.
+// #209/#210: anyrank carries a STATIC TRAILING shape (and, with a layout tag, static
+// trailing STRIDES) in its type — spelled `anyshape<etc, ...>` at the boundary
+// (etc = the erased batch) — so fixed()/peel_front() hand out cells whose inner
+// extents (and strides) are already folded, no per-call recast. Back-compat: an EMPTY
+// tail / keep_strides (the default) yields exactly today's dyn_tensor / layout_stride.
+// A ccontiguous inner block folds its strides (fully-static tail -> EBO cell).
 #include <teeny/teeny.h>
 #include <teeny/dynamic.h>
 #include <cuda/std/type_traits>
@@ -104,6 +105,41 @@ int main() {
     static_assert(decltype(cp)::tail_rank == 3, "copy_meta carrier keeps the tail");
     static_assert(cs::is_trivially_copyable<decltype(cp)>::value, "copy_meta tail carrier is trivially copyable");
     if (cp.peel_front_at<-3>(1)(0,1,1) != plain.peel_front_at<-3>(1)(0,1,1)) return 7;
+
+    // ---- #210: static trailing STRIDES via a layout tag -----------------------
+    // (a) default keep_strides == #209: strides stay runtime (layout_stride cell)
+    static_assert(cs::is_same<decltype(at.fixed<4>())::layout_type, cs::layout_stride>::value,
+                  "keep_strides (default) -> layout_stride, byte-identical to #209");
+    // (b) ccontiguous -> the inner block's strides fold to immediates
+    auto cc = as_anyrank(buf, shp, strd, 4, anyshape<etc,-1,2,2>{}, ccontiguous{});
+    auto F = cc.fixed<4>();
+    static_assert(_is_strides<decltype(F)::layout_type>::value, "ccontiguous tail -> strides<...> layout");
+    static_assert(_is_ic<decltype(F.stride(Int<3>()))>::value, "inner stride folds to immediate");
+    static_assert(decltype(F.stride(Int<3>()))::value == 1, "innermost contiguous stride == 1");
+    static_assert(decltype(F.stride(Int<2>()))::value == 2, "next == C");
+    static_assert(decltype(F.stride(Int<1>()))::value == 4, "next == W*C (static, though its extent is dynamic)");
+    static_assert(!_is_ic<decltype(F.stride(Int<0>()))>::value, "the erased batch dim's stride stays runtime");
+    if (F(1,2,1,1) != buf[1*12 + 2*4 + 1*2 + 1]) return 8;              // values still correct
+
+    // (c) fully-static contiguous tail -> EBO cell (no stride words), folded in the peel range
+    auto t2c = as_anyrank(buf, shp, strd, 4, anyshape<etc,2,2>{}, ccontiguous{});
+    for (auto cell : t2c.peel_front<-2>()) {
+        static_assert(sizeof(cell) == sizeof(double *), "fully-static contiguous cell is pointer-sized (EBO mapping)");
+        static_assert(decltype(cell.stride(Int<0>()))::value == 2 &&
+                      decltype(cell.stride(Int<1>()))::value == 1, "cell strides fully fold");
+        if (cell(1,1) != buf[/*base*/0 + 1*2 + 1] && cell.data() == buf) return 9;
+    }
+
+    // (d) explicit strides<...> tag imposes those strides
+    auto es = as_anyrank(buf, shp, strd, 4, anyshape<etc,2,2>{}, strides<2,1>{});
+    static_assert(decltype(es.fixed<4>().stride(Int<3>()))::value == 1, "explicit inner stride imposed");
+
+    // (e) dispatch_layout still classifies a keep_strides (layout_stride) tail carrier's cell
+    int lay = 0;
+    dispatch_layout(at.fixed<4>(), [&](auto v){
+        if constexpr (cs::is_same<typename decltype(v)::layout_type, ccontiguous>::value) lay = 1;
+    });
+    if (!lay) return 10;
 
     return 0;
 }

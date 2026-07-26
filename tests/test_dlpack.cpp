@@ -62,6 +62,13 @@ int main()
     static_assert(decltype(at.fixed<2>())::shape_type::static_extent(1) == 4, "inner C=4 folds");
     if (at.fixed<2>()(2,3) != fbuf[2*4+3]) return 14;
 
+    // #210: a layout tag by value also folds the inner STRIDES. mm is C-contiguous,
+    // so the innermost stride folds to 1 (checked vs the payload's strides here).
+    auto atc = from_dlpack<float, anyshape<etc, 4>>(&mm, ccontiguous{});
+    static_assert(_is_strides<decltype(atc.fixed<2>())::layout_type>::value, "ccontiguous -> folded strides layout");
+    static_assert(decltype(atc.fixed<2>().stride(Int<1>()))::value == 1, "innermost stride folds to 1");
+    if (atc.fixed<2>()(2,3) != fbuf[2*4+3]) return 15;
+
     // dispatch_dlpack: pick dtype + rank from the struct
     double total = 0; int rank_seen = -1;
     bool ok = dispatch_dlpack(&mm, [&](auto view){ rank_seen = decltype(view)::rank(); total = sum(view); });

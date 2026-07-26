@@ -157,7 +157,7 @@ _TNY_HOST inline const DLTensor & as_dltensor(const DLManagedTensorVersioned & m
 // Core import (shared by every carrier): borrow the DATA, copy the shape/stride
 // METADATA into a self-contained carrier. A null `strides` (DLPack's C-contiguous
 // shorthand) expands to row-major; `byte_offset` folds into the pointer.
-template <class T, storage Space, class S = anyshape<etc>>
+template <class T, storage Space, class S = anyshape<etc>, class Layout = keep_strides>
 _TNY_HOST auto
 import_anyrank(const DLTensor & dt) {
     static_assert(_is_anyshape<S>::value, "import_anyrank: the tail tag must be an anyshape<etc,...>");
@@ -175,10 +175,11 @@ import_anyrank(const DLTensor & dt) {
     if (dt.strides) { for (int i = 0; i < n; ++i) st[i] = dt.strides[i]; }
     else { cs::int64_t s = 1; for (int i = n - 1; i >= 0; --i) { st[i] = s; s *= dt.shape[i]; } }  // C-contiguous
     // The optional static tail (spelled `anyshape<etc,...>`; default `anyshape<etc>`
-    // == today's fully-dynamic carrier) is checked against the payload's trailing
-    // shape by the tail `as_anyrank` overload, here at the import boundary, then
-    // folded into every peeled cell. The spec passes straight through.
-    return as_anyrank<TNY_MAX_RANK, Space>(data, dt.shape, st, nd, copy_meta, S{});
+    // == today's fully-dynamic carrier) and layout (default `keep_strides` == strides
+    // stay runtime; `ccontiguous`/`fcontiguous`/`strides<...>` fold them) are checked
+    // against the payload's trailing shape/strides by the tail `as_anyrank` overload,
+    // here at the import boundary, then folded into every peeled cell. Pass straight through.
+    return as_anyrank<TNY_MAX_RANK, Space>(data, dt.shape, st, nd, copy_meta, S{}, Layout{});
 }
 template <class T, cs::size_t R, storage Space>
 _TNY_HOST dyn_tensor<T, cs::int64_t, R, storage_view_of(Space)>
@@ -290,16 +291,22 @@ _TNY_HOST auto from_dlpack(const DLManagedTensorVersioned * m) { return _dl::imp
  *         debug-checked against the tag once, here at the import boundary (next to the
  *         producer), then folded into every `fixed`/`peel_front` cell — no per-call
  *         `recast`. `etc` = the erased batch (see `anyshape`); the `Space` device
- *         check is the same as the tag-less overloads. Accepts all three carriers. */
-template <class T, class S, storage Space = storage::view,
+ *         check is the same as the tag-less overloads. Accepts all three carriers.
+ *
+ *         Pass a **layout tag by value** to also fold the trailing STRIDES:
+ *         `from_dlpack<float, anyshape<etc,-1,-1,3>>(m, ccontiguous{})` bakes a
+ *         C-contiguous inner block (checked vs the payload's strides here — the "input
+ *         is contiguous" precondition, asserted at the boundary once instead of a
+ *         per-call `recast`/`dispatch_layout`). Default `keep_strides` keeps them runtime. */
+template <class T, class S, storage Space = storage::view, class Layout = keep_strides,
           cs::enable_if_t<_is_anyshape<S>::value, int> = 0>
-_TNY_HOST auto from_dlpack(const DLManagedTensor * m)          { return _dl::import_anyrank<T, Space, S>(_dl::as_dltensor(*m)); }
-template <class T, class S, storage Space = storage::view,
+_TNY_HOST auto from_dlpack(const DLManagedTensor * m, Layout = {})          { return _dl::import_anyrank<T, Space, S, Layout>(_dl::as_dltensor(*m)); }
+template <class T, class S, storage Space = storage::view, class Layout = keep_strides,
           cs::enable_if_t<_is_anyshape<S>::value, int> = 0>
-_TNY_HOST auto from_dlpack(const DLTensor * dt)               { return _dl::import_anyrank<T, Space, S>(_dl::as_dltensor(*dt)); }
-template <class T, class S, storage Space = storage::view,
+_TNY_HOST auto from_dlpack(const DLTensor * dt, Layout = {})               { return _dl::import_anyrank<T, Space, S, Layout>(_dl::as_dltensor(*dt)); }
+template <class T, class S, storage Space = storage::view, class Layout = keep_strides,
           cs::enable_if_t<_is_anyshape<S>::value, int> = 0>
-_TNY_HOST auto from_dlpack(const DLManagedTensorVersioned * m) { return _dl::import_anyrank<T, Space, S>(_dl::as_dltensor(*m)); }
+_TNY_HOST auto from_dlpack(const DLManagedTensorVersioned * m, Layout = {}) { return _dl::import_anyrank<T, Space, S, Layout>(_dl::as_dltensor(*m)); }
 
 /** @brief Import as a **fixed-rank** view (requires the payload's `ndim == R`).
  *         Returns a `layout_stride` tensor view borrowing the data. `Space` (default

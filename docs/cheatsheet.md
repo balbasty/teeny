@@ -248,6 +248,10 @@ as_anyrank(data, shape, stride, ndim, anyshape<etc,-1,-1,3>{});  // STATIC TRAIL
                                               //   peeled cells fold the inner extents (no per-call recast). Checked
                                               //   vs the runtime shape once here, then trusted. `anyshape<etc>` (bare)
                                               //   == today's carrier. Also from_dlpack<T, anyshape<etc,-1,-1,3>>(m).
+as_anyrank(data, shape, stride, ndim, anyshape<etc,-1,-1,3>{}, ccontiguous{});  // + LAYOUT tag folds the inner
+                                              //   STRIDES too (checked vs runtime strides here). Fully-static tail ->
+                                              //   EBO cell. Subsumes dispatch_layout for the "input contiguous"
+                                              //   precondition. from_dlpack passes it by value: (m, ccontiguous{}).
 at.peel_front<-Sr>();  at.peel_front_at<-Sr>(i);  // batch idiom (arg NEGATIVE: keep last Sr); 1 kernel per Sr
 at.size_front<-Sr>();                             // flattened batch count (no range built)
 dispatch_rank(at, f);                    // runtime rank -> fixed-rank view (per total rank)
