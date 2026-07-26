@@ -29,7 +29,7 @@ using namespace tny;
 // compile-time constant in their type, so every loop below unrolls.
 template <class MatA, class MatOut>
 _TNY_API void invert(const MatA & A, MatOut & out) {
-    constexpr int C = (int) decltype(A.extent(Int<0>()))::value;   // static extent -> folds
+    constexpr int C = (int) decltype(A.shape(Int<0>()))::value;   // static shape -> folds
 
     double m[C][C], inv[C][C];
     for (int i = 0; i < C; ++i)

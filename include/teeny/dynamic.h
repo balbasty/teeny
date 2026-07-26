@@ -326,8 +326,8 @@ _TNY_HOST void dispatch_index(V && v, F && f) {
 template <class T, class E, storage O, class F>
 _TNY_HOST void dispatch_layout(tensor<T, E, dynamic_strides, O> v, F && f) {
     static_assert(storage_is_view(O), "dispatch_layout: expects a view (an anyrank fixed()/peel cell)");
-    if      (v.template is_dense<ccontiguous>()) f(tensor<T, E, ccontiguous, O>(v.data(), v.extents()));  // C-order strides fold
-    else if (v.template is_dense<fcontiguous>()) f(tensor<T, E, fcontiguous, O>(v.data(), v.extents()));  // F-order strides fold
+    if      (v.template is_dense<ccontiguous>()) f(tensor<T, E, ccontiguous, O>(v.data(), v.shape()));  // C-order strides fold
+    else if (v.template is_dense<fcontiguous>()) f(tensor<T, E, fcontiguous, O>(v.data(), v.shape()));  // F-order strides fold
     else                                         f(v);                                                    // genuinely strided
 }
 /** @brief The spelling for `dispatch_rank`'s opt-in flag: `dispatch_rank<narrow_index>(at, f)`. */
