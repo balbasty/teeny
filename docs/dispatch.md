@@ -174,9 +174,27 @@ per-call 2–3× runtime branch. Reach for `dispatch_layout` only when the layou
 unknown per call (accept-anything); use the tag when contiguity is a precondition you can
 assert at import.
 
-A static leading **Head** (dims *before* `etc`, `anyshape<A,B,etc,C,D>` for
-`(C_in, *spatial, C_out)`) is reserved for later — for now `etc` must come first. Keep the
-per-call `peel_front_at<shape<…>>(i)` as the escape hatch for a carrier imported without a tag.
+### Static leading Head — `anyshape<A, B, etc, C, D>`
+
+`etc` need not come first: dims *before* it are a static **Head** (anchored at 0), dims
+*after* it the static **Tail** (anchored at `ndim`), with the erased middle between —
+`anyshape<3, etc, 5>` is `(C_in=3, *spatial, C_out=5)`.
+
+```cpp
+auto at = as_anyrank(data, shape, stride, ndim, anyshape<3, etc, 5>{});
+auto v  = at.fixed<R>();   // extent(0) == 3 AND extent(R-1) == 5 at compile time
+```
+
+The Head folds in **`fixed<R>` / `dispatch_rank`** — a full-rank window has a compile-time
+left edge, so a leading dim anchors. It does **not** fold in `peel_front<-Sr>`: that keeps a
+*trailing* window whose left edge is `ndim - Sr` (runtime), and the Head is normally peeled
+into the batch (inert there — the peel cell folds the Tail only). Head **extents** fold; head
+**strides** stay runtime (a leading dim's contiguous stride spans the dynamic middle, so it
+isn't a compile-time constant). An empty Head (`etc` first) is exactly the trailing-only
+carrier, byte-identical.
+
+Keep the per-call `peel_front_at<shape<…>>(i)` as the escape hatch for a carrier imported
+without a tag.
 
 The **range-for is incremental**: it advances the base pointer by the batch
 strides and reuses the loop-invariant cell mapping, so each step is O(1) rather

@@ -147,6 +147,17 @@ template <cs::size_t N> using rank = cs::dextents<cs::int64_t, N>;
 enum class _etc_t {};
 constexpr _etc_t etc{};
 
+// Split an `anyshape<...>` pack at its single `etc` into the leading Head (before)
+// and trailing Tail (after). Walks the heterogeneous `auto...` pack one element at a
+// time, accumulating the head into a `_vpack` until the `etc` element is matched by
+// the more-specialised second partial specialization.
+template <auto... Vs> struct _vpack {};
+template <class HeadAcc, auto... Es> struct _ashape_split;
+template <auto... Hs, auto... Rest>   // hit `etc`: head = accumulated, tail = the rest
+struct _ashape_split<_vpack<Hs...>, etc, Rest...> { using head = shape<Hs...>; using tail = shape<Rest...>; };
+template <auto... Hs, auto E0, auto... Rest>   // any other element: append to head, recurse
+struct _ashape_split<_vpack<Hs...>, E0, Rest...> : _ashape_split<_vpack<Hs..., E0>, Rest...> {};
+
 /** @brief The shape spelling for the rank-erased `anyrank` boundary: exactly one
  *  `etc` marks the dynamic-rank region, the dims AFTER it are the static **Tail**
  *  (anchored at `ndim`), the dims BEFORE it are the static **Head** (anchored at 0).
@@ -155,22 +166,25 @@ constexpr _etc_t etc{};
  *  `from_dlpack<T, anyshape<etc,-1,-1,3>>(m)` so the peeled cells fold those inner
  *  dims — `anyshape<etc,-1,-1,3>` == `(*batch, spatial, spatial, C=3)`.
  *
+ *  A static leading **Head** (dims BEFORE `etc`) is allowed too:
+ *  `anyshape<A, B, etc, C, D>` == `(A, B, *middle, C, D)` — e.g.
+ *  `anyshape<3, etc, 5>` for `(C_in=3, *spatial, C_out=5)`. The Head folds in
+ *  `fixed`/`dispatch_rank` (full-rank materialisation); `peel_front<-Sr>` stays
+ *  trailing-oriented (a leading Head is normally peeled into the batch).
+ *
  *  Unlike a plain `shape<...>` (a concrete fixed-rank `extents`), an `anyshape` is a
  *  SPEC, not a tensor type — a runtime-rank object needs the data + runtime arrays,
- *  not just a type. A `Head` (static leading dims BEFORE `etc`) is reserved for a
- *  follow-up; for now `etc` must come first (empty Head). */
-template <auto First, auto... Rest>
+ *  not just a type. */
+template <auto... Es>
 struct anyshape {
-    static_assert(cs::is_same<decltype(First), _etc_t>::value,
-        "anyshape: a static leading Head (dims before `etc`) is not supported yet — "
-        "put `etc` first: anyshape<etc, ...trailing static dims...>");
-    static_assert(((!cs::is_same<decltype(Rest), _etc_t>::value) && ...),
-        "anyshape: at most one `etc`");
-    using head = shape<>;          // reserved: static leading dims (a follow-up)
-    using tail = shape<Rest...>;   // static trailing dims (anchored at ndim)
+    static_assert((cs::size_t(0) + ... + (cs::is_same<decltype(Es), _etc_t>::value ? 1u : 0u)) == 1u,
+        "anyshape: needs exactly one `etc` (the erased dynamic-rank region)");
+    using _sp  = _ashape_split<_vpack<>, Es...>;
+    using head = typename _sp::head;   // static LEADING dims (before etc), anchored at 0
+    using tail = typename _sp::tail;   // static TRAILING dims (after etc), anchored at ndim
 };
 template <class> struct _is_anyshape : cs::false_type {};
-template <auto F, auto... R> struct _is_anyshape<anyshape<F, R...>> : cs::true_type {};
+template <auto... Es> struct _is_anyshape<anyshape<Es...>> : cs::true_type {};
 
 /** @brief Compile-time **axis selector** — a value tag carrying a list of axes,
  *  the sibling of `shape<...>` for axis arguments. It lets axis-taking ops be

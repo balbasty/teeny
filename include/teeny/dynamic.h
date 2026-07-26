@@ -103,17 +103,77 @@ struct _tail_strides_of<Tail, L, cs::index_sequence<D...>> { using type = stride
 template <class Tail, cs::size_t... D>
 struct _tail_strides_of<Tail, keep_strides, cs::index_sequence<D...>> { using type = strides<((void)D, dynamic_stride)...>; };
 
-// Debug-check the runtime shape/stride tail against the static `Tail`/`TailS` — run
+// --- both-ends geometry (#219): a static leading Head folds too, but ONLY in a
+// FULL-RANK window (`fixed<R>` / `dispatch_rank`), where the window's left edge is the
+// absolute dim 0 (compile-time). `peel_front<-Sr>` keeps a TRAILING window whose left
+// edge is runtime (`ndim - Sr`), so a leading Head can't anchor there — the peel path
+// keeps the `_cell_*`/`_tail_cell` (Tail-only) machinery above unchanged. The
+// full-rank cell folds `Head` left-aligned at `[0, H)`, `Tail` right-aligned at
+// `[R-K, R)`, dynamic middle. An empty Head reduces `_ends_*` to `_tail_*`, so a
+// no-Head `fixed<R>` type is byte-identical to #209/#210.
+template <cs::size_t R, class Head, class Tail>
+struct _ends_ext {
+    static constexpr cs::size_t H = Head::rank(), K = Tail::rank();
+    static constexpr cs::size_t at(cs::size_t j) noexcept {
+        if (j < H)      return Head::static_extent(j);
+        if (j + K >= R) return Tail::static_extent(j - (R - K));     // j >= R-K (H<=R-K, no overlap)
+        return cs::dynamic_extent;
+    }
+};
+template <class offset_t, cs::size_t R, class Head, class Tail, class Seq = cs::make_index_sequence<R>>
+struct _ends_cell_ext;
+template <class offset_t, cs::size_t R, class Head, class Tail, cs::size_t... J>
+struct _ends_cell_ext<offset_t, R, Head, Tail, cs::index_sequence<J...>> {
+    using type = cs::extents<offset_t, _ends_ext<R, Head, Tail>::at(J)...>;
+};
+template <cs::size_t R, class HeadS, class TailS>
+struct _ends_str {
+    static constexpr cs::size_t H = HeadS::N, K = TailS::N;
+    static constexpr cs::int64_t at(cs::size_t j) noexcept {
+        if (j < H)      return HeadS::S_[j];
+        if (j + K >= R) return TailS::S_[j - (R - K)];
+        return dynamic_stride;
+    }
+    static constexpr bool all_dyn() noexcept {
+        for (cs::size_t j = 0; j < R; ++j) if (at(j) != dynamic_stride) return false;
+        return true;
+    }
+};
+template <cs::size_t R, class HeadS, class TailS, bool AllDyn = _ends_str<R, HeadS, TailS>::all_dyn(),
+          class Seq = cs::make_index_sequence<R>>
+struct _ends_layout;
+template <cs::size_t R, class HeadS, class TailS, cs::size_t... J>
+struct _ends_layout<R, HeadS, TailS, /*AllDyn=*/true, cs::index_sequence<J...>> { using type = cs::layout_stride; };
+template <cs::size_t R, class HeadS, class TailS, cs::size_t... J>
+struct _ends_layout<R, HeadS, TailS, /*AllDyn=*/false, cs::index_sequence<J...>> {
+    using type = strides<_ends_str<R, HeadS, TailS>::at(J)...>;
+};
+template <class T, class offset_t, cs::size_t R, class Head, class HeadS, class Tail, class TailS, storage O>
+using _ends_cell = tensor<T, typename _ends_cell_ext<offset_t, R, Head, Tail>::type,
+                          typename _ends_layout<R, HeadS, TailS>::type, O>;
+
+// Debug-check the runtime shape/stride ends against the static `Head`/`HeadS`
+// (leading, dims `[0,H)`) and `Tail`/`TailS` (trailing, dims `[ndim-K, ndim)`) — run
 // ONCE at the boundary (`as_anyrank`/`from_dlpack`), then trusted (same contract class
 // as `recast`, hoisted host-side to the import). Reads the ORIGINAL arrays (so it
 // validates even when a copy-meta store is clamped to TNY_MAX_RANK). A static stride
 // whose dim has runtime extent <= 1 is unobservable, so it is exempt (recast's rule).
-// `const` args accept DLPack's `const int64_t *`.
-template <class Tail, class TailS, class Idx>
-_TNY_HOST void _check_tail(const Idx * shp, const Idx * strd, int ndim) {
-    constexpr cs::size_t K = Tail::rank();
-    _TNY_CHECK(ndim >= static_cast<int>(K), "as_anyrank/from_dlpack: ndim < the static tail rank");
-    for (cs::size_t j = 0; j < K; ++j) {
+// `const` args accept DLPack's `const int64_t *`. Empty Head == the #209/#210 tail check.
+template <class Head, class HeadS, class Tail, class TailS, class Idx>
+_TNY_HOST void _check_ends(const Idx * shp, const Idx * strd, int ndim) {
+    constexpr cs::size_t H = Head::rank(), K = Tail::rank();
+    _TNY_CHECK(ndim >= static_cast<int>(H + K),
+               "as_anyrank/from_dlpack: ndim < the static Head+Tail rank");
+    for (cs::size_t j = 0; j < H; ++j) {                       // leading Head, anchored at 0
+        const int d = static_cast<int>(j);
+        _TNY_CHECK(Head::static_extent(j) == cs::dynamic_extent ||
+                   static_cast<Idx>(Head::static_extent(j)) == shp[d],
+                   "as_anyrank/from_dlpack: a static Head extent does not match the runtime shape");
+        _TNY_CHECK(HeadS::S_[j] == dynamic_stride || shp[d] <= Idx(1) ||
+                   static_cast<Idx>(HeadS::S_[j]) == strd[d],
+                   "as_anyrank/from_dlpack: a static Head stride does not match the runtime strides");
+    }
+    for (cs::size_t j = 0; j < K; ++j) {                       // trailing Tail, anchored at ndim
         const int d = ndim - static_cast<int>(K) + static_cast<int>(j);
         _TNY_CHECK(Tail::static_extent(j) == cs::dynamic_extent ||
                    static_cast<Idx>(Tail::static_extent(j)) == shp[d],
@@ -176,26 +236,34 @@ constexpr copy_meta_t copy_meta{};
  */
 template <class T, class offset_t = cs::int64_t, class Meta = _meta_store<offset_t, TNY_MAX_RANK>,
           storage Space = storage::view, class Tail = shape<>,
-          class TailS = _runtime_strides_t<Tail::rank()>>
+          class TailS = _runtime_strides_t<Tail::rank()>,
+          class Head = shape<>, class HeadS = _runtime_strides_t<Head::rank()>>
 struct anyrank {
     T *  data = nullptr;
     Meta shape{};      // 1-D tensor of sizes   (inline, or a view of external memory)
     Meta stride{};     // 1-D tensor of strides
     int  ndim = 0;
 
-    // The static TRAILING geometry: `Tail` (a `shape<...>`) is the static trailing
-    // EXTENTS, `TailS` (a `strides<...>`) the static trailing STRIDES — both empty /
-    // all-dynamic by default == today's fully-dynamic carrier. They fold into every
-    // cell `fixed`/`peel_front` hands out — recovering the static inner block
-    // (`(*batch, *spatial, C)` with a static `C`, and a contiguous inner layout)
-    // WITHOUT a per-call `recast`. Set at the boundary via the trailing tag (+ optional
+    // The static geometry: `Tail`/`TailS` are the static TRAILING extents/strides
+    // (anchored at `ndim`), `Head`/`HeadS` the static LEADING ones (anchored at 0) —
+    // all empty / all-dynamic by default == today's fully-dynamic carrier. `Tail`
+    // folds into EVERY cell `fixed`/`peel_front` hands out; `Head` folds ONLY in
+    // `fixed`/`dispatch_rank` (a full-rank window), since `peel_front` peels the
+    // leading dims into the batch (the Head is normally there). So `(*batch,*spatial,C)`
+    // needs only `Tail`, while `(C_in,*spatial,C_out)` uses both — recovered WITHOUT a
+    // per-call `recast`. Set at the boundary via the `anyshape<...>` tag (+ optional
     // layout) on `as_anyrank`/`from_dlpack`, which debug-checks them against the runtime
     // shape/strides ONCE, then trusts them (same contract class as `recast`). Pure type
     // info: the members above are unchanged, so size/layout/trivial-copyability hold.
     using tail_type        = Tail;
     using tail_stride_type = TailS;
+    using head_type        = Head;
+    using head_stride_type = HeadS;
     static constexpr cs::size_t tail_rank = Tail::rank();
+    static constexpr cs::size_t head_rank = Head::rank();
+    static constexpr cs::size_t ends_rank = head_rank + tail_rank;   // where dispatch_rank starts
     static_assert(TailS::N == Tail::rank(), "anyrank: TailS must have one stride per Tail dim");
+    static_assert(HeadS::N == Head::rank(), "anyrank: HeadS must have one stride per Head dim");
 
     // The MEMORY SPACE the `data` pointer lives in (a compile-time tag, set at the
     // boundary — `from_dlpack` from the DLPack `device`, `as_anyrank<Space>` by
@@ -229,44 +297,52 @@ struct anyrank {
     _TNY_API offset_t size(int i)  const noexcept { return shape(i); }   // size of dim i
     _TNY_API offset_t step(int i)  const noexcept { return stride(i); }  // stride of dim i
 
-    // internal: build a kept-`Sr` cell at pointer `p`, reading the shape/strides of
-    // the `Sr` dims starting at `d0`. The static `Tail`/`TailS` fold into the cell's
-    // extents/layout; a folded (`strides<...>`) layout only reads the DYNAMIC strides
-    // from the runtime array (an all-static/contiguous tail reads none — EBO mapping),
-    // while an all-dynamic tail keeps the `cs::layout_stride` path (== #209 / today).
-    template <cs::size_t Sr>
-    _TNY_API _tail_cell<T, offset_t, Sr, Tail, TailS, view_space> _cell_at(T * p, int d0) const {
-        using E    = typename _cell_ext<offset_t, Sr, Tail>::type;
-        using CL   = typename _cell_layout<Sr, TailS>::type;
-        using Cell = _tail_cell<T, offset_t, Sr, Tail, TailS, view_space>;
-        cs::array<offset_t, Sr> ext{};
-        for (cs::size_t i = 0; i < Sr; ++i) ext[i] = shape(d0 + static_cast<int>(i));
+    // internal: build a cell of extents `E` / layout `CL` at pointer `p`, reading the
+    // shape/strides of dims `[d0, d0+E::rank())`. A folded (`strides<...>`) layout only
+    // reads the DYNAMIC strides from the runtime array (an all-static/contiguous block
+    // reads none — EBO mapping); an all-dynamic layout keeps the `cs::layout_stride`
+    // path (== #209 / today). Shared by the peel (Tail-only) and fixed (both-ends) cells.
+    template <class E, class CL>
+    _TNY_API tensor<T, E, CL, view_space> _build_cell(T * p, int d0) const {
+        constexpr cs::size_t R = E::rank();
+        using Cell = tensor<T, E, CL, view_space>;
+        cs::array<offset_t, R> ext{};
+        for (cs::size_t i = 0; i < R; ++i) ext[i] = shape(d0 + static_cast<int>(i));
         if constexpr (cs::is_same<CL, cs::layout_stride>::value) {
-            cs::array<offset_t, Sr> st{};
-            for (cs::size_t i = 0; i < Sr; ++i) st[i] = stride(d0 + static_cast<int>(i));
+            cs::array<offset_t, R> st{};
+            for (cs::size_t i = 0; i < R; ++i) st[i] = stride(d0 + static_cast<int>(i));
             return Cell(p, cs::layout_stride::mapping<E>(E(ext), st));
         } else if constexpr (CL::ndyn() == 0) {
             return Cell(p, typename CL::template mapping<E>(E(ext)));   // fully-static strides: EBO
         } else {
             cs::array<offset_t, CL::ndyn() ? CL::ndyn() : 1> dyn{};     // dynamic slots only, dim order
-            for (cs::size_t i = 0, s = 0; i < Sr; ++i)
+            for (cs::size_t i = 0, s = 0; i < R; ++i)
                 if (CL::S_[i] == dynamic_stride) dyn[s++] = stride(d0 + static_cast<int>(i));
             return Cell(p, typename CL::template mapping<E>(E(ext), dyn));
         }
     }
+    // the kept-`Sr` peel cell (Tail-only, right-aligned; Head is inert here — see below)
+    template <cs::size_t Sr>
+    _TNY_API _tail_cell<T, offset_t, Sr, Tail, TailS, view_space> _cell_at(T * p, int d0) const {
+        return _build_cell<typename _cell_ext<offset_t, Sr, Tail>::type,
+                           typename _cell_layout<Sr, TailS>::type>(p, d0);
+    }
 
-    /** @brief View this tensor as a fixed rank `R` (requires `ndim == R`). The static
-     *         `Tail`/`TailS` fold into the last `tail_rank` dims of the result. */
+    /** @brief View this tensor as a fixed rank `R` (requires `ndim == R`). BOTH the
+     *         static `Head` (first `head_rank` dims) and `Tail` (last `tail_rank`) fold —
+     *         the full-rank window has a compile-time left edge, so the Head anchors. */
     template <cs::size_t R>
-    _TNY_API _tail_cell<T, offset_t, R, Tail, TailS, view_space> fixed() const {
-        static_assert(R >= tail_rank, "fixed<R>(): R must be >= the static tail rank");
+    _TNY_API _ends_cell<T, offset_t, R, Head, HeadS, Tail, TailS, view_space> fixed() const {
+        static_assert(R >= ends_rank, "fixed<R>(): R must be >= the static Head+Tail rank");
         _TNY_CHECK(static_cast<cs::size_t>(ndim) == R, "fixed<R>(): R must equal ndim (else reads past the shape/stride arrays)");
-        return _cell_at<R>(data, 0);
+        return _build_cell<typename _ends_cell_ext<offset_t, R, Head, Tail>::type,
+                           typename _ends_layout<R, HeadS, TailS>::type>(data, 0);
     }
 
     // internal: the lin-th sub-view keeping the last `Sr` axes static (peeling
-    // the leading `ndim - Sr` runtime batch axes into the pointer offset). The
-    // static `Tail`/`TailS` fold into the kept window (right-aligned).
+    // the leading `ndim - Sr` runtime batch axes into the pointer offset). Only the
+    // static `Tail`/`TailS` fold (right-aligned) — the kept window's left edge is
+    // runtime, so a leading `Head` can't anchor and is simply peeled into the batch.
     template <cs::size_t Sr>
     _TNY_API _tail_cell<T, offset_t, Sr, Tail, TailS, view_space> _keep_last(offset_t lin) const {
         const int nb = ndim - static_cast<int>(Sr);          // # batch dims (runtime)
@@ -321,7 +397,9 @@ struct anyrank {
     template <long N>
     _TNY_API anyrank_front<T, offset_t, Meta, Space, Tail, TailS, static_cast<cs::size_t>(N < 0 ? -N : 0)> peel_front() const {
         static_assert(N < 0, "anyrank::peel_front needs a NEGATIVE index (keep the last |N| dims)");
-        return { *this };
+        // peel folds Tail only (the leading Head is peeled into the batch), so hand the
+        // range a HEAD-LESS carrier — same members, so the peel cell type is unchanged.
+        return { anyrank<T, offset_t, Meta, Space, Tail, TailS>{ data, shape, stride, ndim } };
     }
 
     /** @brief The number of cells `peel_front<N>()` would yield — the product of
@@ -471,12 +549,16 @@ _TNY_HOST auto as_anyrank(T * data, offset_t * shape, offset_t * stride, int ndi
         "(or to build a device-passable carrier) pass the `copy_meta` tag");
     using TailR  = _reindex_extents_t<offset_t, typename S::tail>;
     using TailSt = typename _tail_strides_of<TailR, Layout>::type;
-    anyrank<T, offset_t, _meta_view<offset_t>, Space, TailR, TailSt> t;
+    using HeadR  = _reindex_extents_t<offset_t, typename S::head>;
+    // Head EXTENTS fold; head STRIDES stay runtime — a leading dim's contiguous stride
+    // spans the (dynamic-rank) middle, so it isn't a compile-time constant in general.
+    using HeadSt = _runtime_strides_t<HeadR::rank()>;
+    anyrank<T, offset_t, _meta_view<offset_t>, Space, TailR, TailSt, HeadR, HeadSt> t;
     t.data = data; t.ndim = ndim;
     cs::dextents<offset_t, 1> e{ static_cast<offset_t>(ndim) };
     t.shape  = _meta_view<offset_t>(shape,  e);
     t.stride = _meta_view<offset_t>(stride, e);
-    _check_tail<TailR, TailSt>(shape, stride, ndim);
+    _check_ends<HeadR, HeadSt, TailR, TailSt>(shape, stride, ndim);
     return t;
 }
 
@@ -487,12 +569,14 @@ template <cs::size_t MaxRank = TNY_MAX_RANK, storage Space = storage::view, clas
 _TNY_HOST auto as_anyrank(T * data, const offset_t * shape, const offset_t * stride, int ndim, copy_meta_t, S, Layout = {}) {
     using TailR  = _reindex_extents_t<offset_t, typename S::tail>;
     using TailSt = typename _tail_strides_of<TailR, Layout>::type;
-    anyrank<T, offset_t, _meta_store<offset_t, MaxRank>, Space, TailR, TailSt> t;
+    using HeadR  = _reindex_extents_t<offset_t, typename S::head>;
+    using HeadSt = _runtime_strides_t<HeadR::rank()>;   // head strides stay runtime (span the dynamic middle)
+    anyrank<T, offset_t, _meta_store<offset_t, MaxRank>, Space, TailR, TailSt, HeadR, HeadSt> t;
     t.data = data; t.ndim = ndim;
     _TNY_CHECK(ndim <= static_cast<int>(MaxRank), "as_anyrank(copy_meta): ndim exceeds MaxRank (raise -DTNY_MAX_RANK)");
     const int n = ndim < static_cast<int>(MaxRank) ? ndim : static_cast<int>(MaxRank);
     for (int i = 0; i < n; ++i) { t.shape(i) = shape[i]; t.stride(i) = stride[i]; }
-    _check_tail<TailR, TailSt>(shape, stride, ndim);
+    _check_ends<HeadR, HeadSt, TailR, TailSt>(shape, stride, ndim);
     return t;
 }
 
@@ -548,9 +632,10 @@ _TNY_HOST void dispatch_layout(tensor<T, E, dynamic_strides, O> v, F && f) {
 inline constexpr bool narrow_index = true;
 
 namespace _detail {
-template <cs::size_t R, bool Narrow, class T, class offset_t, class Meta, storage Space, class Tail, class TailS, class F>
-_TNY_HOST bool dispatch_from(const anyrank<T, offset_t, Meta, Space, Tail, TailS> & t, F & f) {
-    if constexpr (R <= anyrank<T, offset_t, Meta, Space, Tail, TailS>::max_rank) {
+template <cs::size_t R, bool Narrow, class T, class offset_t, class Meta, storage Space,
+          class Tail, class TailS, class Head, class HeadS, class F>
+_TNY_HOST bool dispatch_from(const anyrank<T, offset_t, Meta, Space, Tail, TailS, Head, HeadS> & t, F & f) {
+    if constexpr (R <= anyrank<T, offset_t, Meta, Space, Tail, TailS, Head, HeadS>::max_rank) {
         if (t.ndim == static_cast<int>(R)) {
             if constexpr (Narrow) dispatch_index(t.template fixed<R>(), f);   // width innermost
             else                  f(t.template fixed<R>());
@@ -580,13 +665,15 @@ _TNY_HOST bool dispatch_from(const anyrank<T, offset_t, Meta, Space, Tail, TailS
  *
  *     dispatch_rank<narrow_index>(at, [&](auto v){ kernel(v); });   // int32 cells when they fit
  */
-template <bool Narrow = false, class T, class offset_t, class Meta, storage Space, class Tail, class TailS, class F>
-_TNY_HOST bool dispatch_rank(const anyrank<T, offset_t, Meta, Space, Tail, TailS> & t, F && f) {
-    // Start the recursion at `tail_rank`: a rank below the static tail can never
-    // equal `ndim` (the boundary check guaranteed `ndim >= tail_rank`), and
-    // `fixed<R < tail_rank>()` is a hard static_assert. For an empty tail this is 0
-    // (unchanged — R=0 still handles a rank-0 scalar ndarray).
-    return _detail::dispatch_from<anyrank<T, offset_t, Meta, Space, Tail, TailS>::tail_rank, Narrow>(t, f);
+template <bool Narrow = false, class T, class offset_t, class Meta, storage Space,
+          class Tail, class TailS, class Head, class HeadS, class F>
+_TNY_HOST bool dispatch_rank(const anyrank<T, offset_t, Meta, Space, Tail, TailS, Head, HeadS> & t, F && f) {
+    // Start the recursion at `ends_rank` (= head_rank + tail_rank): a rank below the
+    // static Head+Tail can never equal `ndim` (the boundary check guaranteed
+    // `ndim >= ends_rank`), and `fixed<R < ends_rank>()` is a hard static_assert. For an
+    // empty Head/Tail this is 0 (unchanged — R=0 still handles a rank-0 scalar ndarray).
+    using AR = anyrank<T, offset_t, Meta, Space, Tail, TailS, Head, HeadS>;
+    return _detail::dispatch_from<AR::ends_rank, Narrow>(t, f);
 }
 
 /**

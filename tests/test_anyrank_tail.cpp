@@ -141,5 +141,56 @@ int main() {
     });
     if (!lay) return 10;
 
+    // ---- #219: static LEADING Head — anyshape<A, etc, B> folds BOTH ends in fixed ----
+    // (C_in=3, *spatial=4, C_out=5): shape (3,4,5), strides (20,5,1), C-contiguous
+    double hbuf[3*4*5]; for (int i = 0; i < 60; ++i) hbuf[i] = i;
+    long hshp[3] = {3,4,5}, hstrd[3] = {20,5,1};
+
+    static_assert(cs::is_same<anyshape<3,etc,5>::head, shape<3>>::value &&
+                  cs::is_same<anyshape<3,etc,5>::tail, shape<5>>::value, "anyshape splits head/tail at etc");
+
+    auto hc = as_anyrank(hbuf, hshp, hstrd, 3, anyshape<3, etc, 5>{});
+    static_assert(decltype(hc)::head_rank == 1 && decltype(hc)::tail_rank == 1 && decltype(hc)::ends_rank == 2,
+                  "head+tail ranks");
+    auto HF = hc.fixed<3>();
+    static_assert(decltype(HF)::shape_type::static_extent(0) == 3, "head extent folds");
+    static_assert(decltype(HF)::shape_type::static_extent(1) == cs::dynamic_extent, "middle stays dynamic");
+    static_assert(decltype(HF)::shape_type::static_extent(2) == 5, "tail extent folds");
+    if (HF(1,2,3) != hbuf[1*20 + 2*5 + 3]) return 11;
+
+    // ccontiguous: tail stride folds (1); head stride stays runtime (spans the dynamic middle)
+    auto hcc = as_anyrank(hbuf, hshp, hstrd, 3, anyshape<3, etc, 5>{}, ccontiguous{});
+    auto HG = hcc.fixed<3>();
+    static_assert(decltype(HG.stride(Int<2>()))::value == 1, "tail stride folds to 1");
+    static_assert(!_is_ic<decltype(HG.stride(Int<0>()))>::value, "head stride stays runtime (spans dynamic middle)");
+    if (HG(2,3,4) != hbuf[2*20 + 3*5 + 4]) return 12;
+
+    // peel_front works on a head carrier: head is peeled into the batch, only the tail folds
+    long hn = 0;
+    for (auto cell : hc.peel_front<-1>()) {
+        static_assert(decltype(cell)::shape_type::static_extent(0) == 5, "peel folds tail; head is inert");
+        (void)cell; ++hn;
+    }
+    if (hn != 12) return 13;                              // 3*4 batch cells (incl the head)
+
+    // dispatch_rank folds BOTH ends
+    int hhit = 0;
+    dispatch_rank(hc, [&](auto v){
+        if constexpr (decltype(v)::rank() == 3) {
+            static_assert(decltype(v)::shape_type::static_extent(0) == 3 &&
+                          decltype(v)::shape_type::static_extent(2) == 5, "dispatched cell folds both ends");
+            hhit = 1;
+        }
+    });
+    if (!hhit) return 14;
+
+    // leading-only anyshape<3,etc> and back-compat: an empty-head trailing carrier is
+    // byte-identical to the #209/#210 type (no Head params leak into the cell type)
+    auto lo = as_anyrank(hbuf, hshp, hstrd, 3, anyshape<3, etc>{});
+    static_assert(decltype(lo)::head_rank == 1 && decltype(lo)::tail_rank == 0, "leading-only");
+    static_assert(decltype(lo.fixed<3>())::shape_type::static_extent(0) == 3, "head folds, no tail");
+    static_assert(cs::is_same<decltype(as_anyrank(buf, shp, strd, 4, anyshape<etc,2,2>{}).fixed<4>()),
+                              decltype(t2.fixed<4>())>::value, "empty-Head trailing type unchanged vs #209/#210");
+
     return 0;
 }
