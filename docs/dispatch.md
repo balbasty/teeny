@@ -100,6 +100,23 @@ Each `cell` is a `dextents<_,Sr>` view (inner extents dynamic). Follow with
 [`recast(shape<-1,c,c>{})`](structure.md#recover-static-inner-dims) to fold known
 inner dims.
 
+The **range-for is incremental**: it advances the base pointer by the batch
+strides and reuses the loop-invariant cell mapping, so each step is O(1) rather
+than an O(#batch) index decode. Two ways to parallelize:
+
+```cpp
+// device grid-stride: random access, each thread strides by nthreads
+for (offset_t i = tid; i < at.size_front<-Sr>(); i += nthreads)
+    kernel<Sr>(at.peel_front_at<-Sr>(i));
+
+// CPU thread / device BLOCK owning a contiguous chunk: incremental sweep of [lo,hi)
+for (auto cell : at.peel_front<-Sr>().subrange(lo, hi)) kernel<Sr>(cell);
+```
+
+Use `peel_front_at` (random access) for grid-stride — the odometer can't express a
+`+= nthreads` stride. Use `subrange(lo, hi)` when a worker owns a contiguous block
+of cells: it seeds the cursor once at `lo`, then advances incrementally.
+
 ### `dispatch_rank` / `fixed<R>` — general (per total rank)
 
 When the whole rank must be static, dispatch on the runtime `ndim`. `f` is

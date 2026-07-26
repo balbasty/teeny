@@ -105,5 +105,35 @@ int main()
     static_assert(decltype(dev.peel_front_at<-2>(0))::ownership == storage::gpu_view, "device peel -> gpu_view");
     if (dev.size_front<-2>() != 2) return 17;                      // batch count (host metadata)
 
+    // ---- #110: incremental peel_front range-for over MULTIPLE batch dims must visit
+    //      exactly the same cells (same base pointer, same order) as random-access
+    //      peel_front_at, and subrange(lo,hi) must tile the batch for threaded chunks.
+    long shp4[4]  = {3, 4, 2, 3};                                  // (*batch=3x4, spatial=2x3)
+    long strd4[4] = {4*2*3, 2*3, 3, 1};                            // C-contiguous
+    long n4 = 3*4*2*3; double* b4 = new double[n4];
+    for (long i = 0; i < n4; ++i) b4[i] = i;
+    auto a4 = as_anyrank(b4, shp4, strd4, 4);
+    long idx = 0;
+    for (auto cell : a4.peel_front<-2>()) {                        // 12 batch cells, each (2,3)
+        auto ref = a4.peel_front_at<-2>(idx);                      // random-access decode
+        if (cell.data() != ref.data()) { delete[] b4; return 18; }  // odometer == decode
+        if (cell(1,2) != ref(1,2)) { delete[] b4; return 19; }
+        ++idx;
+    }
+    if (idx != a4.size_front<-2>()) { delete[] b4; return 20; }
+
+    // subrange: two disjoint chunks exactly tile [0, nbatch) (the threading split)
+    long tot = 0, half = a4.size_front<-2>() / 2;
+    for (auto c : a4.peel_front<-2>().subrange(0, half)) {
+        if (c.data() != a4.peel_front_at<-2>(tot).data()) { delete[] b4; return 21; }
+        ++tot;
+    }
+    for (auto c : a4.peel_front<-2>().subrange(half, a4.size_front<-2>())) {
+        if (c.data() != a4.peel_front_at<-2>(tot).data()) { delete[] b4; return 22; }
+        ++tot;
+    }
+    if (tot != a4.size_front<-2>()) { delete[] b4; return 23; }
+    delete[] b4;
+
     return 0;
 }

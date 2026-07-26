@@ -173,18 +173,67 @@ struct anyrank {
 template <class T, class offset_t, class Meta, storage Space, cs::size_t Sr>
 struct anyrank_front {
     anyrank<T, offset_t, Meta, Space> src;
+    using Cell = dyn_tensor<T, offset_t, Sr, storage_view_of(Space)>;
+    static constexpr cs::size_t MaxNb = anyrank<T, offset_t, Meta, Space>::max_rank;
 
     _TNY_API offset_t size() const noexcept { return src.template size_front<-static_cast<long>(Sr)>(); }
+    // Random access (grid-stride `i += nthreads`): decode the batch index from scratch.
     _TNY_API auto operator[](offset_t i) const { return src.template _keep_last<Sr>(i); }
 
+    // Every cell keeps the SAME trailing-Sr extents/strides (only the base offset
+    // moves), so the iterator carries one template cell (invariant mapping) and an
+    // INCREMENTAL odometer over the runtime batch axes (#110) — one stride-add per
+    // step instead of an O(#batch) decode. Seedable at any index (single decode) so a
+    // thread/block can start mid-range; a grid-stride loop keeps `operator[]`.
     struct iterator {
-        anyrank_front r; offset_t i;   // by value (POD carrier) -> no dangle on a temporary range
-        _TNY_API auto operator*() const { return r[i]; }
-        _TNY_API iterator & operator++() { ++i; return *this; }
-        _TNY_API bool operator!=(const iterator & o) const { return i != o.i; }
+        Cell     tmpl;                        // cell at offset 0 -> invariant mapping
+        T *      base;                        // tmpl.data() (== src.data)
+        offset_t ctr[MaxNb ? MaxNb : 1];      // odometer over batch axes 0..nb-1
+        offset_t ext[MaxNb ? MaxNb : 1];      // batch extents
+        offset_t str[MaxNb ? MaxNb : 1];      // batch strides
+        int      nb;                          // # batch axes = ndim - Sr (runtime)
+        offset_t off, lin;
+        _TNY_API Cell operator*() const { return Cell(base + off, tmpl.mapping()); }
+        _TNY_API iterator & operator++() {
+            ++lin;
+            for (int d = nb - 1; d >= 0; --d) {
+                if (ctr[d] + 1 < ext[d]) { ++ctr[d]; off += str[d]; return *this; }
+                off -= ctr[d] * str[d]; ctr[d] = 0;   // wrap axis d, carry up
+            }
+            return *this;
+        }
+        _TNY_API bool operator!=(const iterator & o) const { return lin != o.lin; }
+        _TNY_API bool operator==(const iterator & o) const { return lin == o.lin; }
     };
-    _TNY_API iterator begin() const { return { *this, 0 }; }
-    _TNY_API iterator end()   const { return { *this, size() }; }
+    _TNY_API iterator _iter_at(offset_t i) const {
+        iterator it{};
+        it.tmpl = src.template _keep_last<Sr>(0);      // template at offset 0
+        it.base = it.tmpl.data();
+        it.nb   = src.ndim - static_cast<int>(Sr);
+        for (int d = 0; d < it.nb; ++d) { it.ext[d] = src.size(d); it.str[d] = src.step(d); }
+        it.lin = i; it.off = 0; offset_t rem = i;      // seed the odometer at i (one decode)
+        for (int d = it.nb - 1; d >= 0; --d) {
+            const offset_t e = it.ext[d]; const offset_t k = e ? rem % e : offset_t(0); rem = e ? rem / e : rem;
+            it.ctr[d] = k; it.off += k * it.str[d];
+        }
+        return it;
+    }
+    _TNY_API iterator begin() const { return _iter_at(0); }
+    _TNY_API iterator end()   const { iterator it = _iter_at(0); it.lin = size(); return it; }
+
+    /** @brief A `[lo, hi)` slice of the batch cells for chunked/threaded sweeps: seed
+     *         the incremental cursor once at `lo`, then O(1) per step. Split
+     *         `[0, size())` across threads/blocks; each sweeps its own chunk. */
+    struct subrange_t {
+        iterator b, e;
+        _TNY_API iterator begin() const { return b; }
+        _TNY_API iterator end()   const { return e; }
+    };
+    _TNY_API subrange_t subrange(offset_t lo, offset_t hi) const {
+        iterator b = _iter_at(lo);
+        iterator e = b; e.lin = hi;   // end sentinel: only `lin` is compared
+        return { b, e };
+    }
 };
 
 /** @brief Build an `anyrank` that **wraps** the caller's shape/stride arrays with

@@ -266,10 +266,11 @@ free **`to<Space>(t)`** (`cuda.h`) above, which is device-aware.
 
 | Call | Returns | Notes |
 |---|---|---|
-| `peel<Axes...>(t)` | a range of views | iterate the named axes; each item is a lower-rank view |
-| `peel_at<Axes...>(t, i)` | → view | the `i`-th sub-view (grid-stride style) |
-| `peel_front<N>(t)` | a range of views | `N≥0`: peel the first `N` axes; `N<0`: keep the last `|N|` |
-| `peel_front_at<N>(t, i)` | → view | the `i`-th (grid-stride style) |
+| `peel<Axes...>(t)` | a range of views | iterate the named axes; each item is a lower-rank view. The **range-for is incremental** — it advances the base pointer and reuses the loop-invariant cell mapping (O(1) per step), not an O(#peeled-axes) decode per cell |
+| `peel<Axes...>(t).subrange(lo,hi)` | a `[lo,hi)` sub-range | seed the incremental cursor once at `lo`, then O(1)/step — split `[0,size())` across **CPU threads / device blocks**, each sweeping its own contiguous chunk |
+| `peel_at<Axes...>(t, i)` | → view | the `i`-th sub-view — **random access**, decoded from scratch; this is what a device **grid-stride** loop (`i += nthreads`) needs |
+| `peel_front<N>(t)` | a range of views | `N≥0`: peel the first `N` axes; `N<0`: keep the last `|N|`. Same incremental range-for + `subrange(lo,hi)` |
+| `peel_front_at<N>(t, i)` | → view | the `i`-th (random access / grid-stride) |
 | `size_front<N>(t)` | → index | # cells `peel_front<N>` yields (product of the peeled extents), no range built |
 
 **Input → output type — peel cell.** Each yielded cell is a **view**
