@@ -439,7 +439,11 @@ template <class Op, class A, class B,
           cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() == 0, int> = 0>
 _TNY_API auto oop(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
-    tensor<promote_t<typename A::element_type, typename B::element_type>, RE, ccontiguous, storage::stack> c{};
+    // `_uninit` (not `{}`): the `w_set` engine below fully overwrites `c`, so a
+    // zero-fill here is a dead store (a `memset` per call for a static result that
+    // survives DSE — #212). Every out-of-place result on this page is uninitialised
+    // for the same reason (bzip/scalo/bcmp/scmp/unaryo all full-write, Restrict=true).
+    tensor<promote_t<typename A::element_type, typename B::element_type>, RE, ccontiguous, storage::stack> c(_uninit);
     bzip<w_set, true>(c, a, b, op); return c;   // fresh dest -> restrict + linear fast path
 }
 template <class Op, class A, class B,
@@ -454,7 +458,7 @@ _TNY_HOST auto oop(const A & a, const B & b, Op op) {
 /* ---- out-of-place tensor (op) scalar ----------------------------- */
 template <class Op, class A, class S, cs::enable_if_t<A::is_static, int> = 0>
 _TNY_API auto oops(const A & a, S s, Op op) {
-    tensor<promote_t<typename A::element_type, S>, typename A::extents_type, ccontiguous, storage::stack> c{};
+    tensor<promote_t<typename A::element_type, S>, typename A::extents_type, ccontiguous, storage::stack> c(_uninit);
     scalo<true>(c, a, s, op); return c;   // fresh dest -> restrict + linear fast path
 }
 template <class Op, class A, class S, cs::enable_if_t<!A::is_static, int> = 0>
@@ -483,7 +487,7 @@ template <class Op, class A, class B,
 _TNY_API auto oop_cmp(const A & a, const B & b, Op op) {
     using RE = bcast_extents<typename A::extents_type, typename B::extents_type>;
     using Rc = compute_type_t<promote_t<typename A::element_type, typename B::element_type>>;
-    tensor<bool, RE, ccontiguous, storage::stack> c{}; bcmp<Rc, true>(c, a, b, op); return c;
+    tensor<bool, RE, ccontiguous, storage::stack> c(_uninit); bcmp<Rc, true>(c, a, b, op); return c;
 }
 template <class Op, class A, class B,
           cs::enable_if_t<bcast_extents<typename A::extents_type, typename B::extents_type>::rank_dynamic() != 0, int> = 0>
@@ -497,7 +501,7 @@ _TNY_HOST auto oop_cmp(const A & a, const B & b, Op op) {
 template <class Op, class A, class S, cs::enable_if_t<A::is_static, int> = 0>
 _TNY_API auto oops_cmp(const A & a, S s, Op op) {
     using Rc = compute_type_t<promote_t<typename A::element_type, S>>;
-    tensor<bool, typename A::extents_type, ccontiguous, storage::stack> c{}; scmp<Rc, true>(c, a, s, op); return c;
+    tensor<bool, typename A::extents_type, ccontiguous, storage::stack> c(_uninit); scmp<Rc, true>(c, a, s, op); return c;
 }
 template <class Op, class A, class S, cs::enable_if_t<!A::is_static, int> = 0>
 _TNY_HOST auto oops_cmp(const A & a, S s, Op op) {
@@ -508,7 +512,7 @@ _TNY_HOST auto oops_cmp(const A & a, S s, Op op) {
 /* ---- out-of-place unary : static -> stack, dynamic -> heap ------- */
 template <class Uop, class A, cs::enable_if_t<A::is_static, int> = 0>
 _TNY_API auto uop_out(const A & a, Uop f) {
-    tensor<typename A::element_type, typename A::extents_type, ccontiguous, storage::stack> c{};
+    tensor<typename A::element_type, typename A::extents_type, ccontiguous, storage::stack> c(_uninit);
     unaryo<true>(c, a, f); return c;   // fresh dest -> restrict + linear fast path
 }
 template <class Uop, class A, cs::enable_if_t<!A::is_static, int> = 0>
