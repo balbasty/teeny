@@ -172,9 +172,12 @@ source strides are static), on any source layout. See [Views & structure](struct
 ## nd-peel (iteration) (`iterate.h`)
 
 ```cpp
-peel<Axes...>(x);       peel_at<Axes...>(x, i);  // peel named axes
+peel<Axes...>(x);       peel_at<Axes...>(x, i);  // peel named axes. range-for is INCREMENTAL (O(1)/cell,
+                                                 //   no per-cell decode); peel_at = random access (grid-stride)
 peel(x, axis<Axes...>{}); peel_at(x, i, axis<Axes...>{});  // value form (numpy-like axis selector)
 peel_front<N>(x);       peel_front_at<N>(x, i);  // peel the first N axes (COUNT -> template-only)
+peel<Axes...>(x).subrange(lo, hi);               // a [lo,hi) chunk for a CPU thread / device block
+                                                 //   (seed once, then O(1)/step); peel_front<N>(x) too
 size_front<N>(x);                                // # cells peel_front<N> yields (no range built)
 ```
 

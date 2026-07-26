@@ -79,6 +79,36 @@ _TNY_API auto peel_at_ow(const MD & src, typename MD::index_type i) {
                            cs::make_index_sequence<MD::rank()>{});
 }
 
+// Incremental mixed-radix cursor over a set of peeled axes (#110). Keeps a running
+// base OFFSET so a SEQUENTIAL sweep advances by one stride-add (plus an occasional
+// carry) instead of re-decoding the flat index from zero each step. `seed(i0)` starts
+// at any linear index with a single decode — so a thread/block can begin mid-range
+// (chunked parallelism); a grid-stride loop (`i += nthreads`) keeps the random-access
+// `peel_at`, whose stride the odometer can't express. Handles ANY peeled strides
+// (contiguous, permuted, negative). Nd == number of peeled axes.
+template <class I, cs::size_t Nd>
+struct peel_cursor {
+    I ext[Nd ? Nd : 1];   // peeled extents
+    I str[Nd ? Nd : 1];   // peeled SOURCE strides
+    I ctr[Nd ? Nd : 1];   // odometer multi-index
+    I off;                // running base offset == sum_d ctr[d]*str[d]
+    I lin;                // flat index (end() compares this)
+    _TNY_API void seed(I i0) {
+        lin = i0; off = 0; I rem = i0;
+        for (int d = static_cast<int>(Nd) - 1; d >= 0; --d) {
+            const I e = ext[d]; const I k = e ? rem % e : I(0); rem = e ? rem / e : rem;
+            ctr[d] = k; off += k * str[d];
+        }
+    }
+    _TNY_API void advance() {
+        ++lin;
+        for (int d = static_cast<int>(Nd) - 1; d >= 0; --d) {
+            if (ctr[d] + 1 < ext[d]) { ++ctr[d]; off += str[d]; return; }   // no carry
+            off -= ctr[d] * str[d]; ctr[d] = 0;                             // wrap axis d, carry up
+        }
+    }
+};
+
 } // namespace _md
 
 /** @brief The `i`-th sub-view obtained by peeling `Axes...` (0 <= i < product
@@ -112,31 +142,66 @@ template <long... Axes, class T, class E, class L, storage O>
 _TNY_API auto peel_at(const tensor<T,E,L,O> & t, typename tensor<T,E,L,O>::index_type i, axis<Axes...>)
 { return peel_at<Axes...>(t, i); }
 
-/** @brief A range of sub-views obtained by peeling `Axes...`. Supports
- *         `size()`, `operator[]`, and range-for. */
+/** @brief A range of sub-views obtained by peeling `Axes...`. Supports `size()`,
+ *         random-access `operator[]` (grid-stride loops), range-for (an INCREMENTAL
+ *         cursor — #110 — that advances the pointer instead of re-decoding each
+ *         step, and builds the loop-invariant sub-view mapping once), and
+ *         `subrange(lo,hi)` for chunked/threaded sweeps. */
 template <class MD, storage OW, cs::size_t... Axes>
 struct peel_range {
     using index_type = typename MD::index_type;
+    static constexpr cs::size_t Nd = sizeof...(Axes);
     MD src;
 
     _TNY_API index_type size() const noexcept {
         const index_type e[] = { static_cast<index_type>(src.extent(Axes))..., index_type(1) };
         index_type n = 1;
-        for (cs::size_t p = 0; p < sizeof...(Axes); ++p) n *= e[p];
+        for (cs::size_t p = 0; p < Nd; ++p) n *= e[p];
         return n;
     }
+    // Random access — the i-th cell decoded from scratch. This is what a device
+    // grid-stride loop (`i += nthreads`) needs; the range-for below is incremental.
     _TNY_API auto operator[](index_type i) const { return _md::peel_at_ow<OW, Axes...>(src, i); }
 
+    // Every cell shares the SAME extents/strides (only the base offset moves), so the
+    // iterator carries one pre-built "template" cell (its mapping is loop-invariant)
+    // and rebases its pointer via the incremental cursor.
+    using Cell = decltype(_md::peel_at_ow<OW, Axes...>(cs::declval<const MD &>(), index_type(0)));
+    using El   = typename Cell::element_type;   // carries the source's const-ness
     struct iterator {
-        peel_range r;                 // by value (a single view) -> no dangle if the range is a temporary
-        index_type i;
-        _TNY_API auto operator*() const { return r[i]; }
-        _TNY_API iterator & operator++() { ++i; return *this; }
-        _TNY_API bool operator!=(const iterator & o) const { return i != o.i; }
-        _TNY_API bool operator==(const iterator & o) const { return i == o.i; }
+        Cell tmpl;                                  // cell at offset 0 -> supplies the invariant mapping
+        El * base;                                  // tmpl.data() captured mutably (== src.data()+0)
+        _md::peel_cursor<index_type, Nd> cur;
+        _TNY_API Cell operator*() const { return Cell(base + cur.off, tmpl.mapping()); }
+        _TNY_API iterator & operator++() { cur.advance(); return *this; }
+        _TNY_API bool operator!=(const iterator & o) const { return cur.lin != o.cur.lin; }
+        _TNY_API bool operator==(const iterator & o) const { return cur.lin == o.cur.lin; }
     };
-    _TNY_API iterator begin() const { return { *this, 0 }; }
-    _TNY_API iterator end()   const { return { *this, size() }; }
+    _TNY_API iterator _iter_at(index_type i) const {
+        iterator it{ _md::peel_at_ow<OW, Axes...>(src, index_type(0)), nullptr, {} };   // template cell at offset 0
+        it.base = it.tmpl.data();                   // non-const here -> El* (mutable when the source is)
+        const index_type e[] = { static_cast<index_type>(src.extent(Axes))..., index_type(1) };
+        const index_type s[] = { static_cast<index_type>(src.stride(Axes))..., index_type(0) };
+        for (cs::size_t d = 0; d < Nd; ++d) { it.cur.ext[d] = e[d]; it.cur.str[d] = s[d]; }
+        it.cur.seed(i);
+        return it;
+    }
+    _TNY_API iterator begin() const { return _iter_at(0); }
+    _TNY_API iterator end()   const { iterator it = _iter_at(0); it.cur.lin = size(); return it; }
+
+    /** @brief A `[lo, hi)` slice of the cells for chunked/threaded sweeps: seed the
+     *         incremental cursor once at `lo`, then O(1) per step within the chunk.
+     *         (Split `[0,size())` across threads/blocks; each sweeps its chunk.) */
+    struct subrange_t {
+        iterator b, e;
+        _TNY_API iterator begin() const { return b; }
+        _TNY_API iterator end()   const { return e; }
+    };
+    _TNY_API subrange_t subrange(index_type lo, index_type hi) const {
+        iterator b = _iter_at(lo);
+        iterator e = b; e.cur.lin = hi;   // end sentinel: only `lin` is compared
+        return { b, e };
+    }
 };
 
 /** @brief Build a range of sub-views by peeling `Axes...` of `t`. Non-const `t`

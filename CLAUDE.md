@@ -298,12 +298,19 @@ sum<0>(a); mean<0,2>(a); max<1>(a); min<-1>(a); prod<0>(a); sum<double,0>(a);
 //   static result -> stack (host+device); any dynamic -> heap (HOST ONLY: allocates)
 
 // --- nd-peel: iterate a SUBSET of axes, each yielding a lower-rank view ---
-for (auto line : peel<0,1>(t)) f(line);   // peel axes 0,1; each `line` is a view
-auto s = peel_at<0,1>(t, i);               // the i-th peeled sub-view (grid-stride style)
+for (auto line : peel<0,1>(t)) f(line);   // peel axes 0,1; each `line` is a view. The range-for is
+                                          //   INCREMENTAL: it advances the pointer + reuses the cell
+                                          //   mapping (O(1)/step), not an O(#peeled) decode per cell.
+auto s = peel_at<0,1>(t, i);               // the i-th peeled sub-view — random access (grid-stride style)
+for (auto v : peel<0,1>(t).subrange(lo,hi)) f(v);  // a [lo,hi) chunk: seed the cursor once at lo, then
+                                          //   O(1)/step. Split [0,size()) across threads/blocks — each
+                                          //   sweeps its chunk incrementally (CPU threads / device blocks).
 
 // --- nd-peel: peel the FIRST N axes (arbitrary batch rank) ---
-for (auto v : peel_front<N>(t)) f(v);      // v is (*spatial, C); N = #batch dims
-auto v = peel_front_at<N>(t, i);            // the i-th (grid-stride style)
+for (auto v : peel_front<N>(t)) f(v);      // v is (*spatial, C); N = #batch dims. Incremental (as above);
+                                           //   .subrange(lo,hi) for a threaded/block chunk.
+auto v = peel_front_at<N>(t, i);            // the i-th — random access, for a grid-stride loop (i += nthreads,
+                                            //   whose stride the odometer can't express — keep this entry point)
 auto nb = size_front<N>(t);                 // #cells peel_front<N> yields (product of the peeled
                                             //   extents), computed directly — no range materialised
 
@@ -326,9 +333,15 @@ dispatch_value<1,2,3>(D, [&](auto d){ kern<d.value>(v); });  // runtime value ->
 // BATCH idiom (one kernel per Sr, not per total rank): peel the runtime batch
 // dims, keep the trailing Sr "interesting" dims static. NB the arg is NEGATIVE
 // (keep the last |N|), like the tensor's peel_front — anyrank asserts N<0.
-for (auto cell : at.peel_front<-Sr>()) kernel<Sr>(cell);  // Sr=2 -> peel_front<-2>; cell is rank-Sr
-auto cell = at.peel_front_at<-Sr>(i);         // i-th (grid-stride); .recast<shape<-1,c,c>>() folds inner
-                                              //   EXTENTS (add ,ccontiguous> to also fold the strides)
+for (auto cell : at.peel_front<-Sr>()) kernel<Sr>(cell);  // Sr=2 -> peel_front<-2>; cell is rank-Sr.
+                                              //   The range-for is INCREMENTAL (advances the pointer +
+                                              //   reuses the cell mapping, O(1)/batch-cell, not an
+                                              //   O(#batch) decode). For a CPU thread / device block that
+                                              //   owns a chunk: for (cell : at.peel_front<-Sr>().subrange(lo,hi)).
+auto cell = at.peel_front_at<-Sr>(i);         // i-th — random access (grid-stride i += nthreads, whose
+                                              //   stride the odometer can't express — keep this path);
+                                              //   .recast<shape<-1,c,c>>() folds inner EXTENTS (add
+                                              //   ,ccontiguous> to also fold the strides)
 auto nb = at.size_front<-Sr>();               // flattened batch count (no range built), same NEGATIVE arg
 ```
 
