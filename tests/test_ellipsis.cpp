@@ -77,5 +77,34 @@ int main()
     P(0) = 42.0;                              // writes q, not p
     if (q[0] != 42.0 || p[0] != 1.0) return 13;
 
+    // ---- `etc` and `ellipsis` are ONE thing under two names (#249) ----------
+    static_assert(cs::is_same<ellipsis_t, etc_t>::value, "ellipsis_t IS etc_t");
+    static_assert(cs::is_same<decltype(etc), decltype(ellipsis)>::value, "etc / ellipsis same type");
+    // ...and symmetrically, `ellipsis` works in the anyshape (template-argument) context:
+    static_assert(cs::is_same<anyshape<ellipsis, -1, 3>, anyshape<etc, -1, 3>>::value,
+                  "ellipsis is usable in anyshape<...> too");
+    // `etc` works in the indexing (call-argument) context, exactly like `ellipsis`:
+    auto ea = t(etc);                         // == t(ellipsis): whole thing, rank 3
+    static_assert(decltype(ea)::rank() == 3, "etc alone keeps rank");
+    static_assert(decltype(ea)::extents_type::static_extent(0) == 2, "etc: extent preserved");
+    if (ea(1,2,3) != buf[1*12+2*4+3]) return 14;
+
+    auto eb = t(1, etc);                       // == t(1, all, all): rank 2
+    static_assert(decltype(eb)::rank() == 2, "leading index + etc");
+    if (eb(2,3) != buf[12 + 2*4 + 3]) return 15;
+
+    auto ec = t(etc, 2);                       // == t(all, all, 2): rank 2
+    static_assert(decltype(ec)::rank() == 2, "etc + trailing index");
+    if (ec(1,2) != buf[1*12 + 2*4 + 2]) return 16;
+
+    auto ed = t(1, etc, 2);                    // == t(1, all, 2): keep axis 1 only (rank 1)
+    auto ee = t(1, ellipsis, 2);
+    static_assert(decltype(ed)::rank() == 1, "etc between two indices");
+    for (int j = 0; j < 3; ++j) if (ed(j) != ee(j)) return 17;   // etc == ellipsis, elementwise
+
+    auto eu = t.uget(1, etc);                   // uget path also sees etc as ellipsis
+    static_assert(decltype(eu)::rank() == 2, "uget: leading index + etc");
+    if (eu(2,3) != buf[12 + 2*4 + 3]) return 18;
+
     return 0;
 }

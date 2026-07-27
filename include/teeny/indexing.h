@@ -78,17 +78,15 @@ constexpr none_t none{};
 template <class A> struct _is_newaxis : cs::false_type {};
 template <> struct _is_newaxis<none_t> : cs::true_type {};
 
-/** @brief Ellipsis sentinel — teeny's `...` (python `a[..., 0]` / numpy `Ellipsis`).
- *
- * In an index expression it stands for "as many `all` as it takes to fill the
- * rank": `t(1, ellipsis, 2)` on a rank-5 tensor is `t(1, all, all, all, 2)`.
- * At most one ellipsis per call. It expands to `rank - (#other args)` copies of
- * `all` (which may be zero), then the call proceeds as usual — so if what
- * remains is all integers you get an element `T&`, otherwise a view. */
-struct ellipsis_t {};
-constexpr ellipsis_t ellipsis{};
+// The `ellipsis` / `ellipsis_t` marker (numpy `...`) is defined in alias.h — it is
+// shared with `anyshape<...>`, where it is spelled `etc` (an alias). In an index
+// expression it stands for "as many `all` as it takes to fill the rank": `t(1, ellipsis,
+// 2)` on a rank-5 tensor is `t(1, all, all, all, 2)`. At most one per call. It expands
+// to `rank - (#other args)` copies of `all` (which may be zero), then the call proceeds
+// as usual — so if what remains is all integers you get an element `T&`, otherwise a
+// view. `etc` works here too (same marker).
 template <class A> struct _is_ellipsis : cs::false_type {};
-template <> struct _is_ellipsis<ellipsis_t> : cs::true_type {};
+template <> struct _is_ellipsis<ellipsis_t> : cs::true_type {};   // matches `ellipsis` and `etc` alike
 template <class... Args> struct _has_ellipsis
     : cs::integral_constant<bool, (_is_ellipsis<Args>::value || ... || false)> {};
 

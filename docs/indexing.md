@@ -84,7 +84,7 @@ view into the same memory:
 | `slice(a, b)` | half-open range `[a, b)` |
 | `slice(a, b, step)` | strided range (`step` may be negative) |
 | `none` | an open end inside a `slice` |
-| `ellipsis` | stand-in for as many `all` as it takes to fill the rank |
+| `ellipsis` (or `etc`) | stand-in for as many `all` as it takes to fill the rank |
 
 ```cpp
 t(1, all, all);                 // fix axis 0 -> lower-rank view
@@ -110,7 +110,12 @@ t(1, ellipsis);      // == t(1, all, all)   drop the FIRST axis, keep the rest
 t(ellipsis, 2);      // == t(all, all, 2)   drop the LAST axis
 t(1, ellipsis, 2);   // == t(1, all, 2)     fill only the middle
 t(ellipsis) = b;     // whole-tensor slice-assign (copies b's elements in)
+t(1, etc, 2);        // `etc` is the same marker under another name (== ellipsis)
 ```
+
+`ellipsis` and `etc` are two names for one marker — "the unspecified middle axes."
+`etc` is the spelling used in an [`anyshape<etc, …>`](dispatch.md) boundary tag; both
+names work in both places.
 
 If what remains after expansion is all integers you get an element `T&`; anything
 else yields a view. Assigning into a slice — `t(...) = b`, `t(0, all) = 5.0` —

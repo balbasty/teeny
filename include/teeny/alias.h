@@ -139,13 +139,22 @@ using _reindex_extents_t = typename _reindex_extents<Idx2, E, cs::make_index_seq
  *  `rank<0>` is the rank-0 (scalar) shape. */
 template <cs::size_t N> using rank = cs::dextents<cs::int64_t, N>;
 
-/** @brief The dynamic-rank marker (`etc`, "and so on") for an `anyshape<...>` — the
- *  ONE rank-erased region of a rank-erased shape. It has no compile-time width (the
- *  rank it stands for is only known at run time, as the carrier's `ndim`), so it can
- *  live only in an `anyshape<...>` boundary tag, never in a fixed-rank `shape<...>`.
- *  Its own type (an empty enum) keeps it distinct from any real extent value. */
-enum class _etc_t {};
-constexpr _etc_t etc{};
+/** @brief The **ellipsis** marker (numpy `...`) for the unspecified middle axes. Its
+ *  own type (an empty enum) keeps it distinct from any real extent value, and being an
+ *  enum it is a valid non-type template argument for `anyshape<...>`.
+ *
+ *  It has two roles that never overlap, so one marker serves both:
+ *  - when **indexing**, `t(1, ellipsis, 2)` stands for as many `all` as fill the rank;
+ *  - in an `anyshape<...>` boundary tag it marks the rank-erased region — there it is
+ *    conventionally spelled **`etc`** ("and so on"), an alias of `ellipsis`.
+ *  So `ellipsis`/`ellipsis_t` is the primary name and `etc`/`etc_t` the alias:
+ *  `t(1, etc, 2)` == `t(1, ellipsis, 2)` and `anyshape<ellipsis, 3>` == `anyshape<etc, 3>`.
+ *  (The `_is_ellipsis` indexing trait lives in `indexing.h`.) */
+enum class ellipsis_t {};
+constexpr ellipsis_t ellipsis{};
+/** @brief `etc` — the `anyshape<...>` spelling of `ellipsis` (same marker, same value). */
+using etc_t = ellipsis_t;
+constexpr ellipsis_t etc = ellipsis;
 
 // Split an `anyshape<...>` pack at its single `etc` into the leading Head (before)
 // and trailing Tail (after). Walks the heterogeneous `auto...` pack one element at a
@@ -177,7 +186,7 @@ struct _ashape_split<_vpack<Hs...>, E0, Rest...> : _ashape_split<_vpack<Hs..., E
  *  not just a type. */
 template <auto... Es>
 struct anyshape {
-    static_assert((cs::size_t(0) + ... + (cs::is_same<decltype(Es), _etc_t>::value ? 1u : 0u)) == 1u,
+    static_assert((cs::size_t(0) + ... + (cs::is_same<decltype(Es), etc_t>::value ? 1u : 0u)) == 1u,
         "anyshape: needs exactly one `etc` (the erased dynamic-rank region)");
     using _sp  = _ashape_split<_vpack<>, Es...>;
     using head = typename _sp::head;   // static LEADING dims (before etc), anchored at 0
