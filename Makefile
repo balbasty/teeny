@@ -10,7 +10,11 @@ DEL       ?= rm -f
 MKDIR     ?= mkdir -p
 BUILDDIR  ?= ./build
 CXXFLAGS  += -std=c++17
-INCLUDES  += -I./include -I./external/cccl/libcudacxx/include
+# CCCL (libcudacxx) include path. Defaults to the vendored submodule (pinned to
+# CCCL v2.8.2 — supports CUDA 11.1+, see docs/cuda-compat.md). Override to point at
+# a different CCCL, e.g. a newer 3.x for CUDA 13:  make CCCL_INC=/path/to/cccl/include
+CCCL_INC  ?= ./external/cccl/libcudacxx/include
+INCLUDES  += -I./include -I$(CCCL_INC)
 
 # Stop at the first error (the flag differs between clang and gcc).
 CXX_IS_CLANG := $(shell $(CXX) --version 2>/dev/null | grep -qi clang && echo 1)

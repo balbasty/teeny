@@ -41,26 +41,38 @@ target_include_directories(teeny INTERFACE
     "$<INSTALL_INTERFACE:include>")
 
 # ---------------------------------------------------------------------------
-# CCCL (libcudacxx — cuda::std::mdspan). Prefer an installed CCCL; otherwise
-# fall back to the vendored submodule for in-tree builds. `find_package(teeny)`
-# always re-resolves CCCL via find_dependency (see teeny-config.cmake.in), so
-# an installed teeny needs an installed CCCL.
+# CCCL (libcudacxx — cuda::std::mdspan). Resolution order:
+#   1. TEENY_CCCL_INCLUDE — an explicit include dir you point at a specific CCCL
+#      (the knob for a per-CUDA choice, e.g. a newer 3.x for CUDA 13; mirrors the
+#      Makefile's CCCL_INC). See docs/cuda-compat.md.
+#   2. an installed CCCL via find_package(CCCL).
+#   3. the vendored submodule (pinned to CCCL v2.8.2 — supports CUDA 11.1+).
+# `find_package(teeny)` re-resolves CCCL via find_dependency (teeny-config.cmake.in),
+# so an installed teeny needs an installed CCCL.
 # ---------------------------------------------------------------------------
-find_package(CCCL CONFIG QUIET)
-if (CCCL_FOUND)
-    target_link_libraries(teeny INTERFACE CCCL::CCCL)
+set(TEENY_CCCL_INCLUDE "" CACHE PATH
+    "Explicit CCCL (libcudacxx) include dir; empty = installed CCCL, else vendored submodule")
+if (TEENY_CCCL_INCLUDE)
+    message(STATUS "teeny: using CCCL from TEENY_CCCL_INCLUDE=${TEENY_CCCL_INCLUDE}")
+    target_include_directories(teeny INTERFACE "$<BUILD_INTERFACE:${TEENY_CCCL_INCLUDE}>")
 else()
-    set(_teeny_cccl "${CMAKE_CURRENT_SOURCE_DIR}/external/cccl/libcudacxx/include")
-    if (EXISTS "${_teeny_cccl}/cuda/std/mdspan")
-        message(STATUS "teeny: using vendored CCCL at external/cccl (in-tree build)")
-        # BUILD_INTERFACE only: the vendored path is not valid post-install.
-        target_include_directories(teeny INTERFACE "$<BUILD_INTERFACE:${_teeny_cccl}>")
+    find_package(CCCL CONFIG QUIET)
+    if (CCCL_FOUND)
+        target_link_libraries(teeny INTERFACE CCCL::CCCL)
     else()
-        message(FATAL_ERROR
-            "teeny requires CCCL (cuda::std::mdspan) but none was found.\n"
-            "  - install CCCL and it will be picked up via find_package(CCCL), or\n"
-            "  - initialise the vendored submodule:\n"
-            "      git submodule update --init --depth 1 external/cccl")
+        set(_teeny_cccl "${CMAKE_CURRENT_SOURCE_DIR}/external/cccl/libcudacxx/include")
+        if (EXISTS "${_teeny_cccl}/cuda/std/mdspan")
+            message(STATUS "teeny: using vendored CCCL at external/cccl (in-tree build)")
+            # BUILD_INTERFACE only: the vendored path is not valid post-install.
+            target_include_directories(teeny INTERFACE "$<BUILD_INTERFACE:${_teeny_cccl}>")
+        else()
+            message(FATAL_ERROR
+                "teeny requires CCCL (cuda::std::mdspan) but none was found.\n"
+                "  - set -DTEENY_CCCL_INCLUDE=/path/to/cccl/include, or\n"
+                "  - install CCCL and it will be picked up via find_package(CCCL), or\n"
+                "  - initialise the vendored submodule:\n"
+                "      git submodule update --init --depth 1 external/cccl")
+        endif()
     endif()
 endif()
 

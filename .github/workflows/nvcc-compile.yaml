@@ -25,6 +25,20 @@ permissions:
 jobs:
   nvcc-compile:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # The vendored CCCL (v2.8.2) supports CUDA 11.1+, so we prove BOTH ends of the
+      # supported range: 11.8 (the floor — the cu11 wheel toolkit, reaching old archs
+      # / drivers) and 12.6 (a recent 12.x). Each CUDA pins its max host g++ (11.8 ->
+      # g++<=11; 12.6 -> g++<=13), so the toolkit/host combo is fixed, not left to the
+      # runner. See docs/cuda-compat.md.
+      matrix:
+        include:
+          - cuda: '11.8.0'
+            gxx: '11'
+          - cuda: '12.6.1'
+            gxx: '13'
+    name: nvcc ${{ matrix.cuda }} (g++-${{ matrix.gxx }})
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -36,17 +50,15 @@ jobs:
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git submodule update --init --recursive
 
-      # CUDA 12.6 pairs with a host g++ <= 13; install g++-13 and point nvcc at it
-      # so the toolkit/host-compiler combo is pinned rather than left to the runner.
-      - name: Install host compiler (g++-13)
+      - name: Install host compiler (g++-${{ matrix.gxx }})
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends g++-13
+          sudo apt-get install -y --no-install-recommends g++-${{ matrix.gxx }}
 
       - name: Install CUDA toolkit (nvcc, no GPU)
         uses: Jimver/cuda-toolkit@v0.2.19
         with:
-          cuda: '12.6.1'
+          cuda: ${{ matrix.cuda }}
           method: 'network'
           sub-packages: '["nvcc", "cudart"]'
 
@@ -57,7 +69,7 @@ jobs:
       # vendored CCCL headers are used so cuda::std::mdspan matches the host build.
       - name: Compile-only device build
         run: |
-          nvcc -std=c++17 -ccbin g++-13 \
+          nvcc -std=c++17 -ccbin g++-${{ matrix.gxx }} \
                -I include -I external/cccl/libcudacxx/include \
                --compile tests/nvcc_smoke.cu -o "$RUNNER_TEMP/nvcc_smoke.o"
-          echo "nvcc device-pass compile succeeded"
+          echo "nvcc device-pass compile succeeded (CUDA ${{ matrix.cuda }})"

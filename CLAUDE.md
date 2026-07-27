@@ -74,7 +74,8 @@ include/teeny/
   teeny.h          umbrella (includes everything, cuda.h included + self-guarded)
 tests/             one file per feature; `make run-test` builds + runs all
 examples/          standalone example algorithms (see examples/README.md)
-external/cccl/     vendored CCCL 3.3.0 (libcudacxx). -I external/cccl/libcudacxx/include
+external/cccl/     vendored CCCL v2.8.2 (libcudacxx) — last 2.x, spans CUDA 11.1–12.9
+                   with mdspan; -I external/cccl/libcudacxx/include (see docs/cuda-compat.md)
 ```
 
 `namespace tny` is the public namespace; internal code lives in `tny::_md`
