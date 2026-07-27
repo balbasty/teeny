@@ -171,8 +171,11 @@ mean(m, axis<1>{}, into(rowbuf));  // value form takes into as well
 
 A rank-0 destination can be a `local<T, shape<>>{}` or a view over a bare
 address, `wrap(&x, shape<>{})` — so writing a full reduction "to an address" needs
-no extra overload. As elsewhere, `dest`'s dtype need not match (the result is
-cast), extents are checked, and the destination is returned by reference.
+no extra overload. A full reduction **requires** a rank-0 dest (a non-rank-0 dest is
+a `static_assert`, so forgetting the `<axes>` fails to compile rather than silently
+splatting the grand total); an axis reduction's dest is **broadcast-compatible**
+with the reduced shape (it goes through `copy_`). As elsewhere, `dest`'s dtype need
+not match (the result is cast), and the destination is returned by reference.
 
 ### Type promotion
 

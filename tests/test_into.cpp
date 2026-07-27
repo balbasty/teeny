@@ -162,5 +162,15 @@ int main() {
     auto rowd = zeros<double>(shape<-1>{2});
     sum<1>(md, into(rowd)); if (rowd(0)!=6 || rowd(1)!=15) return 58;
 
+    // ---- axis-into for the remaining reductions + dot<Acc> into --------
+    prod<0>(m, into(col)); if (col(0)!=4  || col(2)!=18) return 59;   // [1·4, 2·5, 3·6]
+    max<0>(m,  into(col)); if (col(0)!=4  || col(2)!=6)  return 60;
+    min<0>(m,  into(col)); if (col(0)!=1  || col(2)!=3)  return 61;
+    sqnorm<1>(m, into(rowv));
+    if (!close(rowv(0), 14.0) || !close(rowv(1), 77.0))  return 62;   // 1+4+9 / 16+25+36
+    norm<1>(m, into(rowv));
+    if (!close(rowv(0), std::sqrt(14.0)) || !close(rowv(1), std::sqrt(77.0))) return 63;
+    dot<double>(vg, vg, into(s0)); if (!close(s0.item(), 25.0)) return 64;  // dot<Acc> into
+
     return 0;
 }

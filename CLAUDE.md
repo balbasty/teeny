@@ -305,7 +305,7 @@ auto m = a < b; a == 2.0; 3.0 < a;    // ==,!=,<,<=,>,>= ; scalar either side
 sum(a); prod(a); max(a); min(a); mean(a); dot(a,b);
 sum(a, into(cell)); dot(a,b,into(cell));  // into(dest) too: a FULL reduction writes its scalar
                       //   into a RANK-0 dest (local<T,shape<>>{}, or wrap(&x,shape<>{}) over an
-                      //   address); dtype casts, extents checked, returns dest&.
+                      //   address; non-rank-0 dest = static_assert); dtype casts, returns dest&.
 allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
 // --- vector algebra & geometry (contained exact math; NO solves/inversion/optimisation) ---
 sqnorm(a);  norm(a);                   // Σaᵢ² / √Σaᵢ² over ALL axes. sqnorm==dot(a,a); norm floating
