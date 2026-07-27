@@ -198,7 +198,12 @@ Over all axes → a scalar:
 
 ```cpp
 sum(a); prod(a); max(a); min(a); mean(a); dot(a, b);
+a.sum(); a.mean(); a.dot(b);            // the same reductions are also methods
 ```
+
+Every reduction (and `sqnorm`/`norm`) is available as a **method** too, with the
+same overload shapes — `a.sum()`, `a.sum<0>()`, `a.mean(axis<1>{})`, `a.norm()`,
+`a.dot(b)`, `a.sum(into(cell))`. The free `sum(a)` form stays as well.
 
 Over named axes → a lower-rank **tensor** (the named axes are removed; negatives
 wrap):

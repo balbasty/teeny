@@ -41,6 +41,7 @@ TESTS = \
 	$(BUILDDIR)/test_mathops \
 	$(BUILDDIR)/test_vecalg \
 	$(BUILDDIR)/test_into \
+	$(BUILDDIR)/test_reduce_methods \
 	$(BUILDDIR)/test_ops \
 	$(BUILDDIR)/test_fold \
 	$(BUILDDIR)/test_axred \

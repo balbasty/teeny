@@ -34,6 +34,25 @@ _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
                 typename MD::layout_type, OW>
 as_tensor(const MD & m);
 
+namespace _md {
+/* --- extents of an AXIS reduction: the input extents with `Axes...` dropped
+ *     (static where the input is). Lives here rather than next to the reduction
+ *     engines in math.h because the reduction METHOD declarations below must
+ *     SFINAE on it — a fully static result is stack-owned (host+device,
+ *     _TNY_API), a dynamic one is heap-owned (host-only, _TNY_HOST) — the same
+ *     split the free reductions in math.h use. -------------------------------- */
+// static output extent for input axis D when reducing Axes... (drop if reduced).
+template <cs::size_t D, class E, long... Axes>
+_TNY_API constexpr cs::size_t red_ext() {
+    return _pos_in<D, _norm_axis(Axes, E::rank())...>() >= 0 ? _drop_axis : E::static_extent(D);
+}
+template <class E, long... Axes, cs::size_t... D>
+auto reduced_ext_(cs::index_sequence<D...>)
+    -> typename _compact<typename E::index_type, red_ext<D, E, Axes...>()...>::type;
+template <class E, long... Axes>
+using reduced_extents = decltype(reduced_ext_<E, Axes...>(cs::make_index_sequence<E::rank()>{}));
+}  // namespace _md
+
 /* --- shared axis dispatch: a STATIC index (`Int<k>()`) folds to an
  *     `integral_constant` where the value is known at compile time; a runtime index
  *     stays a value. Lives ONCE here and is reused by `tensor::extent`/`stride` AND
@@ -1249,6 +1268,47 @@ public:
      *     these are members, and chain after a comparison: (a<b).all()) ---- */
     _TNY_API bool all() const;   // true iff every element is nonzero
     _TNY_API bool any() const;   // true iff any element is nonzero
+
+    /* --- reductions as methods (parity with the free sum(a)/mean(a)/norm(a)/...):
+     *     thin forwarders to the free forms, DEFINED in math.h. Same overload
+     *     shapes as the free functions — full (all axes; leading TYPE = accumulator),
+     *     axis (`m.sum<0>()` / value form `m.sum(axis<0>{})`), and `into(dest)`. */
+// The AXIS forms allocate their (lower-rank) result, so — exactly like the free
+// axis reductions in math.h — each is TWO overloads keyed on whether that result
+// is fully static: static -> stack, host+device (_TNY_API); dynamic -> heap, host
+// only (_TNY_HOST). A single _TNY_API forwarder would make a __host__ __device__
+// method call the __host__-only free overload for a dynamic shape. The FULL
+// reductions never allocate, so they stay single _TNY_API overloads.
+// the SFINAE key, spelled once: "reducing `Ax...` leaves a (fully static | dynamic)
+// result". `CMP` is `==` (static -> _TNY_API) or `!=` (dynamic -> _TNY_HOST). The
+// out-of-line definitions in math.h repeat it (without the `= 0` default).
+#define _TNY_RED_AXIS_IF(E, CMP)                                                                            \
+    cs::enable_if_t<(sizeof...(Ax) > 0) && _md::reduced_extents<E,Ax...>::rank_dynamic() CMP 0, int> = 0
+#define _TNY_RED_AXIS_DECL(NAME, API, CMP)                                                                  \
+    template <long... Ax, _TNY_RED_AXIS_IF(Shape, CMP)> API auto NAME() const;                              \
+    template <class Acc, long... Ax, _TNY_RED_AXIS_IF(Shape, CMP)> API auto NAME() const;                   \
+    template <long... Ax, _TNY_RED_AXIS_IF(Shape, CMP)> API auto NAME(axis<Ax...>) const;                   \
+    template <class Acc, long... Ax, _TNY_RED_AXIS_IF(Shape, CMP)> API auto NAME(axis<Ax...>) const;        \
+    template <long... Ax, class D, _TNY_RED_AXIS_IF(Shape, CMP)> API auto & NAME(into_t<D> out) const;      \
+    template <class Acc, long... Ax, class D, _TNY_RED_AXIS_IF(Shape, CMP)> API auto & NAME(into_t<D> out) const; \
+    template <long... Ax, class D, _TNY_RED_AXIS_IF(Shape, CMP)> API auto & NAME(axis<Ax...>, into_t<D> out) const; \
+    template <class Acc, long... Ax, class D, _TNY_RED_AXIS_IF(Shape, CMP)> API auto & NAME(axis<Ax...>, into_t<D> out) const;
+#define _TNY_RED_METHOD_DECL(NAME)                                                                          \
+    template <class Acc = void> _TNY_API auto NAME() const;                                                 \
+    template <class Acc = void, class D> _TNY_API auto & NAME(into_t<D> out) const;                         \
+    _TNY_RED_AXIS_DECL(NAME, _TNY_API,  ==)                                                                 \
+    _TNY_RED_AXIS_DECL(NAME, _TNY_HOST, !=)
+    _TNY_RED_METHOD_DECL(sum)    _TNY_RED_METHOD_DECL(prod)  _TNY_RED_METHOD_DECL(max)
+    _TNY_RED_METHOD_DECL(min)    _TNY_RED_METHOD_DECL(mean)  _TNY_RED_METHOD_DECL(sqnorm)
+    _TNY_RED_METHOD_DECL(norm)
+#undef _TNY_RED_METHOD_DECL
+#undef _TNY_RED_AXIS_DECL
+#undef _TNY_RED_AXIS_IF
+    // dot is binary (no axis form): m.dot(b) / m.dot<Acc>(b) / m.dot(b, into(cell)).
+    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob>
+    _TNY_API auto dot(const tensor<Tb,Eb,Lb,Ob> & b) const;
+    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob, class D>
+    _TNY_API auto & dot(const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) const;
 
     /* --- in-place unary math (element-wise) ----------------------- */
     _TNY_API tensor & neg_();

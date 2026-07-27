@@ -306,6 +306,9 @@ auto m = a < b; a == 2.0; 3.0 < a;    // ==,!=,<,<=,>,>= ; scalar either side
 //   result: sum<double>(a), dot<double>(a,b), sum<int64_t>(int8_tensor) (untruncated).
 //   mean(int_tensor) -> DOUBLE (numpy: integer mean is float64); mean(float)->T.
 sum(a); prod(a); max(a); min(a); mean(a); dot(a,b);
+a.sum(); a.mean(); a.dot(b); a.sum<0>(); a.mean(axis<1>{}); a.sum<double>();  // ALSO methods
+                      //   (parity with the free forms): every reduction + sqnorm/norm/dot, all the
+                      //   same overload shapes (full / axis / <Acc> / axis<...> value form / into).
 sum(a, into(cell)); dot(a,b,into(cell));  // into(dest) too: a FULL reduction writes its scalar
                       //   into a RANK-0 dest (local<T,shape<>>{}, or wrap(&x,shape<>{}) over an
                       //   address; non-rank-0 dest = static_assert); dtype casts, returns dest&.

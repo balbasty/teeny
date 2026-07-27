@@ -44,7 +44,7 @@ int main() {
     double buf[6] = {1, 2, 3, 4, 5, 6};
     auto m = wrap(buf, shape<2, 3>{});     // a 2×3 view over `buf`
     m(1, 2) = 60;                          // write through the view
-    std::printf("%g  sum=%g\n", m(1, -1), sum(m));  // -1 = last column
+    std::printf("%g  sum=%g\n", m(1, -1), m.sum());  // -1 = last column
     return 0;
 }
 ```
