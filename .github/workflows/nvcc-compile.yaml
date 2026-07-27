@@ -27,32 +27,30 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      # Prove the whole supported CUDA range against the CCCL each end needs. The
-      # vendored submodule (CCCL v2.8.2) covers CUDA 11.1–12.9; CUDA 13 dropped
-      # CCCL 2.x (and every arch below sm_75), so its leg swaps in a CCCL 3.x via
-      # `cccl:`. Each leg pins its max host g++ and its arch floor. teeny is source
-      # -clean on both CCCL lines (the rank-0 stride() guard #223 needs is inert on
-      # 3.x). See docs/cuda-compat.md.
-      #   cccl:  empty  -> the pinned submodule (v2.8.2); else a git tag to check out
-      #   arch:  the -arch floor for that toolkit (sm_52 Kepler/Maxwell … sm_75 Turing)
-      #   os:    the runner image. CUDA 11.8's apt packages only exist in NVIDIA's
-      #          ubuntu2204 repo (not ubuntu2404), so the 11.8 leg pins ubuntu-22.04;
-      #          12.6/13.0 install cleanly on ubuntu-latest (24.04).
+      # Prove the whole supported CUDA range with the CCCL each toolkit uses — the
+      # same selection the build does automatically: nvcc <= 12.x uses the vendored
+      # CCCL 2.8.2 (via `cccl_inc`), nvcc 13 uses its own bundled 3.x (`cccl_inc`
+      # empty, so no -I). See docs/cuda-compat.md.
+      #   cccl_inc: CCCL include dir to add (vendored path), or empty for bundled
+      #   arch:     the -arch floor for that toolkit (sm_52 Kepler/Maxwell … sm_75 Turing)
+      #   os:       the runner image. CUDA 11.8's apt packages only exist in NVIDIA's
+      #             ubuntu2204 repo (not ubuntu2404), so the 11.8 leg pins ubuntu-22.04;
+      #             12.6/13.0 install cleanly on ubuntu-latest (24.04).
       matrix:
         include:
           - cuda: '11.8.0'
             gxx: '11'
-            cccl: ''
+            cccl_inc: 'external/cccl/libcudacxx/include'
             arch: 'sm_52'
             os: 'ubuntu-22.04'
           - cuda: '12.6.1'
             gxx: '13'
-            cccl: ''
+            cccl_inc: 'external/cccl/libcudacxx/include'
             arch: 'sm_70'
             os: 'ubuntu-latest'
           - cuda: '13.0.1'
             gxx: '14'
-            cccl: 'v3.4.0'
+            cccl_inc: ''
             arch: 'sm_75'
             os: 'ubuntu-latest'
     name: nvcc ${{ matrix.cuda }} (g++-${{ matrix.gxx }})
@@ -61,18 +59,11 @@ jobs:
         uses: actions/checkout@v5
 
       # CCCL is a submodule pinned via SSH in .gitmodules; rewrite to HTTPS so the
-      # runner can fetch it without an SSH key. For a leg that names a `cccl:` tag
-      # (CUDA 13 -> a 3.x), check that tag out over the pinned 2.8.2 — one include
-      # path, the CCCL version differs per CUDA leg.
-      - name: Select CCCL (per CUDA leg)
+      # runner can fetch it without an SSH key (needed only by the vendored legs).
+      - name: Fetch CCCL submodule
         run: |
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git submodule update --init --recursive
-          if [ -n "${{ matrix.cccl }}" ]; then
-            git -C external/cccl fetch --depth 1 origin tag "${{ matrix.cccl }}"
-            git -C external/cccl checkout "${{ matrix.cccl }}"
-          fi
-          echo "CCCL at: $(git -C external/cccl describe --tags)"
 
       - name: Install host compiler (g++-${{ matrix.gxx }})
         run: |
@@ -89,11 +80,13 @@ jobs:
       - name: Show nvcc version
         run: nvcc --version
 
-      # Compile the device smoke TU only (`--compile`, no link, no run). The
-      # selected CCCL headers are used so cuda::std::mdspan matches the host build.
+      # Compile the device smoke TU only (`--compile`, no link, no run). Add the
+      # vendored CCCL include for nvcc <= 12.x; nvcc 13 uses its bundled CCCL.
       - name: Compile-only device build
         run: |
+          CCCL_I=""
+          [ -n "${{ matrix.cccl_inc }}" ] && CCCL_I="-I ${{ matrix.cccl_inc }}"
           nvcc -std=c++17 -ccbin g++-${{ matrix.gxx }} -arch=${{ matrix.arch }} \
-               -I include -I external/cccl/libcudacxx/include \
+               -I include $CCCL_I \
                --compile tests/nvcc_smoke.cu -o "$RUNNER_TEMP/nvcc_smoke.o"
           echo "nvcc device-pass compile succeeded (CUDA ${{ matrix.cuda }}, ${{ matrix.arch }})"
