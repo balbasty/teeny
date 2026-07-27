@@ -356,6 +356,11 @@ integers — then **cast the result back to the tensor's element type** `T`
 (`sum(float_tensor)` → `float`, computed in `double`). A leading **type** argument
 makes that type both the accumulator **and** the result.
 
+Every reduction here (plus `sqnorm`/`norm` below) is **also a method** — `a.sum()`,
+`a.mean()`, `a.dot(b)`, `a.sum<0>()`, `a.mean(axis<1>{})`, `a.norm()`,
+`a.sum(into(cell))` — with the same overload shapes as the free form. The free
+`sum(a)` spelling stays (generic code and the numpy reader both use it).
+
 | Call | Returns | Notes |
 |---|---|---|
 | `sum(a)` `prod(a)` `max(a)` `min(a)` `mean(a)` | `T` (accumulated wide) | over all axes |

@@ -27,7 +27,7 @@ m(0,-1);                             // element access (negative index counts fr
 m(all, slice(0,2));                  // sub-view (still no copy)
 m.permute(Int<1>(), Int<0>());       // transpose (a view)
 m.add_(other);                       // in-place math
-auto s = sum(m);                     // reductions (free functions)
+auto s = m.sum();                    // reductions (also free functions: sum(m))
 for (auto row : peel(m, axis<0>{})) work(row);  // iterate a subset of axes
 ```
 

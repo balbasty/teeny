@@ -1324,7 +1324,7 @@ template <class T,class E,class L,storage O>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::normalize_() {
     static_assert(cs::is_floating_point<compute_type_t<T>>::value,
                   "normalize_: requires a floating-point element type (integer division would truncate)");
-    return div_(static_cast<T>(norm(*this)));
+    return div_(static_cast<T>(tny::norm(*this)));   // tny:: — the member norm() now shadows the free one here
 }
 // in-place unit vectors along the named axes: *this /= norm(*this over Axes) (keepdim).
 template <class T,class E,class L,storage O> template <long... Axes>
@@ -1470,6 +1470,43 @@ _TNY_API auto & dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b
     static_assert(D::rank() == 0, "dot into(dest): dest must be rank-0 (a scalar cell)");
     out.dest.fill_(static_cast<typename D::element_type>(dot<Acc>(a, b))); return out.dest;
 }
+
+/* ------------------------------------------------------------------ *
+ *     Reductions AS METHODS (parity with the free sum(a)/dot(a,b))   *
+ *     — thin forwarders to the free forms above; declared in         *
+ *     tensor.h. Same overload shapes (full / axis / Acc / value /    *
+ *     into), told apart the same way the free functions are.         *
+ * ------------------------------------------------------------------ */
+#define _TNY_RED_METHOD_DEF(NAME)                                                                          \
+template <class T,class E,class L,storage O> template <class Acc>                                          \
+_TNY_API auto tensor<T,E,L,O>::NAME() const { return tny::NAME<Acc>(*this); }                              \
+template <class T,class E,class L,storage O> template <long... Ax, cs::enable_if_t<(sizeof...(Ax) > 0), int>> \
+_TNY_API auto tensor<T,E,L,O>::NAME() const { return tny::NAME<Ax...>(*this); }                            \
+template <class T,class E,class L,storage O> template <class Acc, long... Ax, cs::enable_if_t<(sizeof...(Ax) > 0), int>> \
+_TNY_API auto tensor<T,E,L,O>::NAME() const { return tny::NAME<Acc, Ax...>(*this); }                       \
+template <class T,class E,class L,storage O> template <long... Ax>                                         \
+_TNY_API auto tensor<T,E,L,O>::NAME(axis<Ax...>) const { return tny::NAME<Ax...>(*this); }                 \
+template <class T,class E,class L,storage O> template <class Acc, long... Ax>                              \
+_TNY_API auto tensor<T,E,L,O>::NAME(axis<Ax...>) const { return tny::NAME<Acc, Ax...>(*this); }            \
+template <class T,class E,class L,storage O> template <class Acc, class D>                                 \
+_TNY_API auto & tensor<T,E,L,O>::NAME(into_t<D> out) const { return tny::NAME<Acc>(*this, out); }          \
+template <class T,class E,class L,storage O> template <long... Ax, class D, cs::enable_if_t<(sizeof...(Ax) > 0), int>> \
+_TNY_API auto & tensor<T,E,L,O>::NAME(into_t<D> out) const { return tny::NAME<Ax...>(*this, out); }        \
+template <class T,class E,class L,storage O> template <class Acc, long... Ax, class D, cs::enable_if_t<(sizeof...(Ax) > 0), int>> \
+_TNY_API auto & tensor<T,E,L,O>::NAME(into_t<D> out) const { return tny::NAME<Acc, Ax...>(*this, out); }   \
+template <class T,class E,class L,storage O> template <long... Ax, class D>                                \
+_TNY_API auto & tensor<T,E,L,O>::NAME(axis<Ax...>, into_t<D> out) const { return tny::NAME<Ax...>(*this, out); } \
+template <class T,class E,class L,storage O> template <class Acc, long... Ax, class D>                     \
+_TNY_API auto & tensor<T,E,L,O>::NAME(axis<Ax...>, into_t<D> out) const { return tny::NAME<Acc, Ax...>(*this, out); }
+_TNY_RED_METHOD_DEF(sum)    _TNY_RED_METHOD_DEF(prod)  _TNY_RED_METHOD_DEF(max)
+_TNY_RED_METHOD_DEF(min)    _TNY_RED_METHOD_DEF(mean)  _TNY_RED_METHOD_DEF(sqnorm)
+_TNY_RED_METHOD_DEF(norm)
+#undef _TNY_RED_METHOD_DEF
+// dot (binary): m.dot(b) / m.dot<Acc>(b) / m.dot(b, into(cell)).
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::dot<Acc>(*this, b); }
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class D>
+_TNY_API auto & tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) const { return tny::dot<Acc>(*this, b, out); }
 
 /* ------------------------------------------------------------------ *
  *     Out-of-place producers AS METHODS (parity with a.add(b))       *

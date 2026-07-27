@@ -223,6 +223,7 @@ normalize(a, into(y));  cross(a, b, into(N.at(i)));   // cross into a slot ("cro
 //   the tensor's element type: sum(float)->float. A leading TYPE arg makes that
 //   type BOTH accumulator and result: sum<double>(a), dot<double>(a,b).
 sum(a); prod(a); max(a); min(a); mean(a); dot(a, b);   // sum<Acc>(a), mean<Acc>(a), ...
+a.sum(); a.mean(); a.dot(b); a.sum<0>(); a.mean(axis<1>{});  // ALSO methods (parity; same overloads)
 sum(a, into(cell)); dot(a, b, into(cell));  // into(dest): FULL reduction -> a RANK-0 dest
                       //   (local<T,shape<>>{} or wrap(&x,shape<>{})); dtype casts, returns dest&
 allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)

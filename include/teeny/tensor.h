@@ -1250,6 +1250,31 @@ public:
     _TNY_API bool all() const;   // true iff every element is nonzero
     _TNY_API bool any() const;   // true iff any element is nonzero
 
+    /* --- reductions as methods (parity with the free sum(a)/mean(a)/norm(a)/...):
+     *     thin forwarders to the free forms, DEFINED in math.h. Same overload
+     *     shapes as the free functions — full (all axes; leading TYPE = accumulator),
+     *     axis (`m.sum<0>()` / value form `m.sum(axis<0>{})`), and `into(dest)`. */
+#define _TNY_RED_METHOD_DECL(NAME)                                                                          \
+    template <class Acc = void> _TNY_API auto NAME() const;                                                 \
+    template <long... Ax, cs::enable_if_t<(sizeof...(Ax) > 0), int> = 0> _TNY_API auto NAME() const;        \
+    template <class Acc, long... Ax, cs::enable_if_t<(sizeof...(Ax) > 0), int> = 0> _TNY_API auto NAME() const; \
+    template <long... Ax> _TNY_API auto NAME(axis<Ax...>) const;                                            \
+    template <class Acc, long... Ax> _TNY_API auto NAME(axis<Ax...>) const;                                 \
+    template <class Acc = void, class D> _TNY_API auto & NAME(into_t<D> out) const;                         \
+    template <long... Ax, class D, cs::enable_if_t<(sizeof...(Ax) > 0), int> = 0> _TNY_API auto & NAME(into_t<D> out) const; \
+    template <class Acc, long... Ax, class D, cs::enable_if_t<(sizeof...(Ax) > 0), int> = 0> _TNY_API auto & NAME(into_t<D> out) const; \
+    template <long... Ax, class D> _TNY_API auto & NAME(axis<Ax...>, into_t<D> out) const;                  \
+    template <class Acc, long... Ax, class D> _TNY_API auto & NAME(axis<Ax...>, into_t<D> out) const;
+    _TNY_RED_METHOD_DECL(sum)    _TNY_RED_METHOD_DECL(prod)  _TNY_RED_METHOD_DECL(max)
+    _TNY_RED_METHOD_DECL(min)    _TNY_RED_METHOD_DECL(mean)  _TNY_RED_METHOD_DECL(sqnorm)
+    _TNY_RED_METHOD_DECL(norm)
+#undef _TNY_RED_METHOD_DECL
+    // dot is binary (no axis form): m.dot(b) / m.dot<Acc>(b) / m.dot(b, into(cell)).
+    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob>
+    _TNY_API auto dot(const tensor<Tb,Eb,Lb,Ob> & b) const;
+    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob, class D>
+    _TNY_API auto & dot(const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) const;
+
     /* --- in-place unary math (element-wise) ----------------------- */
     _TNY_API tensor & neg_();
     _TNY_API tensor & abs_();
