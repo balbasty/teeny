@@ -126,5 +126,76 @@ int main()
     r1(0) = 111.0;                                      // mutable view aliases the element
     if (t(1,2,3) != 111.0) return 30;
 
+    // ---- #242: MULTI-AXIS unsqueeze<Ax...> / squeeze<Ax...> ------------------
+    // unsqueeze positions are relative to the FINAL rank (numpy expand_dims), so
+    // (H,W).unsqueeze<1,3>() -> (H,1,W,1): insert 1 into rank-2 -> (H,1,W), then
+    // insert 3 into rank-3 -> appends.
+    auto hw = wrap(buf, extents<long,3,4>{});           // (H,W) = (3,4), strides (4,1)
+    auto m2 = hw.unsqueeze<1,3>();
+    static_assert(decltype(m2)::rank() == 4, "unsqueeze<1,3> -> rank 4");
+    static_assert(decltype(m2)::extents_type::static_extent(0) == 3
+               && decltype(m2)::extents_type::static_extent(1) == 1
+               && decltype(m2)::extents_type::static_extent(2) == 4
+               && decltype(m2)::extents_type::static_extent(3) == 1, "unsqueeze<1,3> -> (3,1,4,1)");
+    auto m2ref = hw.unsqueeze<1>().unsqueeze<3>();      // the manual single-axis fold
+    static_assert(cs::is_same<decltype(m2), decltype(m2ref)>::value, "multi-axis unsqueeze == manual fold (same type)");
+    for (long i=0;i<3;++i) for (long j=0;j<4;++j)
+        if (m2(i,0,j,0) != hw(i,j) || m2(i,0,j,0) != m2ref(i,0,j,0)) return 31;
+    // ...and it is a mutable view of the same buffer
+    m2(1,0,2,0) = 77.0;
+    if (hw(1,2) != 77.0) return 32;
+
+    // three axes: (3,4) -> (1,3,1,4,1)
+    auto m3 = hw.unsqueeze<0,2,4>();
+    static_assert(decltype(m3)::rank() == 5, "unsqueeze<0,2,4> -> rank 5");
+    static_assert(decltype(m3)::extents_type::static_extent(0) == 1
+               && decltype(m3)::extents_type::static_extent(1) == 3
+               && decltype(m3)::extents_type::static_extent(2) == 1
+               && decltype(m3)::extents_type::static_extent(3) == 4
+               && decltype(m3)::extents_type::static_extent(4) == 1, "unsqueeze<0,2,4> -> (1,3,1,4,1)");
+    auto m3ref = hw.unsqueeze<0>().unsqueeze<2>().unsqueeze<4>();
+    for (long i=0;i<3;++i) for (long j=0;j<4;++j)
+        if (m3(0,i,0,j,0) != hw(i,j) || m3(0,i,0,j,0) != m3ref(0,i,0,j,0)) return 33;
+
+    // negative positions wrap against the FINAL rank: <0,-1> on rank-2 -> (1,3,4,1)
+    auto mn = hw.unsqueeze<0,-1>();
+    static_assert(decltype(mn)::rank() == 4, "unsqueeze<0,-1> -> rank 4");
+    static_assert(decltype(mn)::extents_type::static_extent(0) == 1
+               && decltype(mn)::extents_type::static_extent(1) == 3
+               && decltype(mn)::extents_type::static_extent(2) == 4
+               && decltype(mn)::extents_type::static_extent(3) == 1, "unsqueeze<0,-1> -> (1,3,4,1)");
+    for (long i=0;i<3;++i) for (long j=0;j<4;++j)
+        if (mn(0,i,j,0) != hw(i,j)) return 34;
+
+    // squeeze positions are relative to the SOURCE rank, dropped LARGEST-first:
+    // (1,3,1,4).squeeze<0,2>(): drop 2 -> (1,3,4), drop 0 -> (3,4).
+    auto q4 = hw.unsqueeze<0,2>();                      // (1,3,1,4)
+    static_assert(decltype(q4)::rank() == 4, "source for squeeze<0,2>");
+    auto sqm2 = q4.squeeze<0,2>();
+    static_assert(decltype(sqm2)::rank() == 2, "squeeze<0,2> -> rank 2");
+    static_assert(decltype(sqm2)::extents_type::static_extent(0) == 3
+               && decltype(sqm2)::extents_type::static_extent(1) == 4, "squeeze<0,2> -> (3,4)");
+    auto sq2ref = q4.squeeze<2>().squeeze<0>();          // the manual fold, in REVERSE order
+    static_assert(cs::is_same<decltype(sqm2), decltype(sq2ref)>::value, "multi-axis squeeze == manual reverse fold (same type)");
+    for (long i=0;i<3;++i) for (long j=0;j<4;++j)
+        if (sqm2(i,j) != hw(i,j) || sqm2(i,j) != sq2ref(i,j)) return 35;
+    sqm2(2,1) = 66.0;                                     // still a mutable view
+    if (hw(2,1) != 66.0) return 36;
+
+    // negative squeeze axes + a longer list: (1,3,1,4,1).squeeze<0,2,-1>() -> (3,4)
+    auto sqm3 = m3.squeeze<0,2,-1>();
+    static_assert(decltype(sqm3)::rank() == 2, "squeeze<0,2,-1> -> rank 2");
+    for (long i=0;i<3;++i) for (long j=0;j<4;++j)
+        if (sqm3(i,j) != hw(i,j)) return 37;
+
+    // a DYNAMIC axis that is 1 only at run time squeezes too (the per-axis
+    // _TNY_CHECK runs at each fold step)
+    auto dsrc = wrap(buf, shape<-1,-1,-1,-1>{1,3,1,4}, {12,4,4,1});   // (1,3,1,4), every dim dynamic
+    auto ds = dsrc.squeeze<0,2>();
+    static_assert(decltype(ds)::rank() == 2, "dynamic squeeze<0,2> -> rank 2");
+    if (ds.extent(0) != 3 || ds.extent(1) != 4) return 38;
+    for (long i=0;i<3;++i) for (long j=0;j<4;++j)
+        if (ds(i,j) != hw(i,j)) return 39;
+
     return 0;
 }

@@ -57,6 +57,16 @@ template <cs::size_t... A> _TNY_API constexpr bool _all_distinct() noexcept {
     return true;
 }
 
+// Whether the (already-normalised) axes are STRICTLY ascending — i.e. distinct and
+// in order. The axis-LIST ops that fold one axis at a time (`unsqueeze<Ax...>` /
+// `squeeze<Ax...>` in tensor.h, `normalize<Axes...>`'s keepdim fold in math.h) need
+// that: each step shifts the positions of the axes on one side, so a sorted, repeat-
+// free list is what makes the fold well defined. Takes runtime `long`s (not a
+// template pack) so a call site can normalise first: `_axes_ascending(_norm_axis(Ax, N)...)`.
+_TNY_API constexpr bool _axes_ascending() { return true; }
+_TNY_API constexpr bool _axes_ascending(long) { return true; }
+template <class... R> _TNY_API constexpr bool _axes_ascending(long a, long b, R... r) { return a < b && _axes_ascending(b, r...); }
+
 /** @brief Open-ended slice sentinel — teeny's `None` (python `a[:n]` / `a[m:]`).
  *
  * `slice(none, n)` starts at 0, `slice(m, none)` runs to the end, and
