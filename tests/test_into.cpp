@@ -107,5 +107,70 @@ int main() {
     auto nn = local<double, shape<3>>(); pp.cross(qq, into(nn));
     if (!close(nn(2), -3.0))                 return 40;                        // a.cross(b, into)
 
+    // ================= into(dest) on REDUCTIONS (#233) =================
+    // ---- FULL reduction -> a rank-0 destination ------------------------
+    auto s0 = local<double, shape<>>();              // rank-0 scalar cell
+    auto & rs = sum(a, into(s0));
+    if (!close(s0.item(), 6.0))              return 41;   // 1+2+3
+    if (&rs != &s0)                          return 42;   // returns dest by ref
+    prod(a, into(s0)); if (!close(s0.item(), 6.0))  return 43;   // 1*2*3
+    max(b, into(s0));  if (!close(s0.item(), 30.0)) return 44;
+    min(b, into(s0));  if (!close(s0.item(), 10.0)) return 45;
+    mean(a, into(s0)); if (!close(s0.item(), 2.0))  return 46;
+
+    // ---- FULL reduction into a bare ADDRESS via a rank-0 view ----------
+    double scal = 0;
+    auto scell = wrap(&scal, shape<>{});             // rank-0 view over an address
+    sum(b, into(scell));
+    if (!close(scal, 60.0))                  return 47;
+
+    // ---- norm / sqnorm / dot into rank-0 -------------------------------
+    auto vg = local<double, shape<3>>(); vg(0)=3; vg(1)=0; vg(2)=4;
+    sqnorm(vg, into(s0)); if (!close(s0.item(), 25.0)) return 48;   // 9+0+16
+    norm(vg,   into(s0)); if (!close(s0.item(),  5.0)) return 49;   // √25
+    dot(a, b, into(s0)); if (!close(s0.item(), 140.0)) return 50;  // 10+40+90
+
+    // ---- dtype cast into rank-0 (double result -> int dest) ------------
+    auto si = local<int, shape<>>();
+    sum(a, into(si)); if (si.item() != 6)    return 51;
+
+    // ---- leading TYPE = accumulator+result on a full reduction ---------
+    auto sf = local<float, shape<>>();
+    sum<float>(a, into(sf)); if (!close(sf.item(), 6.0)) return 52;
+
+    // ---- AXIS reduction -> a lower-rank destination --------------------
+    auto m = local<double, shape<2,3>>();
+    m(0,0)=1; m(0,1)=2; m(0,2)=3; m(1,0)=4; m(1,1)=5; m(1,2)=6;
+    auto col = local<double, shape<3>>();
+    sum<0>(m, into(col));                            // reduce axis 0 -> length-3
+    if (col(0)!=5 || col(1)!=7 || col(2)!=9) return 53;
+    auto rowv = local<double, shape<2>>();
+    sum<1>(m, into(rowv));                           // reduce axis 1 -> length-2
+    if (rowv(0)!=6 || rowv(1)!=15)           return 54;
+
+    // ---- axis reduction: value form + leading TYPE + mean --------------
+    col.zero_(); sum(m, axis<0>{}, into(col));       // value-form into
+    if (col(0)!=5 || col(2)!=9)              return 55;
+    auto colf = local<float, shape<3>>();
+    sum<float, 0>(m, into(colf));                    // leading-type acc + axis
+    if (!close(colf(1), 7.0))                return 56;
+    mean<1>(m, into(rowv));
+    if (!close(rowv(0), 2.0) || !close(rowv(1), 5.0)) return 57;
+
+    // ---- axis reduction into a DYNAMIC-shape destination (host path) ---
+    auto md = zeros<double>(shape<-1,3>{2}); md.copy_(m);
+    auto rowd = zeros<double>(shape<-1>{2});
+    sum<1>(md, into(rowd)); if (rowd(0)!=6 || rowd(1)!=15) return 58;
+
+    // ---- axis-into for the remaining reductions + dot<Acc> into --------
+    prod<0>(m, into(col)); if (col(0)!=4  || col(2)!=18) return 59;   // [1·4, 2·5, 3·6]
+    max<0>(m,  into(col)); if (col(0)!=4  || col(2)!=6)  return 60;
+    min<0>(m,  into(col)); if (col(0)!=1  || col(2)!=3)  return 61;
+    sqnorm<1>(m, into(rowv));
+    if (!close(rowv(0), 14.0) || !close(rowv(1), 77.0))  return 62;   // 1+4+9 / 16+25+36
+    norm<1>(m, into(rowv));
+    if (!close(rowv(0), std::sqrt(14.0)) || !close(rowv(1), std::sqrt(77.0))) return 63;
+    dot<double>(vg, vg, into(s0)); if (!close(s0.item(), 25.0)) return 64;  // dot<Acc> into
+
     return 0;
 }

@@ -156,7 +156,26 @@ a.add(b, alpha, into(y));     // -> y,    a + alpha*b   (sub likewise)
 
 `into(y)` writes in a single pass; `y` may share memory with an operand, and its
 extents are checked against the (broadcast) result. `y`'s dtype need not match —
-the result is cast to it. Reductions do not take `into`.
+the result is cast to it.
+
+Reductions take `into(dest)` too. A **full** reduction (all axes) writes its
+scalar into a **rank-0** destination; an **axis** reduction copies its lower-rank
+result into `dest`:
+
+```cpp
+sum(a, into(cell));           // cell : local<double, shape<>>{} — a rank-0 scalar
+dot(a, b, into(cell));        // full reductions: sum/prod/max/min/mean/sqnorm/norm/dot
+sum<0>(m, into(colbuf));      // axis reduction -> a lower-rank dest
+mean(m, axis<1>{}, into(rowbuf));  // value form takes into as well
+```
+
+A rank-0 destination can be a `local<T, shape<>>{}` or a view over a bare
+address, `wrap(&x, shape<>{})` — so writing a full reduction "to an address" needs
+no extra overload. A full reduction **requires** a rank-0 dest (a non-rank-0 dest is
+a `static_assert`, so forgetting the `<axes>` fails to compile rather than silently
+splatting the grand total); an axis reduction's dest is **broadcast-compatible**
+with the reduced shape (it goes through `copy_`). As elsewhere, `dest`'s dtype need
+not match (the result is cast), and the destination is returned by reference.
 
 ### Type promotion
 
