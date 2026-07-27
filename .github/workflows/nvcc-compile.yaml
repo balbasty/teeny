@@ -27,28 +27,46 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      # The vendored CCCL (v2.8.2) supports CUDA 11.1+, so we prove BOTH ends of the
-      # supported range: 11.8 (the floor — the cu11 wheel toolkit, reaching old archs
-      # / drivers) and 12.6 (a recent 12.x). Each CUDA pins its max host g++ (11.8 ->
-      # g++<=11; 12.6 -> g++<=13), so the toolkit/host combo is fixed, not left to the
-      # runner. See docs/cuda-compat.md.
+      # Prove the whole supported CUDA range against the CCCL each end needs. The
+      # vendored submodule (CCCL v2.8.2) covers CUDA 11.1–12.9; CUDA 13 dropped
+      # CCCL 2.x (and every arch below sm_75), so its leg swaps in a CCCL 3.x via
+      # `cccl:`. Each leg pins its max host g++ and its arch floor. teeny is source
+      # -clean on both CCCL lines (the rank-0 stride() guard #223 needs is inert on
+      # 3.x). See docs/cuda-compat.md.
+      #   cccl:  empty  -> the pinned submodule (v2.8.2); else a git tag to check out
+      #   arch:  the -arch floor for that toolkit (sm_52 Kepler/Maxwell … sm_75 Turing)
       matrix:
         include:
           - cuda: '11.8.0'
             gxx: '11'
+            cccl: ''
+            arch: 'sm_52'
           - cuda: '12.6.1'
             gxx: '13'
+            cccl: ''
+            arch: 'sm_70'
+          - cuda: '13.0.1'
+            gxx: '14'
+            cccl: 'v3.4.0'
+            arch: 'sm_75'
     name: nvcc ${{ matrix.cuda }} (g++-${{ matrix.gxx }})
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
       # CCCL is a submodule pinned via SSH in .gitmodules; rewrite to HTTPS so the
-      # runner can fetch it without an SSH key.
-      - name: Fetch CCCL submodule
+      # runner can fetch it without an SSH key. For a leg that names a `cccl:` tag
+      # (CUDA 13 -> a 3.x), check that tag out over the pinned 2.8.2 — one include
+      # path, the CCCL version differs per CUDA leg.
+      - name: Select CCCL (per CUDA leg)
         run: |
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git submodule update --init --recursive
+          if [ -n "${{ matrix.cccl }}" ]; then
+            git -C external/cccl fetch --depth 1 origin tag "${{ matrix.cccl }}"
+            git -C external/cccl checkout "${{ matrix.cccl }}"
+          fi
+          echo "CCCL at: $(git -C external/cccl describe --tags)"
 
       - name: Install host compiler (g++-${{ matrix.gxx }})
         run: |
@@ -56,7 +74,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends g++-${{ matrix.gxx }}
 
       - name: Install CUDA toolkit (nvcc, no GPU)
-        uses: Jimver/cuda-toolkit@v0.2.19
+        uses: Jimver/cuda-toolkit@v0.2.35
         with:
           cuda: ${{ matrix.cuda }}
           method: 'network'
@@ -66,10 +84,10 @@ jobs:
         run: nvcc --version
 
       # Compile the device smoke TU only (`--compile`, no link, no run). The
-      # vendored CCCL headers are used so cuda::std::mdspan matches the host build.
+      # selected CCCL headers are used so cuda::std::mdspan matches the host build.
       - name: Compile-only device build
         run: |
-          nvcc -std=c++17 -ccbin g++-${{ matrix.gxx }} \
+          nvcc -std=c++17 -ccbin g++-${{ matrix.gxx }} -arch=${{ matrix.arch }} \
                -I include -I external/cccl/libcudacxx/include \
                --compile tests/nvcc_smoke.cu -o "$RUNNER_TEMP/nvcc_smoke.o"
-          echo "nvcc device-pass compile succeeded (CUDA ${{ matrix.cuda }})"
+          echo "nvcc device-pass compile succeeded (CUDA ${{ matrix.cuda }}, ${{ matrix.arch }})"

@@ -18,10 +18,18 @@ line. That choice is deliberate:
 
 - **2.x has mdspan** (added in the 2.2/2.3 timeframe), so teeny builds against it.
 - **2.8.2 spans the widest `nvcc` range** of any mdspan-capable CCCL: **CUDA
-  11.1 through 12.9**. One vendored copy covers every toolkit teeny targets today.
-- **3.x drops CUDA 11.** CCCL 3.0 raised its floor to **CUDA 12.0**, so adopting
-  a 3.x would forfeit the CUDA-11 wheels (see the strategy section). We stay on
-  2.8.2 until CUDA 13 / CCCL 3.x actually needs building.
+  11.1 through 12.9**. One vendored copy covers every CUDA-11/12 toolkit.
+- **3.x drops CUDA 11.** CCCL 3.0 raised its floor to **CUDA 12.0**, so it can't
+  be the *default* vendored copy without forfeiting the CUDA-11 wheels. It is
+  instead selected **per leg** for the CUDA-13 build (below), where 2.8.2 no
+  longer reaches.
+
+**CUDA 13** (released Aug 2025, now at 13.3) needs a **CCCL 3.x** — 2.8.2 caps at
+CUDA 12.9. teeny is source-clean on 3.x as well (it built on CCCL 3.3.0 before
+the 2.8.2 pin, and the rank-0 `stride()` guard 2.8.2 needs is inert there), so a
+CUDA-13 build just points the include knob at a 3.x — see
+[Building for CUDA 13](#building-for-cuda-13). Verified against **CCCL 3.4.0**
+(latest 3.x): the full host suite is 51/51 on g++ and clang++.
 
 teeny is source-compatible with 2.8.2 as-is (a single rank-0 `stride()` guard in
 `tensor.h` was the only adjustment 2.8.2's stricter, spec-conformant mdspan
@@ -45,10 +53,13 @@ Which CUDA toolkits each relevant CCCL release supports, and whether it has the
 |---|---|---|
 | ≤ 2.1 | 11.1 – 12.x | ✗ (not yet) |
 | 2.2 – 2.8.2 | **11.1 – 12.9** | **✓** |
-| 3.0+ | **12.0** – 13.x | ✓ (but no CUDA 11) |
+| 3.0 – 3.4.0 (latest) | **12.0 – 13.x** | ✓ (but no CUDA 11) |
 
-**Takeaway:** the 2.2 – 2.8.2 window is the only one that has mdspan *and* still
-supports CUDA 11. 2.8.2 is its newest point, so that is what teeny vendors.
+**Takeaways:** the 2.2 – 2.8.2 window is the only one that has mdspan *and* still
+supports CUDA 11 — 2.8.2 is its newest point, so that is teeny's default vendored
+copy. There is **no single CCCL that covers both CUDA 11 and CUDA 13**: 2.8.2 tops
+out at 12.9, and 3.x starts at 12.0. So a CUDA-13 build selects a 3.x for that leg
+(the two lines overlap on CUDA 12, so 12.x can use either).
 
 ## CCCL bundled with each CUDA toolkit
 
@@ -67,11 +78,15 @@ exactly why teeny does not depend on it. Approximate mapping (the toolkit's
 | 12.6 | ~2.5 | ✓ |
 | 12.8 | ~2.8 | ✓ |
 | 12.9 | 2.8.2 | ✓ |
+| 13.0 | 3.0 | ✓ |
+| 13.3 | ~3.3 | ✓ |
 
 The lesson: on CUDA 11.8 or 12.0–12.2, the *bundled* CCCL cannot build teeny at
-all — you **must** supply a newer CCCL. Vendoring 2.8.2 makes that automatic and
-identical across every toolkit, so the host and device builds see byte-identical
-headers regardless of which `nvcc` is installed.
+all — you **must** supply a newer CCCL. (CUDA 12.3+ and all of CUDA 13 bundle an
+mdspan-capable CCCL, so there the bundled copy *would* work — but teeny still
+vendors its own for a pinned, byte-identical version across toolchains.) Vendoring
+2.8.2 makes that automatic and identical across every CUDA-11/12 toolkit; the
+CUDA-13 leg swaps in a pinned 3.x the same way (below).
 
 ## Choosing a toolkit for your target hardware
 
@@ -90,6 +105,9 @@ Rules of thumb:
   This is the toolkit for maximum backward reach.
 - **CUDA 12.x** requires a newer driver (roughly **r525+**) and drops the oldest
   archs, but targets Hopper/Ada and current toolchains.
+- **CUDA 13.x** raises the offline-compile floor to **`sm_75` (Turing)** — Maxwell,
+  Pascal, and Volta are dropped — needs driver **~r580+**, and targets up to
+  Blackwell. It also requires a **CCCL 3.x** (2.8.2 stops at 12.9).
 - **Gencode:** embed PTX for the *oldest* arch you support plus SASS for the
   common ones, e.g. `-gencode arch=compute_52,code=sm_52 ... -gencode
   arch=compute_80,code=compute_80` (a trailing `code=compute_XX` PTX entry lets
@@ -98,25 +116,53 @@ Rules of thumb:
 ### Recommended wheel matrix (downstream: fastfields)
 
 `fastfields` ships wheels that cover as many GPUs and drivers as possible. The
-recommended build matrix, all on **vendored CCCL 2.8.2**:
+recommended build matrix:
 
-| Wheel | Built with `nvcc` | Reaches | Min driver |
-|---|---|---|---|
-| **cu11** | 11.8 | Kepler/Maxwell → Ada (via PTX JIT) | ~r450+ |
-| **cu12** | a 12.x (e.g. 12.6) | Volta → Hopper/Ada | ~r525+ |
+| Wheel | Built with `nvcc` | CCCL | Reaches | Min driver |
+|---|---|---|---|---|
+| **cu11** | 11.8 | vendored 2.8.2 | Kepler/Maxwell → Ada (via PTX JIT) | ~r450+ |
+| **cu12** | a 12.x (e.g. 12.6) | vendored 2.8.2 | Volta → Hopper/Ada | ~r525+ |
+| **cu13** | a 13.x (e.g. 13.0) | a 3.x (e.g. 3.4.0) | Turing → Blackwell (`sm_75+`) | ~r580+ |
 
-Two wheels, one CCCL. The cu11 wheel exists purely to reach old
-archs/drivers that CUDA 12 dropped; both compile the *same* teeny headers against
-the *same* vendored CCCL, so there is no source divergence to maintain — only the
-`nvcc`/`-gencode` differ.
+The `cu11`/`cu12` wheels share the vendored 2.8.2 and differ only in
+`nvcc`/`-gencode`. `cu13` is **additive**, not a replacement: it reaches the
+newest archs (Blackwell) but *cannot* reach pre-Turing GPUs, which is exactly what
+`cu11` is for. Its only source difference is the CCCL line — selected with the
+include knob, no `#ifdef`s in teeny.
 
-When CUDA 13 (and a required CCCL 3.x) ships, add a third leg that points its
-build at a vendored **3.x** via `CCCL_INC` / `TEENY_CCCL_INCLUDE`, selected by
-CUDA major version. Until then, 2.8.2 alone is correct and simplest.
+### Building for CUDA 13
+
+CUDA 13 shipped in Aug 2025 (now at 13.3). Because it needs a CCCL 3.x, point the
+include knob at one instead of the vendored 2.8.2 — everything else is unchanged:
+
+```sh
+# Fetch a CCCL 3.x once (or use one already installed / bundled with CUDA 13):
+git clone --depth 1 --branch v3.4.0 https://github.com/NVIDIA/cccl.git /opt/cccl-3x
+
+# Host suite against CCCL 3.x (proves source compatibility):
+make CCCL_INC=/opt/cccl-3x/libcudacxx/include run-test          # 51/51 on g++ and clang++
+
+# Device compile with nvcc 13 (Turing floor):
+nvcc -std=c++17 -arch=sm_75 -I include \
+     -I /opt/cccl-3x/libcudacxx/include --compile tests/nvcc_smoke.cu
+```
+
+CMake is the same one knob: `-DTEENY_CCCL_INCLUDE=/opt/cccl-3x/libcudacxx/include`
+(or install CCCL 3.x and let `find_package(CCCL)` find it). teeny is source-clean
+on both CCCL lines — the rank-0 `stride()` guard 2.8.2 requires is inert on 3.x —
+so no code changes are needed to move a build between them.
 
 ## CI
 
-`.github/workflows/nvcc-compile.yaml` proves both ends of the supported range: it
-compiles the device smoke TU with **`nvcc` 11.8** (the floor) and **`nvcc` 12.6**
-(a recent 12.x), each with its matching max host g++, all against the vendored
-CCCL 2.8.2. That guards the CUDA-11 floor from regressing.
+`.github/workflows/nvcc-compile.yaml` compiles the device smoke TU across the whole
+supported range, each leg against the CCCL that CUDA version needs:
+
+| Leg | `nvcc` | host g++ | CCCL | `-arch` |
+|---|---|---|---|---|
+| floor | 11.8 | g++-11 | vendored 2.8.2 | `sm_52` |
+| mid | 12.6 | g++-13 | vendored 2.8.2 | `sm_70` |
+| ceiling | 13.0 | g++-14 | 3.4.0 (checked out for the leg) | `sm_75` |
+
+The 2.x legs use the pinned submodule; the CUDA-13 leg checks out CCCL `v3.4.0`
+over it first. That guards both ends — the CUDA-11 floor and the CUDA-13
+ceiling — from regressing.
