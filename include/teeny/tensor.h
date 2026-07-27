@@ -1152,6 +1152,12 @@ public:
     _TNY_API tensor & mul_(T s);
     _TNY_API tensor & div_(T s);
 
+    /* --- fused scaled accumulate (BLAS axpy): *this += alpha*b / *this -= *
+     * alpha*b; the tensor rhs `b` broadcasts. `y.add_(x, a)` is axpy; a       *
+     * scaled copy `y = a*x` is `y.zero_().add_(x, a)`. --------------------- */
+    template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & add_(const B & b, T alpha);
+    template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & sub_(const B & b, T alpha);
+
     /* --- atomic accumulate aliases: readable spelling of the atomic scatter *
      * "push" write. `atomic_add_(x)` == `add_<true>(x)`, `atomic_sub_(x)` == *
      * `sub_<true>(x)` — atomic on device (a delta commit, not a read-modify- *
@@ -1213,6 +1219,10 @@ public:
     _TNY_API tensor & sign_();                 // -1 / 0 / +1
     _TNY_API tensor & pow_(T e);
     _TNY_API tensor & clamp_(T lo, T hi);      // clamp each element to [lo, hi]
+    _TNY_API tensor & normalize_();            // *this /= norm(*this)  (L2; floating element types)
+    template <long... Axes> _TNY_API tensor & normalize_();   // ...over the named axes (keepdim); axes distinct & ascending
+    template <class Tb, class Eb, class Lb, storage Ob>
+    _TNY_API tensor & cross_(const tensor<Tb,Eb,Lb,Ob> & b);   // *this = (*this) × b  (3D; rank-1, length 3)
 
     /* --- increment / decrement --------------------------------------- *
      * Prefix ++/-- mutate in place (add/subtract 1 from every element).

@@ -299,6 +299,7 @@ scalar rhs applies to every element.
 | Call | Notes |
 |---|---|
 | `a.add_(x)` `a.sub_(x)` `a.mul_(x)` `a.div_(x)` | `x` = tensor (broadcasts) or scalar |
+| `y.add_(x, alpha)` `y.sub_(x, alpha)` | fused scaled accumulate (BLAS axpy): `y ± alpha*x`, `x` broadcasts; scaled copy `y = alpha*x` is `y.zero_().add_(x, alpha)` |
 | `a.atomic_add_(x)` `a.atomic_sub_(x)` | atomic accumulate on device (`x` = tensor or scalar); underlying form is `add_<Atomic>`/`sub_<Atomic>` |
 | `a += x` `a -= x` `a *= x` `a /= x` | compound-assign sugar |
 | `++a` `--a` | prefix, in place |
@@ -348,6 +349,24 @@ makes that type both the accumulator **and** the result.
 
 Axis reductions: a fully static result → stack (host+device); any dynamic result
 → heap (host only).
+
+### Vector algebra & geometry
+
+Contained exact linear-algebra / geometry on views (no solves, inversion, or
+optimisation — those stay out of teeny).
+
+| Call | Returns | Notes |
+|---|---|---|
+| `sqnorm(a)` | `T` (accumulated wide) | Σ aᵢ² over all axes; == `dot(a, a)`. `sqnorm<Acc>` forces accumulator+result |
+| `sqnorm<Axes...>(a)` / `sqnorm(a, axis<...>{})` | lower-rank tensor | Σ aᵢ² over the named axes (reduction API, like `sum`); `sqnorm<Acc,Axes...>` |
+| `norm(a)` | floating (`T` for float `T`, **`double`** for integer `T`) | √Σ aᵢ² (L2 / Frobenius over all axes); `norm<Acc>` forces accumulator+result |
+| `norm<Axes...>(a)` / `norm(a, axis<...>{})` | lower-rank tensor (floating) | √Σ aᵢ² over the named axes; `norm<Acc,Axes...>` |
+| `a.normalize_()` | `tensor&` | in place `a /= norm(a)`; floating element types only; zero vector → NaN |
+| `a.normalize_<Axes...>()` | `tensor&` | in place, over the named axes (keepdim broadcast); axes distinct & ascending |
+| `normalize(a)` | new tensor (floating; integer → `double`) | out-of-place unit vector; static → stack, dynamic → heap |
+| `normalize<Axes...>(a)` / `normalize(a, axis<...>{})` | new tensor (floating) | out-of-place, over the named axes (keepdim) |
+| `cross(a, b)` | new stack 3-vector `promote(Ta,Tb)` | 3D cross product; operands rank-1, length 3 |
+| `a.cross_(b)` | `tensor&` | in place: `a` becomes `a × b` (rank-1, length 3; aliasing-safe). Into a separate slot: `slot.copy_(cross(a,b))` |
 
 **Input → output type — result element type.** The *accumulator* and the *result
 dtype* are separate. Default accumulator = `reduce_type_t<T>` (`double` for a

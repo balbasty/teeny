@@ -195,6 +195,7 @@ See [Views & structure](structure.md#nd-peel-iterate-a-subset-of-axes).
 // in-place (broadcasts tensor rhs; also scalar rhs). atomic_add_/atomic_sub_
 // accumulate ATOMICALLY on device (underlying form: add_<Atomic>/sub_<Atomic>).
 a.add_(x); a.sub_(x); a.mul_(x); a.div_(x);   a.atomic_add_(x); a.atomic_sub_(s);
+y.add_(x, alpha); y.sub_(x, alpha);  // fused axpy: y += alpha*x / y -= alpha*x (x broadcasts)
 a += x; a -= s; a *= x; a /= s;  // compound-assign
 ++a; --a; auto old = a++;        // prefix in place; postfix (static) -> stack copy
 a.neg_(); a.abs_(); a.exp_(); a.log_(); a.sin_(); a.cos_(); a.sqrt_(); a.tanh_();
@@ -221,6 +222,14 @@ allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (bro
 //   sum<Acc, Axes...>(a) makes Acc accumulator AND result (leading TYPE = acc, int = axis).
 sum<Axes...>(a); prod<...>(a); max<...>(a); min<...>(a); mean<...>(a);  // sum<Acc,Axes...>(a)
 sum(a, axis<0,2>{}); mean(a, axis<-1>{}); sum<double>(a, axis<0>{});    // numpy `axis=` value form
+
+// vector algebra & geometry (contained exact math; on views, host+device)
+sqnorm(a);            // Σaᵢ² over all axes (== dot(a,a)); sqnorm<Acc> forces acc+result
+norm(a);              // √Σaᵢ² (L2/Frobenius); floating result (int -> double); norm<Acc> too
+a.normalize_();       // in place a /= norm(a) (floating types); zero vector -> NaN
+auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, dyn->heap)
+auto c = cross(a, b);  a.cross_(b);          // 3D cross (rank-1 length-3): new / in place (a = a×b)
+                                             //   into a slot: slot.copy_(cross(a, b))
 ```
 
 Promotion: C++ rules but lower-width float wins (`-DTNY_STD_PROMOTION` opts out).

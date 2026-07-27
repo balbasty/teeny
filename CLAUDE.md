@@ -247,6 +247,8 @@ t(all, slice(none,none,-1));    // reverse a range (negative step; a[::-1])
 // --- math (in-place: any tensor/view; mutates *this) ---
 a.add_(b); a.sub_(b); a.mul_(b); a.div_(b);   // tensor rhs BROADCASTS numpy-style
 a.add_(2.0); a.mul_(0.5);                     // scalar rhs
+y.add_(x, alpha); y.sub_(x, alpha);           // FUSED axpy: y += alpha*x / y -= alpha*x (x
+                                              //   broadcasts). scaled copy y=alpha*x = y.zero_().add_(x,alpha)
 a += b; a -= 2.0; a *= b; a /= 2.0;           // compound-assign sugar (scalar or tensor)
 a.atomic_add_(b); a.atomic_sub_(2.0);         // ATOMIC accumulate (device scatter/push);
                                               //   underlying form: add_<Atomic>/sub_<Atomic>
@@ -293,6 +295,16 @@ auto m = a < b; a == 2.0; 3.0 < a;    // ==,!=,<,<=,>,>= ; scalar either side
 //   mean(int_tensor) -> DOUBLE (numpy: integer mean is float64); mean(float)->T.
 sum(a); prod(a); max(a); min(a); mean(a); dot(a,b);
 allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
+// --- vector algebra & geometry (contained exact math; NO solves/inversion/optimisation) ---
+sqnorm(a);  norm(a);                   // Σaᵢ² / √Σaᵢ² over ALL axes. sqnorm==dot(a,a); norm floating
+                      //   (int->double, mean rule). sqnorm<Acc>/norm<Acc> = leading TYPE = acc+result.
+sqnorm<1>(a); norm<0,2>(a); norm(a,axis<-1>{});  // ...over NAMED AXES -> lower-rank tensor (reduction
+                      //   API, like sum; sqnorm<Acc,Axes...>/norm<Acc,Axes...> too).
+a.normalize_();  auto u = normalize(a);// in place a/=norm(a) (floating) / out-of-place unit vector.
+                      //   normalize static->stack, dynamic->heap; zero vector -> NaN (no epsilon)
+a.normalize_<1>(); normalize<-1>(a);   // ...over NAMED AXES (keepdim broadcast); axes distinct & ascending
+auto c = cross(a,b);  a.cross_(b);     // 3D cross product (rank-1, length 3): new / in place (a=a×b).
+                      //   Into a separate slot: slot.copy_(cross(a,b)). (no crossto_/out-param form.)
 // --- axis reductions -> a lower-rank TENSOR (named axes removed; negatives wrap).
 //   Same rule: accumulate in reduce_type, result element type = the tensor's type
 //   (mean over an integer tensor is the exception: DOUBLE, like the scalar mean).
