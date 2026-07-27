@@ -540,6 +540,14 @@ Tests return non-zero on failure (the return code is the failing check number).
 kernels and validate them numerically against hand-written references — when you
 change math or layout code, these are the ones that catch regressions.
 
+**Never commit build output.** `make` writes compiled binaries into `BUILDDIR`
+(default `./build`; a second-compiler run is usually `make BUILDDIR=./build-clang`
+or similar). `.gitignore` ignores `build*/`, so every conventional build dir is
+covered — but if you point `BUILDDIR` somewhere else, ignore that path too and
+**`git status` before every commit**: a stray `build*/` or a compiled test binary
+(extensionless ELF, so `*.out`/`*.exe` won't catch it) in the staged set means the
+gitignore was bypassed — never `git add -A` past it.
+
 ## Downstream: fastfields
 
 teeny is the substrate for the `fastfields` kernels (spline pull/push, distance

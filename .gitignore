@@ -1,5 +1,8 @@
-# Build directory
-build/
+# Build directories — the default `./build` and any custom BUILDDIR
+# (`make BUILDDIR=./build-clang`, `build-gcc`, …). The trailing `/` keeps it
+# to directories; the glob catches every variant so compiled test binaries
+# (which are extensionless ELF files, not caught by *.out/*.exe) never leak in.
+build*/
 
 # Prerequisites
 *.d
