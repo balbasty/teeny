@@ -1413,6 +1413,59 @@ _TNY_API auto mean(const tensor<T,E,L,O> & a) {
 }
 
 /* ------------------------------------------------------------------ *
+ *     into(dest) on reductions — numpy/pytorch `out=`                 *
+ * ------------------------------------------------------------------ *
+ * A FULL reduction writes its scalar into a rank-0 destination
+ * (`local<T>{}`, or `wrap(&x, shape<>{})` over an address) — one store,
+ * no allocation. An AXIS reduction copies its lower-rank result into
+ * `dest`. `dest` may differ in dtype (result cast) / be a strided slot;
+ * extents are checked. Returns `dest&`. The three template shapes mirror
+ * the reductions themselves: bare (`sum(a, into(d))`) and leading-type
+ * (`sum<double>(a, into(d))`) are the FULL forms; a leading axis
+ * (`sum<0>(a, into(d))`) or type+axis (`sum<double,0>(a, into(d))`)
+ * selects the AXIS form (static result -> _TNY_API, dynamic -> _TNY_HOST,
+ * so a device path never calls the host allocator). */
+#define _TNY_RED_INTO(NAME)                                                                          \
+template <class Acc = void, class T,class E,class L,storage O, class D>                              \
+_TNY_API auto & NAME(const tensor<T,E,L,O> & a, into_t<D> out) {                                     \
+    out.dest.fill_(static_cast<typename D::element_type>(NAME<Acc>(a))); return out.dest; }          \
+template <long... Axes, class T,class E,class L,storage O, class D,                                  \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
+_TNY_API  auto & NAME(const tensor<T,E,L,O> & a, into_t<D> out) { out.dest.copy_(NAME<Axes...>(a)); return out.dest; } \
+template <long... Axes, class T,class E,class L,storage O, class D,                                  \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
+_TNY_HOST auto & NAME(const tensor<T,E,L,O> & a, into_t<D> out) { out.dest.copy_(NAME<Axes...>(a)); return out.dest; } \
+template <class Acc, long... Axes, class T,class E,class L,storage O, class D,                       \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
+_TNY_API  auto & NAME(const tensor<T,E,L,O> & a, into_t<D> out) { out.dest.copy_(NAME<Acc, Axes...>(a)); return out.dest; } \
+template <class Acc, long... Axes, class T,class E,class L,storage O, class D,                       \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
+_TNY_HOST auto & NAME(const tensor<T,E,L,O> & a, into_t<D> out) { out.dest.copy_(NAME<Acc, Axes...>(a)); return out.dest; } \
+/* value forms take into too: NAME(a, axis<Axes...>{}, into(d)) == NAME<Axes...>(a, into(d)) */      \
+template <long... Axes, class T,class E,class L,storage O, class D,                                  \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
+_TNY_API  auto & NAME(const tensor<T,E,L,O> & a, axis<Axes...>, into_t<D> out) { return NAME<Axes...>(a, out); } \
+template <long... Axes, class T,class E,class L,storage O, class D,                                  \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
+_TNY_HOST auto & NAME(const tensor<T,E,L,O> & a, axis<Axes...>, into_t<D> out) { return NAME<Axes...>(a, out); } \
+template <class Acc, long... Axes, class T,class E,class L,storage O, class D,                       \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
+_TNY_API  auto & NAME(const tensor<T,E,L,O> & a, axis<Axes...>, into_t<D> out) { return NAME<Acc, Axes...>(a, out); } \
+template <class Acc, long... Axes, class T,class E,class L,storage O, class D,                       \
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
+_TNY_HOST auto & NAME(const tensor<T,E,L,O> & a, axis<Axes...>, into_t<D> out) { return NAME<Acc, Axes...>(a, out); }
+_TNY_RED_INTO(sum)  _TNY_RED_INTO(prod)  _TNY_RED_INTO(max)  _TNY_RED_INTO(min)
+_TNY_RED_INTO(mean) _TNY_RED_INTO(sqnorm) _TNY_RED_INTO(norm)
+#undef _TNY_RED_INTO
+
+/** @brief `dot(a, b, into(d))` — inner product written into a rank-0 dest. */
+template <class Acc = void, class Ta,class Ea,class La,storage Oa,
+          class Tb,class Eb,class Lb,storage Ob, class D>
+_TNY_API auto & dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) {
+    out.dest.fill_(static_cast<typename D::element_type>(dot<Acc>(a, b))); return out.dest;
+}
+
+/* ------------------------------------------------------------------ *
  *     Out-of-place producers AS METHODS (parity with a.add(b))       *
  *     — thin forwarders to the free forms / engines above.           *
  * ------------------------------------------------------------------ */

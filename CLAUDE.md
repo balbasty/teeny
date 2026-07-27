@@ -303,6 +303,9 @@ auto m = a < b; a == 2.0; 3.0 < a;    // ==,!=,<,<=,>,>= ; scalar either side
 //   result: sum<double>(a), dot<double>(a,b), sum<int64_t>(int8_tensor) (untruncated).
 //   mean(int_tensor) -> DOUBLE (numpy: integer mean is float64); mean(float)->T.
 sum(a); prod(a); max(a); min(a); mean(a); dot(a,b);
+sum(a, into(cell)); dot(a,b,into(cell));  // into(dest) too: a FULL reduction writes its scalar
+                      //   into a RANK-0 dest (local<T,shape<>>{}, or wrap(&x,shape<>{}) over an
+                      //   address); dtype casts, extents checked, returns dest&.
 allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
 // --- vector algebra & geometry (contained exact math; NO solves/inversion/optimisation) ---
 sqnorm(a);  norm(a);                   // Σaᵢ² / √Σaᵢ² over ALL axes. sqnorm==dot(a,a); norm floating
@@ -323,6 +326,8 @@ sum<0>(a); mean<0,2>(a); max<1>(a); min<-1>(a); prod<0>(a); sum<double,0>(a);
 //   VALUE FORM (numpy `axis=`): sum(a, axis<0,2>{}) == sum<0,2>(a); sum<double>(a, axis<0>{})
 //   == sum<double,0>(a). Deduced -> no `.template` on a dependent receiver.
 //   static result -> stack (host+device); any dynamic -> heap (HOST ONLY: allocates)
+sum<0>(a, into(buf)); mean(a, axis<1>{}, into(buf));  // into(dest) too -> copies the lower-rank
+                      //   result into buf (any spelling: <Axes>, <Acc,Axes>, or the axis<...> value form)
 
 // --- nd-peel: iterate a SUBSET of axes, each yielding a lower-rank view ---
 for (auto line : peel<0,1>(t)) f(line);   // peel axes 0,1; each `line` is a view. The range-for is

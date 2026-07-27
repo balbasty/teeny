@@ -222,12 +222,15 @@ normalize(a, into(y));  cross(a, b, into(N.at(i)));   // cross into a slot ("cro
 //   the tensor's element type: sum(float)->float. A leading TYPE arg makes that
 //   type BOTH accumulator and result: sum<double>(a), dot<double>(a,b).
 sum(a); prod(a); max(a); min(a); mean(a); dot(a, b);   // sum<Acc>(a), mean<Acc>(a), ...
+sum(a, into(cell)); dot(a, b, into(cell));  // into(dest): FULL reduction -> a RANK-0 dest
+                      //   (local<T,shape<>>{} or wrap(&x,shape<>{})); dtype casts, returns dest&
 allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
 // axis reductions -> lower-rank tensor (named axes removed; negatives wrap). Same
 //   rule: accumulate in reduce_type, result element type = the tensor's type;
 //   sum<Acc, Axes...>(a) makes Acc accumulator AND result (leading TYPE = acc, int = axis).
 sum<Axes...>(a); prod<...>(a); max<...>(a); min<...>(a); mean<...>(a);  // sum<Acc,Axes...>(a)
 sum(a, axis<0,2>{}); mean(a, axis<-1>{}); sum<double>(a, axis<0>{});    // numpy `axis=` value form
+sum<0>(a, into(buf)); mean(a, axis<1>{}, into(buf));  // into(dest) -> copies lower-rank result
 
 // vector algebra & geometry (contained exact math; on views, host+device)
 sqnorm(a);            // Σaᵢ² over all axes (== dot(a,a)); sqnorm<Acc> forces acc+result

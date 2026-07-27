@@ -338,6 +338,8 @@ have a different dtype (the result is cast to it); its extents are checked.
 | `exp(a, into(y))` … (every unary) | `y&` |
 | `minimum(a,b,into(y))` `maximum(a,s,into(y))` `clamp(a,lo,hi,into(y))` | `y&` |
 | `normalize(a, into(y))` `cross(a,b,into(y))` | `y&` |
+| `sum(a, into(cell))` … `dot(a,b,into(cell))` | `cell&` (full reduction → **rank-0** dest) |
+| `sum<0>(m, into(buf))` `mean(m, axis<1>{}, into(buf))` | `buf&` (axis reduction → lower-rank dest) |
 
 ### Comparisons → a `bool` tensor (broadcast), reduced with `.all()`/`.any()`
 
@@ -366,6 +368,14 @@ makes that type both the accumulator **and** the result.
 
 Axis reductions: a fully static result → stack (host+device); any dynamic result
 → heap (host only).
+
+Reductions also take **`into(dest)`** (the `out=` spelling). A **full** reduction
+writes its scalar into a **rank-0** destination — `sum(a, into(cell))`,
+`dot(a, b, into(cell))`, where `cell` is a `local<T, shape<>>{}` or a rank-0 view
+over an address `wrap(&x, shape<>{})`. An **axis** reduction copies its lower-rank
+result into `dest` — `sum<0>(m, into(buf))`, and the `axis<...>` value form takes
+`into` too (`mean(m, axis<1>{}, into(buf))`). Dtype casts, extents are checked, and
+the destination is returned by reference.
 
 ### Vector algebra & geometry
 
