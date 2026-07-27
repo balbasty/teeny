@@ -1412,6 +1412,43 @@ _TNY_API auto mean(const tensor<T,E,L,O> & a) {
     return static_cast<Res>(m);
 }
 
+/* ------------------------------------------------------------------ *
+ *     Out-of-place producers AS METHODS (parity with a.add(b))       *
+ *     — thin forwarders to the free forms / engines above.           *
+ * ------------------------------------------------------------------ */
+#define _TNY_OOP_UNARY_M(NAME, F)                                                                  \
+template <class T,class E,class L,storage O> _TNY_API auto tensor<T,E,L,O>::NAME() const            \
+{ return _md::uop_out(*this, _md::F{}); }                                                           \
+template <class T,class E,class L,storage O> template <class D>                                     \
+_TNY_API auto & tensor<T,E,L,O>::NAME(into_t<D> out) const { _md::uop_to(out.dest, *this, _md::F{}); return out.dest; }
+_TNY_OOP_UNARY_M(neg,   u_neg)   _TNY_OOP_UNARY_M(abs,   u_abs)   _TNY_OOP_UNARY_M(exp,   u_exp)
+_TNY_OOP_UNARY_M(log,   u_log)   _TNY_OOP_UNARY_M(sin,   u_sin)   _TNY_OOP_UNARY_M(cos,   u_cos)
+_TNY_OOP_UNARY_M(sqrt,  u_sqrt)  _TNY_OOP_UNARY_M(tanh,  u_tanh)  _TNY_OOP_UNARY_M(floor, u_floor)
+_TNY_OOP_UNARY_M(ceil,  u_ceil)  _TNY_OOP_UNARY_M(round, u_round) _TNY_OOP_UNARY_M(trunc, u_trunc)
+_TNY_OOP_UNARY_M(sign,  u_sign)
+#undef _TNY_OOP_UNARY_M
+
+template <class T,class E,class L,storage O> template <class B>
+_TNY_API auto tensor<T,E,L,O>::minimum(const B & b) const { return tny::minimum(*this, b); }
+template <class T,class E,class L,storage O> template <class B>
+_TNY_API auto tensor<T,E,L,O>::maximum(const B & b) const { return tny::maximum(*this, b); }
+template <class T,class E,class L,storage O> template <class B, class D>
+_TNY_API auto & tensor<T,E,L,O>::minimum(const B & b, into_t<D> out) const { return tny::minimum(*this, b, out); }
+template <class T,class E,class L,storage O> template <class B, class D>
+_TNY_API auto & tensor<T,E,L,O>::maximum(const B & b, into_t<D> out) const { return tny::maximum(*this, b, out); }
+template <class T,class E,class L,storage O>
+_TNY_API auto tensor<T,E,L,O>::clamp(T lo, T hi) const { return tny::clamp(*this, lo, hi); }
+template <class T,class E,class L,storage O> template <class D>
+_TNY_API auto & tensor<T,E,L,O>::clamp(T lo, T hi, into_t<D> out) const { return tny::clamp(*this, lo, hi, out); }
+template <class T,class E,class L,storage O>
+_TNY_API auto tensor<T,E,L,O>::normalize() const { return tny::normalize(*this); }
+template <class T,class E,class L,storage O> template <class D>
+_TNY_API auto & tensor<T,E,L,O>::normalize(into_t<D> out) const { return tny::normalize(*this, out); }
+template <class T,class E,class L,storage O> template <class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto tensor<T,E,L,O>::cross(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::cross(*this, b); }
+template <class T,class E,class L,storage O> template <class Tb,class Eb,class Lb,storage Ob, class D>
+_TNY_API auto & tensor<T,E,L,O>::cross(const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) const { return tny::cross(*this, b, out); }
+
 _TNY_NAMESPACE_END(tny)
 
 #endif // TNY_MD_MATH

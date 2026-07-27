@@ -122,6 +122,12 @@ auto mn = minimum(a, b);   auto mx = maximum(a, 2.0);  // elementwise binary min
 auto cl = clamp(a, lo, hi);                            // elementwise clamp
 ```
 
+Every out-of-place producer is **also a method**, for parity with `a.add(b)` and
+for chaining — `a.exp()`, `a.sqrt()`, `a.minimum(b)`, `a.clamp(lo, hi)`,
+`a.normalize()`, `a.cross(b)`, … — and each takes the same optional `into(y)`
+(`a.exp(into(y))`). The free forms (`exp(a)`) and the in-place `_` forms
+(`a.exp_()`) still exist; pick whichever reads best.
+
 ### Writing into a preallocated destination — `into(dest)`
 
 Pass `into(y)` as the **last** argument to any of these producers to write the
