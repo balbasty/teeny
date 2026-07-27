@@ -219,16 +219,24 @@ sqnorm(a);            // Σ aᵢ²  over ALL axes — this is dot(a, a)
 norm(a);              // √Σ aᵢ² (L2). floating result; an INTEGER input -> double (like mean)
 sqnorm<double>(a);    // leading TYPE = accumulator AND result (as with sum/dot)
 
+sqnorm<1>(a);  norm<0,2>(a);  norm(a, axis<-1>{});   // OVER NAMED AXES -> lower-rank tensor
+norm<double,1>(a);                                   // ...with a leading accumulator type (like sum)
+
 a.normalize_();       // in place: a /= norm(a)   (floating element types)
 auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, dynamic->heap)
+a.normalize_<1>();  normalize<-1>(a);  normalize(a, axis<1>{});   // OVER NAMED AXES (keepdim broadcast)
 
 auto c = cross(a, b);       // 3D cross product a × b -> new stack 3-vector (rank-1, length 3)
 a.cross_(b);                // in place: a becomes a × b (mirrors add_/mul_; aliasing-safe)
 slot.copy_(cross(a, b));    // write into a preallocated slot with no new vocabulary
 ```
 
-`sqnorm`/`norm` accumulate in the reduce type (§ *Accumulator type vs result
-type*) and reduce over every axis (so `norm` of a matrix is the Frobenius norm).
+`sqnorm`/`norm` are reductions: with no axes they reduce over everything (so `norm`
+of a matrix is the Frobenius norm); with `<Axes...>` (or the `axis<...>` value form,
+or a leading accumulator type) they reduce over just those axes into a lower-rank
+tensor — the same API as `sum`/`mean`. `normalize`/`normalize_` mirror it: with
+`<Axes...>` each sub-vector is divided by its norm over those axes (the reduced axes
+are kept as size-1 so the norm broadcasts back). Axes must be distinct and ascending.
 `normalize` of a zero vector yields NaNs — this is exact math with no epsilon; add
 one at the call site if you need it. `cross` is defined only for rank-1, length-3
 operands (a `static_assert` catches a wrong static length; a runtime length is

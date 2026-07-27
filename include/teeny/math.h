@@ -141,6 +141,7 @@ struct r_any { template <class X> _TNY_API bool operator()(bool a, X x) const { 
 
 /* ---- reduce ops (acc = op(acc, x)) ------------------------------- */
 struct r_add { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a + static_cast<A>(x); } };
+struct r_addsq { template <class A, class X> _TNY_API A operator()(A a, X x) const { A xx = static_cast<A>(x); return a + xx * xx; } };  // Σx² (for sqnorm/norm)
 struct r_mul { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a * static_cast<A>(x); } };
 struct r_max { template <class A, class X> _TNY_API A operator()(A a, X x) const { A y = static_cast<A>(x); return y > a ? y : a; } };
 struct r_min { template <class A, class X> _TNY_API A operator()(A a, X x) const { A y = static_cast<A>(x); return y < a ? y : a; } };
@@ -1072,10 +1073,11 @@ _TNY_API  auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>) { return NAME<Acc,
 template <class Acc, long... Axes, class T,class E,class L,storage O,                                   \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
 _TNY_HOST auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>) { return NAME<Acc, Axes...>(a); }
-_TNY_MD_AXRED(sum,  R(0),                          r_add)
-_TNY_MD_AXRED(prod, R(1),                          r_mul)
-_TNY_MD_AXRED(max,  _reduce_seed_lowest<R>(),  r_max)
-_TNY_MD_AXRED(min,  _reduce_seed_highest<R>(), r_min)
+_TNY_MD_AXRED(sum,    R(0),                        r_add)
+_TNY_MD_AXRED(prod,   R(1),                        r_mul)
+_TNY_MD_AXRED(max,    _reduce_seed_lowest<R>(),  r_max)
+_TNY_MD_AXRED(min,    _reduce_seed_highest<R>(), r_min)
+_TNY_MD_AXRED(sqnorm, R(0),                        r_addsq)   // Σaᵢ² over the named axes (result type = T, like sum)
 #undef _TNY_MD_AXRED
 
 /** @brief Mean over the named axes -> a lower-rank tensor (sum / reduced count).
@@ -1164,6 +1166,39 @@ _TNY_API auto norm(const tensor<T,E,L,O> & a) {
     return static_cast<Res>(cs::sqrt(static_cast<D>(sqnorm<R>(a))));
 }
 
+/* --- axis norm: √(Σaᵢ² over the named axes) -> a lower-rank tensor. Floating result
+ *     (integer -> double, mean rule); norm<Acc,Axes...> makes Acc accumulator+result.
+ *     Accumulates the squares in a floating type and takes the root there. --------- */
+template <long... Axes, class T,class E,class L,storage O,
+          class Res = _mean_result_t<T>, class R = reduce_type_t<T>,
+          class D   = cs::conditional_t<cs::is_floating_point<R>::value, R, double>,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
+_TNY_API  auto norm(const tensor<T,E,L,O> & a) { auto s = sqnorm<D, Axes...>(a); s.sqrt_(); return _md::reduce_to<Res>(static_cast<decltype(s)&&>(s)); }
+template <long... Axes, class T,class E,class L,storage O,
+          class Res = _mean_result_t<T>, class R = reduce_type_t<T>,
+          class D   = cs::conditional_t<cs::is_floating_point<R>::value, R, double>,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
+_TNY_HOST auto norm(const tensor<T,E,L,O> & a) { auto s = sqnorm<D, Axes...>(a); s.sqrt_(); return _md::reduce_to<Res>(static_cast<decltype(s)&&>(s)); }
+template <class Acc, long... Axes, class T,class E,class L,storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
+_TNY_API  auto norm(const tensor<T,E,L,O> & a) { auto s = sqnorm<Acc, Axes...>(a); s.sqrt_(); return s; }
+template <class Acc, long... Axes, class T,class E,class L,storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
+_TNY_HOST auto norm(const tensor<T,E,L,O> & a) { auto s = sqnorm<Acc, Axes...>(a); s.sqrt_(); return s; }
+// value forms: norm(a, axis<Axes...>{}) == norm<Axes...>(a)
+template <long... Axes, class T,class E,class L,storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
+_TNY_API  auto norm(const tensor<T,E,L,O> & a, axis<Axes...>) { return norm<Axes...>(a); }
+template <long... Axes, class T,class E,class L,storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
+_TNY_HOST auto norm(const tensor<T,E,L,O> & a, axis<Axes...>) { return norm<Axes...>(a); }
+template <class Acc, long... Axes, class T,class E,class L,storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
+_TNY_API  auto norm(const tensor<T,E,L,O> & a, axis<Axes...>) { return norm<Acc, Axes...>(a); }
+template <class Acc, long... Axes, class T,class E,class L,storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
+_TNY_HOST auto norm(const tensor<T,E,L,O> & a, axis<Axes...>) { return norm<Acc, Axes...>(a); }
+
 /** @brief Out-of-place unit vector `a / norm(a)` -> a NEW dense tensor (static
  *         shape -> stack, dynamic -> heap). The result element type is floating
  *         (integer input -> `double`, like `norm`). A zero vector yields NaNs
@@ -1178,6 +1213,32 @@ _TNY_API auto normalize(const tensor<T,E,L,O> & a) {
     using S = compute_type_t<_mean_result_t<T>>;
     return a.div(static_cast<S>(norm(a)));
 }
+
+/* --- axis normalize: divide each sub-vector by its norm over the named axes ------ *
+ * `n = norm<Axes...>(a)` removes the reduced axes; restore them as size-1 (keepdim)
+ * so it broadcasts back over `a`. Inserting size-1 axes at ascending positions (each
+ * unsqueeze grows the rank for the next), so the axes must be distinct & ascending. */
+_TNY_API constexpr bool _axes_ascending() { return true; }
+_TNY_API constexpr bool _axes_ascending(long) { return true; }
+template <class... R> _TNY_API constexpr bool _axes_ascending(long a, long b, R... r) { return a < b && _axes_ascending(b, r...); }
+// keepdim view fold: insert a size-1 axis at each (ascending, already-normalised) position.
+template <class Tn> _TNY_API auto _keepdims(const Tn & t) { return t; }
+template <long A0, long... Rest, class Tn> _TNY_API auto _keepdims(const Tn & t) { return _keepdims<Rest...>(t.template unsqueeze<A0>()); }
+
+/** @brief `normalize<Axes...>(a)` — unit vectors along the named axes: each element
+ *         divided by the L2 norm over those axes (keepdim broadcast). Floating result
+ *         (integer -> double). Axes distinct & ascending (numpy-normalised). */
+template <long... Axes, class T, class E, class L, storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+_TNY_API auto normalize(const tensor<T,E,L,O> & a) {
+    static_assert(_axes_ascending(_norm_axis(Axes, (long)E::rank())...), "normalize: axes must be distinct and ascending");
+    auto n = norm<Axes...>(a);                                          // reduced norm (floating tensor)
+    return a.div(_keepdims<_norm_axis(Axes, (long)E::rank())...>(n));   // broadcast-divide (keepdim)
+}
+// value form: normalize(a, axis<Axes...>{}) == normalize<Axes...>(a)
+template <long... Axes, class T, class E, class L, storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+_TNY_API auto normalize(const tensor<T,E,L,O> & a, axis<Axes...>) { return normalize<Axes...>(a); }
 
 // internal: 3D cross product a × b into `out` (all rank-1, length 3). Computes the
 // three components into temporaries FIRST, so `out` may alias `a` or `b` (this is
@@ -1227,6 +1288,16 @@ _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::normalize_() {
     static_assert(cs::is_floating_point<compute_type_t<T>>::value,
                   "normalize_: requires a floating-point element type (integer division would truncate)");
     return div_(static_cast<T>(norm(*this)));
+}
+// in-place unit vectors along the named axes: *this /= norm(*this over Axes) (keepdim).
+template <class T,class E,class L,storage O> template <long... Axes>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::normalize_() {
+    static_assert(cs::is_floating_point<compute_type_t<T>>::value,
+                  "normalize_: requires a floating-point element type (integer division would truncate)");
+    static_assert(sizeof...(Axes) > 0, "normalize_<Axes...>: need at least one axis");
+    static_assert(_axes_ascending(_norm_axis(Axes, (long)rank())...), "normalize_: axes must be distinct and ascending");
+    auto n = tny::norm<Axes...>(*this);                                          // reduced norm (floating tensor)
+    return div_(_keepdims<_norm_axis(Axes, (long)rank())...>(n));                // broadcast-divide (keepdim)
 }
 
 /** @brief True if every element satisfies `|a-b| <= atol + rtol*|b|` (numpy

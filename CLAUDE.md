@@ -297,8 +297,11 @@ allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (bro
 // --- vector algebra & geometry (contained exact math; NO solves/inversion/optimisation) ---
 sqnorm(a);  norm(a);                   // Σaᵢ² / √Σaᵢ² over ALL axes. sqnorm==dot(a,a); norm floating
                       //   (int->double, mean rule). sqnorm<Acc>/norm<Acc> = leading TYPE = acc+result.
+sqnorm<1>(a); norm<0,2>(a); norm(a,axis<-1>{});  // ...over NAMED AXES -> lower-rank tensor (reduction
+                      //   API, like sum; sqnorm<Acc,Axes...>/norm<Acc,Axes...> too).
 a.normalize_();  auto u = normalize(a);// in place a/=norm(a) (floating) / out-of-place unit vector.
                       //   normalize static->stack, dynamic->heap; zero vector -> NaN (no epsilon)
+a.normalize_<1>(); normalize<-1>(a);   // ...over NAMED AXES (keepdim broadcast); axes distinct & ascending
 auto c = cross(a,b);  a.cross_(b);     // 3D cross product (rank-1, length 3): new / in place (a=a×b).
                       //   Into a separate slot: slot.copy_(cross(a,b)). (no crossto_/out-param form.)
 // --- axis reductions -> a lower-rank TENSOR (named axes removed; negatives wrap).

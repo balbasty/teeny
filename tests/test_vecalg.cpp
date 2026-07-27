@@ -123,5 +123,32 @@ int main() {
     auto dn = normalize(d);          // heap result
     if (!close(norm(dn), 1.0))       return 28;
 
+    // ---- axis sqnorm / norm (reduction API: <Axes...>, axis<...>, <Acc>) ----
+    auto M2 = local<double, shape<2,3>>();
+    M2(0,0)=3; M2(0,1)=0; M2(0,2)=4;   // row0: sq=25, |.|=5
+    M2(1,0)=0; M2(1,1)=6; M2(1,2)=8;   // row1: sq=100, |.|=10
+    auto sqr = sqnorm<1>(M2);          // over axis 1 -> (2,)
+    static_assert(decltype(sqr)::rank() == 1, "axis sqnorm -> lower rank");
+    if (sqr(0) != 25 || sqr(1) != 100) return 29;
+    auto nr = norm<1>(M2);
+    if (!close(nr(0), 5.0) || !close(nr(1), 10.0)) return 30;
+    if (!close(norm(M2, axis<1>{})(1), 10.0))      return 31;   // value form
+    if (sqnorm<double,0>(M2)(1) != 36.0)           return 32;   // over axis 0, <Acc>
+    // integer axis norm -> double (mean rule)
+    auto Mi = local<int, shape<2,2>>(); Mi(0,0)=3; Mi(0,1)=4; Mi(1,0)=6; Mi(1,1)=8;
+    auto nri = norm<1>(Mi);
+    static_assert(cs::is_same<typename decltype(nri)::element_type, double>::value, "int axis norm -> double");
+    if (!close(nri(0), 5.0) || !close(nri(1), 10.0)) return 33;
+
+    // ---- axis normalize / normalize_ (keepdim broadcast) -----------------
+    auto un = normalize<1>(M2);        // unit rows
+    if (!close(un(0,0),0.6) || !close(un(0,2),0.8) || !close(un(1,1),0.6)) return 34;
+    if (!close(norm<1>(un)(0), 1.0) || !close(norm<1>(un)(1), 1.0))        return 35;
+    auto Mn = M2; Mn.normalize_<1>();  // in place
+    if (!close(Mn(0,2),0.8) || !close(Mn(1,2),0.8)) return 36;
+    // normalize along axis 0 (columns)
+    auto uc = normalize<0>(M2);
+    if (!close(norm<0>(uc)(0), 1.0))   return 37;
+
     return 0;
 }
