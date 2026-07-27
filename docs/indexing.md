@@ -83,7 +83,7 @@ view into the same memory:
 | `all` | keep the whole axis |
 | `slice(a, b)` | half-open range `[a, b)` |
 | `slice(a, b, step)` | strided range (`step` may be negative) |
-| `none` | an open end inside a `slice` |
+| `none` (or `newaxis`) | inside a `slice`: an open end. As a **bare argument**: insert a new size-1 axis |
 | `ellipsis` (or `etc`) | stand-in for as many `all` as it takes to fill the rank |
 
 ```cpp
@@ -116,6 +116,29 @@ t(1, etc, 2);        // `etc` is the same marker under another name (== ellipsis
 `ellipsis` and `etc` are two names for one marker — "the unspecified middle axes."
 `etc` is the spelling used in an [`anyshape<etc, …>`](dispatch.md) boundary tag; both
 names work in both places.
+
+### Inserting a new axis — `none` / `newaxis`
+
+A **bare** `none` argument (not inside a `slice`) is numpy's `newaxis`
+(`a[None]` / `a[np.newaxis]`): it inserts a size-1 axis at that position and
+consumes no source axis — the mirror of an integer, which consumes a source
+axis and emits nothing. `newaxis` is just a named alias of `none`, for
+readers who'd rather spell it that way (as far as teeny is concerned they are
+the exact same value):
+
+```cpp
+t(none, all, all);      // (H,W) -> (1,H,W): insert a leading axis
+t(all, all, none);      // (H,W) -> (H,W,1): insert a trailing axis
+t(newaxis, all, all);   // identical to the first line
+t(0, none, all);        // (H,W) -> (1,W): int drops an axis, none adds one back
+t(none, ellipsis);      // ellipsis + none compose freely
+```
+
+`t(none, ...)` at position `k` is the same view as `t.unsqueeze<k>()`; the
+inserted axis has static extent 1 and stride 0 (it's a broadcast axis, so
+writing through it writes the single underlying row/column). Any number of
+`none`/`newaxis` args can appear alongside integers, ranges, and (at most one)
+ellipsis in the same call.
 
 If what remains after expansion is all integers you get an element `T&`; anything
 else yields a view. Assigning into a slice — `t(...) = b`, `t(0, all) = 5.0` —

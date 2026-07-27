@@ -125,6 +125,8 @@ x(1, etc, 2);                   // `etc` == `ellipsis` (one marker, two names)
 x(ellipsis) = b;  x(0, all) = v;  // assign INTO a slice copies/fills (a = b rebinds)
 slice(start, stop);  slice(start, stop, step);  // half-open range, optional (neg) step
 none;  all;                     // open slice end (== python None); keep-axis marker
+x(none, all, all);  x(0, newaxis, all);   // BARE none/newaxis arg -> insert a size-1
+                    //   axis (== unsqueeze at that position); newaxis is an alias of none
 x.take_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest
 x.uget(i, j, k);  x.uget(0, slice(1,4));  x.uget(1, ellipsis);  x.uat(i...);
                     // uget = unchecked twin of operator() (element/slice/ellipsis,
