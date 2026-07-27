@@ -24,40 +24,69 @@ permissions:
 
 jobs:
   nvcc-compile:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # Prove the whole supported CUDA range with the CCCL each toolkit uses — the
+      # same selection the build does automatically: nvcc <= 12.x uses the vendored
+      # CCCL 2.8.2 (via `cccl_inc`), nvcc 13 uses its own bundled 3.x (`cccl_inc`
+      # empty, so no -I). See docs/cuda-compat.md.
+      #   cccl_inc: CCCL include dir to add (vendored path), or empty for bundled
+      #   arch:     the -arch floor for that toolkit (sm_52 Kepler/Maxwell … sm_75 Turing)
+      #   os:       the runner image. CUDA 11.8's apt packages only exist in NVIDIA's
+      #             ubuntu2204 repo (not ubuntu2404), so the 11.8 leg pins ubuntu-22.04;
+      #             12.6/13.0 install cleanly on ubuntu-latest (24.04).
+      matrix:
+        include:
+          - cuda: '11.8.0'
+            gxx: '11'
+            cccl_inc: 'external/cccl/libcudacxx/include'
+            arch: 'sm_52'
+            os: 'ubuntu-22.04'
+          - cuda: '12.6.1'
+            gxx: '13'
+            cccl_inc: 'external/cccl/libcudacxx/include'
+            arch: 'sm_70'
+            os: 'ubuntu-latest'
+          - cuda: '13.0.1'
+            gxx: '14'
+            cccl_inc: ''
+            arch: 'sm_75'
+            os: 'ubuntu-latest'
+    name: nvcc ${{ matrix.cuda }} (g++-${{ matrix.gxx }})
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
       # CCCL is a submodule pinned via SSH in .gitmodules; rewrite to HTTPS so the
-      # runner can fetch it without an SSH key.
+      # runner can fetch it without an SSH key (needed only by the vendored legs).
       - name: Fetch CCCL submodule
         run: |
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git submodule update --init --recursive
 
-      # CUDA 12.6 pairs with a host g++ <= 13; install g++-13 and point nvcc at it
-      # so the toolkit/host-compiler combo is pinned rather than left to the runner.
-      - name: Install host compiler (g++-13)
+      - name: Install host compiler (g++-${{ matrix.gxx }})
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends g++-13
+          sudo apt-get install -y --no-install-recommends g++-${{ matrix.gxx }}
 
       - name: Install CUDA toolkit (nvcc, no GPU)
-        uses: Jimver/cuda-toolkit@v0.2.19
+        uses: Jimver/cuda-toolkit@v0.2.35
         with:
-          cuda: '12.6.1'
+          cuda: ${{ matrix.cuda }}
           method: 'network'
           sub-packages: '["nvcc", "cudart"]'
 
       - name: Show nvcc version
         run: nvcc --version
 
-      # Compile the device smoke TU only (`--compile`, no link, no run). The
-      # vendored CCCL headers are used so cuda::std::mdspan matches the host build.
+      # Compile the device smoke TU only (`--compile`, no link, no run). Add the
+      # vendored CCCL include for nvcc <= 12.x; nvcc 13 uses its bundled CCCL.
       - name: Compile-only device build
         run: |
-          nvcc -std=c++17 -ccbin g++-13 \
-               -I include -I external/cccl/libcudacxx/include \
+          CCCL_I=""
+          [ -n "${{ matrix.cccl_inc }}" ] && CCCL_I="-I ${{ matrix.cccl_inc }}"
+          nvcc -std=c++17 -ccbin g++-${{ matrix.gxx }} -arch=${{ matrix.arch }} \
+               -I include $CCCL_I \
                --compile tests/nvcc_smoke.cu -o "$RUNNER_TEMP/nvcc_smoke.o"
-          echo "nvcc device-pass compile succeeded"
+          echo "nvcc device-pass compile succeeded (CUDA ${{ matrix.cuda }}, ${{ matrix.arch }})"

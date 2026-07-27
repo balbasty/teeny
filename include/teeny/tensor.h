@@ -252,8 +252,13 @@ struct tensor : private Layout::template mapping<Shape> {
     { return _axis_stride<Shape, Layout, static_cast<long>(Idx::value)>(mapping()); }
     /** @brief Stride of an axis given by a RUNTIME index (`stride(0)`). */
     template <class Idx, cs::enable_if_t<!_is_ic<Idx>::value, int> = 0>
-    _TNY_API constexpr index_type stride(Idx d) const noexcept
-    { return mapping_type::stride(static_cast<cs::size_t>(d)); }
+    _TNY_API constexpr index_type stride(Idx d) const noexcept {
+        // A rank-0 (scalar) tensor has no axes; `mapping::stride(r)` is constrained to
+        // rank > 0 in a spec-conformant mdspan (CCCL 2.x enforces it, 3.x tolerated the
+        // instantiation), so guard it — same pattern as the dlpack exporter.
+        if constexpr (rank() == 0) { (void)d; return index_type(0); }
+        else                       return mapping_type::stride(static_cast<cs::size_t>(d));
+    }
 private:
     static constexpr index_type _static_numel() noexcept {
         index_type n = 1;

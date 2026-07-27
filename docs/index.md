@@ -50,4 +50,5 @@ auto c = a + b;                        // out-of-place (promotes types)
 - **[Views & structure](structure.md)** — `permute`/`flip`/`reshape`/`peel`.
 - **[Dispatch & the ndarray boundary](dispatch.md)** — runtime rank/value → static.
 - **[Tutorial: DLPack → Python](tutorials/dlpack-python.md)** — CPU+CUDA kernels over `ndarray` inputs.
+- **[CUDA & CCCL compatibility](cuda-compat.md)** — vendored CCCL, `nvcc` ranges, wheel strategy.
 - **[API reference](reference.md)** — the full surface, curated.

@@ -10,7 +10,19 @@ DEL       ?= rm -f
 MKDIR     ?= mkdir -p
 BUILDDIR  ?= ./build
 CXXFLAGS  += -std=c++17
-INCLUDES  += -I./include -I./external/cccl/libcudacxx/include
+# CCCL (libcudacxx: cuda::std::mdspan) — selected automatically, nothing to set:
+#   * host compilers and nvcc <= 12.x  -> the vendored CCCL (v2.8.2), which covers
+#     the whole CUDA 11.1-12.9 range;
+#   * nvcc >= 13                        -> the toolkit's own bundled CCCL (a 3.x that
+#     works with teeny), so the vendored include is skipped.
+# Override CCCL_INC to force a specific CCCL for any compiler. See docs/cuda-compat.md.
+_CUDA_MAJOR := $(shell $(CXX) --version 2>/dev/null | sed -n 's/.*release \([0-9][0-9]*\).*/\1/p' | head -1)
+ifeq ($(shell [ -n "$(_CUDA_MAJOR)" ] && [ "$(_CUDA_MAJOR)" -ge 13 ] 2>/dev/null && echo 1),1)
+CCCL_INC  ?=
+else
+CCCL_INC  ?= ./external/cccl/libcudacxx/include
+endif
+INCLUDES  += -I./include $(if $(strip $(CCCL_INC)),-I$(CCCL_INC))
 
 # Stop at the first error (the flag differs between clang and gcc).
 CXX_IS_CLANG := $(shell $(CXX) --version 2>/dev/null | grep -qi clang && echo 1)

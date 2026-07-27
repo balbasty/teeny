@@ -1,0 +1,174 @@
+# CUDA & CCCL compatibility
+
+teeny is built on **CCCL** (NVIDIA's CUDA C++ Core Libraries — the home of
+`cuda::std::mdspan`). Two facts shape everything here:
+
+1. teeny needs `cuda::std::mdspan`, which CCCL gained in the **2.2** release.
+2. Each CCCL release supports a bounded range of CUDA toolkits (`nvcc`), and each
+   CUDA toolkit *bundles* a particular CCCL — sometimes one **without** mdspan.
+
+For a **host build** (g++/clang++, no CUDA) none of this matters — the bundled
+CCCL below just works. The nuance is only for **CUDA device builds / wheels**.
+
+## The short version
+
+**You don't need to configure anything.** teeny vendors a CCCL that works for
+host builds and for CUDA 11.1–12.9, and automatically uses the toolkit's own CCCL
+when you compile with a newer CUDA (13+). Concretely:
+
+| You compile with… | CCCL used |
+|---|---|
+| a host compiler, or **`nvcc` ≤ 12.x** | the **vendored** CCCL (v2.8.2) |
+| **`nvcc` ≥ 13** | the toolkit's **bundled** CCCL (a 3.x) |
+
+The **Makefile** (and plain compiler flags) selects this automatically from the
+compiler version — nothing to set. Under **CMake**, teeny uses an installed CCCL
+if `find_package(CCCL)` finds one (as a CUDA-13 toolkit provides) and otherwise
+the vendored 2.8.2. To force a specific CCCL for any compiler, override the include
+path — see [Overriding the CCCL](#overriding-the-cccl).
+
+## Why a vendored CCCL at all
+
+teeny vendors **CCCL v2.8.2** (a git submodule under `external/cccl`) — the last
+release of the 2.x line:
+
+- **2.x has mdspan**, so teeny builds against it.
+- **2.8.2 spans the widest `nvcc` range** of any mdspan-capable CCCL: **CUDA 11.1
+  through 12.9** — one copy for every CUDA-11/12 toolkit, including the older ones
+  whose *bundled* CCCL predates mdspan (see the table below).
+- **3.x drops CUDA 11** (its floor is CUDA 12.0), so it can't be the single
+  vendored copy without losing CUDA-11 support.
+
+**CUDA 13** dropped CCCL 2.x, but every CUDA-13 toolkit **bundles a 3.x that works
+with teeny** — so a CUDA-13 build simply uses that bundled copy, no vendoring
+needed. teeny's source is the same for both CCCL lines.
+
+## CCCL ↔ `nvcc` support matrix
+
+Which CUDA toolkits each relevant CCCL release supports, and whether it has the
+`cuda::std::mdspan` teeny needs:
+
+| CCCL release | Supported CUDA (`nvcc`) | `cuda::std::mdspan`? |
+|---|---|---|
+| ≤ 2.1 | 11.1 – 12.x | ✗ (not yet) |
+| 2.2 – 2.8.2 | **11.1 – 12.9** | **✓** |
+| 3.0 – 3.4.0 (latest) | **12.0 – 13.x** | ✓ (but no CUDA 11) |
+
+No single CCCL covers both CUDA 11 and CUDA 13: 2.8.2 tops out at 12.9 and 3.x
+starts at 12.0. That's why teeny uses 2.8.2 by default and the toolkit's 3.x on
+CUDA 13 (the two lines overlap on CUDA 12, which can use either).
+
+## CCCL bundled with each CUDA toolkit
+
+Each `nvcc` toolkit ships a CCCL; older toolkits shipped one that predates mdspan.
+Approximate mapping:
+
+| CUDA toolkit | Bundled CCCL | Bundled has mdspan? |
+|---|---|---|
+| 11.8 | ~1.8 | ✗ |
+| 12.0 | ~2.0 | ✗ |
+| 12.2 | ~2.1 | ✗ |
+| 12.3 | ~2.2 | ✓ |
+| 12.6 | ~2.5 | ✓ |
+| 12.9 | 2.8.2 | ✓ |
+| 13.0 | 3.0 | ✓ |
+| 13.3 | ~3.3 | ✓ |
+
+On CUDA 11.8 or 12.0–12.2 the bundled CCCL has no mdspan, so teeny uses the
+vendored 2.8.2 instead — which is exactly what the [auto-selection](#the-short-version)
+does. From CUDA 12.3 up the bundled copy would work; the vendored one is still
+used through 12.x for a single, consistent version, and the bundled 3.x is used on
+CUDA 13.
+
+## Host compilers
+
+teeny is header-only C++17, so any C++17-conformant host compiler works. CCCL sets
+the practical minimums:
+
+| Host compiler | Minimum | teeny CI |
+|---|---|---|
+| **g++** | 7 (first C++17) | tested on 11–14 |
+| **clang++** | 9 | tested on 18 |
+| **MSVC** (Windows) | 2019 (v19.20) | not in CI, but header-only C++17 + CCCL supports MSVC |
+
+For a **CUDA device build**, the host compiler must also be one your `nvcc`
+supports — each CUDA release caps the host g++/clang/MSVC version (e.g. CUDA 12.6
+allows g++ ≤ 13, CUDA 13.0 allows g++ ≤ 15). See NVIDIA's system requirements for
+the exact per-toolkit host-compiler ranges.
+
+Linux and Windows are both supported (teeny's own CI runs Linux g++/clang++;
+Windows/MSVC is expected to work but is not currently exercised in CI).
+
+## Choosing a toolkit for your target hardware
+
+For CUDA wheels, `nvcc`'s version — *not* CCCL — sets the reachable GPU
+architectures and the minimum driver:
+
+- **CUDA 11.x (e.g. `nvcc` 11.8)** reaches down to Kepler/Maxwell and older drivers
+  (roughly **r450+** with CUDA 11 minor-version compatibility) — the toolkit for
+  maximum backward reach.
+- **CUDA 12.x** needs a newer driver (roughly **r525+**) and drops the oldest archs,
+  but targets Hopper/Ada.
+- **CUDA 13.x** raises the offline-compile floor to **`sm_75` (Turing)** — Maxwell,
+  Pascal, and Volta are dropped — needs driver **~r580+**, and targets up to
+  Blackwell.
+- **Gencode:** embed PTX for the *oldest* arch you support plus SASS for the common
+  ones, e.g. `-gencode arch=compute_52,code=sm_52 … -gencode
+  arch=compute_80,code=compute_80` (a trailing `code=compute_XX` PTX entry lets the
+  driver JIT for newer GPUs you didn't list).
+
+### A wheel matrix for wide coverage
+
+To cover as many GPUs and drivers as possible, build one wheel per CUDA major:
+
+| Wheel | Built with `nvcc` | Reaches | Min driver |
+|---|---|---|---|
+| **cu11** | 11.8 | Kepler/Maxwell → Ada (via PTX JIT) | ~r450+ |
+| **cu12** | a 12.x (e.g. 12.6) | Volta → Hopper/Ada | ~r525+ |
+| **cu13** | a 13.x (e.g. 13.0) | Turing → Blackwell (`sm_75+`) | ~r580+ |
+
+Each wheel compiles the same teeny source; only the `nvcc` version and `-gencode`
+targets differ. `cu13` is **additive** — it reaches the newest archs but not
+pre-Turing GPUs, which is what `cu11` is for.
+
+## Overriding the CCCL
+
+To point teeny at a specific CCCL (e.g. to pin an exact 3.x version, or use one
+you keep elsewhere), set the include path — this overrides the auto-selection:
+
+```sh
+# Make (and plain compiler flags):
+make CCCL_INC=/path/to/cccl/libcudacxx/include run-test
+
+# CMake:
+cmake -DTEENY_CCCL_INCLUDE=/path/to/cccl/libcudacxx/include …
+#   (or install CCCL and let find_package(CCCL) pick it up)
+```
+
+## Device builds, spelled out
+
+Building via the Makefile (`make CXX=nvcc …`) or CMake needs no CCCL flags — the
+[auto-selection](#the-short-version) handles it. With a raw `nvcc` command you add
+the vendored CCCL include for CUDA 11/12 and omit it for CUDA 13 (which supplies a
+compatible CCCL itself). Otherwise the invocations are identical — only `-arch`
+differs:
+
+```sh
+# CUDA 11  — vendored CCCL, oldest archs
+nvcc -std=c++17 -arch=sm_52 -I include -I external/cccl/libcudacxx/include \
+     --compile tests/nvcc_smoke.cu
+
+# CUDA 12  — vendored CCCL
+nvcc -std=c++17 -arch=sm_70 -I include -I external/cccl/libcudacxx/include \
+     --compile tests/nvcc_smoke.cu
+
+# CUDA 13  — bundled CCCL, no CCCL -I needed
+nvcc -std=c++17 -arch=sm_75 -I include \
+     --compile tests/nvcc_smoke.cu
+```
+
+## CI
+
+`.github/workflows/nvcc-compile.yaml` compiles the device smoke translation unit
+across the whole supported range — **`nvcc` 11.8** (`sm_52`), **12.6** (`sm_70`),
+and **13.0** (`sm_75`) — so both ends of the CUDA range stay green.
