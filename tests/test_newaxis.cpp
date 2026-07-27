@@ -26,6 +26,10 @@ int main() {
     for (long i = 0; i < 12; ++i) buf[i] = i;
     auto t = wrap(buf, extents<long,3,4>{});      // (H,W) = (3,4), strides (4,1)
 
+    // ---- `newaxis` is a named alias of `none` (same type/value; numpy's np.newaxis
+    //      vs None distinction, collapsed to one teeny type) ----
+    static_assert(cs::is_same<decltype(newaxis), decltype(none)>::value, "newaxis IS none (same type)");
+
     // ---- t(none,all,all) == unsqueeze<0>()  : (3,4) -> (1,3,4) ----
     auto a0 = t(none, all, all);
     auto u0 = t.unsqueeze<0>();
@@ -99,6 +103,11 @@ int main() {
     auto g0 = t.uget(none, all, all);
     static_assert(decltype(g0)::rank() == 3, "uget newaxis -> rank 3");
     if (!same3(g0, u0)) return 15;
+
+    // ---- `newaxis` works as an actual argument, identically to `none` ----
+    auto an = t(newaxis, all, all);             // == t(none, all, all)
+    static_assert(decltype(an)::rank() == 3, "newaxis arg -> rank 3");
+    if (!same3(an, a0)) return 18;
 
     // ---- a dynamic-shape source: none still inserts a STATIC 1 axis ----
     auto td = wrap(buf, extents<long,cs::dynamic_extent,4>{3, 4});

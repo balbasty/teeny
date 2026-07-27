@@ -65,9 +65,13 @@ template <cs::size_t... A> _TNY_API constexpr bool _all_distinct() noexcept {
  * runtime bounds it resolves at run time, so the one sentinel covers both.
  *
  * A BARE `none` **argument** to `operator()`/`uget` is a different thing: numpy
- * `newaxis` (`a[None]`), which inserts a size-1 axis — see `_is_newaxis` below. */
+ * `newaxis` (`a[None]`), which inserts a size-1 axis — see `_is_newaxis` below.
+ * `newaxis` is a named alias of `none` for that bare-argument spelling (numpy
+ * calls the same value `None` when it's a slice bound and `np.newaxis` when
+ * it's inserting an axis; teeny's `none`/`newaxis` mirror that with one type). */
 struct none_t {};
 constexpr none_t none{};
+constexpr none_t newaxis = none;
 
 // A BARE `none` argument to operator()/uget is numpy `newaxis` (`a[None]`): it
 // inserts a new size-1 axis (static extent 1, stride 0) at its position while
