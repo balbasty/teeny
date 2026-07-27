@@ -13,6 +13,10 @@ axis is stretched); a scalar applies elementwise.
 a.add_(b); a.sub_(b); a.mul_(b); a.div_(b);  // tensor rhs broadcasts
 a.add_(2.0); a.mul_(0.5);                    // scalar rhs
 
+y.add_(x, alpha);  y.sub_(x, alpha);    // fused scaled accumulate (BLAS axpy):
+                                        //   y += alpha*x / y -= alpha*x (x broadcasts).
+                                        //   scaled copy y = alpha*x is y.zero_().add_(x, alpha)
+
 a += b;  a -= 2.0;  a *= b;  a /= 2.0;  // compound-assign (scalar or tensor rhs)
 ++a; --a;                               // prefix: add/sub 1 in place
 auto old = a++;                         // postfix: pre-value as a stack copy
@@ -203,6 +207,31 @@ sum<0>(a);          // float tensor -> float result (accumulated in double)
 sum<double, 0>(a);  // double accumulator -> double result
 mean<double, 1>(a); // force the accumulator+result on an axis mean
 ```
+
+## Vector algebra & geometry
+
+Small **exact** linear-algebra / geometry helpers on views — the compact building
+blocks for kernels like point-to-triangle mesh distance (teeny stops short of
+*algorithms*: no solves, matrix inversion, or optimisation).
+
+```cpp
+sqnorm(a);            // Σ aᵢ²  over ALL axes — this is dot(a, a)
+norm(a);              // √Σ aᵢ² (L2). floating result; an INTEGER input -> double (like mean)
+sqnorm<double>(a);    // leading TYPE = accumulator AND result (as with sum/dot)
+
+a.normalize_();       // in place: a /= norm(a)   (floating element types)
+auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, dynamic->heap)
+
+auto c = cross(a, b);       // 3D cross product a × b -> new stack 3-vector (rank-1, length 3)
+crossto_(out, a, b);        // ... into an existing `out`; `out` MAY alias a or b
+```
+
+`sqnorm`/`norm` accumulate in the reduce type (§ *Accumulator type vs result
+type*) and reduce over every axis (so `norm` of a matrix is the Frobenius norm).
+`normalize` of a zero vector yields NaNs — this is exact math with no epsilon; add
+one at the call site if you need it. `cross` is defined only for rank-1, length-3
+operands (a `static_assert` catches a wrong static length; a runtime length is
+debug-checked).
 
 ## Comparisons → a bool tensor
 

@@ -78,6 +78,13 @@ struct sub { template <class X, class Y> _TNY_API X operator()(X x, Y y) const {
 struct mul { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x * static_cast<X>(y); } };
 struct div { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x / static_cast<X>(y); } };
 
+/* ---- fused scaled accumulate (axpy: out = x (+/-) coeff*y) -------- *
+ * The coefficient rides in the functor; `bzip` runs the op in the      *
+ * destination's compute type, so `coeff` is cast to that type per      *
+ * element (a `half` coeff computes in float, like every other op).     */
+template <class C> struct fma_add { C coeff; template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x + static_cast<X>(coeff) * static_cast<X>(y); } };
+template <class C> struct fma_sub { C coeff; template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x - static_cast<X>(coeff) * static_cast<X>(y); } };
+
 /* ---- reversed scalar ops (out = scalar OP x, for scalar-on-the-left) */
 struct rsub { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return static_cast<X>(y) - x; } };  // s - x
 struct rdiv { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return static_cast<X>(y) / x; } };  // s / x
@@ -762,6 +769,11 @@ _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::sub_(T s) {
 }
 template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::mul_(T s) { _md::scal(*this,s,_md::mul{}); return *this; }
 template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::div_(T s) { _md::scal(*this,s,_md::div{}); return *this; }
+// fused scaled accumulate (BLAS axpy): *this += alpha*b / *this -= alpha*b (b broadcasts).
+template <class T,class E,class L,storage O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::add_(const B & b, T alpha) { _md::bzip(*this,*this,b,_md::fma_add<T>{alpha}); return *this; }
+template <class T,class E,class L,storage O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::sub_(const B & b, T alpha) { _md::bzip(*this,*this,b,_md::fma_sub<T>{alpha}); return *this; }
 // atomic accumulate aliases: the readable spelling of add_<true>/sub_<true>
 // (atomic-on-device scatter/"push"). Thin forwarders over the Atomic form.
 template <class T,class E,class L,storage O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
@@ -1127,6 +1139,83 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) 
     using R = _acc_t<Acc, promote_t<Ta,Tb>>;
     return static_cast<_reduce_result_t<Acc, promote_t<Ta,Tb>>>(
         _md::zipreduce_<R>(a, b, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
+}
+
+/* ------------------------------------------------------------------ *
+ *     Vector algebra & geometry (contained exact math)               *
+ * ------------------------------------------------------------------ */
+
+/** @brief Squared Euclidean norm — the sum of squares `Σ aᵢ²`, over ALL axes.
+ *         Just `dot(a, a)`: accumulates in the reduce type, result cast to the
+ *         element type (`sqnorm<Acc>(a)` accumulates AND returns `Acc`). */
+template <class Acc = void, class T, class E, class L, storage O>
+_TNY_API auto sqnorm(const tensor<T,E,L,O> & a) { return dot<Acc>(a, a); }
+
+/** @brief Euclidean (L2) norm `√Σ aᵢ²`, over ALL axes. Accumulates the squares in
+ *         the reduce type and takes the root there, then casts to the result type:
+ *         a floating element type keeps its type, an INTEGER one yields `double`
+ *         (numpy/`mean` rule). `norm<Acc>(a)` makes `Acc` accumulator AND result. */
+template <class Acc = void, class T, class E, class L, storage O>
+_TNY_API auto norm(const tensor<T,E,L,O> & a) {
+    using Res = _reduce_result_t<Acc, _mean_result_t<T>>;   // floating result (double for integer T)
+    using R   = _acc_t<Acc, T>;                             // accumulate the squares in the reduce type
+    using D   = cs::conditional_t<cs::is_floating_point<R>::value, R,
+                cs::conditional_t<cs::is_floating_point<Res>::value, Res, double>>;   // take the root in a float type
+    return static_cast<Res>(cs::sqrt(static_cast<D>(sqnorm<R>(a))));
+}
+
+/** @brief Out-of-place unit vector `a / norm(a)` -> a NEW dense tensor (static
+ *         shape -> stack, dynamic -> heap). The result element type is floating
+ *         (integer input -> `double`, like `norm`). A zero vector yields NaNs
+ *         (no epsilon — exact math; add one at the call site if you need it). */
+template <class T, class E, class L, storage O>
+_TNY_API auto normalize(const tensor<T,E,L,O> & a) {
+    // Divide by a real ARITHMETIC scalar so `.div` takes its scalar path (a `half`
+    // divisor is not `is_arithmetic` and would look like a tensor rhs); the compute
+    // type of the float result is that scalar (`half`->`float`), and promotion then
+    // gives back the intended element type (half/float -> that float, int -> double).
+    // `.div` itself splits static->stack / dynamic->heap.
+    using S = compute_type_t<_mean_result_t<T>>;
+    return a.div(static_cast<S>(norm(a)));
+}
+
+/** @brief 3D cross product `a × b` into `out` (all rank-1, length 3). Computes the
+ *         three components into temporaries first, so `out` MAY alias `a` or `b`
+ *         (`crossto_(a, a, b)` is safe). Runs in the compute type (`half` in float). */
+template <class To,class Eo,class Lo,storage Oo,
+          class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API void crossto_(tensor<To,Eo,Lo,Oo> & out,
+                       const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
+    static_assert(Eo::rank() == 1 && Ea::rank() == 1 && Eb::rank() == 1, "cross: operands must be rank-1 3-vectors");
+    static_assert(Ea::static_extent(0) == 3 || Ea::static_extent(0) == cs::dynamic_extent, "cross: a must have length 3");
+    static_assert(Eb::static_extent(0) == 3 || Eb::static_extent(0) == cs::dynamic_extent, "cross: b must have length 3");
+    static_assert(Eo::static_extent(0) == 3 || Eo::static_extent(0) == cs::dynamic_extent, "cross: out must have length 3");
+    _TNY_CHECK(a.extent(0) == 3 && b.extent(0) == 3 && out.extent(0) == 3, "cross: 3-vectors required");
+    using C = compute_type_t<promote_t<Ta,Tb>>;
+    const C a0 = static_cast<C>(a(0)), a1 = static_cast<C>(a(1)), a2 = static_cast<C>(a(2));
+    const C b0 = static_cast<C>(b(0)), b1 = static_cast<C>(b(1)), b2 = static_cast<C>(b(2));
+    out(0) = static_cast<To>(a1 * b2 - a2 * b1);
+    out(1) = static_cast<To>(a2 * b0 - a0 * b2);
+    out(2) = static_cast<To>(a0 * b1 - a1 * b0);
+}
+
+/** @brief 3D cross product `a × b` -> a NEW stack 3-vector of `promote(Ta,Tb)`.
+ *         Both operands are rank-1, length 3. */
+template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto cross(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
+    tensor<promote_t<Ta,Tb>, shape<3>, ccontiguous, storage::stack> c(_uninit);
+    crossto_(c, a, b);
+    return c;
+}
+
+// in-place unit vector: *this /= norm(*this). Floating element types only (an
+// integer element would truncate the division). Defined here so `norm` (above)
+// is visible. A zero vector yields NaNs (no epsilon; add one at the call site).
+template <class T,class E,class L,storage O>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::normalize_() {
+    static_assert(cs::is_floating_point<compute_type_t<T>>::value,
+                  "normalize_: requires a floating-point element type (integer division would truncate)");
+    return div_(static_cast<T>(norm(*this)));
 }
 
 /** @brief True if every element satisfies `|a-b| <= atol + rtol*|b|` (numpy
