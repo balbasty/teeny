@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   nvcc-compile:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       # Prove the whole supported CUDA range against the CCCL each end needs. The
@@ -35,20 +35,26 @@ jobs:
       # 3.x). See docs/cuda-compat.md.
       #   cccl:  empty  -> the pinned submodule (v2.8.2); else a git tag to check out
       #   arch:  the -arch floor for that toolkit (sm_52 Kepler/Maxwell … sm_75 Turing)
+      #   os:    the runner image. CUDA 11.8's apt packages only exist in NVIDIA's
+      #          ubuntu2204 repo (not ubuntu2404), so the 11.8 leg pins ubuntu-22.04;
+      #          12.6/13.0 install cleanly on ubuntu-latest (24.04).
       matrix:
         include:
           - cuda: '11.8.0'
             gxx: '11'
             cccl: ''
             arch: 'sm_52'
+            os: 'ubuntu-22.04'
           - cuda: '12.6.1'
             gxx: '13'
             cccl: ''
             arch: 'sm_70'
+            os: 'ubuntu-latest'
           - cuda: '13.0.1'
             gxx: '14'
             cccl: 'v3.4.0'
             arch: 'sm_75'
+            os: 'ubuntu-latest'
     name: nvcc ${{ matrix.cuda }} (g++-${{ matrix.gxx }})
     steps:
       - name: Checkout
