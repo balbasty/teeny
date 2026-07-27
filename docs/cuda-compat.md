@@ -80,6 +80,25 @@ does. From CUDA 12.3 up the bundled copy would work; the vendored one is still
 used through 12.x for a single, consistent version, and the bundled 3.x is used on
 CUDA 13.
 
+## Host compilers
+
+teeny is header-only C++17, so any C++17-conformant host compiler works. CCCL sets
+the practical minimums:
+
+| Host compiler | Minimum | teeny CI |
+|---|---|---|
+| **g++** | 7 (first C++17) | tested on 11–14 |
+| **clang++** | 9 | tested on 18 |
+| **MSVC** (Windows) | 2019 (v19.20) | not in CI, but header-only C++17 + CCCL supports MSVC |
+
+For a **CUDA device build**, the host compiler must also be one your `nvcc`
+supports — each CUDA release caps the host g++/clang/MSVC version (e.g. CUDA 12.6
+allows g++ ≤ 13, CUDA 13.0 allows g++ ≤ 15). See NVIDIA's system requirements for
+the exact per-toolkit host-compiler ranges.
+
+Linux and Windows are both supported (teeny's own CI runs Linux g++/clang++;
+Windows/MSVC is expected to work but is not currently exercised in CI).
+
 ## Choosing a toolkit for your target hardware
 
 For CUDA wheels, `nvcc`'s version — *not* CCCL — sets the reachable GPU
@@ -126,11 +145,26 @@ cmake -DTEENY_CCCL_INCLUDE=/path/to/cccl/libcudacxx/include …
 #   (or install CCCL and let find_package(CCCL) pick it up)
 ```
 
-A CUDA-13 device build, spelled out:
+## Device builds, spelled out
+
+Building via the Makefile (`make CXX=nvcc …`) or CMake needs no CCCL flags — the
+[auto-selection](#the-short-version) handles it. With a raw `nvcc` command you add
+the vendored CCCL include for CUDA 11/12 and omit it for CUDA 13 (which supplies a
+compatible CCCL itself). Otherwise the invocations are identical — only `-arch`
+differs:
 
 ```sh
-nvcc -std=c++17 -arch=sm_75 -I include --compile tests/nvcc_smoke.cu
-#   uses the toolkit's bundled CCCL 3.x automatically — no -I for CCCL needed
+# CUDA 11  — vendored CCCL, oldest archs
+nvcc -std=c++17 -arch=sm_52 -I include -I external/cccl/libcudacxx/include \
+     --compile tests/nvcc_smoke.cu
+
+# CUDA 12  — vendored CCCL
+nvcc -std=c++17 -arch=sm_70 -I include -I external/cccl/libcudacxx/include \
+     --compile tests/nvcc_smoke.cu
+
+# CUDA 13  — bundled CCCL, no CCCL -I needed
+nvcc -std=c++17 -arch=sm_75 -I include \
+     --compile tests/nvcc_smoke.cu
 ```
 
 ## CI
