@@ -529,6 +529,14 @@ _TNY_HOST auto uop_out(const A & a, Uop f) {
     unaryo<true>(c, a, f); return c;   // fresh dest -> restrict + linear fast path
 }
 
+/* ---- into(dest): run a producer's engine into a CALLER-provided dest ------ *
+ * One fused pass, NO allocation. `Restrict=false` because a user dest may alias
+ * an operand; the engine validates dest's extents against the (broadcast) result
+ * and casts to dest's element type. The producer hands `into_t::dest` back. */
+template <class Op, class Out, class A, class B> _TNY_API void oop_to (Out & o, const A & a, const B & b, Op op) { bzip<w_set, false>(o, a, b, op); }
+template <class Op, class Out, class A, class S>  _TNY_API void oops_to(Out & o, const A & a, S s, Op op) { scalo<false>(o, a, s, op); }
+template <class Uop, class Out, class A>          _TNY_API void uop_to (Out & o, const A & a, Uop f) { unaryo<false>(o, a, f); }
+
 /* ---- reduce a . b elementwise into a scalar (for dot) ------------ */
 template <class R, class A, class B, cs::size_t... D>
 _TNY_API R zipreduce_(const A & a, const B & b, cs::index_sequence<D...>) {
@@ -808,12 +816,18 @@ _TNY_MD_BINOP(*, _md::mul)
 _TNY_MD_BINOP(/, _md::div)
 #undef _TNY_MD_BINOP
 
-/* --- out-of-place binary methods (tensor OR scalar rhs) ----------- */
+/* --- out-of-place binary methods (tensor OR scalar rhs) -> new, OR into(dest) - */
 #define _TNY_MD_METHOD(NAME, OP)                                                                 \
 template <class T,class E,class L,storage O> template <class B>                                       \
 _TNY_API auto tensor<T,E,L,O>::NAME(const B & b) const {                                          \
     if constexpr (cs::is_arithmetic<B>::value) return _md::oops(*this, b, OP{});                  \
     else                                       return _md::oop (*this, b, OP{});                   \
+}                                                                                                 \
+template <class T,class E,class L,storage O> template <class B, class D>                              \
+_TNY_API auto & tensor<T,E,L,O>::NAME(const B & b, into_t<D> out) const {                          \
+    if constexpr (cs::is_arithmetic<B>::value) _md::oops_to(out.dest, *this, b, OP{});             \
+    else                                       _md::oop_to (out.dest, *this, b, OP{});             \
+    return out.dest;                                                                               \
 }
 _TNY_MD_METHOD(add, _md::add)
 _TNY_MD_METHOD(sub, _md::sub)
@@ -821,6 +835,17 @@ _TNY_MD_METHOD(mul, _md::mul)
 _TNY_MD_METHOD(div, _md::div)
 _TNY_MD_METHOD(pow, _md::pw)
 #undef _TNY_MD_METHOD
+
+// fused out-of-place axpy: a + alpha*b / a - alpha*b (b tensor, broadcasts) -> new,
+// or into(dest). The in-place twin is add_(b, alpha)/sub_(b, alpha).
+#define _TNY_MD_FMA(NAME, F)                                                                      \
+template <class T,class E,class L,storage O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>> \
+_TNY_API auto tensor<T,E,L,O>::NAME(const B & b, T alpha) const { return _md::oop(*this, b, _md::F<T>{alpha}); }   \
+template <class T,class E,class L,storage O> template <class B, class D, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>> \
+_TNY_API auto & tensor<T,E,L,O>::NAME(const B & b, T alpha, into_t<D> out) const { _md::oop_to(out.dest, *this, b, _md::F<T>{alpha}); return out.dest; }
+_TNY_MD_FMA(add, fma_add)
+_TNY_MD_FMA(sub, fma_sub)
+#undef _TNY_MD_FMA
 
 /* --- tensor (op) scalar and scalar (op) tensor operators ---------- */
 #define _TNY_MD_SCALOP(SYM, OP)                                                                   \
@@ -1213,6 +1238,12 @@ _TNY_API auto normalize(const tensor<T,E,L,O> & a) {
     using S = compute_type_t<_mean_result_t<T>>;
     return a.div(static_cast<S>(norm(a)));
 }
+/** @brief `normalize(a, into(y))` — the unit vector into a caller buffer `y`. */
+template <class T, class E, class L, storage O, class D>
+_TNY_API auto & normalize(const tensor<T,E,L,O> & a, into_t<D> out) {
+    using S = compute_type_t<_mean_result_t<T>>;
+    return a.div(static_cast<S>(norm(a)), out);   // .div's into overload writes out & returns out.dest
+}
 
 /* --- axis normalize: divide each sub-vector by its norm over the named axes ------ *
  * `n = norm<Axes...>(a)` removes the reduced axes; restore them as size-1 (keepdim)
@@ -1262,14 +1293,20 @@ _TNY_API void _cross3(tensor<To,Eo,Lo,Oo> & out,
 }
 
 /** @brief 3D cross product `a × b` -> a NEW stack 3-vector of `promote(Ta,Tb)`.
- *         Both operands are rank-1, length 3. The in-place spelling is the member
- *         `a.cross_(b)` (`a` becomes `a × b`); to write into a preallocated slot
- *         with no temporary, `slot.copy_(cross(a, b))`. */
+ *         Both operands are rank-1, length 3. In place: the member `a.cross_(b)`
+ *         (`a` becomes `a × b`). Into a preallocated slot: `cross(a, b, into(y))`. */
 template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
 _TNY_API auto cross(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
     tensor<promote_t<Ta,Tb>, shape<3>, ccontiguous, storage::stack> c(_uninit);
     _cross3(c, a, b);
     return c;
+}
+/** @brief `cross(a, b, into(y))` — the cross product into a caller buffer `y`
+ *         (rank-1, length 3); `y` may alias `a` or `b`. This is ff's "crossto". */
+template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, class D>
+_TNY_API auto & cross(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) {
+    _cross3(out.dest, a, b);
+    return out.dest;
 }
 
 // in-place 3D cross product: *this becomes (*this) × b (rank-1, length 3). Safe
@@ -1315,7 +1352,9 @@ _TNY_API bool allclose(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> 
 /* --- out-of-place unary free functions ---------------------------- */
 #define _TNY_MD_UNARY(NAME, F)                                                                    \
 template <class T,class E,class L,storage O> _TNY_API auto NAME(const tensor<T,E,L,O> & a)             \
-{ return _md::uop_out(a, F{}); }
+{ return _md::uop_out(a, F{}); }                                                                   \
+template <class T,class E,class L,storage O, class D>                                                  \
+_TNY_API auto & NAME(const tensor<T,E,L,O> & a, into_t<D> out) { _md::uop_to(out.dest, a, F{}); return out.dest; }
 _TNY_MD_UNARY(neg,   _md::u_neg)
 _TNY_MD_UNARY(abs,   _md::u_abs)
 _TNY_MD_UNARY(exp,   _md::u_exp)
@@ -1340,9 +1379,21 @@ template <class T,class E,class L,storage O, class S, cs::enable_if_t<cs::is_ari
 _TNY_API auto minimum(const tensor<T,E,L,O> & a, S s) { return _md::oops(a, s, _md::b_min{}); }
 template <class T,class E,class L,storage O, class S, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
 _TNY_API auto maximum(const tensor<T,E,L,O> & a, S s) { return _md::oops(a, s, _md::b_max{}); }
-/** @brief `clamp(a, lo, hi)` -> a new tensor with each element clamped. */
+// ... into(dest): minimum/maximum, tensor rhs (broadcasts) or scalar rhs.
+template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, class D>
+_TNY_API auto & minimum(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) { _md::oop_to(out.dest, a, b, _md::b_min{}); return out.dest; }
+template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, class D>
+_TNY_API auto & maximum(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) { _md::oop_to(out.dest, a, b, _md::b_max{}); return out.dest; }
+template <class T,class E,class L,storage O, class S, class D, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
+_TNY_API auto & minimum(const tensor<T,E,L,O> & a, S s, into_t<D> out) { _md::oops_to(out.dest, a, s, _md::b_min{}); return out.dest; }
+template <class T,class E,class L,storage O, class S, class D, cs::enable_if_t<cs::is_arithmetic<S>::value, int> = 0>
+_TNY_API auto & maximum(const tensor<T,E,L,O> & a, S s, into_t<D> out) { _md::oops_to(out.dest, a, s, _md::b_max{}); return out.dest; }
+/** @brief `clamp(a, lo, hi)` -> a new tensor with each element clamped; `clamp(a,
+ *         lo, hi, into(y))` writes into `y`. */
 template <class T,class E,class L,storage O>
 _TNY_API auto clamp(const tensor<T,E,L,O> & a, T lo, T hi) { return a.map(_md::u_clamp{ static_cast<double>(lo), static_cast<double>(hi) }); }
+template <class T,class E,class L,storage O, class D>
+_TNY_API auto & clamp(const tensor<T,E,L,O> & a, T lo, T hi, into_t<D> out) { _md::uop_to(out.dest, a, _md::u_clamp{ static_cast<double>(lo), static_cast<double>(hi) }); return out.dest; }
 
 /** @brief Arithmetic mean of all elements. For a floating `T`, accumulates in the
  *         reduce type (`double` for small floats) and the result is cast to `T`.

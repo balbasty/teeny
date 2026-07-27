@@ -320,7 +320,23 @@ scalar rhs applies to every element.
 | `a.pow(b)` | element-wise power |
 | `neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign(a)` | unary free functions |
 | `minimum(a,b)` `maximum(a,s)` `clamp(a,lo,hi)` | elementwise min/max/clamp |
+| `a.add(b, alpha)` `a.sub(b, alpha)` | fused out-of-place axpy: `a ± alpha*b` (b broadcasts); the in-place twin is `add_(b, alpha)` |
 | `a.map(f)` | new tensor from a user functor |
+
+**`into(dest)` — write into a preallocated buffer.** Pass `into(y)` as the last
+argument to any producer above to write the result into `y` (one fused pass, no
+allocation) and return `y&`, instead of a fresh tensor — the kernel-friendly `out=`.
+`into(y)` is a distinct type, so it never collides with a scalar argument (which is
+what lets `add`/`sub` also take the fused `alpha`). `y` may alias an operand and may
+have a different dtype (the result is cast to it); its extents are checked.
+
+| Call | Returns |
+|---|---|
+| `a.add(b, into(y))` `a.mul(b, into(y))` `a.add(s, into(y))` … | `y&` (elementwise, tensor or scalar rhs) |
+| `a.add(b, alpha, into(y))` `a.sub(b, alpha, into(y))` | `y&` (fused axpy into `y`) |
+| `exp(a, into(y))` … (every unary) | `y&` |
+| `minimum(a,b,into(y))` `maximum(a,s,into(y))` `clamp(a,lo,hi,into(y))` | `y&` |
+| `normalize(a, into(y))` `cross(a,b,into(y))` | `y&` |
 
 ### Comparisons → a `bool` tensor (broadcast), reduced with `.all()`/`.any()`
 

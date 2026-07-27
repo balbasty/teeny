@@ -281,6 +281,13 @@ auto c = -a;                          // unary minus -> new tensor
 auto c = a.pow(b);                    // element-wise power
 auto e = exp(a); auto e = sqrt(a);    // unary free (neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign)
 auto c = minimum(a,b); maximum(a,2.0); clamp(a,lo,hi);   // elementwise binary min/max, clamp
+auto c = a.add(b,alpha); a.sub(b,alpha);  // FUSED out-of-place axpy: a +/- alpha*b (twin of add_(b,alpha))
+// --- into(dest): write a producer's result into a preallocated buffer -> dest& ---
+//   one fused pass, NO alloc; `into(y)` LAST arg. A distinct type (never conflated with
+//   a scalar alpha). y may alias an operand / differ in dtype (result cast); extents checked.
+a.add(b, into(y)); a.mul(2.0, into(y)); a.add(b, alpha, into(y));  // elementwise / scalar / fused
+exp(a, into(y)); sqrt(a, into(y)); minimum(a,b,into(y)); clamp(a,lo,hi,into(y));
+normalize(a, into(y)); cross(a, b, into(N.at(i)));   // cross into a slot (the "crossto")
 
 // --- comparisons -> a bool tensor (broadcast); reduce with .all()/.any() ---
 auto m = a < b; a == 2.0; 3.0 < a;    // ==,!=,<,<=,>,>= ; scalar either side

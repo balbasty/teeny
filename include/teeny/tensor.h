@@ -20,6 +20,15 @@ namespace cs = cuda::std;
 // (its argument is a cuda::std::mdspan, so ADL would not find it).
 template <class T, class Shape, class Layout = ccontiguous, storage O = storage::view>
 struct tensor;
+
+// Output-destination tag for the out-of-place math producers (math.h). `f(args,
+// into(y))` writes the result INTO the caller's `y` — one fused pass, no
+// allocation — and returns `y&`, instead of allocating a fresh result. A DISTINCT
+// type, so a destination can never be confused with a scalar argument (e.g. the
+// fused `alpha` of `add(b, alpha)`). Declared here so the tensor's out-of-place
+// members can name `into_t<D>`; the `into()` factory is defined after the class.
+template <class D> struct into_t { D & dest; };
+
 template <storage OW = storage::view, class MD>
 _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
                 typename MD::layout_type, OW>
@@ -1189,6 +1198,19 @@ public:
     template <class B> _TNY_API auto mul(const B & b) const;
     template <class B> _TNY_API auto div(const B & b) const;
     template <class B> _TNY_API auto pow(const B & b) const;
+    /* --- ... into a caller-provided destination (one fused pass, no alloc) -> dest& --- */
+    template <class B, class D> _TNY_API auto & add(const B & b, into_t<D> out) const;
+    template <class B, class D> _TNY_API auto & sub(const B & b, into_t<D> out) const;
+    template <class B, class D> _TNY_API auto & mul(const B & b, into_t<D> out) const;
+    template <class B, class D> _TNY_API auto & div(const B & b, into_t<D> out) const;
+    template <class B, class D> _TNY_API auto & pow(const B & b, into_t<D> out) const;
+    /* --- fused out-of-place axpy: a + alpha*b / a - alpha*b (b tensor, broadcasts);
+     *     the in-place twin is add_(b, alpha). `alpha` is arithmetic and `into_t` a
+     *     distinct type, so the scalar and the destination never collide. --------- */
+    template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API auto add(const B & b, T alpha) const;
+    template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API auto sub(const B & b, T alpha) const;
+    template <class B, class D, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API auto & add(const B & b, T alpha, into_t<D> out) const;
+    template <class B, class D, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API auto & sub(const B & b, T alpha, into_t<D> out) const;
 
     /* --- generic elementwise with a user functor (device-safe) ---- */
     // `f` is applied per element; its APPLICATION ORDER is unspecified (a dense view is
@@ -1235,6 +1257,13 @@ public:
     template <bool S = is_static, cs::enable_if_t<S, int> = 0>
     _TNY_API tensor<T, Shape, ccontiguous, storage::stack> operator--(int) { auto old = clone(); sub_(T(1)); return old; }
 };
+
+/** @brief `into(y)` — the output-destination tag: pass it as the last argument to
+ *         an out-of-place math producer (`a.add(b, into(y))`, `cross(a,b,into(y))`,
+ *         `exp(a, into(y))`, …) to write the result into `y` (one fused pass, no
+ *         allocation) and get `y&` back, instead of a freshly allocated result. */
+template <class T, class E, class L, storage O>
+_TNY_API into_t<tensor<T,E,L,O>> into(tensor<T,E,L,O> & d) noexcept { return into_t<tensor<T,E,L,O>>{ d }; }
 
 /** @brief Free forms of `reindex`/`index_fits` — deduce the tensor, so a
  *         type-dependent receiver avoids `.template`: `reindex<int32_t>(t)`,

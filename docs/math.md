@@ -122,6 +122,36 @@ auto mn = minimum(a, b);   auto mx = maximum(a, 2.0);  // elementwise binary min
 auto cl = clamp(a, lo, hi);                            // elementwise clamp
 ```
 
+### Writing into a preallocated destination — `into(dest)`
+
+Pass `into(y)` as the **last** argument to any of these producers to write the
+result straight into `y` — one fused pass, **no allocation** — instead of
+returning a fresh tensor. It returns `y&`. This is the kernel-friendly form (the
+numpy/pytorch `out=`), and the way to write into a strided slot of a larger array.
+
+```cpp
+a.add(b, into(y));            // y = a + b   (one pass; y may be any compatible shape/dtype)
+a.mul(b, into(y));  a.div(b, into(y));  a.pow(b, into(y));
+a.add(2.0, into(y));          // scalar rhs works too
+exp(a, into(y));  sqrt(a, into(y));  neg(a, into(y));   // every unary
+minimum(a, b, into(y));  maximum(a, s, into(y));  clamp(a, lo, hi, into(y));
+normalize(a, into(y));
+cross(a, b, into(N.at(i)));   // 3D cross into a preallocated slot ("crossto")
+```
+
+`into(y)` is a **distinct type**, so it never collides with a scalar argument —
+which is what lets `add`/`sub` also offer the **fused out-of-place axpy** (the
+out-of-place twin of `add_(b, alpha)`):
+
+```cpp
+auto c = a.add(b, alpha);     // -> new,  a + alpha*b
+a.add(b, alpha, into(y));     // -> y,    a + alpha*b   (sub likewise)
+```
+
+`into(y)` writes in a single pass; `y` may share memory with an operand, and its
+extents are checked against the (broadcast) result. `y`'s dtype need not match —
+the result is cast to it. Reductions do not take `into`.
+
 ### Type promotion
 
 The result type follows the usual C++ arithmetic conversions, **except among

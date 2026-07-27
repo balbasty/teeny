@@ -210,6 +210,12 @@ auto c = a + b;  a.add(b);  a * 2.0;  2.0 - a;  1.0 / a;  -a;  a.pow(b);
 auto c = neg(a); abs(a); exp(a); log(a); sin(a); cos(a); sqrt(a); tanh(a);
 auto c = floor(a); ceil(a); round(a); trunc(a); sign(a);
 auto c = minimum(a, b); maximum(a, s); clamp(a, lo, hi);
+auto c = a.add(b, alpha);  a.sub(b, alpha);  // fused out-of-place axpy: a +/- alpha*b (b broadcasts)
+
+// ...or write into a preallocated dest (one fused pass, no alloc) -> dest&: `into(y)` last
+a.add(b, into(y));  a.mul(b, into(y));  a.add(2.0, into(y));  a.add(b, alpha, into(y));
+exp(a, into(y)); sqrt(a, into(y)); minimum(a, b, into(y)); clamp(a, lo, hi, into(y));
+normalize(a, into(y));  cross(a, b, into(N.at(i)));   // cross into a slot ("crossto")
 
 // reductions -> scalar (all axes). ACCUMULATE in the "reduce type" (double for
 //   small floats float/double/half, item type for ints), then CAST the result to

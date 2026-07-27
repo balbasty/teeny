@@ -40,6 +40,7 @@ TESTS = \
 	$(BUILDDIR)/test_atomic_alias \
 	$(BUILDDIR)/test_mathops \
 	$(BUILDDIR)/test_vecalg \
+	$(BUILDDIR)/test_into \
 	$(BUILDDIR)/test_ops \
 	$(BUILDDIR)/test_fold \
 	$(BUILDDIR)/test_axred \
