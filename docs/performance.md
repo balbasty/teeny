@@ -3,7 +3,7 @@
 teeny's performance model rests on one idea: **fold everything that is known at
 compile time, carry only what is genuinely dynamic.** A `strides<...>` layout with
 known strides is an *empty base* (EBO) — it costs zero bytes and its offsets fold
-to immediates. You pay, in footprint and in lost optimization, only for the axes
+to compile-time constants. You pay, in footprint and in lost optimization, only for the axes
 whose extent or stride is truly a runtime value.
 
 This page is about *where that cost lands* — especially for **dynamic strides**,
@@ -20,14 +20,14 @@ registers / kernel argument space:
 | `double*` (raw) | 8 | baseline |
 | `view<double, shape<8>, strides<1>>` | **8** | fully static geometry → EBO; a bare pointer |
 | `view<double, shape<-1>, strides<2>>` | 16 | static stride is free; only the dynamic **extent** adds 8 |
-| `view<double, shape<-1,-1,-1>, ccontiguous>` | 32 | strides are **derived** from extents, not stored (8 + 3×8) |
+| `view<double, shape<-1,-1,-1>, ccontiguous>` | 32 | strides are **derived** from the shape, not stored (8 + 3×8) |
 | `view<double, shape<-1,-1,-1>, dynamic_strides>` | **56** | 8 ptr + 3 extents + **3 stored strides** |
 
 Two things fall out immediately:
 
 - **A fully-static view is a bare pointer.** Bake known dims/strides into the type
   (`shape<3,3>`, `strides<...>`) and the geometry vanishes.
-- **`ccontiguous` never stores strides** — it derives them from the extents. So even
+- **`ccontiguous` never stores strides** — it derives them from the shape. So even
   for a dynamic shape, a *contiguous* view is 24 bytes lighter than a
   `dynamic_strides` one of the same rank. Reach for `dynamic_strides` only when the
   strides are genuinely arbitrary (a transpose gap, an external DLPack layout).
@@ -73,7 +73,7 @@ dynamic strides cost nothing per element.**
    An interpolation/resampling gather (reading a window of neighbours around each
    arbitrary sample point) computes `base + Σ idxₖ·strideₖ` at scattered points, not a
    linear march. With dynamic spatial strides that is N runtime
-   multiply-adds per gather; with **static** strides they fold to immediates. Keep the
+   multiply-adds per gather; with **static** strides they fold to compile-time constants. Keep the
    spatial strides static (below) and the gather folds.
 4. **Index width** — dynamic offset math in `int64` is slower and uses more registers
    than `int32`, especially on the device. Addressed by #115.
@@ -83,7 +83,7 @@ dynamic strides cost nothing per element.**
 teeny is built to route around the above; the idioms:
 
 - **Bake known geometry into the type.** `local<double, shape<3,3>>`,
-  `strides<9,3,1>` — zero footprint, immediate offsets.
+  `strides<9,3,1>` — zero footprint, compile-time offsets.
 - **Views preserve static strides.** Slicing, `peel`, `permute`, `flip`,
   `unsqueeze`/`squeeze`, and `reshape` all **fold their output strides** to
   compile-time constants where the source is static — so a static source stays static
@@ -94,10 +94,10 @@ teeny is built to route around the above; the idioms:
 - **Peel the batch into the pointer.** `peel_front<Nbatch>` bakes the batch offset
   into each sub-view's *data handle*, so the inner kernel sees only the (usually
   static) spatial + channel strides — the batch strides never enter the inner loop
-  (see [Dispatch & the ndarray boundary](dispatch.md)).
+  (see [Dispatch & the anyrank boundary](dispatch.md)).
 - **Dispatch runtime shape to static kernels.** `dispatch_value` / `dispatch_rank`
   instantiate a static-shape kernel from a runtime spatial rank, so the hot code is
-  compiled against folded extents and strides.
+  compiled against a folded shape and strides.
 
 Rule of thumb for a hot kernel: **the inner loop should run over a view whose
 strides are static** (or contiguous). If it doesn't, `recast` / `dispatch` at the

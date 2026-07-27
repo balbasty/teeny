@@ -100,13 +100,13 @@ any-order denseness, and C-order contiguity respectively.)
     teeny leads with the numpy/pytorch vocabulary — `t.shape()`, `t.shape(d)`,
     `t.strides()`, `t.numel()`, `t.rank()`, `t.is_contiguous()`. The mdspan spellings
     are still there as an interop escape hatch: `t.extents()` / `t.mapping()` return
-    the raw `cuda::std` objects and `t.extent(d) == t.shape(d)`.
+    the raw `cuda::std` objects and `t.extent(d) == t.shape(d)`. See
+    [mdspan vs teeny](mdspan-vs-teeny.md) for the full map.
 
 ## Recover static inner dims
 
-At the ndarray boundary a view is often fully dynamic. `recast` reinterprets it
-with a **more-static** shape (a `shape<...>`, i.e. the mdspan extents type) of the
-same rank, so known inner dims fold:
+At the array boundary a view is often fully dynamic. `recast` reinterprets it
+with a **more-static** `shape<...>` of the same rank, so known inner dims fold:
 
 ```cpp
 auto dyn = wrap(ptr, shape<-1,-1,-1>{n,3,3});  // came in fully dynamic
@@ -124,12 +124,12 @@ auto dyn = wrap(ptr, shape<-1,-1,-1>{n,3,3});  // came in fully dynamic
     auto st = dyn.recast<shape<-1,3,3>>();  // the 3s are now compile-time
     ```
 
-Static dims of the target are validated against the actual extents. `recast`
+Static dims of the target are validated against the actual shape. `recast`
 **preserves the source's strides and works on any layout** (no copy, no contiguity
 requirement): a strided or transposed source keeps its strides — they fold to
 compile-time constants where the source layout makes them derivable (contiguous /
 `strides<>`), and stay run-time for a `dynamic_strides` source. It only re-types
-the *extents*; it never assumes row-major (which would silently mis-address a
+the *shape*; it never assumes row-major (which would silently mis-address a
 non-contiguous view).
 
 A second **layout** argument overrides that when you *want* to reinterpret the
@@ -148,7 +148,7 @@ to compile-time constants when you know it's contiguous:
     auto st = dyn.recast<shape<-1,3,3>, ccontiguous>();    // reinterpret AS row-major: strides fold to (9,3,1)
     ```
 
-`ccontiguous`/`fcontiguous` derive the strides from the extents (**you** promise
+`ccontiguous`/`fcontiguous` derive the strides from the shape (**you** promise
 the data is contiguous in that order — UB if not); `strides<S...>` imposes explicit
 strides. The default (`keep_strides`) preserves the source strides, as above.
 

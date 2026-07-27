@@ -26,10 +26,12 @@ nav = [
     {"Indexing & slicing" = "indexing.md"},
     {"Math & broadcasting" = "math.md"},
     {"Views & structure" = "structure.md"},
-    {"Dispatch & the ndarray boundary" = "dispatch.md"},
+    {"Dispatch & the anyrank boundary" = "dispatch.md"},
+    {"mdspan vs teeny" = "mdspan-vs-teeny.md"},
     {"Performance" = "performance.md"},
     {"Writing efficient kernels" = "efficient-kernels.md"},
     {"Half precision" = "half.md"},
+    {"CUDA & CCCL compatibility" = "cuda-compat.md"},
   ]},
   {"Tutorials" = [
     {"CPU + CUDA kernels for DLPack → Python" = "tutorials/dlpack-python.md"},
