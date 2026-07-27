@@ -1243,9 +1243,9 @@ _TNY_API auto & normalize(const tensor<T,E,L,O> & a, into_t<D> out) {
  * `n = norm<Axes...>(a)` removes the reduced axes; restore them as size-1 (keepdim)
  * so it broadcasts back over `a`. Inserting size-1 axes at ascending positions (each
  * unsqueeze grows the rank for the next), so the axes must be distinct & ascending. */
-_TNY_API constexpr bool _axes_ascending() { return true; }
-_TNY_API constexpr bool _axes_ascending(long) { return true; }
-template <class... R> _TNY_API constexpr bool _axes_ascending(long a, long b, R... r) { return a < b && _axes_ascending(b, r...); }
+// `_axes_ascending(...)` lives in indexing.h (next to `_norm_axis`) — tensor.h's
+// multi-axis `unsqueeze<Ax...>`/`squeeze<Ax...>` folds need it too, and tensor.h
+// cannot include math.h.
 // keepdim view fold: insert a size-1 axis at each (ascending, already-normalised) position.
 template <class Tn> _TNY_API auto _keepdims(const Tn & t) { return t; }
 template <long A0, long... Rest, class Tn> _TNY_API auto _keepdims(const Tn & t) { return _keepdims<Rest...>(t.template unsqueeze<A0>()); }

@@ -150,6 +150,30 @@ _TNY_API void fetch_add(T * p, T v) noexcept {
 #endif
 }
 
+namespace _detail {
+/* --- multi-axis unsqueeze/squeeze folds (see tensor::unsqueeze / ::squeeze) ------ *
+ * Both take ALREADY-NORMALISED (non-negative), strictly ascending axis positions and
+ * apply the single-axis view op one step at a time. `t` is taken by forwarding
+ * reference so the FIRST step keeps the source's constness (and never copies an
+ * owning tensor); every later step runs on the view the previous one returned.
+ *
+ * unsqueeze: positions are relative to the FINAL rank, so insert SMALLEST-first —
+ *   each insert lands left of the not-yet-processed positions and leaves them valid.
+ *   (H,W) unsqueeze<1,3>: insert 1 -> (H,1,W), insert 3 -> (H,1,W,1).
+ * squeeze:   positions are relative to the SOURCE rank, so drop LARGEST-first —
+ *   dropping a later axis never shifts an earlier one.
+ *   rank-4 squeeze<0,2>: drop 2 -> (0,1,3), drop 0 -> (1,3). */
+template <long A0, class Tn> _TNY_API auto _unsqueeze_fold(Tn && t) noexcept
+{ return t.template unsqueeze<A0>(); }
+template <long A0, long A1, long... Rest, class Tn> _TNY_API auto _unsqueeze_fold(Tn && t) noexcept
+{ return _unsqueeze_fold<A1, Rest...>(t.template unsqueeze<A0>()); }
+
+template <long A0, class Tn> _TNY_API auto _squeeze_fold(Tn && t) noexcept
+{ return t.template squeeze<A0>(); }
+template <long A0, long A1, long... Rest, class Tn> _TNY_API auto _squeeze_fold(Tn && t) noexcept
+{ return _squeeze_fold<A1, Rest...>(t).template squeeze<A0>(); }
+} // namespace _detail
+
 /**
  * @brief One N-dimensional tensor, parameterised by ownership.
  *
@@ -1109,6 +1133,33 @@ public:
     _TNY_API auto unsqueeze() const noexcept
     { constexpr cs::size_t A = _norm_axis(Ax, rank() + 1); static_assert(A <= rank(), "unsqueeze: axis out of range"); return as_tensor<storage_view_of(O)>(_detail::unsqueeze_md<A>(mdspan(), cs::make_index_sequence<rank() + 1>{})); }
 
+    /** @brief Insert size-1 axes at SEVERAL positions at once (numpy
+     *         `expand_dims(a, axis=(...))`) -> a rank-(N+k) view. The positions are
+     *         relative to the **final** rank `N + k` (negatives count from the back
+     *         of it), and must be distinct & ascending — e.g. `(H,W).unsqueeze<1,3>()`
+     *         -> `(H,1,W,1)`, `(H,W).unsqueeze<0,-1>()` -> `(1,H,W,1)`. Arity picks
+     *         this overload; one axis still means `unsqueeze<Ax>()` above. */
+    template <long Ax0, long Ax1, long... Rest>
+    _TNY_API auto unsqueeze() noexcept {
+        constexpr cs::size_t NR = rank() + 2 + sizeof...(Rest);   // final (post-insert) rank
+        static_assert(_axis_in_range(Ax0, NR) && _axis_in_range(Ax1, NR) && (_axis_in_range(Rest, NR) && ...),
+                      "unsqueeze: axis out of range");
+        static_assert(_axes_ascending((long)_norm_axis(Ax0, NR), (long)_norm_axis(Ax1, NR), (long)_norm_axis(Rest, NR)...),
+                      "unsqueeze: axes must be distinct and ascending");
+        return _detail::_unsqueeze_fold<(long)_norm_axis(Ax0, NR), (long)_norm_axis(Ax1, NR),
+                                        (long)_norm_axis(Rest, NR)...>(*this);
+    }
+    template <long Ax0, long Ax1, long... Rest>
+    _TNY_API auto unsqueeze() const noexcept {
+        constexpr cs::size_t NR = rank() + 2 + sizeof...(Rest);   // final (post-insert) rank
+        static_assert(_axis_in_range(Ax0, NR) && _axis_in_range(Ax1, NR) && (_axis_in_range(Rest, NR) && ...),
+                      "unsqueeze: axis out of range");
+        static_assert(_axes_ascending((long)_norm_axis(Ax0, NR), (long)_norm_axis(Ax1, NR), (long)_norm_axis(Rest, NR)...),
+                      "unsqueeze: axes must be distinct and ascending");
+        return _detail::_unsqueeze_fold<(long)_norm_axis(Ax0, NR), (long)_norm_axis(Ax1, NR),
+                                        (long)_norm_axis(Rest, NR)...>(*this);
+    }
+
 private:
     static constexpr long _ax_all = cs::numeric_limits<long>::min();   // squeeze() sentinel: "all singletons"
     // gather arg for axis D when squeezing all singletons: drop a STATIC size-1
@@ -1121,6 +1172,12 @@ private:
     template <class P, cs::size_t... D>
     _TNY_API auto _squeeze_all(P p, cs::index_sequence<D...>) const noexcept
     { return _slice_range(p, cs::make_index_sequence<rank()>{}, _sq_arg<D>()...); }
+    // Every named (already-normalised) axis is size-1 as far as the TYPE knows — a
+    // DYNAMIC extent passes here and is checked at run time by the per-axis squeeze
+    // the multi-axis fold calls. An out-of-range axis short-circuits (its own
+    // static_assert reports it) so `static_extent` is never asked for a bad rank.
+    template <cs::size_t... A> static _TNY_API constexpr bool _all_extent1() noexcept
+    { return ((A >= rank() || Shape::static_extent(A) == cs::dynamic_extent || Shape::static_extent(A) == 1) && ...); }
 public:
     /** @brief Drop a size-1 axis `Ax` (negatives wrap) -> a rank-(N-1) view.
      *         `squeeze()` (no axis) drops EVERY statically-size-1 axis. */
@@ -1141,6 +1198,36 @@ public:
                              "squeeze: axis must have extent 1");
                _TNY_CHECK(extent(A) == index_type(1), "squeeze: axis must have extent 1");   // runtime check for a dynamic extent
                return as_tensor<storage_view_of(O)>(_detail::squeeze_md<A>(mdspan(), cs::make_index_sequence<rank() - 1>{})); }
+    }
+
+    /** @brief Drop SEVERAL size-1 axes at once (numpy `squeeze(axis=(...))`) -> a
+     *         rank-(N-k) view. The positions are relative to the **source** rank
+     *         (negatives count from the back) and must be distinct & ascending; every
+     *         named axis must have extent 1 (`static_assert` where the extent is
+     *         static, `_TNY_CHECK` where it is dynamic). e.g. a `(1,H,1,W)` view
+     *         `.squeeze<0,2>()` -> `(H,W)`. Arity picks this overload; one axis (or
+     *         none) still means `squeeze<Ax>()` above. */
+    template <long Ax0, long Ax1, long... Rest>
+    _TNY_API auto squeeze() noexcept {
+        static_assert(_axis_in_range(Ax0, rank()) && _axis_in_range(Ax1, rank()) && (_axis_in_range(Rest, rank()) && ...),
+                      "squeeze: axis out of range");
+        static_assert(_axes_ascending((long)_norm_axis(Ax0, rank()), (long)_norm_axis(Ax1, rank()), (long)_norm_axis(Rest, rank())...),
+                      "squeeze: axes must be distinct and ascending");
+        static_assert(_all_extent1<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>(),
+                      "squeeze: every named axis must have extent 1");
+        return _detail::_squeeze_fold<(long)_norm_axis(Ax0, rank()), (long)_norm_axis(Ax1, rank()),
+                                      (long)_norm_axis(Rest, rank())...>(*this);   // each step re-checks a dynamic extent
+    }
+    template <long Ax0, long Ax1, long... Rest>
+    _TNY_API auto squeeze() const noexcept {
+        static_assert(_axis_in_range(Ax0, rank()) && _axis_in_range(Ax1, rank()) && (_axis_in_range(Rest, rank()) && ...),
+                      "squeeze: axis out of range");
+        static_assert(_axes_ascending((long)_norm_axis(Ax0, rank()), (long)_norm_axis(Ax1, rank()), (long)_norm_axis(Rest, rank())...),
+                      "squeeze: axes must be distinct and ascending");
+        static_assert(_all_extent1<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>(),
+                      "squeeze: every named axis must have extent 1");
+        return _detail::_squeeze_fold<(long)_norm_axis(Ax0, rank()), (long)_norm_axis(Ax1, rank()),
+                                      (long)_norm_axis(Rest, rank())...>(*this);   // each step re-checks a dynamic extent
     }
 
     /* --- value-form axis args: x.squeeze(Int<1>()) == x.squeeze<1>() ---- *
