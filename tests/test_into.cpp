@@ -86,5 +86,26 @@ int main() {
     a.add(b, into(fi));                              // double result -> float dest
     if (!close(fi(0),11.0) || !close(fi(2),33.0)) return 27;
 
+    // ---- out-of-place ops AS METHODS (parity with a.add(b)) ------------
+    auto sq2 = local<double, shape<3>>(); sq2(0)=4; sq2(1)=9; sq2(2)=16;
+    if (!close(sq2.sqrt()(0), 2.0) || !close(sq2.sqrt()(2), 4.0)) return 28;   // a.sqrt()
+    if (a.neg()(0) != -1)                    return 29;                        // a.neg()
+    if (!close(e.exp()(1), std::exp(1.0)))   return 30;                        // a.exp()
+    sq2.sqrt(into(y)); if (y(0)!=2 || y(2)!=4) return 31;                      // a.sqrt(into(y))
+    if (a.minimum(b)(2) != 3)                return 32;                        // a.minimum(tensor)
+    if (a.maximum(b)(0) != 10)               return 33;
+    if (b.minimum(15.0)(2) != 15)            return 34;                        // a.minimum(scalar)
+    if (b.clamp(12.0, 25.0)(1) != 20)        return 35;                        // a.clamp
+    b.maximum(a, into(y)); if (y(0)!=10)     return 36;                        // a.maximum(t, into)
+    auto vv = local<double, shape<3>>(); vv(0)=3; vv(1)=0; vv(2)=4;
+    if (!close(vv.normalize()(2), 0.8))      return 37;                        // a.normalize()
+    auto uu = local<double, shape<3>>(); vv.normalize(into(uu));
+    if (!close(uu(0), 0.6))                  return 38;                        // a.normalize(into)
+    auto pp = local<double, shape<3>>(); pp(0)=1; pp(1)=2; pp(2)=3;
+    auto qq = local<double, shape<3>>(); qq(0)=4; qq(1)=5; qq(2)=6;
+    if (!close(pp.cross(qq)(0), -3.0))       return 39;                        // a.cross(b)
+    auto nn = local<double, shape<3>>(); pp.cross(qq, into(nn));
+    if (!close(nn(2), -3.0))                 return 40;                        // a.cross(b, into)
+
     return 0;
 }

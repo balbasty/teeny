@@ -1212,6 +1212,31 @@ public:
     template <class B, class D, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API auto & add(const B & b, T alpha, into_t<D> out) const;
     template <class B, class D, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API auto & sub(const B & b, T alpha, into_t<D> out) const;
 
+    /* --- out-of-place unary math AS METHODS: a.exp(), a.sqrt(), … -> new tensor,
+     *     or a.exp(into(y)) -> y&. The free forms (exp(a)) and in-place (a.exp_())
+     *     still exist; these give method parity with a.add(b). ------------------- */
+#define _TNY_OOP_UNARY_DECL(NAME) \
+    _TNY_API auto NAME() const;   \
+    template <class D> _TNY_API auto & NAME(into_t<D> out) const;
+    _TNY_OOP_UNARY_DECL(neg)  _TNY_OOP_UNARY_DECL(abs)   _TNY_OOP_UNARY_DECL(exp)
+    _TNY_OOP_UNARY_DECL(log)  _TNY_OOP_UNARY_DECL(sin)   _TNY_OOP_UNARY_DECL(cos)
+    _TNY_OOP_UNARY_DECL(sqrt) _TNY_OOP_UNARY_DECL(tanh)  _TNY_OOP_UNARY_DECL(floor)
+    _TNY_OOP_UNARY_DECL(ceil) _TNY_OOP_UNARY_DECL(round) _TNY_OOP_UNARY_DECL(trunc)
+    _TNY_OOP_UNARY_DECL(sign)
+#undef _TNY_OOP_UNARY_DECL
+
+    /* --- min/max/clamp/normalize/cross AS METHODS (free forms exist too) --- */
+    template <class B> _TNY_API auto minimum(const B & b) const;                          // tensor (broadcasts) or scalar rhs
+    template <class B> _TNY_API auto maximum(const B & b) const;
+    template <class B, class D> _TNY_API auto & minimum(const B & b, into_t<D> out) const;
+    template <class B, class D> _TNY_API auto & maximum(const B & b, into_t<D> out) const;
+    _TNY_API auto clamp(T lo, T hi) const;
+    template <class D> _TNY_API auto & clamp(T lo, T hi, into_t<D> out) const;
+    _TNY_API auto normalize() const;                                                      // unit vector (a.normalize_() is in place)
+    template <class D> _TNY_API auto & normalize(into_t<D> out) const;
+    template <class Tb,class Eb,class Lb,storage Ob> _TNY_API auto cross(const tensor<Tb,Eb,Lb,Ob> & b) const;   // 3D (a.cross_(b) is in place)
+    template <class Tb,class Eb,class Lb,storage Ob, class D> _TNY_API auto & cross(const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) const;
+
     /* --- generic elementwise with a user functor (device-safe) ---- */
     // `f` is applied per element; its APPLICATION ORDER is unspecified (a dense view is
     // walked in physical, not logical, order — a transposed in-place map_ vectorizes).

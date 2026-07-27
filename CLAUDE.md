@@ -281,6 +281,8 @@ auto c = -a;                          // unary minus -> new tensor
 auto c = a.pow(b);                    // element-wise power
 auto e = exp(a); auto e = sqrt(a);    // unary free (neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign)
 auto c = minimum(a,b); maximum(a,2.0); clamp(a,lo,hi);   // elementwise binary min/max, clamp
+// Every out-of-place producer is ALSO a method (parity with a.add(b)), each taking into():
+//   a.exp(); a.sqrt(); a.minimum(b); a.clamp(lo,hi); a.normalize(); a.cross(b);  a.exp(into(y)); ...
 auto c = a.add(b,alpha); a.sub(b,alpha);  // FUSED out-of-place axpy: a +/- alpha*b (twin of add_(b,alpha))
 // --- into(dest): write a producer's result into a preallocated buffer -> dest& ---
 //   one fused pass, NO alloc; `into(y)` LAST arg. A distinct type (never conflated with

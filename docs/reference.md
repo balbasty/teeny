@@ -318,8 +318,9 @@ scalar rhs applies to every element.
 | `a + b` / `a.add(b)`, `a - b`, `a * b`, `a / b` | new tensor (tensor+tensor broadcasts, or +scalar) |
 | `2.0 * a`, `2.0 - a`, `1.0 / a`, `-a` | scalar–tensor / unary minus |
 | `a.pow(b)` | element-wise power |
-| `neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign(a)` | unary free functions |
-| `minimum(a,b)` `maximum(a,s)` `clamp(a,lo,hi)` | elementwise min/max/clamp |
+| `neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign(a)` | unary free functions — **also methods** (`a.exp()`, …) |
+| `minimum(a,b)` `maximum(a,s)` `clamp(a,lo,hi)` | elementwise min/max/clamp — **also methods** (`a.minimum(b)`, …) |
+| `normalize(a)` `cross(a,b)` | unit vector / 3D cross — **also methods** (`a.normalize()`, `a.cross(b)`) |
 | `a.add(b, alpha)` `a.sub(b, alpha)` | fused out-of-place axpy: `a ± alpha*b` (b broadcasts); the in-place twin is `add_(b, alpha)` |
 | `a.map(f)` | new tensor from a user functor |
 
