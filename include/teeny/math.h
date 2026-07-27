@@ -583,16 +583,10 @@ _TNY_API R reduce_(const A & a, R init, Op op, cs::index_sequence<D...>) {
  * Output extents = input extents with `Axes...` dropped (static where the
  * input is). Fully static -> stack (host+device); dynamic -> heap (HOST). */
 
-// static output extent for input axis D when reducing Axes... (drop if reduced).
-template <cs::size_t D, class E, long... Axes>
-_TNY_API constexpr cs::size_t red_ext() {
-    return _pos_in<D, _norm_axis(Axes, E::rank())...>() >= 0 ? _drop_axis : E::static_extent(D);
-}
-template <class E, long... Axes, cs::size_t... D>
-auto reduced_ext_(cs::index_sequence<D...>)
-    -> typename _compact<typename E::index_type, red_ext<D, E, Axes...>()...>::type;
-template <class E, long... Axes>
-using reduced_extents = decltype(reduced_ext_<E, Axes...>(cs::make_index_sequence<E::rank()>{}));
+// `red_ext` / `reduced_ext_` / `reduced_extents` (the output extents of an axis
+// reduction) live in tensor.h: the reduction METHOD declarations there SFINAE on
+// them to split _TNY_API (static result) from _TNY_HOST (dynamic result), exactly
+// as the free reductions below do, and tensor.h is included before this header.
 
 // the engine: init `out` to `init`, then fold each input element into its output
 // cell (reduced axes contribute stride 0 to the output offset). `out` is a fresh
@@ -1477,31 +1471,44 @@ _TNY_API auto & dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b
  *     tensor.h. Same overload shapes (full / axis / Acc / value /    *
  *     into), told apart the same way the free functions are.         *
  * ------------------------------------------------------------------ */
+// The AXIS forms come in the same _TNY_API (static result -> stack) / _TNY_HOST
+// (dynamic result -> heap) pairs as the free functions they forward to, keyed on
+// the identical condition (declared in tensor.h) — so a device-callable method
+// never forwards to a host-only allocator. `_TNY_RED_AXIS_IF` repeats the
+// declaration's key WITHOUT the `= 0` default (out-of-line definitions may not
+// restate default template arguments).
+#define _TNY_RED_AXIS_IF(E, CMP)                                                                           \
+    cs::enable_if_t<(sizeof...(Ax) > 0) && _md::reduced_extents<E,Ax...>::rank_dynamic() CMP 0, int>
+#define _TNY_RED_AXIS_DEF(NAME, API, CMP)                                                                  \
+template <class T,class E,class L,storage O> template <long... Ax, _TNY_RED_AXIS_IF(E, CMP)>               \
+API auto tensor<T,E,L,O>::NAME() const { return tny::NAME<Ax...>(*this); }                                 \
+template <class T,class E,class L,storage O> template <class Acc, long... Ax, _TNY_RED_AXIS_IF(E, CMP)>    \
+API auto tensor<T,E,L,O>::NAME() const { return tny::NAME<Acc, Ax...>(*this); }                            \
+template <class T,class E,class L,storage O> template <long... Ax, _TNY_RED_AXIS_IF(E, CMP)>               \
+API auto tensor<T,E,L,O>::NAME(axis<Ax...>) const { return tny::NAME<Ax...>(*this); }                      \
+template <class T,class E,class L,storage O> template <class Acc, long... Ax, _TNY_RED_AXIS_IF(E, CMP)>    \
+API auto tensor<T,E,L,O>::NAME(axis<Ax...>) const { return tny::NAME<Acc, Ax...>(*this); }                 \
+template <class T,class E,class L,storage O> template <long... Ax, class D, _TNY_RED_AXIS_IF(E, CMP)>      \
+API auto & tensor<T,E,L,O>::NAME(into_t<D> out) const { return tny::NAME<Ax...>(*this, out); }             \
+template <class T,class E,class L,storage O> template <class Acc, long... Ax, class D, _TNY_RED_AXIS_IF(E, CMP)> \
+API auto & tensor<T,E,L,O>::NAME(into_t<D> out) const { return tny::NAME<Acc, Ax...>(*this, out); }        \
+template <class T,class E,class L,storage O> template <long... Ax, class D, _TNY_RED_AXIS_IF(E, CMP)>      \
+API auto & tensor<T,E,L,O>::NAME(axis<Ax...>, into_t<D> out) const { return tny::NAME<Ax...>(*this, out); } \
+template <class T,class E,class L,storage O> template <class Acc, long... Ax, class D, _TNY_RED_AXIS_IF(E, CMP)> \
+API auto & tensor<T,E,L,O>::NAME(axis<Ax...>, into_t<D> out) const { return tny::NAME<Acc, Ax...>(*this, out); }
 #define _TNY_RED_METHOD_DEF(NAME)                                                                          \
 template <class T,class E,class L,storage O> template <class Acc>                                          \
 _TNY_API auto tensor<T,E,L,O>::NAME() const { return tny::NAME<Acc>(*this); }                              \
-template <class T,class E,class L,storage O> template <long... Ax, cs::enable_if_t<(sizeof...(Ax) > 0), int>> \
-_TNY_API auto tensor<T,E,L,O>::NAME() const { return tny::NAME<Ax...>(*this); }                            \
-template <class T,class E,class L,storage O> template <class Acc, long... Ax, cs::enable_if_t<(sizeof...(Ax) > 0), int>> \
-_TNY_API auto tensor<T,E,L,O>::NAME() const { return tny::NAME<Acc, Ax...>(*this); }                       \
-template <class T,class E,class L,storage O> template <long... Ax>                                         \
-_TNY_API auto tensor<T,E,L,O>::NAME(axis<Ax...>) const { return tny::NAME<Ax...>(*this); }                 \
-template <class T,class E,class L,storage O> template <class Acc, long... Ax>                              \
-_TNY_API auto tensor<T,E,L,O>::NAME(axis<Ax...>) const { return tny::NAME<Acc, Ax...>(*this); }            \
 template <class T,class E,class L,storage O> template <class Acc, class D>                                 \
 _TNY_API auto & tensor<T,E,L,O>::NAME(into_t<D> out) const { return tny::NAME<Acc>(*this, out); }          \
-template <class T,class E,class L,storage O> template <long... Ax, class D, cs::enable_if_t<(sizeof...(Ax) > 0), int>> \
-_TNY_API auto & tensor<T,E,L,O>::NAME(into_t<D> out) const { return tny::NAME<Ax...>(*this, out); }        \
-template <class T,class E,class L,storage O> template <class Acc, long... Ax, class D, cs::enable_if_t<(sizeof...(Ax) > 0), int>> \
-_TNY_API auto & tensor<T,E,L,O>::NAME(into_t<D> out) const { return tny::NAME<Acc, Ax...>(*this, out); }   \
-template <class T,class E,class L,storage O> template <long... Ax, class D>                                \
-_TNY_API auto & tensor<T,E,L,O>::NAME(axis<Ax...>, into_t<D> out) const { return tny::NAME<Ax...>(*this, out); } \
-template <class T,class E,class L,storage O> template <class Acc, long... Ax, class D>                     \
-_TNY_API auto & tensor<T,E,L,O>::NAME(axis<Ax...>, into_t<D> out) const { return tny::NAME<Acc, Ax...>(*this, out); }
+_TNY_RED_AXIS_DEF(NAME, _TNY_API,  ==)                                                                     \
+_TNY_RED_AXIS_DEF(NAME, _TNY_HOST, !=)
 _TNY_RED_METHOD_DEF(sum)    _TNY_RED_METHOD_DEF(prod)  _TNY_RED_METHOD_DEF(max)
 _TNY_RED_METHOD_DEF(min)    _TNY_RED_METHOD_DEF(mean)  _TNY_RED_METHOD_DEF(sqnorm)
 _TNY_RED_METHOD_DEF(norm)
 #undef _TNY_RED_METHOD_DEF
+#undef _TNY_RED_AXIS_DEF
+#undef _TNY_RED_AXIS_IF
 // dot (binary): m.dot(b) / m.dot<Acc>(b) / m.dot(b, into(cell)).
 template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob>
 _TNY_API auto tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::dot<Acc>(*this, b); }

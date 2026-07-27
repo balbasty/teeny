@@ -66,5 +66,39 @@ int main()
     v.dot(w, into(cell));                              // dot into rank-0
     if (!close(cell.item(), 7.0))         return 24;
 
+    // ---- DYNAMIC-shape receiver: the axis methods must resolve to the ------
+    // HOST (heap-allocating) free overload, not the host+device one. The method
+    // declarations mirror the free functions' static/dynamic split, so a
+    // _TNY_API (__host__ __device__) forwarder never calls a __host__-only
+    // allocator. NB reducing axis 0 of shape<-1,3> leaves a STATIC shape<3>
+    // (the _TNY_API arm); reducing axis 1 leaves a DYNAMIC shape<-1> (the
+    // _TNY_HOST arm) — both arms are exercised here.
+    auto md = zeros<double>(shape<-1,3>{2}); md.copy_(m);
+    auto dcol = md.sum<0>();                             // -> static shape<3> (device-safe arm)
+    static_assert(decltype(dcol)::extents_type::rank_dynamic() == 0, "sum<0> of shape<-1,3> is static");
+    if (dcol(0)!=5 || dcol(1)!=7 || dcol(2)!=9)          return 25;
+    auto drow = md.sum<1>();                             // -> dynamic shape<-1> (host-only arm)
+    static_assert(decltype(drow)::extents_type::rank_dynamic() == 1, "sum<1> of shape<-1,3> is dynamic");
+    static_assert(decltype(drow)::ownership == storage::heap, "dynamic axis result is heap-owned");
+    if (drow(0)!=6 || drow(1)!=15)                       return 26;
+    auto drowv = md.sum(axis<1>{});                      // value form, dynamic result
+    if (drowv(0)!=6 || drowv(1)!=15)                     return 27;
+    auto drowa = md.sum<double,1>();                     // accumulator + axis, dynamic result
+    if (!close(drowa(0), 6.0) || !close(drowa(1), 15.0)) return 28;
+    auto dmean = md.mean<1>();
+    if (!close(dmean(0), 2.0) || !close(dmean(1), 5.0))  return 29;
+    auto dnorm = md.norm<1>();
+    if (!close(dnorm(0), std::sqrt(14.0)) || !close(dnorm(1), std::sqrt(77.0))) return 30;
+    // ...and the into() twins of the dynamic axis forms
+    auto dbuf = zeros<double>(shape<-1>{2});
+    md.sum<1>(into(dbuf));            if (dbuf(0)!=6 || dbuf(1)!=15)  return 31;
+    dbuf.zero_();
+    md.sum(axis<1>{}, into(dbuf));    if (dbuf(0)!=6 || dbuf(1)!=15)  return 32;
+    dbuf.zero_();
+    md.sum<double,1>(into(dbuf));     if (dbuf(0)!=6 || dbuf(1)!=15)  return 33;
+    md.mean(axis<1>{}, into(dbuf));
+    if (!close(dbuf(0), 2.0) || !close(dbuf(1), 5.0))                 return 34;
+    md.sum(into(cell));               if (!close(cell.item(), 21.0))  return 35;   // full form still fine
+
     return 0;
 }
