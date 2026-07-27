@@ -121,6 +121,7 @@ x(i, j, k);                     // element access -> T& (negatives wrap)
 x.at(i, j, k);                  // one element as a rank-0 VIEW (rank-0 <-> scalar, .item())
 x(0, all, slice(1, 4));         // any slice arg -> a VIEW
 x(1, ellipsis, 2);              // ellipsis = (rank - #other args) copies of `all`
+x(1, etc, 2);                   // `etc` == `ellipsis` (one marker, two names)
 x(ellipsis) = b;  x(0, all) = v;  // assign INTO a slice copies/fills (a = b rebinds)
 slice(start, stop);  slice(start, stop, step);  // half-open range, optional (neg) step
 none;  all;                     // open slice end (== python None); keep-axis marker

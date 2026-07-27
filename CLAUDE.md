@@ -200,6 +200,8 @@ t(none, all, all); t(all, none); t(ellipsis, none);  // a BARE `none` arg = nump
                       //   inserts a size-1 axis (static extent 1, stride 0) -> rank+1 view,
                       //   == unsqueeze at that position (composes with int/range/ellipsis).
 t(1, ellipsis, 2);    // ellipsis (numpy ...) = (rank - #other args, excl. none) copies of `all`; max one.
+t(1, etc, 2);         // `etc` and `ellipsis` are ONE marker under two names (ellipsis_t == etc_t):
+                      //   `etc` is the anyshape<etc,...> spelling; both names work in both contexts.
 t(ellipsis) = b; t(0,all) = 3.0;  // assign INTO a slice copies/fills (b broadcasts);
                       //   `a = b` on a NAMED view REBINDS (shallow) — the contrast.
 t(0, slice<1,4>()); t(0, slice<0,8,2>());  // compile-time slice (bounds fold like `all`);
