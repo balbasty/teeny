@@ -1179,13 +1179,14 @@ _TNY_API auto normalize(const tensor<T,E,L,O> & a) {
     return a.div(static_cast<S>(norm(a)));
 }
 
-/** @brief 3D cross product `a × b` into `out` (all rank-1, length 3). Computes the
- *         three components into temporaries first, so `out` MAY alias `a` or `b`
- *         (`crossto_(a, a, b)` is safe). Runs in the compute type (`half` in float). */
+// internal: 3D cross product a × b into `out` (all rank-1, length 3). Computes the
+// three components into temporaries FIRST, so `out` may alias `a` or `b` (this is
+// what makes both `cross` and the in-place `cross_` — where out IS a — safe). Runs
+// in the compute type (`half` in float). Not public: use `cross`/`cross_` below.
 template <class To,class Eo,class Lo,storage Oo,
           class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
-_TNY_API void crossto_(tensor<To,Eo,Lo,Oo> & out,
-                       const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
+_TNY_API void _cross3(tensor<To,Eo,Lo,Oo> & out,
+                      const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
     static_assert(Eo::rank() == 1 && Ea::rank() == 1 && Eb::rank() == 1, "cross: operands must be rank-1 3-vectors");
     static_assert(Ea::static_extent(0) == 3 || Ea::static_extent(0) == cs::dynamic_extent, "cross: a must have length 3");
     static_assert(Eb::static_extent(0) == 3 || Eb::static_extent(0) == cs::dynamic_extent, "cross: b must have length 3");
@@ -1200,12 +1201,22 @@ _TNY_API void crossto_(tensor<To,Eo,Lo,Oo> & out,
 }
 
 /** @brief 3D cross product `a × b` -> a NEW stack 3-vector of `promote(Ta,Tb)`.
- *         Both operands are rank-1, length 3. */
+ *         Both operands are rank-1, length 3. The in-place spelling is the member
+ *         `a.cross_(b)` (`a` becomes `a × b`); to write into a preallocated slot
+ *         with no temporary, `slot.copy_(cross(a, b))`. */
 template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
 _TNY_API auto cross(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
     tensor<promote_t<Ta,Tb>, shape<3>, ccontiguous, storage::stack> c(_uninit);
-    crossto_(c, a, b);
+    _cross3(c, a, b);
     return c;
+}
+
+// in-place 3D cross product: *this becomes (*this) × b (rank-1, length 3). Safe
+// because _cross3 buffers the three components before storing (out aliases a).
+template <class T,class E,class L,storage O> template <class Tb,class Eb,class Lb,storage Ob>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::cross_(const tensor<Tb,Eb,Lb,Ob> & b) {
+    _cross3(*this, *this, b);
+    return *this;
 }
 
 // in-place unit vector: *this /= norm(*this). Floating element types only (an

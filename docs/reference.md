@@ -362,7 +362,7 @@ optimisation — those stay out of teeny).
 | `a.normalize_()` | `tensor&` | in place `a /= norm(a)`; floating element types only; zero vector → NaN |
 | `normalize(a)` | new tensor (floating; integer → `double`) | out-of-place unit vector; static → stack, dynamic → heap |
 | `cross(a, b)` | new stack 3-vector `promote(Ta,Tb)` | 3D cross product; operands rank-1, length 3 |
-| `crossto_(out, a, b)` | `void` | `a × b` into `out`; `out` may alias `a`/`b` |
+| `a.cross_(b)` | `tensor&` | in place: `a` becomes `a × b` (rank-1, length 3; aliasing-safe). Into a separate slot: `slot.copy_(cross(a,b))` |
 
 **Input → output type — result element type.** The *accumulator* and the *result
 dtype* are separate. Default accumulator = `reduce_type_t<T>` (`double` for a

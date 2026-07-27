@@ -1215,6 +1215,8 @@ public:
     _TNY_API tensor & pow_(T e);
     _TNY_API tensor & clamp_(T lo, T hi);      // clamp each element to [lo, hi]
     _TNY_API tensor & normalize_();            // *this /= norm(*this)  (L2; floating element types)
+    template <class Tb, class Eb, class Lb, storage Ob>
+    _TNY_API tensor & cross_(const tensor<Tb,Eb,Lb,Ob> & b);   // *this = (*this) × b  (3D; rank-1, length 3)
 
     /* --- increment / decrement --------------------------------------- *
      * Prefix ++/-- mutate in place (add/subtract 1 from every element).

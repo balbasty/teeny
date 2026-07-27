@@ -96,28 +96,32 @@ int main() {
     // cross is orthogonal to both operands
     if (!close(dot(pq,p),0.0) || !close(dot(pq,q),0.0)) return 21;
 
-    // crossto_ into an existing (possibly aliasing) output
+    // write into a preallocated slot with no temporary: slot.copy_(cross(a,b))
     auto out = local<double, shape<3>>();
-    crossto_(out, p, q);
+    out.copy_(cross(p, q));
     if (!close(out(0),-3) || !close(out(2),-3)) return 22;
-    // aliasing: out == a is safe (components buffered first)
+    // in-place member: a becomes a × b (aliasing-safe — components buffered first)
     auto pa = local<double, shape<3>>(); pa(0)=1; pa(1)=2; pa(2)=3;
-    crossto_(pa, pa, q);
+    pa.cross_(q);
     if (!close(pa(0),-3) || !close(pa(1),6) || !close(pa(2),-3)) return 23;
+    // cross_ chains and returns *this
+    auto r = local<double, shape<3>>(); r(0)=1; r(1)=0; r(2)=0;
+    r.cross_(e2);                             // x × y = z
+    if (!close(r(2), 1.0))          return 24;
 
     // ---- half coverage (computes in float) -------------------------------
     auto hv = local<half, shape<3>>(); hv(0)=half(3); hv(1)=half(0); hv(2)=half(4);
-    if (!closeh((double)(float)norm(hv), 5.0))  return 24;
+    if (!closeh((double)(float)norm(hv), 5.0))  return 25;
     static_assert(cs::is_same<decltype(norm(hv)), half>::value, "norm(half)->half");
     auto hn = normalize(hv);
     static_assert(cs::is_same<typename decltype(hn)::element_type, half>::value, "normalize(half)->half");
-    if (!closeh((double)(float)hn(2), 0.8))     return 25;
+    if (!closeh((double)(float)hn(2), 0.8))     return 26;
 
     // ---- dynamic-shape norm (heap-owned, host) ---------------------------
     auto d = zeros<double>(shape<-1>{3}); d(0)=3; d(1)=0; d(2)=4;
-    if (!close(norm(d), 5.0))        return 26;
+    if (!close(norm(d), 5.0))        return 27;
     auto dn = normalize(d);          // heap result
-    if (!close(norm(dn), 1.0))       return 27;
+    if (!close(norm(dn), 1.0))       return 28;
 
     return 0;
 }

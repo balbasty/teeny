@@ -223,7 +223,8 @@ a.normalize_();       // in place: a /= norm(a)   (floating element types)
 auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, dynamic->heap)
 
 auto c = cross(a, b);       // 3D cross product a × b -> new stack 3-vector (rank-1, length 3)
-crossto_(out, a, b);        // ... into an existing `out`; `out` MAY alias a or b
+a.cross_(b);                // in place: a becomes a × b (mirrors add_/mul_; aliasing-safe)
+slot.copy_(cross(a, b));    // write into a preallocated slot with no new vocabulary
 ```
 
 `sqnorm`/`norm` accumulate in the reduce type (§ *Accumulator type vs result
@@ -231,7 +232,9 @@ type*) and reduce over every axis (so `norm` of a matrix is the Frobenius norm).
 `normalize` of a zero vector yields NaNs — this is exact math with no epsilon; add
 one at the call site if you need it. `cross` is defined only for rank-1, length-3
 operands (a `static_assert` catches a wrong static length; a runtime length is
-debug-checked).
+debug-checked). Its in-place form is the member `a.cross_(b)` (`a = a × b`); to
+write into a *separate* buffer, `slot.copy_(cross(a, b))` — the result is a tiny
+stack 3-vector, so there is no meaningful copy cost.
 
 ## Comparisons → a bool tensor
 

@@ -299,7 +299,8 @@ sqnorm(a);  norm(a);                   // Σaᵢ² / √Σaᵢ² over ALL axes. 
                       //   (int->double, mean rule). sqnorm<Acc>/norm<Acc> = leading TYPE = acc+result.
 a.normalize_();  auto u = normalize(a);// in place a/=norm(a) (floating) / out-of-place unit vector.
                       //   normalize static->stack, dynamic->heap; zero vector -> NaN (no epsilon)
-auto c = cross(a,b);  crossto_(out,a,b);  // 3D cross product (rank-1, length 3); out may alias a/b
+auto c = cross(a,b);  a.cross_(b);     // 3D cross product (rank-1, length 3): new / in place (a=a×b).
+                      //   Into a separate slot: slot.copy_(cross(a,b)). (no crossto_/out-param form.)
 // --- axis reductions -> a lower-rank TENSOR (named axes removed; negatives wrap).
 //   Same rule: accumulate in reduce_type, result element type = the tensor's type
 //   (mean over an integer tensor is the exception: DOUBLE, like the scalar mean).

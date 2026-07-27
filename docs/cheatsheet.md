@@ -228,7 +228,8 @@ sqnorm(a);            // Σaᵢ² over all axes (== dot(a,a)); sqnorm<Acc> force
 norm(a);              // √Σaᵢ² (L2/Frobenius); floating result (int -> double); norm<Acc> too
 a.normalize_();       // in place a /= norm(a) (floating types); zero vector -> NaN
 auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, dyn->heap)
-auto c = cross(a, b); crossto_(out, a, b);   // 3D cross (rank-1 length-3); out may alias a/b
+auto c = cross(a, b);  a.cross_(b);          // 3D cross (rank-1 length-3): new / in place (a = a×b)
+                                             //   into a slot: slot.copy_(cross(a, b))
 ```
 
 Promotion: C++ rules but lower-width float wins (`-DTNY_STD_PROMOTION` opts out).
