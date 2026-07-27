@@ -7,9 +7,10 @@ combination.
 
 ## `shape<...>` — the sizes
 
-`shape<...>` is the extents type: `cuda::std::extents<int64_t, ...>`. The
-`int64_t` index type matches DLPack's `shape`, so it drops onto ndarray
-bindings.
+`shape<...>` lists the per-dimension sizes of a tensor. Its `int64_t` index type
+matches DLPack's, so it drops onto ndarray bindings directly. (Under the hood it is
+teeny's spelling of `cuda::std::extents<int64_t, ...>` — see
+[mdspan vs teeny](mdspan-vs-teeny.md).)
 
 ```cpp
 shape<2,3,4>             // fully static 2×3×4
@@ -24,60 +25,71 @@ by supplying only the dynamic sizes:
 auto a = wrap(ptr, shape<2,3,4>{});      // all static — nothing to supply
 auto b = wrap(ptr, shape<-1,3>{n});      // supply the one dynamic size, n
 auto c = wrap(ptr, shape<-1,-1>{r, k});  // supply both
+auto d = wrap(ptr, rank<2>{r, k});       // rank<N> is the fully-dynamic rank-N shape
 ```
 
-Query sizes with `extent` / `shape` (a python-friendly alias):
+`rank<N>` is the fully-dynamic shape of rank `N`, so `rank<2>` is exactly
+`shape<-1,-1>`. (There is no `rank{r, k}` / `shape{r, k}` shortcut: class-template
+argument deduction does not apply to alias templates in C++17, so you always give
+the rank — `rank<2>{r, k}` or `shape<-1,-1>{r, k}`.)
+
+Query sizes with `shape`:
 
 ```cpp
-t.rank();            // number of dimensions (static)
-t.numel();           // total element count
-t.extent(0);         // RUNTIME lookup -> index_type
-t.extent(Int<0>());  // STATIC lookup -> integral_constant when that extent is
-                     //   static (folds into later arithmetic)
-t.shape(1); t.shape();  // aliases of extent(1) / extents()
-t.extent(Int<-1>());    // negative axis: the last dimension
+t.rank();          // number of dimensions (static)
+t.numel();         // total element count
+t.shape();         // the whole shape as an array-like accessor
+t.shape(1);        // RUNTIME lookup -> the size of axis 1 (an index_type value)
+t.shape(Int<0>()); // STATIC lookup -> an integral_constant when that axis is static
+                   //   (so it folds into later arithmetic)
+t.shape(Int<-1>()); // negative axis: the last dimension
 ```
+
+(These are teeny's numpy/pytorch-flavoured spellings. The underlying `mdspan`
+spellings — `t.extent(d)`, `t.extents()` — still exist as an interop escape hatch;
+see [mdspan vs teeny](mdspan-vs-teeny.md).)
 
 ## `strides<...>` — the strides
 
-The default layout is `ccontiguous` (C-order); strides derive from the extents.
-For specific strides — a padded row, a channel-last view, a reversed axis — use
-`strides<...>`, the stride analogue of `shape<...>`:
+The default layout is `ccontiguous` (C-order). In this case, strides are computed
+automatically from the shape and do not need to be provided. For specific strides —
+a padded row, a channel-last view, a reversed axis — use `strides<...>`, the stride
+analogue of `shape<...>`:
 
 ```cpp
-tensor<float, shape<3,4>, strides<4,1>>(ptr);               // row stride 4 (padding), col 1
-tensor<float, shape<-1,4>, strides<dynamic_stride,1>>(ptr, {n});  // outer runtime, inner 1
+auto a = wrap(ptr, shape<3,4>{}, strides<4,1>{});               // row stride 4 (padding), col 1
+auto b = wrap<dynamic_stride,1>(ptr, shape<-1,4>{n}, {4});      // outer runtime, inner 1 (folds)
 ```
 
-- Known strides fold to immediates; only the dynamic ones are stored. A
-  fully-static `strides<...>` mapping is empty (a `strides<>` view is exactly a
-  pointer).
+- Known strides become compile-time constants baked into the code, and only the
+  dynamic ones are stored. A fully-static `strides<...>` mapping is empty, so a
+  `strides<>` view is exactly a pointer.
 - Strides are **signed**: `strides<-4,1>` is a real stride of −4 (a reversed
   view), not dynamic. A runtime stride is the sentinel `dynamic_stride`.
-- `layout_static_stride<S...>` is a back-compat alias of `strides<S...>`.
 
 Query a stride, static when derivable:
 
 ```cpp
 t.stride(0);         // runtime
-t.stride(Int<1>());  // static integral_constant for a strides<> layout, a
+t.stride(Int<1>());  // a compile-time constant for a strides<> layout, a
                      //   contiguous static shape, or a contiguous layout's
                      //   always-unit stride (even under a dynamic shape)
 ```
 
 A `strides<...>` tensor is **fully sliceable**. Every view op — `operator()`
-slicing, `take_along`, `permute`, `flip`, `squeeze`/`unsqueeze`, `peel` — builds
-its view by hand (teeny does not call `cs::submdspan`), so it works on any source
-layout including `strides<...>`, and folds the output strides the same way.
-Slicing a contiguous static tensor keeps folded compile-time strides.
+slicing, `take_along`, `permute`, `flip`, `squeeze`/`unsqueeze`, `peel` — works on
+any source layout including `strides<...>`, and folds the output strides the same
+way. Slicing a contiguous static tensor keeps folded compile-time strides. (If you
+know mdspan, the [mdspan vs teeny](mdspan-vs-teeny.md) page explains how `strides<>`
+relates to `layout_static_stride` and why teeny builds these views by hand.)
 
 ## The static/runtime idiom
 
 The API accepts runtime integers, static integers (`integral_constant`), and
 slices of either, and returns the matching output type. `alias.h` provides short
-names — `Int<V>`, `Long<V>`, `Size<V>`, `UInt<V>`, `Int32<V>`, `Int64<V>`,
-`Diff<V>`, `Bool<V>` — each converting implicitly to a runtime integer
-and carrying `::value`.
+names for these static integers: `Int<V>`, `Long<V>`, `Size<V>`, `UInt<V>`,
+`Int32<V>`, `Int64<V>`, `Diff<V>`, `Bool<V>`. Each static type converts implicitly
+to a runtime value and carries a `::value`.
 
 Rule of thumb: pass `Int<k>()` to make the compiler fold; pass a plain
 `int`/`long` when the value is only known at run time.
@@ -89,7 +101,7 @@ t.extent(runtime_d);  // -> int64_t                 (a value)
 
 ## The index type — `shape32` / `reindex`
 
-Every offset computation runs in the extents' `index_type` (`int64_t` for
+Every offset computation runs in the shape's `index_type` (`int64_t` for
 `shape<...>`, matching DLPack). At a **kernel boundary** you can narrow it to 32-bit
 without a copy:
 
@@ -97,9 +109,9 @@ without a copy:
 auto v32 = t.reindex<int32_t>();     // free form: reindex<int32_t>(t)
 ```
 
-`reindex` preserves the layout — same pointer and layout kind, with the extents and
+`reindex` preserves the layout — same pointer and layout kind, with the shape and
 any *dynamic* strides narrowed to the new width (a `strides<...>` literal pack is
-unchanged). It's the index-width twin of `recast` (which recovers static extent
+unchanged). It's the index-width twin of `recast` (which recovers static shape
 *values*): orthogonal, and they compose. `shape32<...>` == `shape_as<int32_t, ...>`
 is the int32-indexed shape; `shape_as<Idx, ...>` picks any index type.
 

@@ -9,7 +9,7 @@ The whole model reduces to one rule:
 !!! tip "The one rule"
     **Keep the hot loop running over a view whose geometry is static (or at least
     contiguous). Push everything dynamic to the launch boundary.** Static shapes and
-    strides fold to immediates; a fresh contiguous result auto-vectorizes. What's left
+    strides fold to compile-time constants; a fresh contiguous result auto-vectorizes. What's left
     dynamic — the batch count, an arbitrary DLPack stride — should live in the *outer*
     loop, where it's hoisted once and costs nothing per element.
 
@@ -70,7 +70,7 @@ for (auto cell : at.peel_front<-2>())              // keep the trailing 2 dims; 
 
 Combine with `dispatch_value<1,2,3>(spatial_ndim, …)` to also turn a runtime *spatial
 rank* into a static one — the full `(*batch, *spatial, C)` walk-through is in
-[Dispatch & the ndarray boundary](dispatch.md).
+[Dispatch & the anyrank boundary](dispatch.md).
 
 **Known batch rank** (a plain tensor). A `tensor` always has a *static rank* — the rank is
 a compile-time property even when the extents are dynamic — so if you know the batch count
@@ -166,14 +166,14 @@ hand-written quality *only* if you help the compiler in a few places (all measur
   `out` — the reloads vanish (a probe dropped one clang kernel 68 → 37 instructions).
   (This is the read-side analogue of the out-of-place `__restrict__` fast path in §5.)
 - **Fully unroll the small static loops with `TNY_UNROLL`.** A packed index like
-  `sub2pak(C,i,j)` folds to an immediate offset only when its loop unrolls. clang and
+  `sub2pak(C,i,j)` folds to an compile-time offset only when its loop unrolls. clang and
   nvcc honour a bare `#pragma unroll`; **gcc silently ignores it** and needs
   `#pragma GCC unroll N`. Use the portable `TNY_UNROLL` (`defines.h`) immediately before
   the `for`:
 
   ```cpp
   TNY_UNROLL
-  for (int j = 0; j < C; ++j) acc += L(i,j) * x(j);   // static C -> folds to immediates
+  for (int j = 0; j < C; ++j) acc += L(i,j) * x(j);   // static C -> folds to compile-time constants
   ```
 
   `TNY_UNROLL` is a full unroll with a generous fixed count (gcc's pragma needs a
@@ -218,7 +218,7 @@ it moves the needle:
   straightforward nested loop the optimizer strength-reduces the index arithmetic itself,
   and a big sweep is memory-bound anyway. Likewise **static vs dynamic strides made no
   difference for a big sweep** (1.00×) — `strides<...>` in the type pays off in the
-  *small, fully-unrolled* loops of §7 (where combined offsets fold to immediates), not
+  *small, fully-unrolled* loops of §7 (where combined offsets fold to compile-time constants), not
   in a large streaming loop. Reach for a manual pointer walk only when each step does
   **heavy work the compiler can't see through** — e.g. materialising a sub-view per
   iteration, which is exactly why the batch `peel`/`peel_front` range-for walks the

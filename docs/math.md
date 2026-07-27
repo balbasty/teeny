@@ -155,7 +155,7 @@ a.add(b, alpha, into(y));     // -> y,    a + alpha*b   (sub likewise)
 ```
 
 `into(y)` writes in a single pass; `y` may share memory with an operand, and its
-extents are checked against the (broadcast) result. `y`'s dtype need not match —
+shape is checked against the (broadcast) result. `y`'s dtype need not match —
 the result is cast to it.
 
 Reductions take `into(dest)` too. A **full** reduction (all axes) writes its

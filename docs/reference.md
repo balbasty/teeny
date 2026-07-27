@@ -7,7 +7,7 @@ Doxygen-extracted signatures, see [Autodoc](api/index.md).
 Everything is in `namespace tny` (`namespace cs = cuda::std`). Include
 `<teeny/teeny.h>` for all of it; `<teeny/cuda.h>` adds the CUDA memory spaces.
 
-Legend: **`Idx`** = the extents' `index_type` (`int64_t` for `shape<...>`).
+Legend: **`Idx`** = the shape's `index_type` (`int64_t` for `shape<...>`).
 **`T`** = element type. A *static index* is an `integral_constant` (`Int<k>()`);
 a *runtime index* is a plain integer. "→ view" means a non-owning
 `tensor<…, storage::view>` aliasing the same memory (no copy).
@@ -426,7 +426,7 @@ axes removed) and the ownership splits static → stack / dynamic → heap.
 
 ---
 
-## Dispatch (the ndarray boundary)
+## Dispatch (the anyrank boundary)
 
 | Call | Returns | Notes |
 |---|---|---|

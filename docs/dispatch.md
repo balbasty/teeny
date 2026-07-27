@@ -1,9 +1,9 @@
-# Dispatch & the ndarray boundary
+# Dispatch & the anyrank boundary
 
-Kernels want static shapes (for folding), but data from Python arrives with a
-runtime rank and runtime sizes. teeny turns a runtime **value**, a runtime
-**rank**, or a rank-erased pointer into a statically-typed tensor once, at the
-boundary, then stays fast inside.
+Kernels want static shapes (so they fold to compile-time constants), but data from
+Python arrives with a runtime rank and runtime sizes. teeny turns a runtime
+**value**, a runtime **rank**, or a rank-erased pointer into a statically-typed
+tensor once, at the boundary, then stays fast inside.
 
 ## `dispatch_value` — runtime value → compile-time
 
@@ -159,7 +159,7 @@ auto at = as_anyrank(data, shape, stride, ndim, anyshape<etc,-1,-1,3>{}, ccontig
 
 - `keep_strides` (default) — strides stay runtime (`layout_stride` cell), exactly the
   extents-only behaviour above.
-- `ccontiguous`/`fcontiguous` — the inner block's strides fold to immediates
+- `ccontiguous`/`fcontiguous` — the inner block's strides fold to compile-time constants
   (`shape<-1,-1,3>` C-order → `strides<9,3,1>` — the outer stride is static because it is
   the product of the *static* trailing extents, even though its own extent is dynamic). A
   fully-static contiguous tail makes the cell's mapping **empty (EBO)** — the cell loses its
@@ -271,7 +271,7 @@ strides. `dispatch_layout` is the layout sibling of `dispatch_index`: it cheaply
 classifies the runtime strides (`is_dense<ccontiguous>()` / `<fcontiguous>()` — a
 stride compare, no data touched) and hands `f` the view **retyped** to
 `ccontiguous` / `fcontiguous` / (else) `dynamic_strides`. In the contiguous arms the
-strides are extent-derived, so the inner `recast` folds them to immediates **safely** —
+strides are extent-derived, so the inner `recast` folds them to compile-time constants **safely** —
 no `recast<…, ccontiguous>()` "I promise it's contiguous" (which is UB under `-DNDEBUG`
 if wrong).
 

@@ -27,7 +27,7 @@ m(0,-1);                             // element access (negative index counts fr
 m(all, slice(0,2));                  // sub-view (still no copy)
 m.permute(Int<1>(), Int<0>());       // transpose (a view)
 m.add_(other);                       // in-place math
-auto s = sum(m);                     // reductions
+auto s = sum(m);                     // reductions (free functions)
 for (auto row : peel(m, axis<0>{})) work(row);  // iterate a subset of axes
 ```
 
@@ -42,13 +42,17 @@ Factories:
 
 | factory | makes |
 |---|---|
-| `wrap(ptr, extents)` | C-order view |
-| `wrap<fcontiguous>(ptr, extents)` | F-order view |
-| `wrap(ptr, extents, strides<Sx,Sy,...>{})` | view with compile-time strides (may be negative) |
-| `wrap(ptr, extents, {s0,s1,...})` | view with runtime strides (`dynamic_strides`) |
-| `wrap<S...>(ptr, extents, {dyn...})` | mixed static/runtime strides (`dynamic_stride` slots) |
-| `as_tensor(any_mdspan)` | wrap an `mdspan`/`submdspan` result as a view |
-| `make_view(ptr, extents)` | same as `view`, deducing the extents type |
+| `wrap(ptr, shape)` | C-order view |
+| `wrap<fcontiguous>(ptr, shape)` | F-order view (the layout is a template argument) |
+| `wrap(ptr, shape, strides<Sx,Sy,...>{})` | view with compile-time strides (may be negative) |
+| `wrap(ptr, shape, {s0,s1,...})` | view with runtime strides (`dynamic_strides`) |
+| `wrap<S...>(ptr, shape, {dyn...})` | mixed static/runtime strides (`dynamic_stride` slots) |
+| `as_tensor(any_mdspan)` | wrap a raw `mdspan`/`submdspan` result as a view |
+| `make_view(ptr, shape)` | an alias of `wrap` in the `make_*` family (same result) |
+
+`wrap` already deduces the shape type from its argument, so `make_view` is a plain
+synonym that exists for symmetry with `make_local` / `make_heap` / `make_gpu`. Use
+whichever reads better.
 
 Copying a view copies the pointer, not the data; memory lifetime is the caller's.
 
@@ -86,13 +90,14 @@ when they die. Pick one by where the memory should live.
     Inline array. Requires a fully static shape (size known at compile time). A
     `local` is exactly `sizeof` its data — no pointer, no heap, host and device.
     Use for kernel-local scratch (a small matrix, an accumulator). A static shape
-    also lets every index computation fold to immediates — see
+    also lets every index computation fold to compile-time constants — see
     [Performance](performance.md).
 
     ```cpp
-    auto m = local<double, shape<3,3>>{};  // 9 doubles on the stack
+    auto m = local<double, shape<3,3>>{};       // 9 doubles on the stack
     static_assert(sizeof(m) == 9*sizeof(double));
     m.fill_(0.0);
+    auto m2 = make_local<double>(shape<3,3>{});  // same, deducing E from the shape
     ```
 
 === "`owned` — heap (host)"
@@ -107,18 +112,21 @@ when they die. Pick one by where the memory should live.
 
 === "`gpu` / `pinned` / `mapped` — CUDA"
 
-    From `#include <teeny/cuda.h>` (needs the CUDA runtime). Move-only owning
-    tensors in device (`gpu`), page-locked host (`pinned`, pytorch's `pin_memory`),
-    or device-mapped zero-copy host (`mapped`) memory.
+    Move-only owning tensors in device (`gpu`), page-locked host (`pinned`,
+    pytorch's `pin_memory`), or device-mapped zero-copy host (`mapped`) memory.
+    These live in `teeny/cuda.h`, which `teeny/teeny.h` already includes when a
+    CUDA toolkit is present — you do not include it yourself.
 
     ```cpp
-    #include <teeny/cuda.h>
     auto d = gpu<float, shape<-1,3,3>>(shape<-1,3,3>{n});  // cudaMalloc'd
-    my_kernel<<<grid, block>>>(d.view());                     // pass a view in
+    auto e = make_gpu<float>(shape<-1,3,3>{n});            // same, deducing E
+    auto p = make_pinned<float>(shape<-1,3,3>{n});         // page-locked host memory
+    my_kernel<<<grid, block>>>(d.view());                  // pass a view in
     ```
 
-Creation factories build and fill an owning tensor in one step (static shape →
-`local`, dynamic → `owned`):
+Creation factories build and fill an owning tensor in one step. Ownership is
+deduced from the shape — a static shape gives a `local`, a dynamic one gives an
+`owned`:
 
 ```cpp
 auto z = zeros<double>(shape<3,3>{});  // stack, all zeros
@@ -127,13 +135,23 @@ auto f = full<int>(shape<8>{}, 7);     // filled with 7
 auto a = arange<long>(10);             // [0,1,…,9] (1-D heap)
 ```
 
+You can override the deduced ownership by naming a backend, and override the
+default `ccontiguous` layout with a layout template argument:
+
+```cpp
+auto h = make_heap<double>(shape<3,3>{});               // force HEAP for a static shape
+auto e = empty<double, storage::heap>(shape<3,3>{});    // same, via empty
+auto f = make_local<double, fcontiguous>(shape<3,3>{}); // stack, F-order (column-major)
+auto g = zeros<float, storage_deduce, fcontiguous>(shape<-1,4>{n});  // F-order zeros
+```
+
 ## Getting a view from an owning tensor
 
 Inside a kernel you want a view (trivially copyable). Every owning tensor hands
 one out:
 
 ```cpp
-auto d = gpu<float, shape<-1,3,3>>(shape<-1,3,3>{n});
+auto d = make_gpu<float>(shape<-1,3,3>{n});  // deduces E — no repeated shape
 auto v = d.view();  // view over d's memory — pass THIS to the kernel
 ```
 
@@ -142,13 +160,15 @@ auto v = d.view();  // view over d's memory — pass THIS to the kernel
 The variants are one class template with a different final argument:
 
 ```cpp
-template <class T, class Extents, class Layout = ccontiguous, storage O = storage::view>
+template <class T, class Shape, class Layout = ccontiguous, storage O = storage::view>
 struct tensor;
 ```
 
-`storage` is `{ view, stack, heap, gpu, pinned, mapped, gpu_view }` (`gpu_view` is a
-non-owning view of *device* memory — what slicing/permuting a `gpu` tensor
-yields). Rarely named directly —
-use the aliases (`view`/`local`/`owned`) and factories (`make_*`,
-`zeros`/`ones`/`full`) instead. The parameter lets one class and one set of
-algorithms cover every memory space.
+`storage` is `{ view, stack, heap, gpu, pinned, mapped, gpu_view, pinned_view,
+mapped_view }`. The `*_view` kinds are non-owning views that remember their memory
+space: `gpu_view` is a view of *device* memory (what slicing or permuting a `gpu`
+tensor yields), and `pinned_view` / `mapped_view` keep the page-locked space of a
+`pinned` / `mapped` source (so DLPack can label them `kDLCUDAHost`). The `storage`
+parameter is rarely named directly — use the aliases (`view`/`local`/`owned`) and
+factories (`make_*`, `zeros`/`ones`/`full`) instead. It lets one class and one set
+of algorithms cover every memory space.

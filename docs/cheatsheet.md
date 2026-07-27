@@ -109,7 +109,8 @@ x.extent(d);  x.extent(Int<d>());          // mdspan-side per-axis size (== x.sh
 !!! note "mdspan equivalent"
     `x.shape()`/`x.strides()` are teeny's array-like accessors and the primary
     spelling; `x.extents()`/`x.mapping()` return the raw `cuda::std` mdspan
-    objects. Per-axis, `x.extent(d) == x.shape(d)`.
+    objects. Per-axis, `x.extent(d) == x.shape(d)`. See
+    [mdspan vs teeny](mdspan-vs-teeny.md) for the full vocabulary map.
 
 ---
 
@@ -257,7 +258,7 @@ See [Half precision](half.md).
 
 ---
 
-## Dispatch (the ndarray boundary) (`dynamic.h`)
+## Dispatch (the anyrank boundary) (`dynamic.h`)
 
 ```cpp
 dispatch_value<Vs...>(v, f);            // runtime value -> integral_constant
@@ -282,7 +283,7 @@ dispatch_index(v, f);                    // narrow one fixed view's offset width
 at.fixed<R>();                           // force a known rank
 ```
 
-See [Dispatch & the ndarray boundary](dispatch.md).
+See [Dispatch & the anyrank boundary](dispatch.md).
 
 ---
 
