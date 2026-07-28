@@ -16,7 +16,6 @@
 
 using namespace tny;
 namespace cs = cuda::std;
-using cs::extents;
 
 // ---- boundary conditions: map an out-of-range index back in range ----------
 enum class bound { zero, replicate, reflect };
@@ -77,7 +76,7 @@ int main() {
     for (int i = 0; i < 512; ++i) buf[i] = std::sin(0.1 * i) * 10.0;
 
     // 2-D bilinear on a static-shape view; replicate boundary.
-    auto img = wrap(buf, extents<long,5,6>{});           // strides (6,1) fold
+    auto img = wrap(buf, shape<5,6>{});                   // strides (6,1) fold
     for (double x : {0.0, 1.4, 3.9, 4.9}) for (double y : {0.2, 2.5, 5.1}) {
         auto s = cs::make_tuple(sample<1>(x,5,bound::replicate),
                                 sample<1>(y,6,bound::replicate));
@@ -91,7 +90,7 @@ int main() {
     }
 
     // Same convolve, now 3-D trilinear on a fully-dynamic-extent view.
-    using E3 = extents<long, cs::dynamic_extent, cs::dynamic_extent, cs::dynamic_extent>;
+    using E3 = rank<3>;                                   // fully-dynamic rank-3 shape
     auto vol = wrap(buf, E3{4,5,6});
     {
         double x=2.6,y=3.7,z=4.9;
@@ -110,7 +109,7 @@ int main() {
 
     // Zero boundary really zeroes out-of-range contributions (sample past the edge).
     {
-        auto line = wrap(buf, extents<long,4>{});
+        auto line = wrap(buf, shape<4>{});
         auto s = cs::make_tuple(sample<1>(3.5, 4, bound::zero));  // idx 3 (in) & 4 (out->0)
         double got = pull(line, s);
         if (!close(got, buf[3] * 0.5)) { std::printf("zero-bound mismatch\n"); return 3; }

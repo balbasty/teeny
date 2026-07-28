@@ -10,8 +10,6 @@
 #include <cmath>
 
 using namespace tny;
-namespace cs = cuda::std;
-using cs::extents;
 using ff::bound;
 
 static bool close(double a, double b) { return std::fabs(a - b) < 1e-9; }
@@ -25,7 +23,7 @@ int main() {
 
     // ---- (1) linear pull == manual bilinear ---------------------------
     {
-        auto img = local<double, extents<long,H,W>>();
+        auto img = local<double, shape<H,W>>();
         for (long i=0;i<H;++i) for (long j=0;j<W;++j) img(i,j) = std::sin(0.3*i)+std::cos(0.2*j);
         bound b[2] = { bound::replicate, bound::replicate };
         for (double x : {0.0, 1.4, 3.9, 4.9}) for (double y : {0.2, 2.5, 5.4}) {
@@ -47,7 +45,7 @@ int main() {
     for (bound bm : bmodes) for (int order : orders) {
         bound b[2] = { bm, bm };
 
-        auto x = local<double, extents<long,H,W>>();      // "input volume"
+        auto x = local<double, shape<H,W>>();      // "input volume"
         for (long i=0;i<H;++i) for (long j=0;j<W;++j) x(i,j) = frand()*2 - 1;
 
         double loc[NP][2], y[NP];
@@ -58,7 +56,7 @@ int main() {
         for (int p=0;p<NP;++p) lhs += ff::pull(x, loc[p], order, b) * y[p];
 
         // rhs = <x, Pᵀ y>  where Pᵀ y = Σ_p push(loc_p, y_p)
-        auto pushed = local<double, extents<long,H,W>>(); pushed.zero_();
+        auto pushed = local<double, shape<H,W>>(); pushed.zero_();
         for (int p=0;p<NP;++p) ff::push(pushed, loc[p], y[p], order, b);
         double rhs = dot(x, pushed);
 

@@ -10,14 +10,13 @@
 
 using namespace tny;
 namespace cs = cuda::std;
-using cs::extents;
 
 static double vmin(double a, double b) { return a < b ? a : b; }
 
 // The 1-D forward+backward L1 distance sweep, on a rank-1 view of ANY stride.
 template <class Line>
 static void l1_line(Line line, double w) {
-    const long n = line.extent(0);
+    const long n = line.shape(0);
     if (n <= 1) return;
     double tmp = line(0);
     for (long i = 1;   i < n;  ++i) { tmp = vmin(tmp + w, line(i)); line(i) = tmp; }
@@ -34,7 +33,7 @@ int main() {
     // A (2,3,7) volume: batch axes 0,1; the transform runs along axis 2.
     double buf[2*3*7];
     for (int i = 0; i < 2*3*7; ++i) buf[i] = (i % 5 == 0) ? 0.0 : 1e9;
-    auto t = wrap(buf, extents<long,2,3,7>{});
+    auto t = wrap(buf, shape<2,3,7>{});
 
     distance_l1<0,1>(t, 1.0);                 // peel axes 0 and 1
 
@@ -51,7 +50,7 @@ int main() {
     // Different batch rank, SAME code: a (4,7) matrix, peel just axis 0.
     double buf2[4*7], ref2[4*7];
     for (int i = 0; i < 4*7; ++i) buf2[i] = ref2[i] = (i % 3 == 0) ? 0.0 : 1e9;
-    auto m = wrap(buf2, extents<long,4,7>{});
+    auto m = wrap(buf2, shape<4,7>{});
     distance_l1<0>(m, 1.0);
     for (int r = 0; r < 4; ++r) {                        // reference: 4 rows of 7
         double * f = ref2 + r*7; double tmp = f[0];

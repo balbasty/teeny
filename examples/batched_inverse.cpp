@@ -26,7 +26,7 @@ namespace cs = cuda::std;
 // whole thing unrolls and the strides fold to immediates.
 template <class MatA, class MatO>
 _TNY_API void invert(const MatA & A, MatO & out) {
-    constexpr int C = static_cast<int>(decltype(A.extent(Int<0>()))::value);   // static extent, friendly
+    constexpr int C = static_cast<int>(decltype(A.shape(Int<0>()))::value);   // static extent, friendly
     double m[C][C], inv[C][C];
     for (int i=0;i<C;++i) for (int j=0;j<C;++j) { m[i][j]=A(i,j); inv[i][j]=(i==j)?1.0:0.0; }
     for (int col=0; col<C; ++col) {
@@ -52,7 +52,7 @@ _TNY_API void invert_at(const In & in, Out & out, long i) {
 // ---- CPU driver: split the batch across std::threads -----------------------
 template <class In, class Out>
 static void invert_batch_cpu(const In & in, Out & out) {
-    const long n = in.extent(0);
+    const long n = in.shape(0);
     const unsigned nt = 4;
     std::vector<std::thread> pool;
     for (unsigned t=0; t<nt; ++t)
@@ -64,12 +64,12 @@ static void invert_batch_cpu(const In & in, Out & out) {
 #ifdef __CUDACC__
 template <class In, class Out>
 __global__ void invert_batch_kernel(In in, Out out) {          // views are trivially copyable
-    for (long i = blockIdx.x*blockDim.x + threadIdx.x; i < in.extent(0); i += gridDim.x*blockDim.x)
+    for (long i = blockIdx.x*blockDim.x + threadIdx.x; i < in.shape(0); i += gridDim.x*blockDim.x)
         invert_at(in, out, i);
 }
 template <class In, class Out>
 static void invert_batch_cuda(const In & in, Out & out) {
-    int block = 256, grid = (int)((in.extent(0)+block-1)/block);
+    int block = 256, grid = (int)((in.shape(0)+block-1)/block);
     invert_batch_kernel<<<grid, block>>>(in, out);             // in/out are device views
 }
 #endif
