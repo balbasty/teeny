@@ -26,19 +26,36 @@ struct FakeMapping : private FakeDynStrides<int, 0>, private Shape {
     static constexpr std::size_t rank() { return Shape::rank(); }
 };
 
+// Matches tensor.h's ALREADY-FIXED (#294) pattern: a free function template so
+// there's no enclosing-class scope for MSVC's two-phase lookup to conflict with.
+template <class Shape>
+static constexpr std::size_t _shape_rank() { return Shape::rank(); }
+
+// PROPOSED fix for #315: same pattern, for an EXTENTS-like type named from an
+// unrelated context (recast's NewE).
+template <class E>
+static constexpr std::size_t _extents_rank() { return E::rank(); }
+
 // Stand-in for tensor<T, Shape, strides<...>, O>: privately inherits from
 // FakeMapping<Shape> (its OWN shape), same as the real tensor's EBO base.
+// rank() ALREADY routes through _shape_rank<Shape>() here (mirroring real
+// current teeny post-#294) -- so if the bug were about the bare `rank()` call
+// alone, it would already be gone; the point of this repro is to isolate
+// whether `NewE::rank()` ALSO needs its own wrapper.
 template <class Shape>
 struct FakeTensor : private FakeMapping<Shape> {
-    static constexpr std::size_t rank() { return Shape::rank(); }
+    static constexpr std::size_t rank() { return _shape_rank<Shape>(); }
 
-    // Mirrors tensor::_recast<NewE,...>: NewE is UNRELATED to this tensor's
-    // own Shape/FakeMapping -- the real bug is that MSVC's diagnostic for
-    // `NewE::rank()` here blames the CURRENT instantiation's own private base
-    // instead of (correctly) just evaluating the qualified name.
+    // BUGGY (matches current teeny's _recast exactly): NewE::rank() called directly.
     template <class NewE>
-    static constexpr bool recast_rank_matches() {
+    static constexpr bool recast_rank_matches_buggy() {
         return NewE::rank() == rank();
+    }
+
+    // FIXED (proposed): NewE::rank() routed through the same free-function pattern.
+    template <class NewE>
+    static constexpr bool recast_rank_matches_fixed() {
+        return _extents_rank<NewE>() == rank();
     }
 };
 
@@ -47,6 +64,7 @@ using NewShape = FakeExtents<5, 6>;   // the recast TARGET -- unrelated type, sa
 
 int main() {
     using T = FakeTensor<SrcShape>;
-    static_assert(T::recast_rank_matches<NewShape>(), "recast: rank must match");
+    static_assert(T::recast_rank_matches_buggy<NewShape>(), "recast: rank must match (buggy path)");
+    static_assert(T::recast_rank_matches_fixed<NewShape>(), "recast: rank must match (fixed path)");
     return 0;
 }
