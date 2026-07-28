@@ -55,6 +55,7 @@ TESTS = \
 	$(BUILDDIR)/test_empty \
 	$(BUILDDIR)/test_factory_dtype \
 	$(BUILDDIR)/test_reduce_dtype \
+	$(BUILDDIR)/test_reduce_compose \
 	$(BUILDDIR)/test_iterate \
 	$(BUILDDIR)/test_peel_enumerate \
 	$(BUILDDIR)/test_peel_recast \

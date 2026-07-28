@@ -30,6 +30,11 @@ struct tensor;
 // members can name `into_t<D>`; the `into()` factory is defined after the class.
 template <class D> struct into_t { D & dest; };
 namespace _kw { template <class D> struct is_keyword<into_t<D>> : cs::true_type {}; }
+/** @brief `_is_into_tag<X>::value` is true iff `X` is an `into_t<D>` instantiation —
+ *  lets a generic trailing keyword bag (`_kw`) find the destination tag among
+ *  `dtype<...>`/`axis<...>`/`keepdims_t` siblings. */
+template <class> struct _is_into_tag : cs::false_type {};
+template <class D> struct _is_into_tag<into_t<D>> : cs::true_type {};
 
 template <storage OW = storage::view, class MD>
 _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
@@ -66,6 +71,20 @@ auto reduced_ext_(cs::index_sequence<D...>)
     -> typename _compact<typename E::index_type, red_ext<D, E, Axes...>()...>::type;
 template <class E, long... Axes>
 using reduced_extents = decltype(reduced_ext_<E, Axes...>(cs::make_index_sequence<E::rank()>{}));
+
+/* --- shared by the generic "trailing keyword bag" reduction entry points
+ * (math.h): whether reducing over the axes named by an `axis<...>` TAG (rather
+ * than an explicit `Axes...` template pack) would leave a dynamic result — the
+ * same static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split every axis
+ * reduction needs, computed from the TAG so the tag-driven entry point can
+ * SFINAE on it exactly like the explicit-Axes one does. `axis<>` (no axes
+ * given -- the bare, all-axes reduction) is never dynamic (a full reduction is
+ * always a scalar, never allocates) -- that is the primary template below;
+ * the partial specialization below handles a real (non-empty) axis list. */
+template <class E, class AxisTag> struct _red_dyn { static constexpr cs::size_t value = 0; };
+template <class E, long A0, long... Rest> struct _red_dyn<E, axis<A0, Rest...>> {
+    static constexpr auto value = reduced_extents<E, A0, Rest...>::rank_dynamic();
+};
 }  // namespace _md
 
 /* --- shared axis dispatch: a STATIC index (`Int<k>()`) folds to an
@@ -1421,47 +1440,48 @@ public:
 
     /* --- reductions as methods (parity with the free sum(a)/mean(a)/norm(a)/...):
      *     thin forwarders to the free forms, DEFINED in math.h. Same overload
-     *     shapes as the free functions — full (all axes; leading TYPE = accumulator),
-     *     axis (`m.sum<0>()` / value form `m.sum(axis<0>{})`), and `into(dest)`. */
+     *     shapes as the free functions — full (all axes; leading TYPE =
+     *     accumulator), explicit axis (`m.sum<0>()`), and a generic trailing
+     *     keyword bag (`m.sum(axis<0>{})`, `m.sum(dtype<double>{}, into(d))`,
+     *     `m.sum<0>(keepdims)`, ... any subset/order of `dtype`/`axis`/`into`/
+     *     `keepdims` — see math.h's `_TNY_RED_TAGGED`). */
 // The AXIS forms allocate their (lower-rank) result, so — exactly like the free
 // axis reductions in math.h — each is TWO overloads keyed on whether that result
 // is fully static: static -> stack, host+device (_TNY_API); dynamic -> heap, host
 // only (_TNY_HOST). A single _TNY_API forwarder would make a __host__ __device__
 // method call the __host__-only free overload for a dynamic shape. The FULL
-// reductions never allocate, so they stay single _TNY_API overloads.
-// the SFINAE key, spelled once: "reducing `Ax...` leaves a (fully static | dynamic)
-// result". `CMP` is `==` (static -> _TNY_API) or `!=` (dynamic -> _TNY_HOST). The
-// out-of-line definitions in math.h repeat it (without the `= 0` default).
+// reductions never allocate, so they stay single _TNY_API overloads. The
+// tag-driven form needs the SAME split, keyed off `_md::_red_dyn` (computed from
+// whichever `axis<...>` tag -- if any -- turns up in the trailing bag) instead of
+// an explicit `Ax...` pack. `CMP` is `==` (static -> _TNY_API) or `!=` (dynamic ->
+// _TNY_HOST). The out-of-line definitions in math.h repeat both keys (without the
+// `= 0` default).
 #define _TNY_RED_AXIS_IF(E, CMP)                                                                            \
     cs::enable_if_t<(sizeof...(Ax) > 0) && _md::reduced_extents<E,Ax...>::rank_dynamic() CMP 0, int> = 0
-#define _TNY_RED_AXIS_DECL(NAME, API, CMP)                                                                  \
-    template <long... Ax, _TNY_RED_AXIS_IF(Shape, CMP)> API auto NAME() const;                              \
-    template <class Acc, long... Ax, _TNY_RED_AXIS_IF(Shape, CMP)> API auto NAME() const;                   \
-    template <long... Ax, _TNY_RED_AXIS_IF(Shape, CMP)> API auto NAME(axis<Ax...>) const;                   \
-    template <class Acc, long... Ax, _TNY_RED_AXIS_IF(Shape, CMP)> API auto NAME(axis<Ax...>) const;        \
-    template <long... Ax, class D, _TNY_RED_AXIS_IF(Shape, CMP)> API auto & NAME(into_t<D> out) const;      \
-    template <class Acc, long... Ax, class D, _TNY_RED_AXIS_IF(Shape, CMP)> API auto & NAME(into_t<D> out) const; \
-    template <long... Ax, class D, _TNY_RED_AXIS_IF(Shape, CMP)> API auto & NAME(axis<Ax...>, into_t<D> out) const; \
-    template <class Acc, long... Ax, class D, _TNY_RED_AXIS_IF(Shape, CMP)> API auto & NAME(axis<Ax...>, into_t<D> out) const;
+#define _TNY_RED_TAGGED_IF(E, CMP)                                                                          \
+    class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                                       \
+    cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value CMP 0, int> = 0
 #define _TNY_RED_METHOD_DECL(NAME)                                                                          \
     template <class Acc = void> _TNY_API auto NAME() const;                                                 \
-    template <class Acc = void, class D> _TNY_API auto & NAME(into_t<D> out) const;                         \
-    template <class Acc> _TNY_API auto NAME(dtype<Acc>) const;                                              \
-    _TNY_RED_AXIS_DECL(NAME, _TNY_API,  ==)                                                                 \
-    _TNY_RED_AXIS_DECL(NAME, _TNY_HOST, !=)
+    template <long... Ax, class... Tags, _TNY_RED_AXIS_IF(Shape, ==)> _TNY_API  decltype(auto) NAME(Tags... tags) const; \
+    template <long... Ax, class... Tags, _TNY_RED_AXIS_IF(Shape, !=)> _TNY_HOST decltype(auto) NAME(Tags... tags) const; \
+    template <class Acc, long... Ax, class... Tags, _TNY_RED_AXIS_IF(Shape, ==)> _TNY_API  decltype(auto) NAME(Tags... tags) const; \
+    template <class Acc, long... Ax, class... Tags, _TNY_RED_AXIS_IF(Shape, !=)> _TNY_HOST decltype(auto) NAME(Tags... tags) const; \
+    template <class Acc = void, class Tag0, class... Tags, _TNY_RED_TAGGED_IF(Shape, ==)> _TNY_API  decltype(auto) NAME(Tag0 tag0, Tags... tags) const; \
+    template <class Acc = void, class Tag0, class... Tags, _TNY_RED_TAGGED_IF(Shape, !=)> _TNY_HOST decltype(auto) NAME(Tag0 tag0, Tags... tags) const;
     _TNY_RED_METHOD_DECL(sum)    _TNY_RED_METHOD_DECL(prod)  _TNY_RED_METHOD_DECL(max)
     _TNY_RED_METHOD_DECL(min)    _TNY_RED_METHOD_DECL(mean)  _TNY_RED_METHOD_DECL(sqnorm)
     _TNY_RED_METHOD_DECL(norm)
 #undef _TNY_RED_METHOD_DECL
-#undef _TNY_RED_AXIS_DECL
+#undef _TNY_RED_TAGGED_IF
 #undef _TNY_RED_AXIS_IF
-    // dot is binary (no axis form): m.dot(b) / m.dot<Acc>(b) / m.dot(b, into(cell)).
+    // dot is binary (no axis form): m.dot(b) / m.dot<Acc>(b) / m.dot(b, dtype<Acc>{},
+    // into(cell)) — a generic trailing keyword bag (dtype/into, any subset/order),
+    // requiring at least one tag so it never competes with the bare form above.
     template <class Acc = void, class Tb,class Eb,class Lb,storage Ob>
     _TNY_API auto dot(const tensor<Tb,Eb,Lb,Ob> & b) const;
-    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob, class D>
-    _TNY_API auto & dot(const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) const;
-    template <class Tb,class Eb,class Lb,storage Ob, class Acc>
-    _TNY_API auto dot(const tensor<Tb,Eb,Lb,Ob> & b, dtype<Acc>) const;
+    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags>
+    _TNY_API decltype(auto) dot(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const;
 
     /* --- in-place unary math (element-wise) ----------------------- */
     _TNY_API tensor & neg_();

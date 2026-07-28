@@ -375,7 +375,7 @@ Every reduction here (plus `sqnorm`/`norm` below) is **also a method** — `a.su
 | `sum(a)` `prod(a)` `max(a)` `min(a)` `mean(a)` | `T` (accumulated wide) | over all axes |
 | `dot(a, b)` | `promote(Ta,Tb)` (accumulated wide) | inner product; extents must match **exactly** (no broadcast) |
 | `sum<Acc>(a)`, `mean<Acc>(a)`, `dot<Acc>(a,b)` | `Acc` | force the accumulator/return type |
-| `sum(a, dtype<Acc>{})`, `dot(a, b, dtype<Acc>{})` | `Acc` | value-tag form of the above — deduces `Acc` from the tag (numpy's `dtype=`); bare, all-axes form only, does not yet compose with an axis list or `into(dest)` |
+| `sum(a, dtype<Acc>{})`, `dot(a, b, dtype<Acc>{})` | `Acc` | value-tag form of the above — deduces `Acc` from the tag (numpy's `dtype=`); composes freely with an axis list, `keepdims`, and `into(dest)`, in any subset/order (see below) |
 | `allclose(a, b, rtol=1e-5, atol=1e-8)` | `bool` | `\|a−b\| ≤ atol+rtol·\|b\|` everywhere (broadcasts) |
 | `sum<Axes...>(a)` `mean<Axes...>` `max`/`min`/`prod<Axes...>` | lower-rank tensor | remove the named axes (negatives wrap) |
 | `sum<Acc, Axes...>(a)` | lower-rank tensor | leading **type** = accumulator, leading **int** = axis |
@@ -383,9 +383,14 @@ Every reduction here (plus `sqnorm`/`norm` below) is **also a method** — `a.su
 | `sum<Axes...>(a, keepdims)` (also as the value form, or with a leading `Acc`) | same rank | numpy `keepdims=True` — the named axes stay size-1 instead of being removed, so the result broadcasts back against the input |
 
 Axis reductions: a fully static result → stack (host+device); any dynamic result
-→ heap (host only). `keepdims` applies to `sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`
-and composes with a leading `Acc`, the `axis<...>{}` value form, and `into(dest)`
-(in that order: `sum(a, axis<0>{}, keepdims, into(dest))`).
+→ heap (host only). `keepdims` applies to `sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`.
+The explicit `<Acc, Axes...>` template split stays (C++17 has no universal template
+parameter to unify "leading type = accumulator" vs "leading int = axis"), but past
+that split every TRAILING keyword — `dtype<Acc>{}`, `axis<...>{}`, `keepdims`,
+`into(dest)` — composes generically, in any subset and any order (`tny::_kw` in
+`kwargs.h`): `sum(a, dtype<double>{}, axis<0>{}, keepdims, into(dest))` ==
+`sum<double, 0>(a, keepdims, into(dest))`. `dot` composes the same way (`dtype`
+and `into`; it has no axis concept).
 
 Reductions also take **`into(dest)`** (the `out=` spelling). A **full** reduction
 writes its scalar into a **rank-0** destination — `sum(a, into(cell))`,
