@@ -1527,6 +1527,14 @@ _TNY_API tensor<T, Shape, Layout, storage_view_of(Space)> wrap(T * p, Shape e, L
     return Tn(p, typename Tn::mapping_type(e));
 }
 
+/** @brief `wrap(mdspan)` — a spelling of `as_tensor(mdspan)` under the one factory
+ *  name users already reach for. Wrap any `cuda::std::mdspan`/`submdspan` result as
+ *  a non-owning view; `OW` (default `storage::view`) names the memory space, exactly
+ *  like `as_tensor<OW>(md)`. `as_tensor` stays available (it is what teeny's own
+ *  view-producing ops — `permute`/`flip`/`squeeze`/… — call internally). */
+template <storage OW = storage::view, class MD>
+_TNY_API auto wrap(const MD & md) { return as_tensor<OW>(md); }
+
 /** @brief Wrap `p` as a non-owning view with explicit **runtime strides** (a
  *         `layout_stride` view). Pass one stride per dimension — an `array` or a
  *         braced list — in ELEMENTS; strides may be negative (a reversed view).

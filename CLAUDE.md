@@ -141,7 +141,9 @@ fcontiguous{})` (value-tag layout: same as `wrap<fcontiguous>`, deduced, no
 `wrap(ptr, extents, {s...})` (runtime strides -> dynamic_strides),
 `wrap<S...>(ptr, extents, {dyn...})` (mixed static/runtime strides),
 `wrap(ptr, extents, strides<S...>{})` (compile-time strides),
-`as_tensor(any_mdspan)` (wrap a submdspan/mdspan result as a view). Every `wrap`
+`as_tensor(any_mdspan)` / `wrap(any_mdspan)` (wrap a submdspan/mdspan result as a
+view — same thing, `as_tensor` is what teeny's own view-producing ops call
+internally). Every `wrap`
 overload takes an optional trailing memory-space tag `storage_c<Space>{}` (or the
 no-braces `storage_v<Space>`), default `storage::view` (host). Pass the plain BACKEND the
 memory lives in — `wrap(dptr, e, storage_v<storage::gpu>)` wraps a **device** pointer,
