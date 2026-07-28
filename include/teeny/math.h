@@ -949,10 +949,13 @@ _TNY_API auto tensor<T,E,L,O>::map(F f) const { return _md::uop_out(*this, f); }
 /**
  * @brief Default accumulator type for a reduction over element type `T`.
  *
- * `double` for floating-point types of at most 8 bytes (`float`, `double`,
- * `half`, `bfloat16`) — enough headroom that summing many low-precision values
- * doesn't lose catastrophically; a *wider* floating type (`long double`) keeps
- * itself. Integer types narrower than 8 bytes accumulate in 64-bit (`int64_t` if
+ * `double` for floating-point types narrower than `double` (`float`, `half`,
+ * `bfloat16`) — enough headroom that summing many low-precision values doesn't
+ * lose catastrophically; a floating type already **at least** as wide as
+ * `double` (`double` itself, or `long double`) keeps itself — `long double` is
+ * `double`-sized on some ABIs (e.g. MSVC, arm64 macOS), where widening it would
+ * be a no-op precision-wise but a needless type change. Integer types narrower
+ * than 8 bytes accumulate in 64-bit (`int64_t` if
  * signed, `uint64_t` if unsigned — `bool` counts as unsigned) so that summing /
  * multiplying many small integers can't overflow mid-accumulation (signed
  * overflow is UB); integers already ≥8 bytes keep their own type. The RESULT is
@@ -964,7 +967,7 @@ _TNY_API auto tensor<T,E,L,O>::map(F f) const { return _md::uop_out(*this, f); }
 template <class T>
 using reduce_type_t = cs::conditional_t<
     (cs::is_floating_point<T>::value || !cs::is_same<compute_type_t<T>, T>::value),
-    cs::conditional_t<(sizeof(T) > 8), T, double>,
+    cs::conditional_t<(sizeof(T) >= sizeof(double)), T, double>,
     // integer T: widen a narrow item to 64-bit (signed/unsigned to match), keep
     // an already-wide integer as-is. `is_signed` is false for `bool` -> uint64_t.
     cs::conditional_t<(sizeof(T) >= 8), T,

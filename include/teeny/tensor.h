@@ -34,6 +34,15 @@ _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
                 typename MD::layout_type, OW>
 as_tensor(const MD & m);
 
+// Whether a shape is fully static. A free helper rather than inline in tensor's
+// body: MSVC's two-phase lookup can mis-resolve an unqualified `Shape::rank_dynamic()`
+// inside `tensor`, whose private base `Layout::mapping<Shape>` (layout.h) itself
+// privately inherits from `Shape` for EBO — a private-inheritance/dependent-base
+// disambiguation quirk (clang/gcc resolve it fine). A namespace-scope function
+// template has no enclosing class, so there is no base-class scope to conflict with.
+template <class Shape>
+_TNY_API constexpr bool _is_static_shape() { return Shape::rank_dynamic() == 0; }
+
 namespace _md {
 /* --- extents of an AXIS reduction: the input extents with `Axes...` dropped
  *     (static where the input is). Lives here rather than next to the reduction
@@ -204,7 +213,7 @@ struct tensor : private Layout::template mapping<Shape> {
     using const_view_type = cs::mdspan<const T, Shape, Layout>;
 
     static constexpr storage  ownership = O;
-    static constexpr bool is_static = (Shape::rank_dynamic() == 0);
+    static constexpr bool is_static = _is_static_shape<Shape>();
     // memory-space flags (mirror the storage_* helpers, as compile-time constants):
     static constexpr bool is_view            = storage_is_view(O);             // view / gpu_view / pinned_view / mapped_view
     static constexpr bool is_owning          = storage_is_owning(O);           // heap/gpu/pinned/mapped

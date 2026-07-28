@@ -2,6 +2,7 @@
 #include <teeny/teeny.h>
 #include <teeny/dlpack.h>
 #include <cuda/std/type_traits>
+#include <cstdint>
 
 using namespace tny;
 namespace cs = cuda::std;
@@ -124,7 +125,7 @@ int main()
 
         // a device-tagged capsule (kDLCUDA); data pointer is host memory here but
         // we never dereference it — only the tag/rank is under test.
-        long dshape[3] = {2, 3, 4}, dstride[3] = {12, 4, 1};
+        int64_t dshape[3] = {2, 3, 4}, dstride[3] = {12, 4, 1};
         DLManagedTensor md{};
         md.dl_tensor.data = buf;                       // stand-in pointer (not dereferenced)
         md.dl_tensor.device = {kDLCUDA, 0};
