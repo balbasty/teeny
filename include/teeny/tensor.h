@@ -43,6 +43,10 @@ as_tensor(const MD & m);
 template <class Shape>
 _TNY_API constexpr bool _is_static_shape() { return Shape::rank_dynamic() == 0; }
 
+// Same MSVC quirk as `_is_static_shape` above, for `Shape::rank()`.
+template <class Shape>
+_TNY_API constexpr cs::size_t _shape_rank() { return Shape::rank(); }
+
 namespace _md {
 /* --- extents of an AXIS reduction: the input extents with `Axes...` dropped
  *     (static where the input is). Lives here rather than next to the reduction
@@ -288,7 +292,7 @@ struct tensor : private Layout::template mapping<Shape> {
     _TNY_HOST tensor(Shape e, _uninit_t) : mapping_type(e), store_(_alloc_size(mapping_type(e)), _uninit) {}
 
     /* --- geometry ------------------------------------------------- */
-    static constexpr cs::size_t rank() noexcept { return Shape::rank(); }
+    static constexpr cs::size_t rank() noexcept { return _shape_rank<Shape>(); }
     _TNY_API constexpr const mapping_type & mapping() const noexcept { return *this; }
     _TNY_API constexpr const Shape & extents() const noexcept { return mapping_type::extents(); }
     static constexpr bool is_strides_layout    = _is_strides<Layout>::value;
