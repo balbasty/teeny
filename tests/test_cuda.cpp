@@ -55,7 +55,11 @@ int main()
     static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, ccontiguous, storage::gpu_view>>::value, "gpu_view trivially copyable");
     static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, ccontiguous, storage::pinned_view>>::value, "pinned_view trivially copyable");
     static_assert(cs::is_trivially_copyable<tensor<float, shape<2,3>, ccontiguous, storage::mapped_view>>::value, "mapped_view trivially copyable");
+    // Same CCCL layout_right EBO gap as test_tensor.cpp's static_view (#295):
+    // the sizeof-exact guarantee doesn't hold on real MSVC there either.
+#if !defined(_MSC_VER) || defined(__clang__)
     static_assert(sizeof(tensor<float, shape<2,3>, ccontiguous, storage::gpu_view>) == sizeof(float*), "view tensor is one pointer wide");
+#endif
 
     // compile-time memory-space flags (members + free trait forms).
     static_assert(gpu<float, shape<2>>::is_device && !gpu<float, shape<2>>::is_host_accessible, "gpu is device");

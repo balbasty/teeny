@@ -48,7 +48,12 @@ int main()
 
     // factor + solve, with stack-owned L and x (fully static shape)
     auto L = local<double, shape<3,3>>();            // 9 doubles, no padding
+    // Same CCCL layout_right EBO gap as test_tensor.cpp's stack_33 (#295): the
+    // sizeof-exact guarantee doesn't hold on real MSVC (extents stored as a
+    // member there, not an empty base), so this check is MSVC-guarded there too.
+#if !defined(_MSC_VER) || defined(__clang__)
     static_assert(sizeof(L) == 9*sizeof(double), "stack matrix is exactly its data");
+#endif
     cholesky(A, L);
 
     auto b = local<double, shape<3>>();
