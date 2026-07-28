@@ -570,6 +570,36 @@ template-only.
    is separate and drifts silently.
 7. Commit with a focused message.
 
+## Documentation style
+
+Docs are for **humans who are not necessarily C++ template-metaprogramming
+experts**. They want to know how to call teeny well — correct, beautiful
+call-site code, and (where it matters) why that call compiles to fast code.
+Apply this to every hand-written `docs/*.md` page, tutorial, and example —
+not just the header doc-comments:
+
+1. **teeny vocabulary over mdspan vocabulary.** Lead with teeny's own spelling
+   — `shape()`/`strides()`/`rank()`/`numel()`/`is_contiguous()` — not the raw
+   mdspan escape hatch (`extent()`/`extents()`/`mapping()`). The mdspan
+   spellings are the *interop* path (`docs/mdspan-vs-teeny.md`), not the
+   primary one; don't let them leak into pages that aren't specifically about
+   interop.
+2. **Value sugar before templates, as tabs, in this order.** When an API has
+   more than one equivalent spelling, show them as `=== "..."` tabs, in this
+   fixed order: (1) the value-tag sugar (`axis<...>{}`, `dtype<T>{}`, a layout
+   tag, …) — what a caller should reach for first; (2) `Int<k>()`/
+   integral-constant values; (3) the explicit `<...>` template form last — the
+   escape hatch for when the sugar can't be deduced (a bare `none`, say).
+3. **Plain language.** No agentic/internal-monologue phrasing, and no
+   unexplained internal engine names (`_md`, `bzip`, `_offset`, …) — those
+   belong in code comments and this file's internals section, not in
+   `docs/*.md`. Say what a reader needs in order to use the library, not what
+   teeny's implementation does internally.
+4. **Leanness bar.** If an example or tutorial snippet doesn't read as short
+   and natural, that's a signal: either a nicer teeny spelling already exists
+   and the example should use it, or teeny itself is missing sugar — file an
+   `enhancement` issue for the gap rather than shipping an awkward example.
+
 ## Testing
 
 `make run-test` builds and runs every `tests/test_*.cpp`, printing `PASS`/`FAIL`.
