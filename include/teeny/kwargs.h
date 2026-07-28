@@ -81,9 +81,9 @@ _TNY_API constexpr auto get(D dflt, A0 a0, R... rest) {
  */
 template <template <class> class... Ps>
 struct accepts {
-    template <class A>    static constexpr bool one()    { return (false || ... || Ps<A>::value); }
-    template <class... A> static constexpr bool known()  { return (true && ... && one<A>()); }
-    template <class... A> static constexpr bool unique() { return (true && ... && (count<Ps, A...>() <= 1)); }
+    template <class A>    _TNY_API static constexpr bool one()    { return (false || ... || Ps<A>::value); }
+    template <class... A> _TNY_API static constexpr bool known()  { return (true && ... && one<A>()); }
+    template <class... A> _TNY_API static constexpr bool unique() { return (true && ... && (count<Ps, A...>() <= 1)); }
 };
 
 /**

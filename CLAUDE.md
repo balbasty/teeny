@@ -51,8 +51,9 @@ include/teeny/
   half.h           `half` (IEEE binary16) + `bfloat16` element types + compute_type
   kwargs.h         `tny::_kw` — generic keyword-argument primitive (find/get/has/count/
                    accepts/is_keyword) for the trailing value-carrier tags (dtype/storage/
-                   layout/axis/into/keepdims). Internal-only infra; no public API touches
-                   it yet (see #277's umbrella for the call-site migrations that will). The
+                   layout/axis/into/keepdims). Backs every migrated call site (#277's
+                   umbrella: empty/zeros/ones/full/arange/wrap/make_*, and the reduction
+                   family sum/prod/max/min/mean/sqnorm/norm/dot). The
                    per-keyword READERS live next to each tag's own definition instead of
                    here: `dtype_arg_t` (alias.h), `storage_arg` (storage.h), `layout_arg_t`
                    (layout.h) — each resolves explicit-template-arg > matching value tag >
@@ -311,8 +312,9 @@ zeros(sh, dtype<T>{}, storage_c<storage::pinned>{});  // ...or compose BOTH valu
 empty(sh, fcontiguous{}, dtype<T>{}, storage_c<storage::heap>{});  // the generic keyword
                       //   mechanism (#277-#281): dtype/storage_c/a layout tag compose in ANY
                       //   order/subset — empty/zeros/ones/full all take a layout tag this way;
-                      //   arange has no layout keyword (1-D has no C/F distinction). Not yet
-                      //   extended to wrap/make_* (#282).
+                      //   arange has no layout keyword (1-D has no C/F distinction). `wrap`/
+                      //   `make_*` (#282) are on the same mechanism for their `storage_c` tag
+                      //   (no `dtype` keyword there — `T` is deduced from the pointer/shape).
 
 // --- math (out-of-place -> NEW tensor; static shape -> stack, else heap/host) ---
 // result type = promote(A,B): C++ rules, but among floats the LOWER width wins
