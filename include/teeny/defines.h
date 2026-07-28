@@ -14,6 +14,18 @@
 
 #define _TNY_API _TNY_HOSTDEVICE
 
+// MSVC-only: the Microsoft ABI applies empty-base-optimization to only the
+// FIRST eligible empty base of a class by default -- a class with two or more
+// private empty bases (teeny's usual EBO-for-a-mapping trick) stays non-empty
+// unless the DERIVED class itself is tagged __declspec(empty_bases), which
+// opts every base back into the standard-conforming layout. No-op (and no
+// warning) on clang/g++/nvcc, which already fold every empty base for free.
+#if defined(_MSC_VER) && !defined(__clang__)
+#   define _TNY_EMPTY_BASES __declspec(empty_bases)
+#else
+#   define _TNY_EMPTY_BASES
+#endif
+
 // Restrict qualifier for a non-aliasing pointer. Used by the out-of-place
 // elementwise engines to mark a freshly-allocated DESTINATION that provably
 // cannot alias its (const) operands, unlocking the auto-vectorized linear write.

@@ -104,7 +104,7 @@ the practical minimums:
 | **g++** | 7 (first C++17) | tested on 11–14 |
 | **clang++** | 9 | tested on 18 |
 | **AppleClang** (macOS) | 9 | tested on `macos-latest` |
-| **MSVC** (Windows) | 2019 (v19.20) | tested on `windows-latest`, currently failing — [#295](https://github.com/balbasty/teeny/issues/295)/[#296](https://github.com/balbasty/teeny/issues/296) |
+| **MSVC** (Windows) | 2019 (v19.20) | tested on `windows-latest`, currently failing — [#296](https://github.com/balbasty/teeny/issues/296) |
 
 For a **CUDA device build**, the host compiler must also be one your `nvcc`
 supports — each CUDA release caps the host g++/clang/MSVC version (e.g. CUDA 12.6
@@ -116,11 +116,24 @@ macOS and Windows via the CMake + CTest build (each `tests/test_*.cpp` is a CTes
 target). MSVC used to fail to compile teeny at all (a compiler-specific defect in
 `operator()`'s overload resolution, [#268](https://github.com/balbasty/teeny/issues/268),
 fixed). Fixing it let compilation get far enough to uncover further pre-existing,
-independent MSVC-only defects that #268 had been masking — empty-base-optimization
-not applying ([#295](https://github.com/balbasty/teeny/issues/295)) and some
-axis-reduction overloads failing to resolve ([#296](https://github.com/balbasty/teeny/issues/296)).
-The Windows CI job stays `continue-on-error` until those are fixed too, so only
-Linux and macOS are proven-portable today.
+independent MSVC-only defects that #268 had been masking: empty-base-optimization
+not applying to a mapping with 2+ private empty bases ([#295](https://github.com/balbasty/teeny/issues/295),
+fixed — needed `__declspec(empty_bases)`, see the EBO note below) and some
+axis-reduction overloads failing to resolve ([#296](https://github.com/balbasty/teeny/issues/296),
+open). The Windows CI job stays `continue-on-error` until #296 is fixed too, so
+only Linux and macOS are proven-portable today.
+
+**A permanent, documented MSVC limitation from #295's investigation:** teeny's
+`sizeof`-exact guarantee (a fully-static view/stack tensor is exactly the size
+of its data) holds on every compiler for teeny's own `strides<...>` layout, but
+**not** on real MSVC for the `ccontiguous`/`fcontiguous` layouts — CCCL's own
+`layout_right`/`layout_left::mapping` stores extents as a member tagged
+`_CCCL_NO_UNIQUE_ADDRESS`, and CCCL deliberately disables that attribute on
+MSVC (a documented kernel-launch data-corruption history), so the member
+always occupies real space there. This is CCCL's own upstream tradeoff, not a
+teeny defect, and isn't something `__declspec(empty_bases)` can fix (it only
+folds bases that are already empty). `tests/test_tensor.cpp`'s affected
+`sizeof` assertions are `#if`'d out on real MSVC for this reason.
 
 ## Choosing a toolkit for your target hardware
 
