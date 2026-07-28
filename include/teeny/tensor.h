@@ -62,13 +62,22 @@ namespace _md {
  *     _TNY_API), a dynamic one is heap-owned (host-only, _TNY_HOST) — the same
  *     split the free reductions in math.h use. -------------------------------- */
 // static output extent for input axis D when reducing Axes... (drop if reduced).
+// A VALUE-yielding class template (`::value`), not a function template called
+// in place -- MSVC's trailing-return-type parser doesn't reliably fold a
+// function CALL used as a non-type template argument pack element (it treats
+// the callee itself as the argument rather than the call's result), so
+// `red_ext<D,E,Axes...>()...` inside `_compact<...>`'s argument list silently
+// fails to specialize on real MSVC (part of #296's investigation). A class
+// template's `::value` is an ordinary non-type template argument, which every
+// compiler folds the same way.
 template <cs::size_t D, class E, long... Axes>
-_TNY_API constexpr cs::size_t red_ext() {
-    return _pos_in<D, _norm_axis(Axes, E::rank())...>() >= 0 ? _drop_axis : E::static_extent(D);
-}
+struct _red_ext_v {
+    static constexpr cs::size_t value =
+        _pos_in<D, _norm_axis(Axes, E::rank())...>() >= 0 ? _drop_axis : E::static_extent(D);
+};
 template <class E, long... Axes, cs::size_t... D>
 auto reduced_ext_(cs::index_sequence<D...>)
-    -> typename _compact<typename E::index_type, red_ext<D, E, Axes...>()...>::type;
+    -> typename _compact<typename E::index_type, _red_ext_v<D, E, Axes...>::value...>::type;
 template <class E, long... Axes>
 using reduced_extents = decltype(reduced_ext_<E, Axes...>(cs::make_index_sequence<E::rank()>{}));
 
