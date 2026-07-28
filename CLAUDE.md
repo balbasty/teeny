@@ -135,7 +135,9 @@ owned<T,E,L>    // heap-owned (host, move-only)    e.g. owned<double, DynE>(DynE
 gpu/pinned/mapped<T,E,L>   // from cuda.h
 ```
 
-Factories: `wrap(ptr, extents)` / `wrap<Layout>(ptr, extents)`,
+Factories: `wrap(ptr, extents)` / `wrap<Layout>(ptr, extents)` / `wrap(ptr, extents,
+fcontiguous{})` (value-tag layout: same as `wrap<fcontiguous>`, deduced, no
+`.template`),
 `wrap(ptr, extents, {s...})` (runtime strides -> dynamic_strides),
 `wrap<S...>(ptr, extents, {dyn...})` (mixed static/runtime strides),
 `wrap(ptr, extents, strides<S...>{})` (compile-time strides),
