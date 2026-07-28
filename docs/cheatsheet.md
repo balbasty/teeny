@@ -42,6 +42,8 @@ empty<T>(shape);                 // UNINITIALISED (np.empty); deduces stack (sta
                                  //   (a value-initialised local<...>{} / owned(e) stays zeroed; empty opts out)
 empty<T, storage::gpu>(shape);       // ...or name a backend: stack/heap/gpu/pinned/mapped
 empty<T>(shape, storage_c<storage::gpu>{});   // value-tag backend form (same result)
+empty(shape, dtype<T>{});            // value-tag ELEMENT-TYPE form: deduces T, no .template needed.
+                                     //   O stays a leading explicit template arg: empty<storage::gpu>(shape, dtype<T>{})
 make_local<T>(shape);  make_heap<T>(shape);            // thin spellings of empty<T,storage::stack/heap>
 make_gpu<T>(shape); make_pinned<T>(shape); make_mapped<T>(shape);   // empty<T,storage::gpu/...>; T defaults to float
 
@@ -52,6 +54,9 @@ arange<T, N>();  arange<T>(Int<N>());  // static 1-D [0..N-1] (stack, folds)
 zeros<T, storage::pinned>(shape);  arange<T>(n, storage_c<storage::pinned>{});   // ...or name a
                     // host-accessible backend (stack/heap/pinned/mapped); a gpu fill
                     // static_asserts -> use to<storage::gpu>(zeros<T>(shape))
+zeros(shape, dtype<T>{});  full(shape, v, dtype<T>{});  arange(n, dtype<T>{});   // value-tag T (also ones)
+zeros(shape, dtype<T>{}, storage_c<S>{});  // ...or compose BOTH tags, either order (also
+                    //   storage_c<S>{}, dtype<T>{}) — no explicit template arg at all (also empty/ones/full)
 ```
 
 ---
@@ -158,6 +163,7 @@ x.recast<NewExtents, ccontiguous>();  // ...AS contiguous (fold the strides; "I 
 x.recast(shape<...>{}, ccontiguous{}); // functional form (shape + layout, both may mix static/dynamic)
 x.to<T2>();                           // dtype convert (matching dtype -> no-copy borrow; else owning copy).
                                       //   The copy runs on the HOST; convert a gpu/gpu_view tensor via to<Space>(x)
+x.to(dtype<T2>{});                    // value-tag twin (deduces T2, no .template on a dependent receiver)
 to<storage::gpu>(x);                      // memory-space move: to<Space,ET,Force>(x) (from <teeny/cuda.h>);
                                       //   device-aware copy — use this (not clone()/member .to<>()) for a gpu source
 ```
@@ -230,6 +236,7 @@ normalize(a, into(y));  cross(a, b, into(N.at(i)));   // cross into a slot ("cro
 //   type BOTH accumulator and result: sum<double>(a), dot<double>(a,b).
 sum(a); prod(a); max(a); min(a); mean(a); dot(a, b);   // sum<Acc>(a), mean<Acc>(a), ...
 a.sum(); a.mean(); a.dot(b); a.sum<0>(); a.mean(axis<1>{});  // ALSO methods (parity; same overloads)
+sum(a, dtype<double>{});  a.sum(dtype<double>{});  // value-tag Acc == sum<double>(a) (bare form only)
 sum(a, into(cell)); dot(a, b, into(cell));  // into(dest): FULL reduction -> a RANK-0 dest
                       //   (local<T,shape<>>{} or wrap(&x,shape<>{})); dtype casts, returns dest&
 allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)

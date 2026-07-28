@@ -95,6 +95,8 @@ stack (host+device), dynamic shape → heap (host only):
 | `arange<T>(n)` | `owned<T, shape<-1>>` | `T` (=`int64_t`); 1-D `[0,n)` |
 | `arange<T,N>()` / `arange<T>(Int<N>())` | `local<T, shape<N>>` | static 1-D `[0,N)` |
 | `zeros<T, storage::S>(shape)` (also `ones`/`full`/`arange`) | owner in space `S` | host-accessible backend (`stack`/`heap`/`pinned`/`mapped`); `storage::gpu` `static_assert`s → `to<storage::gpu>(zeros<T>(shape))`. Value-tag: `zeros<T>(shape, storage_c<storage::S>{})` |
+| `empty(shape, dtype<T>{})` (also `zeros`/`ones`/`full`/`arange`) | same as `<T>` | value-tag element-type form — deduces `T` from the tag instead of an explicit `<T>` template argument, so a type-dependent receiver needs no `.template`. A backend override stays a *leading* explicit template arg since `T` is now deduced: `empty<storage::gpu>(shape, dtype<T>{})` |
+| `empty(shape, dtype<T>{}, storage_c<S>{})` / `empty(shape, storage_c<S>{}, dtype<T>{})` (also `zeros`/`ones`/`full`/`arange`) | same as `<T,S>` | **both** value tags at once, either order — no explicit template argument needed at all |
 
 ---
 
@@ -228,6 +230,7 @@ Worked input→output shapes (`E` = source extents):
 | `t.index_fits<Idx2>()` (free: `index_fits<Idx2>(t)`) | `bool` | do all element offsets fit `Idx2`? Signed reach `Σ_{s>0}(e−1)s` / `Σ_{s<0}(e−1)s` ⊆ `Idx2` (handles negative-stride/flipped views; broadcast stride 0 adds 0) |
 | `t.clone()` | owning (stack/heap) | materialise a dense row-major copy. Copies on the HOST → the **dynamic-shape** overload `static_assert`s the source is host-accessible; for a `gpu`/`gpu_view` tensor use the free `to<Space>(t)` below |
 | `t.to<T2>()` | view (no-copy) or owning | **dtype** convert. Matching dtype (no `Force`) → a read-only borrow (`gpu_view` if `t` is on the device, else `view`); differing dtype or `t.to<T2,true>()` → a dense owning copy (static→stack, dyn→heap). The **dynamic-shape** copy runs on the HOST and `static_assert`s host-accessibility — convert a `gpu`/`gpu_view` tensor via the free `to<Space>(t)` |
+| `t.to(dtype<T2>{})` | same as `t.to<T2>()` | value-tag form — deduces `T2` from the tag instead of an explicit `<T2>` template argument |
 | `to<Space>(t)` (`cuda.h`) | view (no-copy) or owning | **memory-space** move: `to<Space, ET, Force>(t)` — `Space` ∈ `storage::gpu`/`pinned`/`mapped`/`heap`/`stack`. Same no-copy/`Force` rule; a device source (gpu/`gpu_view`) downloads via `cudaMemcpy`. rvalue source → always copies |
 
 `reshape`/`flatten` need exact C-contiguity (`is_contiguous()`);
@@ -370,6 +373,7 @@ Every reduction here (plus `sqnorm`/`norm` below) is **also a method** — `a.su
 | `sum(a)` `prod(a)` `max(a)` `min(a)` `mean(a)` | `T` (accumulated wide) | over all axes |
 | `dot(a, b)` | `promote(Ta,Tb)` (accumulated wide) | inner product; extents must match **exactly** (no broadcast) |
 | `sum<Acc>(a)`, `mean<Acc>(a)`, `dot<Acc>(a,b)` | `Acc` | force the accumulator/return type |
+| `sum(a, dtype<Acc>{})`, `dot(a, b, dtype<Acc>{})` | `Acc` | value-tag form of the above — deduces `Acc` from the tag (numpy's `dtype=`); bare, all-axes form only, does not yet compose with an axis list or `into(dest)` |
 | `allclose(a, b, rtol=1e-5, atol=1e-8)` | `bool` | `\|a−b\| ≤ atol+rtol·\|b\|` everywhere (broadcasts) |
 | `sum<Axes...>(a)` `mean<Axes...>` `max`/`min`/`prod<Axes...>` | lower-rank tensor | remove the named axes (negatives wrap) |
 | `sum<Acc, Axes...>(a)` | lower-rank tensor | leading **type** = accumulator, leading **int** = axis |

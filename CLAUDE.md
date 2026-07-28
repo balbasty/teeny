@@ -47,6 +47,7 @@ that process guide.
 include/teeny/
   defines.h        macros: _TNY_API / _TNY_HOST, namespace open/close
   alias.h          cs:: vocabulary into tny:: + Int<V>/... static ints + `all` + shape<...>
+                   + axis<...>/dtype<...> value-carrier tags
   half.h           `half` (IEEE binary16) + `bfloat16` element types + compute_type
   storage.h        `storage` enum + storage policies (owning_storage<T,Alloc>, cpp_alloc)
   layout.h         strides<S...> — per-dim static/dynamic strides (extents for strides)
@@ -246,6 +247,7 @@ t.to<double>();                 // pytorch-like dtype convert -> dense owning co
                                 //   view; t.to<T,true>() forces a copy (clone() is the unconditional spelling).
                                 //   The copy runs on the HOST (dynamic overload static_asserts host-accessibility);
                                 //   convert a gpu/gpu_view tensor via the free to<Space>(x) instead.
+t.to(dtype<double>{});          // value-tag twin of to<double>() (deduces T, no .template on a dependent receiver)
 to<storage::gpu>(t);                // MEMORY-SPACE move (cuda.h free fn): to<Space,ET,Force>(x). Same no-copy/force
                                 //   rule — to<storage::gpu>(gpu_x) borrows; to<storage::gpu,void,true>(x) force-clones.
 t(all, slice(none,none,-1));    // reverse a range (negative step; a[::-1])
@@ -280,6 +282,12 @@ auto z = zeros<T>(shape); ones<T>(sh); full(sh,v); arange<T>(n);  // creation. z
                       //   full<T>(sh,v,storage_c<storage::pinned>{}) — HOST-ACCESSIBLE only
                       //   (stack/heap/pinned/mapped); a gpu fill static_asserts ->
                       //   to<storage::gpu>(zeros<T>(sh)).
+zeros(sh, dtype<T>{}); full(sh,v,dtype<T>{}); arange(n, dtype<T>{});  // value-tag T (deduced,
+                      //   no .template); a LEADING explicit template arg still names the backend
+                      //   — zeros<storage::pinned>(sh, dtype<T>{}). Same for empty().
+zeros(sh, dtype<T>{}, storage_c<storage::pinned>{});  // ...or compose BOTH value tags, either
+                      //   order (zeros(sh, storage_c<...>{}, dtype<T>{}) too) — no explicit
+                      //   template argument at all. Same for empty/ones/full/arange.
 
 // --- math (out-of-place -> NEW tensor; static shape -> stack, else heap/host) ---
 // result type = promote(A,B): C++ rules, but among floats the LOWER width wins
@@ -315,6 +323,9 @@ sum(a); prod(a); max(a); min(a); mean(a); dot(a,b);
 a.sum(); a.mean(); a.dot(b); a.sum<0>(); a.mean(axis<1>{}); a.sum<double>();  // ALSO methods
                       //   (parity with the free forms): every reduction + sqnorm/norm/dot, all the
                       //   same overload shapes (full / axis / <Acc> / axis<...> value form / into).
+sum(a, dtype<double>{});  a.sum(dtype<double>{});  // value-tag accumulator: == sum<double>(a)
+                      //   (numpy's dtype=; bare, all-axes form only — not yet wired up to compose
+                      //   with axis<...>/into, use the explicit <Acc>/<Acc,Axes...> form for those).
 sum(a, into(cell)); dot(a,b,into(cell));  // into(dest) too: a FULL reduction writes its scalar
                       //   into a RANK-0 dest (local<T,shape<>>{}, or wrap(&x,shape<>{}) over an
                       //   address; non-rank-0 dest = static_assert); dtype casts, returns dest&.
@@ -457,7 +468,7 @@ Methods that take a compile-time **selector** as an explicit `<...>` template
 argument also have a **deduced value-form twin**, so on a **type-dependent**
 receiver (inside a kernel/template) you avoid the `x.template method<...>()`
 disambiguator (a deduced call needs no `.template`; the explicit `<...>` form
-does). Two selector vocabularies:
+does). Three selector vocabularies:
 
 - **`axis<...>`** — the numpy-like axis selector (`axis: int | list[int]`), a
   value tag sibling to `shape<...>` (in `alias.h`). For the axis-LIST ops:
@@ -465,6 +476,13 @@ does). Two selector vocabularies:
   `t.take_along(axis<0,2>{}, i, slice(1,4))` == `t.take_along<0,2>(...)`,
   `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise `unsqueeze`/`permute`.
   Being a single distinct-typed arg it also disambiguates `take_along`'s two packs.
+- **`dtype<T>`** — a value tag for an element/accumulator type `T` (`alias.h`,
+  next to `axis`), numpy's `dtype=` namesake: `empty(shape<3,3>{}, dtype<double>{})`
+  == `empty<double>(shape<3,3>{})`, likewise `zeros`/`ones`/`full`/`arange` and
+  `a.to(dtype<float>{})` == `a.to<float>()`. Also reused as the reduction
+  accumulator: `sum(a, dtype<double>{})` == `sum<double>(a)` (bare, all-axes form
+  only — composing with `axis<...>`/`into(dest)` isn't wired up yet, use the
+  explicit `<Acc>`/`<Acc,Axes...>` template form for those).
 - **`Int<k>()` / `shape<...>{}` / a layout tag** — the single-selector ops (or a
   variadic `Int<>`-per-axis pack, for `permute`): `t.squeeze(Int<1>())` (one axis),
   `t.permute(Int<2>(),Int<0>(),Int<1>())`, `t.reshape(Int<6>(),Int<-1>())`,
