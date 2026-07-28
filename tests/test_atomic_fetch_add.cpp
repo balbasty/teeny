@@ -76,8 +76,8 @@ int main()
         for (int t = 0; t < nthreads; ++t)
             ts.emplace_back([&]() { for (int i = 0; i < niter; ++i) a.atomic_add_(one); });
         for (auto & th : ts) th.join();
-        if (buf[0] != static_cast<double>(nthreads) * niter ||
-            buf[3] != static_cast<double>(nthreads) * niter) return 4;
+        double expected = static_cast<double>(nthreads) * niter;
+        for (int k = 0; k < 4; ++k) if (buf[k] != expected) return 4;
     }
 
     return 0;

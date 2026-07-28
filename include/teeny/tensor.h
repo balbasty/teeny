@@ -1396,10 +1396,10 @@ public:
 
     /* --- atomic accumulate aliases: readable spelling of the atomic scatter *
      * "push" write. `atomic_add_(x)` == `add_<true>(x)`, `atomic_sub_(x)` == *
-     * `sub_<true>(x)` — atomic on both host and device (#257; a delta       *
-     * commit, not a read-modify-write). Both a broadcasting tensor rhs and  *
-     * a scalar rhs, mirroring the add_/sub_ overloads. Works on a rank-0    *
-     * at(i...) result, so `a.at(i,j).atomic_add_(v)` is the scatter-        *
+     * `sub_<true>(x)` — atomic on both host and device (#257; a delta        *
+     * commit, not a read-modify-write). Both a broadcasting tensor rhs and   *
+     * a scalar rhs, mirroring the add_/sub_ overloads. Works on a rank-0     *
+     * at(i...) result, so `a.at(i,j).atomic_add_(v)` is the scatter-         *
      * accumulate idiom. The underlying form is add_<Atomic>/sub_<Atomic>. */
     template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & atomic_add_(const B & b);
     template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & atomic_sub_(const B & b);
