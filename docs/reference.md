@@ -270,7 +270,7 @@ free **`to<Space>(t)`** (`cuda.h`) above, which is device-aware.
 | `peel<Axes...>(t).subrange(lo,hi)` | a `[lo,hi)` sub-range | seed the incremental cursor once at `lo`, then O(1)/step — split `[0,size())` across **CPU threads / device blocks**, each sweeping its own contiguous chunk |
 | `peel<Axes...>(t).enumerate()` | a range of `{index, cell}` | range-for that ALSO yields the peeled **multi-index**: `for (auto [m, cell] : …)` with `m[d]` = the coordinate of peeled axis `d` (row-major, last listed fastest) — for a per-axis table `axtab[d][m[d]]` or a write-by-coord. **Opt-in** (the bare `peel` cell stays lean — no coordinate words); composes with `subrange` (`.enumerate().subrange(lo,hi)`). The raw iterator also exposes `it.index(d)` / `it.index()` |
 | `peel_at<Axes...>(t, i)` | → view | the `i`-th sub-view — **random access**, decoded from scratch; this is what a device **grid-stride** loop (`i += nthreads`) needs |
-| `peel_front<N>(t)` | a range of views | `N≥0`: peel the first `N` axes; `N<0`: keep the last `|N|`. Same incremental range-for + `subrange(lo,hi)` |
+| `peel_front<N>(t)` | a range of views | `N≥0`: peel the first `N` axes; `N<0`: keep the last `abs(N)`. Same incremental range-for + `subrange(lo,hi)` |
 | `peel_front_at<N>(t, i)` | → view | the `i`-th (random access / grid-stride) |
 | `size_front<N>(t)` | → index | # cells `peel_front<N>` yields (product of the peeled extents), no range built |
 

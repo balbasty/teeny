@@ -43,7 +43,7 @@ that process guide.
 
 ## Layout of the repo
 
-```
+```text
 include/teeny/
   defines.h        macros: _TNY_API / _TNY_HOST, namespace open/close
   alias.h          cs:: vocabulary into tny:: + Int<V>/... static ints + `all` + shape<...>
@@ -449,6 +449,7 @@ argument also have a **deduced value-form twin**, so on a **type-dependent**
 receiver (inside a kernel/template) you avoid the `x.template method<...>()`
 disambiguator (a deduced call needs no `.template`; the explicit `<...>` form
 does). Two selector vocabularies:
+
 - **`axis<...>`** — the numpy-like axis selector (`axis: int | list[int]`), a
   value tag sibling to `shape<...>` (in `alias.h`). For the axis-LIST ops:
   `peel(t, axis<0,1>{})` == `peel<0,1>(t)`, `peel_at(t, i, axis<0,1>{})`,

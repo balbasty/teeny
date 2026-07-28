@@ -117,12 +117,12 @@ loop, where they hoist for free.
 - **`restrict`/no-alias fast path (#161, #175) — landed.** Contiguous elementwise ops
   now take a **linear fast path** in place of the per-element mixed-radix decode, which
   auto-vectorizes. Two flavours, by whether a second array is in play:
-    - **Out-of-place** (`a + b`, `a * 2`, `exp(a)`, `a < b`) writes a **freshly
+  - **Out-of-place** (`a + b`, `a * 2`, `exp(a)`, `a < b`) writes a **freshly
       allocated** result, so the engines (`bzip_`/`scalo_`/`unaryo_`) run a flat
       `for (i) cp[i] = op(ap[i], …)` with the destination `cp` marked `__restrict__`
       (`_TNY_RESTRICT`, defines.h). UB-free *because* the destination is fresh; the
       sources are left un-`restrict`ed so `a + a` stays correct.
-    - **In-place scalar / unary / iota / fill** (`a *= 2`, `a.add_(1)`, `a.exp_()`,
+  - **In-place scalar / unary / iota / fill** (`a *= 2`, `a.add_(1)`, `a.exp_()`,
       `a.iota_(…)`) is a **single-array** read-modify-write — one pointer, so it
       vectorizes with **no `__restrict__` at all** (nothing to alias). The scalar and
       unary ops are order-independent, so they take the fast path over **any dense

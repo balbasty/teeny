@@ -62,7 +62,7 @@ Don't leave finished work untracked and don't leave merged issues open.
 - **Commit subjects** use a conventional prefix, then a concise imperative
   summary:
 
-  ```
+  ```text
   fix:      a bug / UB / crash
   feat:     a new feature or API surface
   refactor: behaviour-preserving restructuring (dedupe, extract, rename)
@@ -102,6 +102,7 @@ make CXX=g++ run-examples                               # the example kernels
   g++ -std=c++17 -Iinclude -Iexternal/cccl/libcudacxx/include \
       -fsanitize=address,undefined -g tests/test_<feature>.cpp -o /tmp/t && /tmp/t
   ```
+
 - If you touch slicing / broadcasting / layout folds, also build once with
   `-DTNY_NO_NEGATIVE_INDEX` — the compile-time fold and the runtime gather must
   agree under every flag (a divergence is UB).
