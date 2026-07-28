@@ -374,9 +374,12 @@ Every reduction here (plus `sqnorm`/`norm` below) is **also a method** — `a.su
 | `sum<Axes...>(a)` `mean<Axes...>` `max`/`min`/`prod<Axes...>` | lower-rank tensor | remove the named axes (negatives wrap) |
 | `sum<Acc, Axes...>(a)` | lower-rank tensor | leading **type** = accumulator, leading **int** = axis |
 | `sum(a, axis<Axes...>{})` (also `mean`/`max`/`min`/`prod`) | lower-rank tensor | value form — numpy `axis=` selector; `sum<Acc>(a, axis<...>{})` for the accumulator; no `.template` on a dependent receiver |
+| `sum<Axes...>(a, keepdims)` (also as the value form, or with a leading `Acc`) | same rank | numpy `keepdims=True` — the named axes stay size-1 instead of being removed, so the result broadcasts back against the input |
 
 Axis reductions: a fully static result → stack (host+device); any dynamic result
-→ heap (host only).
+→ heap (host only). `keepdims` applies to `sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`
+and composes with a leading `Acc`, the `axis<...>{}` value form, and `into(dest)`
+(in that order: `sum(a, axis<0>{}, keepdims, into(dest))`).
 
 Reductions also take **`into(dest)`** (the `out=` spelling). A **full** reduction
 writes its scalar into a **rank-0** destination — `sum(a, into(cell))`,

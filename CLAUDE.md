@@ -340,6 +340,9 @@ sum<0>(a); mean<0,2>(a); max<1>(a); min<-1>(a); prod<0>(a); sum<double,0>(a);
 //   static result -> stack (host+device); any dynamic -> heap (HOST ONLY: allocates)
 sum<0>(a, into(buf)); mean(a, axis<1>{}, into(buf));  // into(dest) too -> copies the lower-rank
                       //   result into buf (any spelling: <Axes>, <Acc,Axes>, or the axis<...> value form)
+sum<0>(a, keepdims); sum(a, axis<0>{}, keepdims);  // keepdims: reduced axis kept as size-1 (numpy
+                      //   keepdims=True), broadcasts back over a. sum/prod/max/min/mean/sqnorm/norm;
+                      //   composes with a leading Acc and into(dest): sum<0>(a, keepdims, into(buf))
 
 // --- nd-peel: iterate a SUBSET of axes, each yielding a lower-rank view ---
 for (auto line : peel<0,1>(t)) f(line);   // peel axes 0,1; each `line` is a view. The range-for is

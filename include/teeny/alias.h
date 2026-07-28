@@ -210,6 +210,15 @@ template <long... Axes> struct axis { static constexpr cs::size_t rank = sizeof.
 /** @brief Keep-this-axis marker for slicing (an alias of `full_extent`). */
 constexpr cs::full_extent_t all{};
 
+/** @brief numpy/pytorch `keepdims=True` tag for axis reductions — pass as the
+ *  last argument (before an `into(dest)`, if any) to keep the reduced axes as
+ *  size-1 instead of removing them, so the result broadcasts back against the
+ *  input: `sum<0>(a, keepdims)`, `sum(a, axis<0,2>{}, keepdims)`. A distinct
+ *  empty-tag type, like `all`/`none`, so it never collides with another
+ *  argument. */
+struct keepdims_t {};
+constexpr keepdims_t keepdims{};
+
 _TNY_NAMESPACE_END(tny)
 
 #endif // TNY_ALIAS
