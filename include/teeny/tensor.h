@@ -62,13 +62,22 @@ namespace _md {
  *     _TNY_API), a dynamic one is heap-owned (host-only, _TNY_HOST) — the same
  *     split the free reductions in math.h use. -------------------------------- */
 // static output extent for input axis D when reducing Axes... (drop if reduced).
+// A VALUE-yielding class template (`::value`), not a function template called
+// in place -- MSVC's trailing-return-type parser doesn't reliably fold a
+// function CALL used as a non-type template argument pack element (it treats
+// the callee itself as the argument rather than the call's result), so
+// `red_ext<D,E,Axes...>()...` inside `_compact<...>`'s argument list silently
+// fails to specialize on real MSVC (part of #296's investigation). A class
+// template's `::value` is an ordinary non-type template argument, which every
+// compiler folds the same way.
 template <cs::size_t D, class E, long... Axes>
-_TNY_API constexpr cs::size_t red_ext() {
-    return _pos_in<D, _norm_axis(Axes, E::rank())...>() >= 0 ? _drop_axis : E::static_extent(D);
-}
+struct _red_ext_v {
+    static constexpr cs::size_t value =
+        _pos_in<D, _norm_axis(Axes, E::rank())...>() >= 0 ? _drop_axis : E::static_extent(D);
+};
 template <class E, long... Axes, cs::size_t... D>
 auto reduced_ext_(cs::index_sequence<D...>)
-    -> typename _compact<typename E::index_type, red_ext<D, E, Axes...>()...>::type;
+    -> typename _compact<typename E::index_type, _red_ext_v<D, E, Axes...>::value...>::type;
 template <class E, long... Axes>
 using reduced_extents = decltype(reduced_ext_<E, Axes...>(cs::make_index_sequence<E::rank()>{}));
 
@@ -81,9 +90,19 @@ using reduced_extents = decltype(reduced_ext_<E, Axes...>(cs::make_index_sequenc
  * given -- the bare, all-axes reduction) is never dynamic (a full reduction is
  * always a scalar, never allocates) -- that is the primary template below;
  * the partial specialization below handles a real (non-empty) axis list. */
+// Same MSVC two-phase-lookup quirk `_is_static_shape`/`_shape_rank` (above, in
+// the enclosing `tny` scope) work around for `tensor`'s own body: MSVC can
+// mis-resolve `reduced_extents<...>::rank_dynamic()` when it's evaluated
+// directly in a class TEMPLATE's static-member initializer rather than inside
+// an ordinary function body. Route it through a plain function template
+// (only instantiated when actually called, unlike a static member initializer)
+// so `_red_dyn`'s partial specialization below doesn't retrigger it.
+template <class E, long... Axes>
+_TNY_API constexpr cs::size_t _red_dyn_value() { return reduced_extents<E, Axes...>::rank_dynamic(); }
+
 template <class E, class AxisTag> struct _red_dyn { static constexpr cs::size_t value = 0; };
 template <class E, long A0, long... Rest> struct _red_dyn<E, axis<A0, Rest...>> {
-    static constexpr auto value = reduced_extents<E, A0, Rest...>::rank_dynamic();
+    static constexpr auto value = _red_dyn_value<E, A0, Rest...>();
 };
 }  // namespace _md
 
