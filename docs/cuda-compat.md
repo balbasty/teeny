@@ -43,6 +43,20 @@ release of the 2.x line:
 with teeny** — so a CUDA-13 build simply uses that bundled copy, no vendoring
 needed. teeny's source is the same for both CCCL lines.
 
+!!! note "Why GitHub shows the submodule as a commit, not `v2.8.2`"
+    The submodule pin (`external/cccl @ 207d20f`) **is** exactly CCCL's tagged
+    `v2.8.2` release — but a git submodule always records a commit hash in the
+    tree, never a ref name, so GitHub (and `git`) have no tag to display. This
+    isn't fixable: it's how submodules work in the git object model.
+
+    `.gitmodules` has a `branch` key, but it names a **branch** to track for
+    `git submodule update --remote` — CCCL only tags releases (`v2.8.2` has no
+    corresponding branch), so setting `branch = v2.8.2` would point
+    `--remote` at a branch that doesn't exist rather than clarify anything.
+    Pinning by tag, and updating deliberately by re-running
+    `git -C external/cccl checkout v2.8.3 && git add external/cccl` when a new
+    release lands, is the correct workflow here.
+
 ## CCCL ↔ `nvcc` support matrix
 
 Which CUDA toolkits each relevant CCCL release supports, and whether it has the
