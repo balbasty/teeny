@@ -8,6 +8,7 @@
 #include <cuda/std/type_traits>
 #include <teeny/defines.h>
 #include <teeny/alias.h>
+#include <teeny/kwargs.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
 
@@ -173,6 +174,28 @@ template <cs::int64_t... S> struct _strides_all_static<strides<S...>> : cs::inte
 template <class L> struct _contiguous_layout : cs::false_type {};
 template <> struct _contiguous_layout<ccontiguous> : cs::true_type {};
 template <> struct _contiguous_layout<fcontiguous>  : cs::true_type {};
+// kwargs-family name (matches _is_dtype/_is_storage_tag) for the same predicate --
+// a layout tag, for THIS step (#279), is exactly a bare ccontiguous{}/fcontiguous{}
+// value (strides<...>{} is wrap's own third positional argument, not a keyword --
+// see the design note on #277 §4; composing it as a keyword is #283's job).
+template <class L> using _is_layout_tag = _contiguous_layout<L>;
+
+/** @brief layout_arg_t<Expl, Dflt, Tags...>: the Layout a call site should use --
+ *         an explicit template argument (Expl != void) wins, else a bare
+ *         ccontiguous{}/fcontiguous{} tag found in Tags..., else the library
+ *         default Dflt. Unlike dtype_arg_t, no unwrapping is needed: the tag
+ *         itself IS the layout type, so find_t's result is the answer directly.
+ *         static_assert if BOTH an explicit Expl and a tag were supplied. */
+template <class Expl, class Dflt, class... Tags>
+struct _layout_resolve {
+    static_assert(cs::is_same<Expl, void>::value || !_kw::has<_is_layout_tag, Tags...>(),
+        "layout given both as an explicit template argument and as a layout tag "
+        "(ccontiguous{}/fcontiguous{}) -- pick one");
+    using type = cs::conditional_t<!cs::is_same<Expl, void>::value, Expl,
+        _kw::find_t<_is_layout_tag, Dflt, Tags...>>;
+};
+template <class Expl, class Dflt, class... Tags>
+using layout_arg_t = typename _layout_resolve<Expl, Dflt, Tags...>::type;
 
 // per-dim static stride from a strides<...> layout (signed; `dynamic_stride` if
 // runtime, or for any non-strides layout so callers fall through).

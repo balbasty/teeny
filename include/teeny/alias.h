@@ -12,6 +12,7 @@
 #include <cuda/std/cstdint>
 #include <cuda/std/cstddef>
 #include <teeny/defines.h>
+#include <teeny/kwargs.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
 
@@ -32,6 +33,10 @@ using cs::layout_stride;
  *         this is teeny's default and preferred spelling. */
 using ccontiguous = cs::layout_right;
 using fcontiguous = cs::layout_left;
+namespace _kw {
+template <> struct is_keyword<ccontiguous> : cs::true_type {};
+template <> struct is_keyword<fcontiguous> : cs::true_type {};
+}
 /** @brief Legacy aliases (`corder`/`forder`); prefer `ccontiguous`/`fcontiguous`. */
 using corder = ccontiguous;
 using forder = fcontiguous;
@@ -206,6 +211,7 @@ template <auto... Es> struct _is_anyshape<anyshape<Es...>> : cs::true_type {};
  *  axis (`axis<0>{}`) and a list (`axis<0,2>{}`); axes are **signed** (negatives
  *  count from the back, as everywhere in teeny). `rank` is the axis count. */
 template <long... Axes> struct axis { static constexpr cs::size_t rank = sizeof...(Axes); };
+namespace _kw { template <long... Axes> struct is_keyword<axis<Axes...>> : cs::true_type {}; }
 
 /** @brief Compile-time **element-type tag** — a value carrier for `T`, the
  *  sibling of `axis<...>` for the dtype argument. It lets a type-parameterised
@@ -221,6 +227,25 @@ template <class T> struct dtype {};
  *  accidentally binding a misplaced `dtype<T>{}` tag instead of a real value. */
 template <class> struct _is_dtype : cs::false_type {};
 template <class T> struct _is_dtype<dtype<T>> : cs::true_type {};
+namespace _kw { template <class T> struct is_keyword<dtype<T>> : cs::true_type {}; }
+
+// dtype_arg_t<Expl, Dflt, Tags...>: the element/accumulator type a call site should
+// use -- an explicit template argument (Expl != void) wins, else a dtype<T>{} tag
+// found in Tags..., else the library default Dflt. static_assert (in a class
+// template body, not the alias itself, so it actually fires) if BOTH an explicit
+// Expl and a dtype<...> tag were supplied -- ambiguous, and worth a clear message
+// rather than silently preferring one.
+template <class X, class D> struct _dtype_arg             { using type = D; };
+template <class T, class D> struct _dtype_arg<dtype<T>, D> { using type = T; };
+template <class Expl, class Dflt, class... Tags>
+struct _dtype_resolve {
+    static_assert(cs::is_same<Expl, void>::value || !_kw::has<_is_dtype, Tags...>(),
+        "dtype given both as an explicit template argument (T) and as a dtype<T>{} tag -- pick one");
+    using type = cs::conditional_t<!cs::is_same<Expl, void>::value, Expl,
+        typename _dtype_arg<_kw::find_t<_is_dtype, _kw::unset, Tags...>, Dflt>::type>;
+};
+template <class Expl, class Dflt, class... Tags>
+using dtype_arg_t = typename _dtype_resolve<Expl, Dflt, Tags...>::type;
 
 /** @brief Keep-this-axis marker for slicing (an alias of `full_extent`). */
 constexpr cs::full_extent_t all{};
@@ -233,6 +258,7 @@ constexpr cs::full_extent_t all{};
  *  argument. */
 struct keepdims_t {};
 constexpr keepdims_t keepdims{};
+namespace _kw { template <> struct is_keyword<keepdims_t> : cs::true_type {}; }
 
 _TNY_NAMESPACE_END(tny)
 

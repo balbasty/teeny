@@ -52,7 +52,12 @@ include/teeny/
   kwargs.h         `tny::_kw` — generic keyword-argument primitive (find/get/has/count/
                    accepts/is_keyword) for the trailing value-carrier tags (dtype/storage/
                    layout/axis/into/keepdims). Internal-only infra; no public API touches
-                   it yet (see #277's umbrella for the call-site migrations that will).
+                   it yet (see #277's umbrella for the call-site migrations that will). The
+                   per-keyword READERS live next to each tag's own definition instead of
+                   here: `dtype_arg_t` (alias.h), `storage_arg` (storage.h), `layout_arg_t`
+                   (layout.h) — each resolves explicit-template-arg > matching value tag >
+                   library default, `static_assert`ing if both an explicit arg and a tag
+                   are given for the same keyword.
   storage.h        `storage` enum + storage policies (owning_storage<T,Alloc>, cpp_alloc)
   layout.h         strides<S...> — per-dim static/dynamic strides (extents for strides)
   indexing.h       free indexing/slicing vocabulary: slice()/none, _norm_axis,
