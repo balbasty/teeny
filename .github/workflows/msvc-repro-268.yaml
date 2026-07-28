@@ -57,3 +57,10 @@ jobs:
       - name: Compile preceded.cpp
         continue-on-error: true
         run: cl /std:c++17 /EHsc /nologo /I include /I external\cccl\libcudacxx\include /Fe:preceded.exe scratch_msvc268\preceded.cpp
+
+      # No CCCL/mdspan at all -- just the same enable_if_t-partitioned operator()
+      # overload-set SHAPE, to isolate whether the defect is in that general
+      # pattern or specific to teeny's mdspan-based tensor.
+      - name: Compile bare_repro.cpp (no CCCL/mdspan)
+        continue-on-error: true
+        run: cl /std:c++17 /EHsc /nologo /Fe:bare_repro.exe scratch_msvc268\bare_repro.cpp && bare_repro.exe
