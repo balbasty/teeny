@@ -14,14 +14,14 @@ int main() {
     long s0 = t.stride(Int<0>());  if (s0 != 12) return 1;         // converts to runtime
 
     // runtime axis -> runtime index_type
-    static_assert(cs::is_same<decltype(t.extent(0)), long>(), "runtime extent -> long");
+    static_assert(cs::is_same<decltype(t.extent(0)), cs::int64_t>(), "runtime extent -> long");
     if (t.extent(1) != 3) return 2;
 
     // dynamic extent, static axis -> runtime
     using E = shape<dynamic_extent, 3>;
     auto d = wrap(buf, E{2});
     static_assert(d.extent(Int<1>()) == 3, "static in mixed");
-    static_assert(cs::is_same<decltype(d.extent(Int<0>())), long>(), "dynamic extent, static axis -> runtime");
+    static_assert(cs::is_same<decltype(d.extent(Int<0>())), cs::int64_t>(), "dynamic extent, static axis -> runtime");
     if (d.extent(Int<0>()) != 2) return 3;
 
     // static-stride layout -> static stride even with dynamic extents
@@ -33,7 +33,7 @@ int main() {
     using DynE = shape<dynamic_extent, dynamic_extent, dynamic_extent>;
     auto dr = wrap(buf, DynE{2,3,4});                      // layout_right
     static_assert(cs::is_same<decltype(dr.stride(Int<2>())), cs::integral_constant<cs::int64_t,1>>(), "right unit stride folds");
-    static_assert(cs::is_same<decltype(dr.stride(Int<0>())), long>(), "right outer stride runtime");
+    static_assert(cs::is_same<decltype(dr.stride(Int<0>())), cs::int64_t>(), "right outer stride runtime");
     auto dl = wrap<cs::layout_left>(buf, DynE{2,3,4});     // layout_left
     static_assert(cs::is_same<decltype(dl.stride(Int<0>())), cs::integral_constant<cs::int64_t,1>>(), "left unit stride folds");
 
@@ -46,7 +46,7 @@ int main() {
     static_assert(cs::is_same<decltype(pc.stride(Int<2>())), cs::integral_constant<cs::int64_t,1>>(), "partial-dyn unit stride folds");
     // but a dynamic INNER extent makes the outer stride genuinely runtime
     auto pd = wrap(buf, shape<3,dynamic_extent,3>{4});   // shape<3,-1,3>
-    static_assert(cs::is_same<decltype(pd.stride(Int<0>())), long>(), "dyn inner extent -> outer stride runtime");
+    static_assert(cs::is_same<decltype(pd.stride(Int<0>())), cs::int64_t>(), "dyn inner extent -> outer stride runtime");
     static_assert(cs::is_same<decltype(pd.stride(Int<2>())), cs::integral_constant<cs::int64_t,1>>(), "unit still folds");
 
     // `shape` aliases `extent(s)` (python-friendly)
@@ -68,7 +68,7 @@ int main() {
 
     // dynamic_strides: no static fold, runtime values are correct
     auto dv = wrap(buf, DynE{2,3,4}, {12,4,1});
-    static_assert(cs::is_same<decltype(dv.strides()[Int<1>()]), long>(), "dynamic stride stays runtime");
+    static_assert(cs::is_same<decltype(dv.strides()[Int<1>()]), cs::int64_t>(), "dynamic stride stays runtime");
     if (dv.shape()[0] != 2 || dv.strides()[0] != 12 || dv.strides()[2] != 1) return 10;
     return 0;
 }
