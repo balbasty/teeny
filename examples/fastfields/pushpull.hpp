@@ -67,7 +67,7 @@ template <class MD>
 double pull(const MD & inp, const double * loc, int order, const bound * b) {
     constexpr int D = (int)MD::rank();
     axis_nb nb[D];
-    for (int d = 0; d < D; ++d) nb[d] = make_axis(order, b[d], loc[d], (long)inp.extent(d));
+    for (int d = 0; d < D; ++d) nb[d] = make_axis(order, b[d], loc[d], (long)inp.shape(d));
     return pull_rec<0, D>(inp, nb, 0, 1.0, 1);
 }
 
@@ -76,7 +76,7 @@ template <class MD>
 void push(MD & out, const double * loc, double val, int order, const bound * b) {
     constexpr int D = (int)MD::rank();
     axis_nb nb[D];
-    for (int d = 0; d < D; ++d) nb[d] = make_axis(order, b[d], loc[d], (long)out.extent(d));
+    for (int d = 0; d < D; ++d) nb[d] = make_axis(order, b[d], loc[d], (long)out.shape(d));
     push_rec<0, D>(out, nb, 0, val, 1);
 }
 

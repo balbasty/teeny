@@ -8,16 +8,14 @@
 #include <cstdio>
 
 using namespace tny;
-namespace cs = cuda::std;
-using cs::extents;
 
 static bool close(double a, double b) { double d=a-b; return (d<0?-d:d) < 1e-9; }
 
 int main() {
     constexpr long C=3, H=2, W=4;
-    auto img   = local<double, extents<long,C,H,W>>();
-    auto scale = local<double, extents<long,C,1,1>>();   // one per channel
-    auto bias  = local<double, extents<long,C,1,1>>();
+    auto img   = local<double, shape<C,H,W>>();
+    auto scale = local<double, shape<C,1,1>>();   // one per channel
+    auto bias  = local<double, shape<C,1,1>>();
 
     for (long c=0;c<C;++c) { scale(c,0,0) = c+1; bias(c,0,0) = 10*(c+1); }
     for (long c=0;c<C;++c) for (long h=0;h<H;++h) for (long w=0;w<W;++w)
@@ -33,15 +31,15 @@ int main() {
     }
 
     // out-of-place: a (C,1,1) column + a (1,H,W) plane -> (C,H,W) stack tensor
-    auto col   = local<double, extents<long,C,1,1>>();
-    auto plane = local<double, extents<long,1,H,W>>();
+    auto col   = local<double, shape<C,1,1>>();
+    auto plane = local<double, shape<1,H,W>>();
     for (long c=0;c<C;++c) col(c,0,0)=c;
     for (long h=0;h<H;++h) for (long w=0;w<W;++w) plane(0,h,w)=h*10+w;
 
     auto out = col + plane;
     static_assert(decltype(out)::rank()==3 && decltype(out)::is_static, "static broadcast -> stack");
-    static_assert(decltype(out.extent(Int<0>()))::value==C, "result C");   // friendly static extent
-    static_assert(decltype(out.extent(Int<1>()))::value==H, "result H");
+    static_assert(decltype(out.shape(Int<0>()))::value==C, "result C");   // friendly static extent
+    static_assert(decltype(out.shape(Int<1>()))::value==H, "result H");
     for (long c=0;c<C;++c) for (long h=0;h<H;++h) for (long w=0;w<W;++w)
         if (!close(out(c,h,w), col(c,0,0)+plane(0,h,w))) { std::printf("oop mismatch\n"); return 2; }
 
