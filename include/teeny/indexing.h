@@ -23,8 +23,20 @@ namespace cs = cuda::std;
 // else (all / slice, i.e. a slice specifier) turns operator() into a view.
 template <class T> struct _is_ic : cs::false_type {};
 template <class T, T V> struct _is_ic<cs::integral_constant<T,V>> : cs::true_type {};
+// Whether EVERY type in Args... is an integral_constant (#268: a NAMED trait,
+// not a fold-expression written inline inside an enable_if_t<...>'s own
+// template-argument list — MSVC fails to resolve an overload set partitioned by
+// the latter, even though the fold itself is unremarkable in any other context).
+template <class... Args> struct _all_ic
+    : cs::integral_constant<bool, (_is_ic<Args>::value && ...)> {};
 template <class A> struct _is_index
     : cs::integral_constant<bool, cs::is_integral<A>::value || _is_ic<A>::value> {};
+// Whether EVERY type in Args... is an index (static or runtime integer) —
+// same #268 rationale as _all_ic above; this is the one `operator()`/`uget`/
+// `at`/`uat` gate on to tell "every arg is an index" from "at least one is a
+// slice/ellipsis".
+template <class... Args> struct _all_index
+    : cs::integral_constant<bool, (_is_index<Args>::value && ...)> {};
 
 // normalise a python-style AXIS index (negatives count from the back) against a
 // rank. Axis template parameters are signed (`long`) so `-1` is the last axis.
