@@ -110,10 +110,15 @@ make CXX=g++ run-examples                               # the example kernels
 CI (`.github/workflows/`) runs the g++ and clang++ test matrix on every PR, plus
 a macOS (AppleClang) and Windows (MSVC) CMake+CTest build — you don't need
 local access to either platform to be confident a PR is portable. The Windows
-job is currently `continue-on-error` (non-blocking): a pre-existing MSVC-only
-defect in `operator()`'s overload set ([#268](https://github.com/balbasty/teeny/issues/268))
-fails it independent of most PRs. macOS staying green is still a real, required
-signal.
+job is currently `continue-on-error` (non-blocking): fixing the original
+MSVC-only `operator()` overload-resolution defect
+([#268](https://github.com/balbasty/teeny/issues/268)) let compilation get far
+enough to uncover several more pre-existing, independent MSVC-only defects
+(empty-base-optimization not applying, [#295](https://github.com/balbasty/teeny/issues/295);
+axis-reduction overload resolution, [#296](https://github.com/balbasty/teeny/issues/296)) —
+each was previously masked because #268 aborted MSVC compilation before they
+were ever reached. The job stays non-blocking until those are fixed too.
+macOS staying green is still a real, required signal.
 
 ---
 
