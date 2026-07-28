@@ -159,7 +159,10 @@ memory lives in — `wrap(dptr, e, storage_v<storage::gpu>)` wraps a **device** 
 `storage::pinned`/`storage::mapped` page-locked host memory. Since `wrap` always yields a
 VIEW, the space folds to its view kind (`gpu -> gpu_view`, …) via `storage_view_of`, so
 you never spell the `_view` kinds (symmetric with `as_anyrank<Space>` /
-`from_dlpack<T,Space>`). Functional
+`from_dlpack<T,Space>`). Since #282, that trailing tag is a generic keyword-tag
+bag (kwargs mechanism, #277) rather than a fixed `storage_c<Space>` parameter —
+same behavior today, but a future keyword (e.g. a `stream` tag) lands on all
+four `wrap` positional forms without touching any of them again. Functional
 factories that deduce the extents type: `make_view(ptr,e)`, `make_local<T>(e)`,
 `make_heap<T>(e)`, `make_gpu/pinned/mapped<T>(e)` (E deduced; **T defaults to
 `float`**, override explicitly). The `make_*` owning factories are thin spellings
