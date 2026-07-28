@@ -186,8 +186,10 @@ All return a view and work on any source layout (incl. `strides<...>`); axis
 template args are signed (negatives count from the back). Each `<Ax>` op also has
 a **value form** — pass `Int<Ax>()` in place of the template argument
 (`t.squeeze(Int<1>()) == t.squeeze<1>()`, likewise `permute`/`flip`/`unsqueeze`/
-`reshape`/`recast`); the value spelling is the preferred one. See
-[Views & structure](structure.md).
+`reshape`/`recast`); the value spelling is the preferred one. The axis-**list**
+ops — `permute`, `squeeze`, `unsqueeze` — additionally take an `axis<...>{}` tag
+(`t.squeeze(axis<0,2>{}) == t.squeeze<0,2>()`), the same one `peel`/`take_along`/
+the reductions use. See [Views & structure](structure.md).
 
 **Type inference — what the output *type* keeps.** A view op transforms the input
 type along four independent facets; staticity is preserved wherever it is
@@ -216,7 +218,9 @@ Worked input→output shapes (`E` = source extents):
 | `t.permute<Perm...>()` | → view | reorder axes (a permutation of `0..N-1`) |
 | `t.flip<Ax>()` | → view | reverse an axis (negative-stride) |
 | `t.unsqueeze<Ax>()` | → view, rank+1 | insert a size-1 axis |
+| `t.unsqueeze<Ax0,Ax1,...>()` | → view, rank+k | insert **several** size-1 axes at once; positions are relative to the *final* rank, distinct & ascending (folds smallest-first) |
 | `t.squeeze<Ax>()` / `t.squeeze()` | → view, rank−1 / − all size-1 | drop size-1 axis / axes |
+| `t.squeeze<Ax0,Ax1,...>()` | → view, rank−k | drop **several** size-1 axes at once; positions are relative to the *source* rank, distinct & ascending (folds largest-first) |
 | `t.reshape<NewExt...>()` | → view | contiguous reshape (one `-1` inferred) |
 | `t.flatten()` | → 1-D view | ravel; needs C-contiguous |
 | `t.recast<NewShape[, NewLayout]>()` | → view | reinterpret with a more-static same-rank extents; **`NewLayout` defaults to `keep_strides`** (preserve the source strides AND layout type, any layout, no copy). `ccontiguous`/`fcontiguous` = reinterpret AS that order (derive+fold the strides — the "I promise it's contiguous" form; a **debug build verifies** the imposed strides match the source's and aborts a false promise, symmetric with the extent check — UB only under `-DNDEBUG`); `strides<S...>` = impose them. Functional form `t.recast(shape{…}, layout{…})` |

@@ -8,6 +8,12 @@ Every axis argument has a **value form** too: pass a static integer
 `t.squeeze<1>()`, and likewise for `permute`/`flip`/`unsqueeze`/`reshape`. Both
 spellings compile to the same code; the tabs below **lead with the value form**.
 
+The axis-**list** ops — `permute`, `squeeze`, `unsqueeze` — additionally take an
+`axis<...>{}` tag (a compile-time axis list, sibling of `shape<...>`, the same one
+`peel`/`take_along`/the reductions use): `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`,
+`t.permute(axis<2,0,1>{})` == `t.permute<2,0,1>()`. Being a single distinct-typed
+argument, it needs no `.template` on a dependent receiver.
+
 ## Rearrange axes
 
 === "value form"
@@ -52,6 +58,29 @@ spellings compile to the same code; the tabs below **lead with the value form**.
     t.reshape<6,-1>();  // one -1 dimension is inferred from numel
     t.flatten();        // view as 1-D (ravel)
     ```
+
+## Multiple axes at once
+
+`squeeze`/`unsqueeze` also take **several** axes in one call, inserting or
+dropping them all at once instead of chaining single-axis calls:
+
+```cpp
+(h,w).unsqueeze<1,3>();          // (H,W) -> (H,1,W,1)
+(1,h,1,w)_view.squeeze<0,2>();   // (1,H,1,W) -> (H,W)
+```
+
+The tricky part — axis positions shift as siblings get inserted or dropped — is
+handled for you: `unsqueeze`'s axes are positions in the **final** (post-insert)
+rank, and `squeeze`'s are positions in the **source** rank; both must be
+**distinct and ascending**. Internally each folds one axis at a time in the
+direction that keeps the remaining positions valid — `unsqueeze` smallest-first
+(each insert lands left of what's left to do), `squeeze` largest-first (each drop
+never shifts an earlier position). You don't need to think about the fold order —
+just list the axes ascending, in either the final (`unsqueeze`) or source
+(`squeeze`) numbering.
+
+A single axis (or none, for `squeeze`) still means the one-axis form above —
+arity alone picks the multi-axis overload.
 
 `reshape`/`flatten` follow **numpy semantics**: they return a **view** whenever the
 new shape is reachable without a copy — not only from a C-contiguous tensor, but any

@@ -146,6 +146,9 @@ See [Indexing & slicing](indexing.md).
 x.permute<Perm...>();                 // reorder axes
 x.flip<Ax>();                         // reverse an axis (negative-stride view)
 x.unsqueeze<Ax>();  x.squeeze<Ax>();  // insert / drop a size-1 axis
+x.unsqueeze<Ax0,Ax1,...>();  x.squeeze<Ax0,Ax1,...>();  // insert/drop SEVERAL at once (arity picks this
+                                      //   overload); unsqueeze positions are relative to the FINAL rank
+                                      //   (smallest-first fold), squeeze to the SOURCE rank (largest-first)
 x.reshape<NewExt...>();               // contiguous-view reshape (one -1 inferred)
 x.flatten();                          // 1-D contiguous view
 x.clone();                            // dense row-major OWNING copy (copies on the HOST; a gpu/gpu_view

@@ -216,6 +216,12 @@ t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1) -> view
 t.flip<1>();          // reverse an axis (negative-stride view; needs signed index)
 t.unsqueeze<2>();     // insert size-1 axis at pos 2 (numpy newaxis) -> rank+1 view
 t.squeeze<3>();       // drop a size-1 axis -> rank-1 view
+t.unsqueeze<1,3>();   // insert SEVERAL at once: positions relative to the FINAL rank,
+                      //   distinct & ascending (folds smallest-first) -> rank+k view
+t.squeeze<0,2>();     // drop SEVERAL at once: positions relative to the SOURCE rank,
+                      //   distinct & ascending (folds largest-first) -> rank-k view
+t.squeeze(axis<0,2>{});  t.unsqueeze(axis<1,3>{});  t.permute(axis<2,0,1>{});  // axis<...>
+                      //   value form (== the <...> template form) for these axis-LIST ops
 t.reshape<6,4>(); t.flatten();  // reshape / ravel -> VIEW when regroupable without a copy
                                 //   (numpy: not just C-contiguous; strided/permuted often view too).
                                 //   Non-viewable = static_assert (static src) / debug-check (dyn); clone() first.
@@ -452,12 +458,13 @@ does). Two selector vocabularies:
 - **`axis<...>`** — the numpy-like axis selector (`axis: int | list[int]`), a
   value tag sibling to `shape<...>` (in `alias.h`). For the axis-LIST ops:
   `peel(t, axis<0,1>{})` == `peel<0,1>(t)`, `peel_at(t, i, axis<0,1>{})`,
-  `t.take_along(axis<0,2>{}, i, slice(1,4))` == `t.take_along<0,2>(...)`. Being a
-  single distinct-typed arg it also disambiguates `take_along`'s two packs.
-- **`Int<k>()` / `shape<...>{}` / a layout tag** — the single-selector ops:
-  `t.squeeze(Int<1>())`, `t.permute(Int<2>(),Int<0>(),Int<1>())`,
-  `t.reshape(Int<6>(),Int<-1>())`, `t.recast(shape<3,3>{})`,
-  `t.is_contiguous(ccontiguous{})`.
+  `t.take_along(axis<0,2>{}, i, slice(1,4))` == `t.take_along<0,2>(...)`,
+  `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise `unsqueeze`/`permute`.
+  Being a single distinct-typed arg it also disambiguates `take_along`'s two packs.
+- **`Int<k>()` / `shape<...>{}` / a layout tag** — the single-selector ops (or a
+  variadic `Int<>`-per-axis pack, for `permute`): `t.squeeze(Int<1>())` (one axis),
+  `t.permute(Int<2>(),Int<0>(),Int<1>())`, `t.reshape(Int<6>(),Int<-1>())`,
+  `t.recast(shape<3,3>{})`, `t.is_contiguous(ccontiguous{})`.
 
 The **reductions** `sum`/`mean`/`max`/`min`/`prod` also take the `axis<...>` value
 form — `sum(a, axis<0,2>{})` == `sum<0,2>(a)`, and `sum<double>(a, axis<0>{})`
