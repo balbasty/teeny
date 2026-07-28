@@ -220,9 +220,9 @@ Worked input→output shapes (`E` = source extents):
 | `t.permute<Perm...>()` | → view | reorder axes (a permutation of `0..N-1`) |
 | `t.flip<Ax>()` | → view | reverse an axis (negative-stride) |
 | `t.unsqueeze<Ax>()` | → view, rank+1 | insert a size-1 axis |
-| `t.unsqueeze<Ax0,Ax1,...>()` | → view, rank+k | insert **several** size-1 axes at once; positions are relative to the *final* rank, distinct & ascending (folds smallest-first) |
+| `t.unsqueeze<Ax0,Ax1,...>()` | → view, rank+k | insert **several** size-1 axes at once; positions are relative to the *final* rank, distinct, any order (#275) |
 | `t.squeeze<Ax>()` / `t.squeeze()` | → view, rank−1 / − all size-1 | drop size-1 axis / axes |
-| `t.squeeze<Ax0,Ax1,...>()` | → view, rank−k | drop **several** size-1 axes at once; positions are relative to the *source* rank, distinct & ascending (folds largest-first) |
+| `t.squeeze<Ax0,Ax1,...>()` | → view, rank−k | drop **several** size-1 axes at once; positions are relative to the *source* rank, distinct, any order (#275) |
 | `t.reshape<NewExt...>()` | → view | contiguous reshape (one `-1` inferred) |
 | `t.flatten()` | → 1-D view | ravel; needs C-contiguous |
 | `t.recast<NewShape[, NewLayout]>()` | → view | reinterpret with a more-static same-rank extents; **`NewLayout` defaults to `keep_strides`** (preserve the source strides AND layout type, any layout, no copy). `ccontiguous`/`fcontiguous` = reinterpret AS that order (derive+fold the strides — the "I promise it's contiguous" form; a **debug build verifies** the imposed strides match the source's and aborts a false promise, symmetric with the extent check — UB only under `-DNDEBUG`); `strides<S...>` = impose them. Functional form `t.recast(shape{…}, layout{…})` |

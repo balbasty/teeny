@@ -11,6 +11,7 @@
 #include <cuda/std/type_traits>
 #include <cuda/std/limits>
 #include <cuda/std/cstdint>
+#include <cuda/std/array>
 #include <teeny/defines.h>
 #include <teeny/layout.h>
 
@@ -49,7 +50,10 @@ template <cs::size_t... A> _TNY_API constexpr bool _is_perm() noexcept {
 
 // No repeats among A... (a SUBSET of axes, unlike `_is_perm` which needs a full
 // 0..N-1 permutation). Used by `take_along`, where a repeated axis would bind two
-// args to the same axis and silently drop one.
+// args to the same axis and silently drop one. Also used by `unsqueeze<Ax...>`/
+// `squeeze<Ax...>` (tensor.h, #275) as the ORDER-INDEPENDENT distinctness check, so
+// axes can be listed in any order — `_sort_axes`/`_sorted_axes` below then reorders
+// them into what the fold actually needs.
 template <cs::size_t... A> _TNY_API constexpr bool _all_distinct() noexcept {
     constexpr cs::size_t N = sizeof...(A);
     cs::size_t a[N ? N : 1] = { A... };
@@ -58,14 +62,33 @@ template <cs::size_t... A> _TNY_API constexpr bool _all_distinct() noexcept {
 }
 
 // Whether the (already-normalised) axes are STRICTLY ascending — i.e. distinct and
-// in order. The axis-LIST ops that fold one axis at a time (`unsqueeze<Ax...>` /
-// `squeeze<Ax...>` in tensor.h, `normalize<Axes...>`'s keepdim fold in math.h) need
-// that: each step shifts the positions of the axes on one side, so a sorted, repeat-
-// free list is what makes the fold well defined. Takes runtime `long`s (not a
-// template pack) so a call site can normalise first: `_axes_ascending(_norm_axis(Ax, N)...)`.
+// in order. `normalize<Axes...>`'s keepdim fold (math.h) folds one axis at a time in
+// ascending order and still requires the CALLER to list them ascending. Takes runtime
+// `long`s (not a template pack) so a call site can normalise first:
+// `_axes_ascending(_norm_axis(Ax, N)...)`.
 _TNY_API constexpr bool _axes_ascending() { return true; }
 _TNY_API constexpr bool _axes_ascending(long) { return true; }
 template <class... R> _TNY_API constexpr bool _axes_ascending(long a, long b, R... r) { return a < b && _axes_ascending(b, r...); }
+
+// Compile-time insertion sort of an (already-normalised, distinct) axis-value pack
+// (#275). `unsqueeze<Ax...>`/`squeeze<Ax...>` (tensor.h) fold one axis at a time in
+// a fixed order (see `_unsqueeze_fold`/`_squeeze_fold`) that assumes the axes arrive
+// ascending — sorting them here means the CALLER no longer has to list them that
+// way, only distinctly (`_all_distinct` above, checked on the original, unsorted
+// pack). `_sorted_axes<Ax...>::value` is a `static constexpr` array, re-expandable
+// into a template argument pack at the call site (`_sorted_axes<Ax...>::value[I]...`
+// for `I` from an `index_sequence`) — the standard trick for sorting a non-type
+// template parameter pack, since C++17 has no way to sort the pack itself.
+template <cs::size_t N> _TNY_API constexpr cs::array<long, N> _sort_axes(cs::array<long, N> a) {
+    for (cs::size_t i = 1; i < N; ++i) {
+        long key = a[i]; cs::size_t j = i;
+        while (j > 0 && a[j - 1] > key) { a[j] = a[j - 1]; --j; }
+        a[j] = key;
+    }
+    return a;
+}
+template <long... Ax> struct _sorted_axes
+{ static constexpr cs::array<long, sizeof...(Ax)> value = _sort_axes(cs::array<long, sizeof...(Ax)>{Ax...}); };
 
 /** @brief Open-ended slice sentinel — teeny's `None` (python `a[:n]` / `a[m:]`).
  *
