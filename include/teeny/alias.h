@@ -207,6 +207,16 @@ template <auto... Es> struct _is_anyshape<anyshape<Es...>> : cs::true_type {};
  *  count from the back, as everywhere in teeny). `rank` is the axis count. */
 template <long... Axes> struct axis { static constexpr cs::size_t rank = sizeof...(Axes); };
 
+/** @brief Compile-time **element-type tag** — a value carrier for `T`, the
+ *  sibling of `axis<...>` for the dtype argument. It lets a type-parameterised
+ *  call be spelled by VALUE (deducing `T` from the argument) instead of an
+ *  explicit `<T>` template argument, so on a type-dependent receiver it needs
+ *  no `.template`: `empty(shape<3,3>{}, dtype<double>{})` == `empty<double>(shape<3,3>{})`,
+ *  `a.to(dtype<float>{})` == `a.to<float>()`. Numpy's `dtype=` keyword is the
+ *  namesake — including reuse as the reduction accumulator/result type:
+ *  `sum(a, dtype<double>{})` == `sum<double>(a)`, matching `np.sum(a, dtype=...)`. */
+template <class T> struct dtype {};
+
 /** @brief Keep-this-axis marker for slicing (an alias of `full_extent`). */
 constexpr cs::full_extent_t all{};
 

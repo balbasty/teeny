@@ -1043,6 +1043,18 @@ _TNY_API auto min(const tensor<T,E,L,O> & a) {
         _md::reduce_<R>(a, _reduce_seed_highest<R>(), _md::r_min{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
 }
 
+/** @brief Value-tag accumulator form: `sum(a, dtype<Acc>{})` == `sum<Acc>(a)` —
+ *  deduces `Acc` from the tag instead of an explicit `<Acc>` template argument
+ *  (numpy's `dtype=` keyword; see `dtype<...>` in `alias.h`). Likewise for
+ *  `prod`/`max`/`min`/`mean`/`dot`/`sqnorm`/`norm` below — each the bare, all-axes
+ *  form only; composing `dtype<...>` with an axis list or `into(dest)` is not yet
+ *  supported, use the explicit `<Acc>` (or `<Acc, Axes...>`) template form for those. */
+#define _TNY_RED_DTYPE(NAME) \
+template <class T, class E, class L, storage O, class Acc> \
+_TNY_API auto NAME(const tensor<T,E,L,O> & a, dtype<Acc>) { return NAME<Acc>(a); }
+_TNY_RED_DTYPE(sum) _TNY_RED_DTYPE(prod) _TNY_RED_DTYPE(max) _TNY_RED_DTYPE(min)
+#undef _TNY_RED_DTYPE
+
 /* --- boolean reductions (members; chain after a comparison) -------- */
 template <class T,class E,class L,storage O> _TNY_API bool tensor<T,E,L,O>::all() const
 { return _md::reduce_<bool>(*this, true,  _md::r_all{}, cs::make_index_sequence<rank()>{}); }
@@ -1259,6 +1271,9 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) 
     return static_cast<_reduce_result_t<Acc, promote_t<Ta,Tb>>>(
         _md::zipreduce_<R>(a, b, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
 }
+/** @brief Value-tag accumulator form: `dot(a, b, dtype<Acc>{})` == `dot<Acc>(a, b)`. */
+template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, class Acc>
+_TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, dtype<Acc>) { return dot<Acc>(a, b); }
 
 /* ------------------------------------------------------------------ *
  *     Vector algebra & geometry (contained exact math)               *
@@ -1269,6 +1284,9 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) 
  *         element type (`sqnorm<Acc>(a)` accumulates AND returns `Acc`). */
 template <class Acc = void, class T, class E, class L, storage O>
 _TNY_API auto sqnorm(const tensor<T,E,L,O> & a) { return dot<Acc>(a, a); }
+/** @brief Value-tag accumulator form: `sqnorm(a, dtype<Acc>{})` == `sqnorm<Acc>(a)`. */
+template <class T, class E, class L, storage O, class Acc>
+_TNY_API auto sqnorm(const tensor<T,E,L,O> & a, dtype<Acc>) { return sqnorm<Acc>(a); }
 
 /** @brief Euclidean (L2) norm `√Σ aᵢ²`, over ALL axes. Accumulates the squares in
  *         the reduce type and takes the root there, then casts to the result type:
@@ -1282,6 +1300,9 @@ _TNY_API auto norm(const tensor<T,E,L,O> & a) {
                 cs::conditional_t<cs::is_floating_point<Res>::value, Res, double>>;   // take the root in a float type
     return static_cast<Res>(cs::sqrt(static_cast<D>(sqnorm<R>(a))));
 }
+/** @brief Value-tag accumulator form: `norm(a, dtype<Acc>{})` == `norm<Acc>(a)`. */
+template <class T, class E, class L, storage O, class Acc>
+_TNY_API auto norm(const tensor<T,E,L,O> & a, dtype<Acc>) { return norm<Acc>(a); }
 
 /* --- axis norm: √(Σaᵢ² over the named axes) -> a lower-rank tensor. Floating result
  *     (integer -> double, mean rule); norm<Acc,Axes...> makes Acc accumulator+result.
@@ -1558,6 +1579,9 @@ _TNY_API auto mean(const tensor<T,E,L,O> & a) {
     const D m = static_cast<D>(sum<R>(a)) / static_cast<D>(a.numel());
     return static_cast<Res>(m);
 }
+/** @brief Value-tag accumulator form: `mean(a, dtype<Acc>{})` == `mean<Acc>(a)`. */
+template <class T, class E, class L, storage O, class Acc>
+_TNY_API auto mean(const tensor<T,E,L,O> & a, dtype<Acc>) { return mean<Acc>(a); }
 
 /* ------------------------------------------------------------------ *
  *     into(dest) on reductions — numpy/pytorch `out=`                 *
@@ -1654,6 +1678,8 @@ template <class T,class E,class L,storage O> template <class Acc>               
 _TNY_API auto tensor<T,E,L,O>::NAME() const { return tny::NAME<Acc>(*this); }                              \
 template <class T,class E,class L,storage O> template <class Acc, class D>                                 \
 _TNY_API auto & tensor<T,E,L,O>::NAME(into_t<D> out) const { return tny::NAME<Acc>(*this, out); }          \
+template <class T,class E,class L,storage O> template <class Acc>                                          \
+_TNY_API auto tensor<T,E,L,O>::NAME(dtype<Acc>) const { return tny::NAME<Acc>(*this); }                    \
 _TNY_RED_AXIS_DEF(NAME, _TNY_API,  ==)                                                                     \
 _TNY_RED_AXIS_DEF(NAME, _TNY_HOST, !=)
 _TNY_RED_METHOD_DEF(sum)    _TNY_RED_METHOD_DEF(prod)  _TNY_RED_METHOD_DEF(max)
@@ -1667,6 +1693,8 @@ template <class T,class E,class L,storage O> template <class Acc, class Tb,class
 _TNY_API auto tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::dot<Acc>(*this, b); }
 template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class D>
 _TNY_API auto & tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) const { return tny::dot<Acc>(*this, b, out); }
+template <class T,class E,class L,storage O> template <class Tb,class Eb,class Lb,storage Ob, class Acc>
+_TNY_API auto tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b, dtype<Acc>) const { return tny::dot<Acc>(*this, b); }
 
 /* ------------------------------------------------------------------ *
  *     Out-of-place producers AS METHODS (parity with a.add(b))       *

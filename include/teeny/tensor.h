@@ -894,6 +894,20 @@ public:
         tensor<cs::remove_cv_t<T2>, Shape, ccontiguous, storage::heap> c(extents()); c.copy_(*this); return c;
     }
 
+    /** @brief Value-tag form: `x.to(dtype<T2>{})` == `x.to<T2>()` (`Force` stays an
+     *  explicit template arg — `x.to<true>(dtype<T2>{})`). Deduces `T2` from the tag
+     *  instead of an explicit `<T2>` template argument, so a type-dependent receiver
+     *  spells it with no `.template`. A thin forwarder: `S` picks the same branch
+     *  `to<T2,Force>()` would resolve to internally, so the annotation always matches. */
+    template <class T2, bool Force = false, bool S = is_static, cs::enable_if_t<S, int> = 0>
+    _TNY_API auto to(dtype<T2>) const & { return to<T2, Force>(); }
+    template <class T2, bool Force = false, bool S = is_static, cs::enable_if_t<!S, int> = 0>
+    _TNY_HOST auto to(dtype<T2>) const & { return to<T2, Force>(); }
+    template <class T2, bool Force = false, bool S = is_static, cs::enable_if_t<S, int> = 0>
+    _TNY_API auto to(dtype<T2>) const && { return cs::move(*this).template to<T2, Force>(); }
+    template <class T2, bool Force = false, bool S = is_static, cs::enable_if_t<!S, int> = 0>
+    _TNY_HOST auto to(dtype<T2>) const && { return cs::move(*this).template to<T2, Force>(); }
+
 private:
     // POD the compile-time reshape solver returns (fully-static sources): whether the
     // reshape is viewable without a copy, plus the resolved target extents and strides.
@@ -1396,6 +1410,7 @@ public:
 #define _TNY_RED_METHOD_DECL(NAME)                                                                          \
     template <class Acc = void> _TNY_API auto NAME() const;                                                 \
     template <class Acc = void, class D> _TNY_API auto & NAME(into_t<D> out) const;                         \
+    template <class Acc> _TNY_API auto NAME(dtype<Acc>) const;                                              \
     _TNY_RED_AXIS_DECL(NAME, _TNY_API,  ==)                                                                 \
     _TNY_RED_AXIS_DECL(NAME, _TNY_HOST, !=)
     _TNY_RED_METHOD_DECL(sum)    _TNY_RED_METHOD_DECL(prod)  _TNY_RED_METHOD_DECL(max)
@@ -1409,6 +1424,8 @@ public:
     _TNY_API auto dot(const tensor<Tb,Eb,Lb,Ob> & b) const;
     template <class Acc = void, class Tb,class Eb,class Lb,storage Ob, class D>
     _TNY_API auto & dot(const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) const;
+    template <class Tb,class Eb,class Lb,storage Ob, class Acc>
+    _TNY_API auto dot(const tensor<Tb,Eb,Lb,Ob> & b, dtype<Acc>) const;
 
     /* --- in-place unary math (element-wise) ----------------------- */
     _TNY_API tensor & neg_();
@@ -1595,6 +1612,15 @@ _TNY_HOST auto empty(Shape e) {
  *  spell the backend as a template arg — `empty<T, storage::stack>(extents)`. */
 template <class T = float, class Layout = ccontiguous, class Shape, storage O>
 _TNY_HOST auto empty(Shape e, storage_c<O>) { return empty<T, O, Layout>(e); }
+/** @brief Value-tag element-type form: `empty(extents, dtype<T>{})` — deduces `T`
+ *  from the tag instead of an explicit `<T>` template argument (`O`/`Layout` stay
+ *  leading explicit template args, e.g. `empty<storage::gpu>(e, dtype<double>{})`). */
+template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
+          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+_TNY_API auto empty(Shape e, dtype<T>) { return empty<T, O, Layout>(e); }
+template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
+          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+_TNY_HOST auto empty(Shape e, dtype<T>) { return empty<T, O, Layout>(e); }
 
 /** @brief `make_local<T>(extents)` — a stack-owned tensor (static shape).
  *         `T` defaults to `float` (numpy's default float dtype). Thin spelling of
@@ -1638,6 +1664,15 @@ _TNY_HOST auto full(Shape e, V v) {
 /** @brief Value-tag backend form: `full<T>(extents, v, storage_c<storage::pinned>{})`. */
 template <class T = void, class Layout = ccontiguous, class Shape, class V, storage O>
 _TNY_HOST auto full(Shape e, V v, storage_c<O>) { return full<T, O, Layout>(e, v); }
+/** @brief Value-tag element-type form: `full(extents, v, dtype<T>{})` — deduces `T`
+ *  from the tag instead of an explicit `<T>` template argument (overrides the value's
+ *  own type, same as explicit `full<T>(e, v)`). */
+template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class V, class T,
+          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+_TNY_API auto full(Shape e, V v, dtype<T>) { return full<T, O, Layout>(e, v); }
+template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class V, class T,
+          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+_TNY_HOST auto full(Shape e, V v, dtype<T>) { return full<T, O, Layout>(e, v); }
 
 /** @brief `zeros<T>(extents)` / `ones<T>(extents)` — a new tensor of 0s / 1s.
  *         `T` defaults to `float`. Same ownership deduction and backend selector
@@ -1652,6 +1687,14 @@ template <class T = float, storage O = storage_deduce, class Layout = ccontiguou
 _TNY_HOST auto zeros(Shape e) { return full<T, O, Layout>(e, T(0)); }
 template <class T = float, class Layout = ccontiguous, class Shape, storage O>
 _TNY_HOST auto zeros(Shape e, storage_c<O>) { return zeros<T, O, Layout>(e); }
+/** @brief Value-tag element-type form: `zeros(extents, dtype<T>{})` — deduces `T`
+ *  from the tag instead of an explicit `<T>` template argument. */
+template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
+          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+_TNY_API  auto zeros(Shape e, dtype<T>) { return zeros<T, O, Layout>(e); }
+template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
+          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+_TNY_HOST auto zeros(Shape e, dtype<T>) { return zeros<T, O, Layout>(e); }
 template <class T = float, storage O = storage_deduce, class Layout = ccontiguous, class Shape,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
 _TNY_API  auto ones(Shape e) { return full<T, O, Layout>(e, T(1)); }
@@ -1660,6 +1703,14 @@ template <class T = float, storage O = storage_deduce, class Layout = ccontiguou
 _TNY_HOST auto ones(Shape e) { return full<T, O, Layout>(e, T(1)); }
 template <class T = float, class Layout = ccontiguous, class Shape, storage O>
 _TNY_HOST auto ones(Shape e, storage_c<O>) { return ones<T, O, Layout>(e); }
+/** @brief Value-tag element-type form: `ones(extents, dtype<T>{})` — deduces `T`
+ *  from the tag instead of an explicit `<T>` template argument. */
+template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
+          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+_TNY_API  auto ones(Shape e, dtype<T>) { return ones<T, O, Layout>(e); }
+template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
+          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+_TNY_HOST auto ones(Shape e, dtype<T>) { return ones<T, O, Layout>(e); }
 
 /** @brief `arange<T>(n)` — a 1-D tensor `[0, 1, ..., n-1]` (heap, host). `T`
  *         defaults to `int64_t` (an integer range, like numpy `arange(n)`). A
@@ -1676,6 +1727,10 @@ _TNY_HOST auto arange(long n) {
 /** @brief Value-tag backend form: `arange<T>(n, storage_c<storage::pinned>{})`. */
 template <class T = cs::int64_t, storage O>
 _TNY_HOST auto arange(long n, storage_c<O>) { return arange<T, O>(n); }
+/** @brief Value-tag element-type form: `arange(n, dtype<T>{})` — deduces `T` from
+ *  the tag instead of an explicit `<T>` template argument. */
+template <storage O = storage_deduce, class T>
+_TNY_HOST auto arange(long n, dtype<T>) { return arange<T, O>(n); }
 /** @brief Static `arange<T, N>()` — a stack `[0..N-1]` (host+device, folds). */
 template <class T = cs::int64_t, long N>
 _TNY_API auto arange() { tensor<T, cs::extents<cs::int64_t, static_cast<cs::size_t>(N)>, ccontiguous, storage::stack> t{}; t.iota_(); return t; }
