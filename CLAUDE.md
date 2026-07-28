@@ -529,6 +529,32 @@ keeps the leading TYPE as the accumulator (the value axis arg and the type arg
 never collide). `peel_front<N>` / `size_front<N>` (a COUNT, not an axis list) stay
 template-only.
 
+### Keyword arguments (the trailing-bag design rule)
+
+Several call sites accept a run of **keyword-like value tags** after their
+required positional arguments — `dtype<T>{}`, `axis<...>{}`, a layout tag
+(`ccontiguous`/`fcontiguous`), `storage_c<O>{}`, `keepdims`, `into(dest)`. This
+is a deliberate API-wide **design rule**, not an implementation detail the
+caller needs to reach for: **keywords are trailing** (after every required
+positional argument, in fixed order), **order-free among themselves**, and
+**one of each kind per call** (matched by distinct TYPE, so nothing is
+positional/ambiguous — passing two of the same kind, or a kind a call site
+doesn't recognise, is a compile error naming the mistake, not silent
+misbehaviour or a wall of overload-resolution noise). So `empty(shape<3,3>{},
+dtype<double>{}, fcontiguous{})`, `zeros(shape, storage_c<storage::pinned>{},
+dtype<double>{})`, and `sum(a, dtype<double>{}, axis<0>{}, keepdims,
+into(buf))` all compose their keywords in **any subset, any order** — the
+factory/`wrap`/`make_*` family (`storage.h`/`layout.h`/`tensor.h`) and the
+reduction family (`math.h`) both build on the same primitive:
+`tny::_kw` (`kwargs.h`) — `find_t`/`has`/`count`/`get` ask questions of the
+trailing pack, `accepts<Ps...>::known/unique` is the guard every call site
+puts in a `static_assert` up front. Where a selector still needs an EXPLICIT
+`<...>` template argument (an axis list too big to spell as a value in a
+generic context, or the `<Acc, Axes...>` reduction split — C++17 has no
+universal template parameter to unify "leading type = accumulator" with
+"leading int = axis"), that split stays; it is the keyword BAG past it that
+is generic.
+
 ## How the hard parts work (so you don't re-derive them)
 
 - **Broadcasting** (`math.h`, `_md::bzip`): numpy-style — operands are aligned

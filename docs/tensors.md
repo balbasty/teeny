@@ -145,6 +145,25 @@ auto f = make_local<double, fcontiguous>(shape<3,3>{}); // stack, F-order (colum
 auto g = zeros<float, storage_deduce, fcontiguous>(shape<-1,4>{n});  // F-order zeros
 ```
 
+### Composable keywords {: #factories }
+
+Every factory above (`empty`/`zeros`/`ones`/`full`/`arange`, and `wrap`'s
+memory-space tag) also takes its `dtype<T>{}`/`storage_c<O>{}`/layout-tag
+arguments as **value-tag keywords** instead of explicit template arguments —
+and, unlike the template forms above, these compose in **any subset, any
+order**:
+
+```cpp
+auto e2 = empty(shape<3,3>{}, dtype<double>{}, storage_c<storage::heap>{});
+auto g2 = zeros(shape<-1,4>{n}, fcontiguous{}, dtype<float>{});   // order doesn't matter
+auto h2 = make_heap(shape<3,3>{}, dtype<double>{});               // make_* forwards its keywords too
+```
+
+This is the same **keyword-argument design rule** used by [reductions](math.md#keyword-arguments)
+(`sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf))`): keywords are
+trailing, order-free among themselves, and one of each kind per call —
+`tny::_kw` (`kwargs.h`) is the shared primitive behind both.
+
 ## Getting a view from an owning tensor
 
 Inside a kernel you want a view (trivially copyable). Every owning tensor hands
