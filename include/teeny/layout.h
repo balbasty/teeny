@@ -78,8 +78,11 @@ struct strides {
 
     // Shape is a private base (not a member) so the mapping is EMPTY (EBO)
     // when the shape is fully static, keeping strides<...> tensors sizeof-exact.
+    // _TNY_EMPTY_BASES (defines.h): MSVC only auto-folds the FIRST empty base
+    // of a class into zero extra bytes -- this mapping privately inherits TWO
+    // (_dyn_strides and Shape), so without the tag MSVC leaves it non-empty.
     template <class Shape>
-    struct mapping : private _dyn_strides<typename Shape::index_type, strides::ndyn()>, private Shape {
+    struct _TNY_EMPTY_BASES mapping : private _dyn_strides<typename Shape::index_type, strides::ndyn()>, private Shape {
         using extents_type = Shape;
         using index_type   = typename Shape::index_type;
         using rank_type    = typename Shape::rank_type;

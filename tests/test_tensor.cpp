@@ -11,11 +11,24 @@ using static_view = tensor<double, shape<2,3,4>, cs::layout_right, storage::view
 static_assert(static_view::rank() == 3, "rank");
 static_assert(static_view::is_static, "static");
 static_assert(cs::is_trivially_copyable<static_view>::value, "view trivially copyable");
+// The sizeof-exact guarantee itself does NOT hold on real MSVC (#295): CCCL's
+// cs::layout_right::mapping stores its extents as a MEMBER, tagged
+// _CCCL_NO_UNIQUE_ADDRESS -- and CCCL deliberately disables that attribute on
+// MSVC specifically ("silent runtime corruption when passing data into
+// kernels", external/cccl/libcudacxx/include/cuda/std/__cccl/attributes.h), so
+// the member always occupies real space there. That is CCCL's own upstream
+// tradeoff, not something teeny's EBO usage can work around -- unlike
+// teeny's own strides<...> layout (test_strides.cpp), which does not have
+// this problem and stays sizeof-exact on every compiler including MSVC.
+#if !defined(_MSC_VER) || defined(__clang__)
 static_assert(sizeof(static_view) == sizeof(double*), "static view == just a pointer");
+#endif
 
 // A stack tensor stores exactly its elements.
 using stack_33 = tensor<double, shape<3,3>, cs::layout_right, storage::stack>;
+#if !defined(_MSC_VER) || defined(__clang__)
 static_assert(sizeof(stack_33) == 9 * sizeof(double), "stack tensor == its data");
+#endif
 static_assert(cs::is_trivially_copyable<stack_33>::value, "stack trivially copyable");
 
 int main()

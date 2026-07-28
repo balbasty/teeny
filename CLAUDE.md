@@ -549,7 +549,19 @@ template-only.
   and a fully sliceable source. CCCL's `cs::submdspan` doesn't accept it, but
   teeny never calls `cs::submdspan` anymore.
 - **EBO**: `tensor : private Layout::mapping<Extents>`. `mapping()` returns
-  `*this`. Do not add non-static data members besides `store_`.
+  `*this`. Do not add non-static data members besides `store_`. A class privately
+  inheriting TWO OR MORE empty bases for this trick (e.g. `strides<S...>::mapping`,
+  `layout.h`) needs `_TNY_EMPTY_BASES` (`defines.h`, `__declspec(empty_bases)` on
+  MSVC, no-op elsewhere) on the derived class — MSVC only auto-folds the FIRST
+  empty base by default (#295). **Not fixable for CCCL's own `ccontiguous`/
+  `fcontiguous` mappings**: `cs::layout_right`/`layout_left::mapping` stores
+  extents as a *member* tagged `_CCCL_NO_UNIQUE_ADDRESS`, and CCCL deliberately
+  disables that attribute on MSVC (kernel-launch data-corruption history) — so
+  the sizeof-exact guarantee (a fully-static view/stack tensor == just its data)
+  holds on every compiler for teeny's own `strides<...>` layout, but not on real
+  MSVC for the contiguous layouts. This is CCCL's own upstream tradeoff, not a
+  teeny bug — `test_tensor.cpp`'s `sizeof` assertions are `#if`'d out on MSVC
+  for exactly this reason; don't try to "fix" that guard.
 
 ## Adding a feature — checklist
 
