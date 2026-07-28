@@ -13,7 +13,11 @@ int main() {
     auto e1 = empty(shape<3,3>{}, dtype<double>{});
     static_assert(cs::is_same<decltype(e1)::element_type, double>::value, "");
     static_assert(decltype(e1)::ownership == storage::stack, "");
+    // Same CCCL layout_right EBO gap as test_tensor.cpp's stack_33 (#295): the
+    // sizeof-exact guarantee doesn't hold on real MSVC there either.
+#if !defined(_MSC_VER) || defined(__clang__)
     if (sizeof(e1) != 9 * sizeof(double)) return 1;
+#endif
 
     // dtype<T> composes with an explicit leading O template arg (T stays deduced)
     auto e2 = empty<storage::heap>(shape<3,3>{}, dtype<double>{});
