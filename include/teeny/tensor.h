@@ -894,18 +894,25 @@ public:
         tensor<cs::remove_cv_t<T2>, Shape, ccontiguous, storage::heap> c(extents()); c.copy_(*this); return c;
     }
 
-    /** @brief Value-tag form: `x.to(dtype<T2>{})` == `x.to<T2>()` (`Force` stays an
-     *  explicit template arg — `x.to<true>(dtype<T2>{})`). Deduces `T2` from the tag
-     *  instead of an explicit `<T2>` template argument, so a type-dependent receiver
-     *  spells it with no `.template`. A thin forwarder: `S` picks the same branch
-     *  `to<T2,Force>()` would resolve to internally, so the annotation always matches. */
-    template <class T2, bool Force = false, bool S = is_static, cs::enable_if_t<S, int> = 0>
+    /** @brief Value-tag form: `x.to(dtype<T2>{})` == `x.to<T2>()`. Deduces `T2` from
+     *  the tag instead of an explicit `<T2>` template argument, so a type-dependent
+     *  receiver spells it with no `.template`. `Force` is a LEADING explicit template
+     *  arg (since `T2` is now deduced) — `x.to<true>(dtype<T2>{})`. A thin forwarder:
+     *  the enable_if mirrors exactly which of `to<T2,Force>()`'s branches is
+     *  `_TNY_API` (the matching-dtype borrow is `_TNY_API` regardless of a dynamic
+     *  shape; only a differing-dtype/`Force` copy of a dynamic shape is `_TNY_HOST`),
+     *  so the annotation always matches — never `_TNY_API` calling `_TNY_HOST`. */
+    template <bool Force = false, class T2, bool S = is_static,
+              cs::enable_if_t<S || (!Force && cs::is_same<T2, element_type>::value), int> = 0>
     _TNY_API auto to(dtype<T2>) const & { return to<T2, Force>(); }
-    template <class T2, bool Force = false, bool S = is_static, cs::enable_if_t<!S, int> = 0>
+    template <bool Force = false, class T2, bool S = is_static,
+              cs::enable_if_t<!(S || (!Force && cs::is_same<T2, element_type>::value)), int> = 0>
     _TNY_HOST auto to(dtype<T2>) const & { return to<T2, Force>(); }
-    template <class T2, bool Force = false, bool S = is_static, cs::enable_if_t<S, int> = 0>
+    template <bool Force = false, class T2, bool S = is_static,
+              cs::enable_if_t<S || (storage_is_view(O) && !Force && cs::is_same<T2, element_type>::value), int> = 0>
     _TNY_API auto to(dtype<T2>) const && { return cs::move(*this).template to<T2, Force>(); }
-    template <class T2, bool Force = false, bool S = is_static, cs::enable_if_t<!S, int> = 0>
+    template <bool Force = false, class T2, bool S = is_static,
+              cs::enable_if_t<!(S || (storage_is_view(O) && !Force && cs::is_same<T2, element_type>::value)), int> = 0>
     _TNY_HOST auto to(dtype<T2>) const && { return cs::move(*this).template to<T2, Force>(); }
 
 private:
@@ -1660,18 +1667,28 @@ _TNY_HOST auto make_heap(Shape e) { return empty<T, storage::heap, Layout>(e); }
 template <class T = void, storage O = storage_deduce, class Layout = ccontiguous, class Shape, class V,
           class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API auto full(Shape e, V v) { auto t = empty<ET, O, Layout>(e); t.fill_(static_cast<ET>(v)); return t; }
+_TNY_API auto full(Shape e, V v) {
+    static_assert(!_is_dtype<V>::value, "full(shape, v): v looks like a dtype<T> tag, not a fill value — "
+        "did you mean full(shape, v, dtype<T>{}) (value first, dtype tag last)?");
+    auto t = empty<ET, O, Layout>(e); t.fill_(static_cast<ET>(v)); return t;
+}
 template <class T = void, storage O = storage_deduce, class Layout = ccontiguous, class Shape, class V,
           class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
 _TNY_HOST auto full(Shape e, V v) {
+    static_assert(!_is_dtype<V>::value, "full(shape, v): v looks like a dtype<T> tag, not a fill value — "
+        "did you mean full(shape, v, dtype<T>{}) (value first, dtype tag last)?");
     static_assert(storage_is_host_accessible(storage_resolve(O, Shape::rank_dynamic() == 0)),
         "zeros/ones/full<..., storage::gpu>: a device fill needs a kernel launch; use to<storage::gpu>(full<T>(shape, v)) (or to<storage::gpu>(zeros<T>(shape))), or empty<T, storage::gpu>(shape) then a memset.");
     auto t = empty<ET, O, Layout>(e); t.fill_(static_cast<ET>(v)); return t;
 }
 /** @brief Value-tag backend form: `full<T>(extents, v, storage_c<storage::pinned>{})`. */
 template <class T = void, class Layout = ccontiguous, class Shape, class V, storage O>
-_TNY_HOST auto full(Shape e, V v, storage_c<O>) { return full<T, O, Layout>(e, v); }
+_TNY_HOST auto full(Shape e, V v, storage_c<O>) {
+    static_assert(!_is_dtype<V>::value, "full(shape, v, storage_c<O>{}): v looks like a dtype<T> tag, not a "
+        "fill value — did you mean full(shape, v, dtype<T>{}, storage_c<O>{})?");
+    return full<T, O, Layout>(e, v);
+}
 /** @brief Value-tag element-type form: `full(extents, v, dtype<T>{})` — deduces `T`
  *  from the tag instead of an explicit `<T>` template argument (overrides the value's
  *  own type, same as explicit `full<T>(e, v)`). */
