@@ -6,9 +6,11 @@ namespace cs = cuda::std;
 using cs::extents;
 
 // atomic_add_/atomic_sub_ are the readable aliases of add_<true>/sub_<true>.
-// On the host the atomic write is a plain += (see fetch_add), so the alias must
-// produce exactly the same result as the underlying <true> form, element by
-// element — for a broadcasting tensor rhs, a scalar rhs, and a rank-0 at() cell.
+// On the host the atomic write is a REAL atomic (cuda::std::atomic_ref, #257),
+// so the alias must produce exactly the same result as the underlying <true>
+// form, element by element — for a broadcasting tensor rhs, a scalar rhs, and
+// a rank-0 at() cell. (The genuine multi-threaded race-freedom proof lives in
+// test_atomic_fetch_add.cpp; this file only checks single-threaded parity.)
 
 int main()
 {

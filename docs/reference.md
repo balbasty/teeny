@@ -309,7 +309,7 @@ scalar rhs applies to every element.
 |---|---|
 | `a.add_(x)` `a.sub_(x)` `a.mul_(x)` `a.div_(x)` | `x` = tensor (broadcasts) or scalar |
 | `y.add_(x, alpha)` `y.sub_(x, alpha)` | fused scaled accumulate (BLAS axpy): `y ± alpha*x`, `x` broadcasts; scaled copy `y = alpha*x` is `y.zero_().add_(x, alpha)` |
-| `a.atomic_add_(x)` `a.atomic_sub_(x)` | atomic accumulate on device (`x` = tensor or scalar); underlying form is `add_<Atomic>`/`sub_<Atomic>` |
+| `a.atomic_add_(x)` `a.atomic_sub_(x)` | atomic accumulate, host and device (`x` = tensor or scalar); underlying form is `add_<Atomic>`/`sub_<Atomic>` |
 | `a += x` `a -= x` `a *= x` `a /= x` | compound-assign sugar |
 | `++a` `--a` | prefix, in place |
 | `a++` | postfix → pre-value **stack copy** (static shape only) |
@@ -318,7 +318,7 @@ scalar rhs applies to every element.
 | `a & b` `a \| b` `a ^ b` `~a` `a &= b` … | bitwise (**integer** element types only) |
 | `a.fill_(v)` `a.zero_()` `a.copy_(b)` `a.iota_(start,step)` | assignment / init (`b` broadcasts) |
 | `a.map_(f)` `a.zip_with_(g, b)` | user functor (a device-safe struct, not a lambda) |
-| `a.at(i...).atomic_add_(v)` | scatter-accumulate `a(i...) += v` (atomic on device) |
+| `a.at(i...).atomic_add_(v)` | scatter-accumulate `a(i...) += v` (atomic, host and device) |
 
 ### Out-of-place (→ new tensor; static shape → stack, else heap)
 

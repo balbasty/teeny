@@ -5,6 +5,7 @@
 #include <cuda/std/utility>
 #include <cuda/std/limits>
 #include <cuda/std/type_traits>
+#include <cuda/std/atomic>
 #include <teeny/defines.h>
 #include <teeny/alias.h>
 #include <teeny/kwargs.h>
@@ -183,26 +184,33 @@ struct _geom_view {
 };
 
 /**
- * @brief Accumulate `v` into `*p`, atomic **on the device only**.
+ * @brief Accumulate `v` into `*p`, atomic on both host and device (#257).
  *
  * INTERNAL primitive behind the atomic accumulate ops — prefer
  * `a.atomic_add_(x)` / `t.at(i...).atomic_add_(v)` in user code.
  *
- * The scatter/"push" write: on the device many threads accumulate into
- * overlapping outputs, which a plain `+=` would race. Device -> `atomicAdd`
- * (`double` needs sm_60+, `__half` sm_70+; not all integer widths have an
- * overload — that surfaces as an nvcc error at instantiation).
+ * The scatter/"push" write: many threads may accumulate into overlapping
+ * outputs, which a plain `+=` would race. Device -> `atomicAdd` (`double`
+ * needs sm_60+, `__half` sm_70+; not all integer widths have an overload —
+ * that surfaces as an nvcc error at instantiation). Host, arithmetic `T`
+ * (every case teeny's own math actually stores) -> `cuda::std::atomic_ref<T>`
+ * (libcu++'s C++17-usable backport of `std::atomic_ref`) so a push kernel
+ * parallelised with `std::thread`/OpenMP over overlapping outputs is genuinely
+ * race-free, matching the device semantics instead of merely documenting the
+ * caller must work around it.
  *
- * WARNING: on the **host** this is a plain `*p += v` — NOT atomic. A push kernel
- * parallelised with std::thread over overlapping outputs races; guard those
- * writes yourself (per-thread partials, a mutex, or std::atomic_ref).
+ * Non-arithmetic `T` (a portable software `half`/`bfloat16` struct, i.e. NOT
+ * compiled under `__CUDACC__`) has no hardware atomic representation to route
+ * through `atomic_ref`; it keeps the old plain `*p += v` (still not
+ * thread-safe there — same as before this fix, not a regression).
  */
 template <class T>
 _TNY_API void fetch_add(T * p, T v) noexcept {
 #ifdef __CUDA_ARCH__
     atomicAdd(p, v);
 #else
-    *p += v;
+    if constexpr (cs::is_arithmetic<T>::value) cs::atomic_ref<T>(*p).fetch_add(v);
+    else *p += v;
 #endif
 }
 

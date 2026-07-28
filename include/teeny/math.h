@@ -352,7 +352,17 @@ _TNY_API void scal_(C & c, typename C::element_type s, Op op, cs::index_sequence
         for (int d = static_cast<int>(sizeof...(D)) - 1; d >= 0; --d) {
             I k = rem % e[d]; rem /= e[d]; oc += k * sc[d];
         }
-        W{}(&c.data()[oc], op(static_cast<Cv>(c.data()[oc]), sv));
+        // w_set's op (add/sub/mul/div/...) is a genuine read-modify-write, so it
+        // needs the current value. An atomic writer (w_add) is only ever paired
+        // with rhs/nrhs (#257 doc: "the op commits a DELTA... rather than a
+        // read-modify-write"), which ignore their first argument outright — so
+        // skip reading c.data()[oc] there. Reading it anyway would be an ordinary
+        // (non-atomic) load racing the concurrent atomic_ref RMW on the same
+        // object, i.e. a real data race even though the discarded value is unused.
+        if constexpr (cs::is_same<W, w_set>::value)
+            W{}(&c.data()[oc], op(static_cast<Cv>(c.data()[oc]), sv));
+        else
+            W{}(&c.data()[oc], op(Cv{}, sv));
     }
 }
 template <class W = w_set, class C, class Op>
