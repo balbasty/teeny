@@ -96,6 +96,7 @@ stack (host+device), dynamic shape → heap (host only):
 | `arange<T,N>()` / `arange<T>(Int<N>())` | `local<T, shape<N>>` | static 1-D `[0,N)` |
 | `zeros<T, storage::S>(shape)` (also `ones`/`full`/`arange`) | owner in space `S` | host-accessible backend (`stack`/`heap`/`pinned`/`mapped`); `storage::gpu` `static_assert`s → `to<storage::gpu>(zeros<T>(shape))`. Value-tag: `zeros<T>(shape, storage_c<storage::S>{})` |
 | `empty(shape, dtype<T>{})` (also `zeros`/`ones`/`full`/`arange`) | same as `<T>` | value-tag element-type form — deduces `T` from the tag instead of an explicit `<T>` template argument, so a type-dependent receiver needs no `.template`. A backend override stays a *leading* explicit template arg since `T` is now deduced: `empty<storage::gpu>(shape, dtype<T>{})` |
+| `empty(shape, dtype<T>{}, storage_c<S>{})` / `empty(shape, storage_c<S>{}, dtype<T>{})` (also `zeros`/`ones`/`full`/`arange`) | same as `<T,S>` | **both** value tags at once, either order — no explicit template argument needed at all |
 
 ---
 

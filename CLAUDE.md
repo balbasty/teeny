@@ -283,8 +283,11 @@ auto z = zeros<T>(shape); ones<T>(sh); full(sh,v); arange<T>(n);  // creation. z
                       //   (stack/heap/pinned/mapped); a gpu fill static_asserts ->
                       //   to<storage::gpu>(zeros<T>(sh)).
 zeros(sh, dtype<T>{}); full(sh,v,dtype<T>{}); arange(n, dtype<T>{});  // value-tag T (deduced,
-                      //   no .template); backend stays a LEADING explicit template arg since T is
-                      //   now deduced — zeros<storage::pinned>(sh, dtype<T>{}). Same for empty().
+                      //   no .template); a LEADING explicit template arg still names the backend
+                      //   — zeros<storage::pinned>(sh, dtype<T>{}). Same for empty().
+zeros(sh, dtype<T>{}, storage_c<storage::pinned>{});  // ...or compose BOTH value tags, either
+                      //   order (zeros(sh, storage_c<...>{}, dtype<T>{}) too) — no explicit
+                      //   template argument at all. Same for empty/ones/full/arange.
 
 // --- math (out-of-place -> NEW tensor; static shape -> stack, else heap/host) ---
 // result type = promote(A,B): C++ rules, but among floats the LOWER width wins

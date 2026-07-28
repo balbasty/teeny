@@ -23,8 +23,7 @@ int main() {
     static_assert(cs::is_same<decltype(z1)::element_type, float>::value, "");
     if (z1(0,0) != 0.0f || z1(2,2) != 0.0f)  return 2;
 
-    // dtype<T> composes with an explicit leading O template arg (not storage_c —
-    // that value tag already carries O; dtype<T> lets O stay a template arg instead)
+    // dtype<T> composes with an explicit leading O template arg
     auto o1 = ones<storage::heap>(shape<-1,3>{}, dtype<double>{});
     static_assert(decltype(o1)::ownership == storage::heap, "");
     auto o3 = ones(shape<3>{}, dtype<int>{});
@@ -87,6 +86,33 @@ int main() {
     if (v.dot(v, dtype<double>{}) != 14.0)            return 25;
     if (v.sqnorm(dtype<double>{}) != 14.0)            return 26;
     if (!close(v.norm(dtype<double>{}), 3.7416573867739413)) return 27;
+
+    // ---- composed value-tag forms: dtype<T> + storage_c<O> together, EITHER
+    //      order — no explicit template argument needed at all -----------------
+    auto ce1 = empty(shape<3,3>{}, dtype<double>{}, storage_c<storage::heap>{});
+    auto ce2 = empty(shape<3,3>{}, storage_c<storage::heap>{}, dtype<double>{});
+    static_assert(cs::is_same<decltype(ce1)::element_type, double>::value, "");
+    static_assert(decltype(ce1)::ownership == storage::heap, "");
+    static_assert(cs::is_same<decltype(ce2)::element_type, double>::value, "");
+    static_assert(decltype(ce2)::ownership == storage::heap, "");
+
+    auto cz1 = zeros(shape<3,3>{}, dtype<float>{}, storage_c<storage::heap>{});
+    auto cz2 = zeros(shape<3,3>{}, storage_c<storage::heap>{}, dtype<float>{});
+    static_assert(decltype(cz1)::ownership == storage::heap, "");
+    static_assert(decltype(cz2)::ownership == storage::heap, "");
+    if (cz1(0,0)!=0.0f || cz2(2,2)!=0.0f)             return 28;
+
+    auto co1 = ones(shape<3>{}, dtype<int>{}, storage_c<storage::heap>{});
+    auto co2 = ones(shape<3>{}, storage_c<storage::heap>{}, dtype<int>{});
+    if (co1(0)!=1 || co2(2)!=1)                        return 29;
+
+    auto cf1 = full(shape<4>{}, 7, dtype<double>{}, storage_c<storage::heap>{});
+    auto cf2 = full(shape<4>{}, 7, storage_c<storage::heap>{}, dtype<double>{});
+    if (cf1(0)!=7.0 || cf2(3)!=7.0)                     return 30;
+
+    auto ca1 = arange(5, dtype<double>{}, storage_c<storage::heap>{});
+    auto ca2 = arange(5, storage_c<storage::heap>{}, dtype<double>{});
+    if (ca1(4)!=4.0 || ca2(4)!=4.0)                     return 31;
 
     return 0;
 }

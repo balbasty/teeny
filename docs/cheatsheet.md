@@ -55,6 +55,8 @@ zeros<T, storage::pinned>(shape);  arange<T>(n, storage_c<storage::pinned>{});  
                     // host-accessible backend (stack/heap/pinned/mapped); a gpu fill
                     // static_asserts -> use to<storage::gpu>(zeros<T>(shape))
 zeros(shape, dtype<T>{});  full(shape, v, dtype<T>{});  arange(n, dtype<T>{});   // value-tag T (also ones)
+zeros(shape, dtype<T>{}, storage_c<S>{});  // ...or compose BOTH tags, either order (also
+                    //   storage_c<S>{}, dtype<T>{}) — no explicit template arg at all (also empty/ones/full)
 ```
 
 ---
