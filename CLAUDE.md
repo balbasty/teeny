@@ -222,9 +222,9 @@ t.flip<1>();          // reverse an axis (negative-stride view; needs signed ind
 t.unsqueeze<2>();     // insert size-1 axis at pos 2 (numpy newaxis) -> rank+1 view
 t.squeeze<3>();       // drop a size-1 axis -> rank-1 view
 t.unsqueeze<1,3>();   // insert SEVERAL at once: positions relative to the FINAL rank,
-                      //   distinct & ascending (folds smallest-first) -> rank+k view
+                      //   must be distinct, in ANY order (sorted internally, #275) -> rank+k view
 t.squeeze<0,2>();     // drop SEVERAL at once: positions relative to the SOURCE rank,
-                      //   distinct & ascending (folds largest-first) -> rank-k view
+                      //   must be distinct, in ANY order (sorted internally, #275) -> rank-k view
 t.squeeze(axis<0,2>{});  t.unsqueeze(axis<1,3>{});  t.permute(axis<2,0,1>{});  // axis<...>
                       //   value form (== the <...> template form) for these axis-LIST ops
 t.reshape<6,4>(); t.flatten();  // reshape / ravel -> VIEW when regroupable without a copy

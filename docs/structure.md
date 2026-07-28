@@ -72,12 +72,12 @@ dropping them all at once instead of chaining single-axis calls:
 The tricky part — axis positions shift as siblings get inserted or dropped — is
 handled for you: `unsqueeze`'s axes are positions in the **final** (post-insert)
 rank, and `squeeze`'s are positions in the **source** rank; both must be
-**distinct and ascending**. Internally each folds one axis at a time in the
-direction that keeps the remaining positions valid — `unsqueeze` smallest-first
-(each insert lands left of what's left to do), `squeeze` largest-first (each drop
-never shifts an earlier position). You don't need to think about the fold order —
-just list the axes ascending, in either the final (`unsqueeze`) or source
-(`squeeze`) numbering.
+**distinct**, but you can list them in **any order** — `t.squeeze<2,0>()` ==
+`t.squeeze<0,2>()`. Internally each folds one axis at a time in the direction
+that keeps the remaining positions valid — `unsqueeze` smallest-first (each
+insert lands left of what's left to do), `squeeze` largest-first (each drop
+never shifts an earlier position) — sorting the axes into that order at compile
+time first, so you don't need to think about it or list them ascending yourself.
 
 A single axis (or none, for `squeeze`) still means the one-axis form above —
 arity alone picks the multi-axis overload.

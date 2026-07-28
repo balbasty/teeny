@@ -181,6 +181,18 @@ template <long A0, class Tn> _TNY_API auto _squeeze_fold(Tn && t) noexcept
 { return t.template squeeze<A0>(); }
 template <long A0, long A1, long... Rest, class Tn> _TNY_API auto _squeeze_fold(Tn && t) noexcept
 { return _squeeze_fold<A1, Rest...>(t).template squeeze<A0>(); }
+
+// Re-expand a `_sorted_axes<...>` (indexing.h, #275) into the fold above, so
+// unsqueeze<Ax...>/squeeze<Ax...> can accept their axes in ANY order: the member
+// functions sort the (normalised, distinctness-checked) axes into `Sorted`, then
+// call here with `I = 0..N-1` to unpack `Sorted::value[I]...` back into the fold's
+// `long...` template pack, now guaranteed ascending regardless of caller order.
+template <class Sorted, cs::size_t... I, class Tn>
+_TNY_API auto _unsqueeze_sorted(Tn && t, cs::index_sequence<I...>) noexcept
+{ return _unsqueeze_fold<Sorted::value[I]...>(t); }
+template <class Sorted, cs::size_t... I, class Tn>
+_TNY_API auto _squeeze_sorted(Tn && t, cs::index_sequence<I...>) noexcept
+{ return _squeeze_fold<Sorted::value[I]...>(t); }
 } // namespace _detail
 
 /**
@@ -1166,28 +1178,29 @@ public:
     /** @brief Insert size-1 axes at SEVERAL positions at once (numpy
      *         `expand_dims(a, axis=(...))`) -> a rank-(N+k) view. The positions are
      *         relative to the **final** rank `N + k` (negatives count from the back
-     *         of it), and must be distinct & ascending — e.g. `(H,W).unsqueeze<1,3>()`
-     *         -> `(H,1,W,1)`, `(H,W).unsqueeze<0,-1>()` -> `(1,H,W,1)`. Arity picks
-     *         this overload; one axis still means `unsqueeze<Ax>()` above. */
+     *         of it), and must be distinct (in ANY order — sorted internally, #275)
+     *         — e.g. `(H,W).unsqueeze<1,3>()` -> `(H,1,W,1)`, `(H,W).unsqueeze<0,-1>()`
+     *         -> `(1,H,W,1)`. Arity picks this overload; one axis still means
+     *         `unsqueeze<Ax>()` above. */
     template <long Ax0, long Ax1, long... Rest>
     _TNY_API auto unsqueeze() noexcept {
         constexpr cs::size_t NR = rank() + 2 + sizeof...(Rest);   // final (post-insert) rank
         static_assert(_axis_in_range(Ax0, NR) && _axis_in_range(Ax1, NR) && (_axis_in_range(Rest, NR) && ...),
                       "unsqueeze: axis out of range");
-        static_assert(_axes_ascending((long)_norm_axis(Ax0, NR), (long)_norm_axis(Ax1, NR), (long)_norm_axis(Rest, NR)...),
-                      "unsqueeze: axes must be distinct and ascending");
-        return _detail::_unsqueeze_fold<(long)_norm_axis(Ax0, NR), (long)_norm_axis(Ax1, NR),
-                                        (long)_norm_axis(Rest, NR)...>(*this);
+        static_assert(_all_distinct<_norm_axis(Ax0, NR), _norm_axis(Ax1, NR), _norm_axis(Rest, NR)...>(),
+                      "unsqueeze: axes must be distinct");
+        using Sorted = _sorted_axes<(long)_norm_axis(Ax0, NR), (long)_norm_axis(Ax1, NR), (long)_norm_axis(Rest, NR)...>;
+        return _detail::_unsqueeze_sorted<Sorted>(*this, cs::make_index_sequence<2 + sizeof...(Rest)>{});
     }
     template <long Ax0, long Ax1, long... Rest>
     _TNY_API auto unsqueeze() const noexcept {
         constexpr cs::size_t NR = rank() + 2 + sizeof...(Rest);   // final (post-insert) rank
         static_assert(_axis_in_range(Ax0, NR) && _axis_in_range(Ax1, NR) && (_axis_in_range(Rest, NR) && ...),
                       "unsqueeze: axis out of range");
-        static_assert(_axes_ascending((long)_norm_axis(Ax0, NR), (long)_norm_axis(Ax1, NR), (long)_norm_axis(Rest, NR)...),
-                      "unsqueeze: axes must be distinct and ascending");
-        return _detail::_unsqueeze_fold<(long)_norm_axis(Ax0, NR), (long)_norm_axis(Ax1, NR),
-                                        (long)_norm_axis(Rest, NR)...>(*this);
+        static_assert(_all_distinct<_norm_axis(Ax0, NR), _norm_axis(Ax1, NR), _norm_axis(Rest, NR)...>(),
+                      "unsqueeze: axes must be distinct");
+        using Sorted = _sorted_axes<(long)_norm_axis(Ax0, NR), (long)_norm_axis(Ax1, NR), (long)_norm_axis(Rest, NR)...>;
+        return _detail::_unsqueeze_sorted<Sorted>(*this, cs::make_index_sequence<2 + sizeof...(Rest)>{});
     }
 
 private:
@@ -1232,32 +1245,33 @@ public:
 
     /** @brief Drop SEVERAL size-1 axes at once (numpy `squeeze(axis=(...))`) -> a
      *         rank-(N-k) view. The positions are relative to the **source** rank
-     *         (negatives count from the back) and must be distinct & ascending; every
-     *         named axis must have extent 1 (`static_assert` where the extent is
-     *         static, `_TNY_CHECK` where it is dynamic). e.g. a `(1,H,1,W)` view
-     *         `.squeeze<0,2>()` -> `(H,W)`. Arity picks this overload; one axis (or
-     *         none) still means `squeeze<Ax>()` above. */
+     *         (negatives count from the back) and must be distinct (in ANY order —
+     *         sorted internally, #275); every named axis must have extent 1
+     *         (`static_assert` where the extent is static, `_TNY_CHECK` where it is
+     *         dynamic). e.g. a `(1,H,1,W)` view `.squeeze<0,2>()` -> `(H,W)`. Arity
+     *         picks this overload; one axis (or none) still means `squeeze<Ax>()`
+     *         above. */
     template <long Ax0, long Ax1, long... Rest>
     _TNY_API auto squeeze() noexcept {
         static_assert(_axis_in_range(Ax0, rank()) && _axis_in_range(Ax1, rank()) && (_axis_in_range(Rest, rank()) && ...),
                       "squeeze: axis out of range");
-        static_assert(_axes_ascending((long)_norm_axis(Ax0, rank()), (long)_norm_axis(Ax1, rank()), (long)_norm_axis(Rest, rank())...),
-                      "squeeze: axes must be distinct and ascending");
+        static_assert(_all_distinct<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>(),
+                      "squeeze: axes must be distinct");
         static_assert(_all_extent1<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>(),
                       "squeeze: every named axis must have extent 1");
-        return _detail::_squeeze_fold<(long)_norm_axis(Ax0, rank()), (long)_norm_axis(Ax1, rank()),
-                                      (long)_norm_axis(Rest, rank())...>(*this);   // each step re-checks a dynamic extent
+        using Sorted = _sorted_axes<(long)_norm_axis(Ax0, rank()), (long)_norm_axis(Ax1, rank()), (long)_norm_axis(Rest, rank())...>;
+        return _detail::_squeeze_sorted<Sorted>(*this, cs::make_index_sequence<2 + sizeof...(Rest)>{});   // each step re-checks a dynamic extent
     }
     template <long Ax0, long Ax1, long... Rest>
     _TNY_API auto squeeze() const noexcept {
         static_assert(_axis_in_range(Ax0, rank()) && _axis_in_range(Ax1, rank()) && (_axis_in_range(Rest, rank()) && ...),
                       "squeeze: axis out of range");
-        static_assert(_axes_ascending((long)_norm_axis(Ax0, rank()), (long)_norm_axis(Ax1, rank()), (long)_norm_axis(Rest, rank())...),
-                      "squeeze: axes must be distinct and ascending");
+        static_assert(_all_distinct<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>(),
+                      "squeeze: axes must be distinct");
         static_assert(_all_extent1<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>(),
                       "squeeze: every named axis must have extent 1");
-        return _detail::_squeeze_fold<(long)_norm_axis(Ax0, rank()), (long)_norm_axis(Ax1, rank()),
-                                      (long)_norm_axis(Rest, rank())...>(*this);   // each step re-checks a dynamic extent
+        using Sorted = _sorted_axes<(long)_norm_axis(Ax0, rank()), (long)_norm_axis(Ax1, rank()), (long)_norm_axis(Rest, rank())...>;
+        return _detail::_squeeze_sorted<Sorted>(*this, cs::make_index_sequence<2 + sizeof...(Rest)>{});   // each step re-checks a dynamic extent
     }
 
     /* --- value-form axis args: x.squeeze(Int<1>()) == x.squeeze<1>() ---- *

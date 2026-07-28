@@ -70,6 +70,7 @@ TESTS = \
 	$(BUILDDIR)/test_subperm \
 	$(BUILDDIR)/test_takealong \
 	$(BUILDDIR)/test_alias \
+	$(BUILDDIR)/test_axis_sort \
 	$(BUILDDIR)/test_static_extent \
 	$(BUILDDIR)/test_wrap \
 	$(BUILDDIR)/test_slice \
