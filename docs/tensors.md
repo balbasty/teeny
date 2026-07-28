@@ -25,7 +25,7 @@ Everything works on a view:
 ```cpp
 m(0,-1);                             // element access (negative index counts from the back)
 m(all, slice(0,2));                  // sub-view (still no copy)
-m.permute(Int<1>(), Int<0>());       // transpose (a view)
+m.permute(axis<1,0>{});              // transpose (a view)
 m.add_(other);                       // in-place math
 auto s = m.sum();                    // reductions (also free functions: sum(m))
 for (auto row : peel(m, axis<0>{})) work(row);  // iterate a subset of axes
