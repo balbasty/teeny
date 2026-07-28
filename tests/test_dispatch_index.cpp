@@ -31,8 +31,11 @@ int main() {
     if (w != 2) return 3;
 
     // (4) dispatch_rank<narrow_index>: the fixed cell is int32 when it fits.
-    long sh[2] = {2,3}, st[2] = {3,1};
-    auto at = as_anyrank(buf, sh, st, 2);                  // carrier offset_t = long (int64)
+    // cs::int64_t (not `long`, which is only 32-bit on Windows/LLP64): the carrier's
+    // offset_t is deduced from this array's element type, and check (6) below needs a
+    // real 64-bit carrier to construct its >2^31 stride without truncating.
+    cs::int64_t sh[2] = {2,3}, st[2] = {3,1};
+    auto at = as_anyrank(buf, sh, st, 2);                  // carrier offset_t = int64
     w = 0; dispatch_rank<narrow_index>(at, Rec{&w});
     if (w != 4) return 4;
 
@@ -41,7 +44,7 @@ int main() {
     if (w != 8) return 5;
 
     // (6) dispatch_rank<narrow_index> on a >2^31 carrier falls back to the wide arm.
-    long shb[1] = {2}, stb[1] = {3000000000LL};
+    cs::int64_t shb[1] = {2}, stb[1] = {3000000000LL};
     auto atb = as_anyrank(buf, shb, stb, 1);
     w = 0; dispatch_rank<narrow_index>(atb, Rec{&w});
     if (w != 8) return 6;
