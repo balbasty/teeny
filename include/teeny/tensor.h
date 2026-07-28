@@ -1653,39 +1653,52 @@ _TNY_API auto make_view(T * p, Shape e, storage_c<Space> tag = {}) { return wrap
  *  `empty<T>(extents, storage_c<storage::gpu>{})`. `gpu`/`pinned`/`mapped` require
  *  `<teeny/cuda.h>` (their storage lives there). `T` defaults to `float`. Split
  *  by the resolved ownership so the `stack` case stays `_TNY_API` (host+device)
- *  while the allocating cases are `_TNY_HOST`. */
-template <class T = float, storage O = storage_deduce, class Layout = ccontiguous, class Shape,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API auto empty(Shape = Shape{}) { return tensor<T, Shape, Layout, storage::stack>(_uninit); }
-template <class T = float, storage O = storage_deduce, class Layout = ccontiguous, class Shape,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
-_TNY_HOST auto empty(Shape e) {
-    constexpr storage R = storage_resolve(O, Shape::rank_dynamic() == 0);
-    static_assert(!storage_is_view(R), "empty(): a non-owning view kind (view/gpu_view/pinned_view/mapped_view) has no storage to allocate — use wrap()/make_view() for a view.");
-    return tensor<T, Shape, Layout, R>(e, _uninit);
+ *  while the allocating cases are `_TNY_HOST`.
+ *
+ *  Element type, backend, and layout may each be given as a leading explicit
+ *  template argument OR as a trailing value tag (`dtype<T>{}`/`storage_c<O>{}`/
+ *  a layout tag), in ANY order and ANY subset: `empty<double>(e)`,
+ *  `empty(e, dtype<double>{})`, `empty(e, storage_c<storage::gpu>{}, dtype<double>{})`
+ *  all work. `_kw::accepts`/`dtype_arg_t`/`storage_arg`/`layout_arg_t` (`kwargs.h`
+ *  and each tag's own header) resolve the trailing bag; an unrecognised or
+ *  duplicated keyword fails on one clean `static_assert` instead of an
+ *  overload-resolution wall (#279/#280). */
+template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+_TNY_API auto empty(Shape = Shape{}, Tags... /*tags*/) {
+    using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
+    static_assert(ok::known<Tags...>(), "empty(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
+    static_assert(ok::unique<Tags...>(), "empty(): the same keyword was given twice");
+    using ET = dtype_arg_t<T, float, Tags...>;
+    using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
+    return tensor<ET, Shape, LO, storage::stack>(_uninit);
 }
-/** @brief Value-tag backend form: `empty<T>(extents, storage_c<storage::gpu>{})`. Always
- *  `_TNY_HOST` (a host-side convenience); for a device-usable static-shape build
- *  spell the backend as a template arg — `empty<T, storage::stack>(extents)`. */
-template <class T = float, class Layout = ccontiguous, class Shape, storage O>
-_TNY_HOST auto empty(Shape e, storage_c<O>) { return empty<T, O, Layout>(e); }
-/** @brief Value-tag element-type form: `empty(extents, dtype<T>{})` — deduces `T`
- *  from the tag instead of an explicit `<T>` template argument (`O`/`Layout` stay
- *  leading explicit template args, e.g. `empty<storage::gpu>(e, dtype<double>{})`). */
+template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+_TNY_HOST auto empty(Shape e, Tags... /*tags*/) {
+    using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
+    static_assert(ok::known<Tags...>(), "empty(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
+    static_assert(ok::unique<Tags...>(), "empty(): the same keyword was given twice");
+    using ET = dtype_arg_t<T, float, Tags...>;
+    constexpr storage R = storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+    static_assert(!storage_is_view(R), "empty(): a non-owning view kind (view/gpu_view/pinned_view/mapped_view) has no storage to allocate — use wrap()/make_view() for a view.");
+    using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
+    return tensor<ET, Shape, LO, R>(e, _uninit);
+}
+/** @brief Legacy forwarder for the one spelling the generic entry point above
+ *  cannot cover: a LEADING explicit template argument that means the BACKEND
+ *  rather than the element type, because a `dtype<T>{}` tag makes `T` deducible
+ *  from the call instead — `empty<storage::pinned>(e, dtype<double>{})`. A
+ *  non-variadic overload is more specialised than a variadic one in partial
+ *  ordering, so this wins whenever it applies (verified on both compilers with
+ *  a standalone probe before this landed); every other spelling falls through
+ *  to the generic entry point above. */
 template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
 _TNY_API auto empty(Shape e, dtype<T>) { return empty<T, O, Layout>(e); }
 template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
 _TNY_HOST auto empty(Shape e, dtype<T>) { return empty<T, O, Layout>(e); }
-/** @brief Composed value-tag form: `empty(extents, dtype<T>{}, storage_c<O>{})` (or the
- *  reverse order) — both `T` and the backend by value, no explicit template argument at
- *  all. Always `_TNY_HOST` (a host-side convenience, matching the `storage_c`-only form
- *  above); for a device-usable static-shape build spell the backend as a template arg. */
-template <class Layout = ccontiguous, class Shape, class T, storage O>
-_TNY_HOST auto empty(Shape e, dtype<T>, storage_c<O>) { return empty<T, O, Layout>(e); }
-template <class Layout = ccontiguous, class Shape, class T, storage O>
-_TNY_HOST auto empty(Shape e, storage_c<O>, dtype<T>) { return empty<T, O, Layout>(e); }
 
 /** @brief `make_local<T>(extents)` — a stack-owned tensor (static shape).
  *         `T` defaults to `float` (numpy's default float dtype). Thin spelling of

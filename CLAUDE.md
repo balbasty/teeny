@@ -166,7 +166,11 @@ factories that deduce the extents type: `make_view(ptr,e)`, `make_local<T>(e)`,
 of one **`empty<T[, storage::Space]>(e)`** factory: ownership is deduced from the
 shape (static→stack, dynamic→heap) unless a backend is named as a template arg
 (`empty<T, storage::gpu>(e)`) or a value-tag (`empty<T>(e, storage_c<storage::gpu>{})`);
-gpu/pinned/mapped need `<teeny/cuda.h>`. `empty` is **UNINITIALISED** (numpy
+gpu/pinned/mapped need `<teeny/cuda.h>`. Since #280, `empty` also composes a
+`dtype<T>{}`/`storage_c<O>{}`/layout tag in ANY order and ANY subset (the kwargs
+mechanism, #277/#278/#279): `empty(e, fcontiguous{}, dtype<double>{})`,
+`empty(e, storage_c<storage::heap>{}, fcontiguous{}, dtype<double>{})`, etc.
+`empty` is **UNINITIALISED** (numpy
 `np.empty` — fill it before reading), so a workspace a kernel fully overwrites pays
 no zero-init; `zeros`/`ones`/`full`/`arange` and a value-initialised `local<...>{}`
 (or `owned(e)`) stay zeroed/filled — zeroing is the opt-in, not the default.

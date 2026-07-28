@@ -48,6 +48,26 @@ int main()
     auto cf = empty<float, storage::stack, fcontiguous>(shape<2,3>{});
     static_assert(cs::is_same<decltype(cf)::layout_type, fcontiguous>::value, "layout arg honoured");
 
+    // ---- #279/#280: empty() on the generic keyword mechanism -- a bare layout
+    //      tag, and any composition of dtype/storage/layout tags in any order,
+    //      now work directly (previously only the template-arg form did) ------
+    auto lf = empty(shape<2,3>{}, fcontiguous{});
+    static_assert(cs::is_same<decltype(lf)::layout_type, fcontiguous>::value, "bare layout tag");
+    static_assert(cs::is_same<decltype(lf)::element_type, float>::value, "layout tag alone -> T still defaults");
+
+    auto ldf = empty(shape<2,3>{}, fcontiguous{}, dtype<double>{});
+    static_assert(cs::is_same<decltype(ldf)::layout_type, fcontiguous>::value, "layout+dtype: layout honoured");
+    static_assert(cs::is_same<decltype(ldf)::element_type, double>::value, "layout+dtype: dtype honoured");
+
+    auto dlf = empty(shape<2,3>{}, dtype<double>{}, fcontiguous{});
+    static_assert(cs::is_same<decltype(dlf)::layout_type, decltype(ldf)::layout_type>::value, "order doesn't matter");
+    static_assert(cs::is_same<decltype(dlf)::element_type, decltype(ldf)::element_type>::value, "order doesn't matter");
+
+    auto all3 = empty(shape<2,3>{}, storage_c<storage::heap>{}, fcontiguous{}, dtype<double>{});
+    static_assert(decltype(all3)::ownership == storage::heap,          "3-way: storage honoured");
+    static_assert(cs::is_same<decltype(all3)::layout_type, fcontiguous>::value, "3-way: layout honoured");
+    static_assert(cs::is_same<decltype(all3)::element_type, double>::value,     "3-way: dtype honoured");
+
     // ---- fill factories carry the same backend selector (host-accessible) ----
     auto zs = zeros<float>(shape<2,2>{});                      // deduced: static -> stack
     static_assert(decltype(zs)::ownership == storage::stack, "zeros deduces stack for a static shape");
