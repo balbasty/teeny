@@ -1046,17 +1046,11 @@ _TNY_API auto min(const tensor<T,E,L,O> & a) {
         _md::reduce_<R>(a, _reduce_seed_highest<R>(), _md::r_min{}, cs::make_index_sequence<tensor<T,E,L,O>::rank()>{}));
 }
 
-/** @brief Value-tag accumulator form: `sum(a, dtype<Acc>{})` == `sum<Acc>(a)` —
- *  deduces `Acc` from the tag instead of an explicit `<Acc>` template argument
- *  (numpy's `dtype=` keyword; see `dtype<...>` in `alias.h`). Likewise for
- *  `prod`/`max`/`min`/`mean`/`dot`/`sqnorm`/`norm` below — each the bare, all-axes
- *  form only; composing `dtype<...>` with an axis list or `into(dest)` is not yet
- *  supported, use the explicit `<Acc>` (or `<Acc, Axes...>`) template form for those. */
-#define _TNY_RED_DTYPE(NAME) \
-template <class T, class E, class L, storage O, class Acc> \
-_TNY_API auto NAME(const tensor<T,E,L,O> & a, dtype<Acc>) { return NAME<Acc>(a); }
-_TNY_RED_DTYPE(sum) _TNY_RED_DTYPE(prod) _TNY_RED_DTYPE(max) _TNY_RED_DTYPE(min)
-#undef _TNY_RED_DTYPE
+// The value-tag accumulator form (`sum(a, dtype<Acc>{})` == `sum<Acc>(a)`), its
+// composition with an axis list (`sum(a, axis<0>{}, dtype<Acc>{})`), `keepdims`,
+// and `into(dest)` — in any subset, any order — are all handled generically by
+// `_TNY_RED_TAGGED` further below (right after the axis-reduction engines it
+// dispatches into), for `sum`/`prod`/`max`/`min`/`sqnorm`/`mean`/`norm`.
 
 /* --- boolean reductions (members; chain after a comparison) -------- */
 template <class T,class E,class L,storage O> _TNY_API bool tensor<T,E,L,O>::all() const
@@ -1080,187 +1074,202 @@ template <class T,class E,class L,storage O> _TNY_API bool tensor<T,E,L,O>::any(
 // dynamic (heap, host-only) to match `axreduce`; the result is accumulated in `R`
 // then cast to the public element type by `reduce_to`.
 // keepdim view fold: insert a size-1 axis at each (ascending, already-normalised)
-// position — used by both the `keepdims` reduction overloads below and axis
-// `normalize`. `_axes_ascending(...)` lives in indexing.h (next to `_norm_axis`) —
-// tensor.h's multi-axis `unsqueeze<Ax...>`/`squeeze<Ax...>` folds need it too, and
-// tensor.h cannot include math.h.
+// position — used by both the generic "finish" step below and axis `normalize`.
+// `_axes_ascending(...)` lives in indexing.h (next to `_norm_axis`) — tensor.h's
+// multi-axis `unsqueeze<Ax...>`/`squeeze<Ax...>` folds need it too, and tensor.h
+// cannot include math.h.
 template <class Tn> _TNY_API auto _keepdims(const Tn & t) { return t; }
 template <long A0, long... Rest, class Tn> _TNY_API auto _keepdims(const Tn & t) { return _keepdims<Rest...>(t.template unsqueeze<A0>()); }
 
-#define _TNY_MD_AXRED(NAME, INIT, OP)                                                              \
-template <long... Axes, class T,class E,class L,storage O, class R = reduce_type_t<T>,                 \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<T>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); } \
-template <long... Axes, class T,class E,class L,storage O, class R = reduce_type_t<T>,                 \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<T>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class R = Acc,                   \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class R = Acc,                   \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto NAME(const tensor<T,E,L,O> & a) { return _md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})); } \
-/* value forms: NAME(a, axis<Axes...>{}) == NAME<Axes...>(a) — numpy's `axis=` spelling  \
-   (no `.template` on a dependent receiver). Forward to the template axis form, keeping   \
-   the static(_TNY_API)/dynamic(_TNY_HOST) split so a device path never calls host code. */ \
-template <long... Axes, class T,class E,class L,storage O,                                              \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>) { return NAME<Axes...>(a); }              \
-template <long... Axes, class T,class E,class L,storage O,                                              \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>) { return NAME<Axes...>(a); }              \
-template <class Acc, long... Axes, class T,class E,class L,storage O,                                   \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>) { return NAME<Acc, Axes...>(a); }         \
-template <class Acc, long... Axes, class T,class E,class L,storage O,                                   \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>) { return NAME<Acc, Axes...>(a); }
-_TNY_MD_AXRED(sum,    R(0),                        r_add)
-_TNY_MD_AXRED(prod,   R(1),                        r_mul)
-_TNY_MD_AXRED(max,    _reduce_seed_lowest<R>(),  r_max)
-_TNY_MD_AXRED(min,    _reduce_seed_highest<R>(), r_min)
-_TNY_MD_AXRED(sqnorm, R(0),                        r_addsq)   // Σaᵢ² over the named axes (result type = T, like sum)
-#undef _TNY_MD_AXRED
+namespace _md {
+/** @brief Shared "finish" step for every axis reduction's generic trailing
+ *  keyword bag (`_TNY_RED_TAGGED` below): given the already-computed reduced
+ *  tensor `r`, apply `keepdims_t` if present in `Tags...` — re-`unsqueeze` the
+ *  named axes (normalised against `SrcRank`, the SOURCE tensor's rank) back in
+ *  and materialise into a freshly-owned tensor, exactly as the old hand-written
+ *  `_TNY_RED_KEEPDIMS` macro did (the view from `_keepdims`'s recursive
+ *  `unsqueeze` fold bakes in a `const` element type via its CONST overload, so
+ *  `.clone()` can't be reused — the target is built explicitly with `r`'s own
+ *  element type) — then write into `into_t<D>` if present, else return the
+ *  (possibly keepdims-wrapped) tensor by value. Two overloads matching the SAME
+ *  static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split as `axreduce` itself. */
+template <long SrcRank, long... Axes, class R, class... Tags>
+_TNY_API decltype(auto) _red_finish_static(R && r, Tags... tags) {
+    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tags...);
+    if constexpr (_kw::has<_is_keepdims_tag, Tags...>()) {
+        static_assert(_axes_ascending(_norm_axis(Axes, SrcRank)...), "keepdims: axes must be distinct and ascending");
+        auto kv = _keepdims<_norm_axis(Axes, SrcRank)...>(r);
+        tensor<typename cs::remove_reference_t<R>::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::stack> c{};
+        c.copy_(kv);
+        if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) { out.dest.copy_(c); return out.dest; }
+        else return c;
+    } else {
+        if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) { out.dest.copy_(r); return out.dest; }
+        else return static_cast<R>(static_cast<R&&>(r));  // force a prvalue: decltype(auto) would otherwise deduce R&& from the xvalue cast and dangle once r's temporary is destroyed
+    }
+}
+template <long SrcRank, long... Axes, class R, class... Tags>
+_TNY_HOST decltype(auto) _red_finish_dynamic(R && r, Tags... tags) {
+    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tags...);
+    if constexpr (_kw::has<_is_keepdims_tag, Tags...>()) {
+        static_assert(_axes_ascending(_norm_axis(Axes, SrcRank)...), "keepdims: axes must be distinct and ascending");
+        auto kv = _keepdims<_norm_axis(Axes, SrcRank)...>(r);
+        tensor<typename cs::remove_reference_t<R>::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::heap> c(kv.extents());
+        c.copy_(kv);
+        if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) { out.dest.copy_(c); return out.dest; }
+        else return c;
+    } else {
+        if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) { out.dest.copy_(r); return out.dest; }
+        else return static_cast<R>(static_cast<R&&>(r));  // force a prvalue: decltype(auto) would otherwise deduce R&& from the xvalue cast and dangle once r's temporary is destroyed
+    }
+}
+} // namespace _md
 
-/* --- keepdims: numpy `keepdims=True` — keep the reduced axes as size-1 instead of
- * removing them, so the result broadcasts back against the input. Reuses the
- * `_keepdims` fold already built for `normalize`'s axis form: compute the ordinary
- * (rank-reducing) axis reduction into a NAMED local `r` (so it outlives the view),
- * re-`unsqueeze` the named axes (normalized against the SOURCE rank, ascending)
- * back in, then copy that view into a freshly-owned tensor before returning (the
- * view must not escape the function). `_keepdims`'s recursive fold always goes
- * through `unsqueeze`'s CONST overload (each step rebinds a temporary to a
- * `const Tn&`), so its view type bakes in a `const` element type — `.clone()`
- * can't be reused here (it would try to write through `const T`), so the target
- * is built explicitly with `r`'s own (non-const) element type. `NAME<Axes...>(a,
- * keepdims)`, `NAME(a, axis<Axes...>{}, keepdims)`, and
- * both compose with a trailing `into(dest)` (dest then matches the kept-dims
- * shape). Shared by every axis reduction with this exact template shape
- * (sum/prod/max/min/sqnorm/mean); `norm` is handled separately (it layers sqrt +
- * a floating result type on top). */
-#define _TNY_RED_KEEPDIMS(NAME)                                                                       \
-template <long... Axes, class T,class E,class L,storage O,                                            \
+// Axis-reduction "core": `NAME<Axes...>(a, Tags...)` accumulates in the reduce
+// type (double for small floats) and returns the tensor's element type `T`;
+// `NAME<Acc, Axes...>(a, Tags...)` makes `Acc` both the accumulator AND the
+// result element type. The two forms are told apart by template-arg KIND: a
+// leading non-type (`0`) is an axis, a leading type (`double`) is the
+// accumulator. Each splits static (stack, host+device) / dynamic (heap,
+// host-only) to match `axreduce`. `Tags...` is `keepdims_t`/`into_t<D>` in any
+// subset/order (`_red_finish_static`/`_dynamic` above apply them); the value-tag
+// forms (`NAME(a, axis<Axes...>{})`, `NAME(a, dtype<Acc>{})`, and their
+// composition with `keepdims`/`into`) are handled generically by
+// `_TNY_RED_TAGGED` further below, which dispatches into this core.
+#define _TNY_RED_AXIS_CORE(NAME, INIT, OP)                                                              \
+template <long... Axes, class T,class E,class L,storage O, class... Tags, class R = reduce_type_t<T>,   \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto NAME(const tensor<T,E,L,O> & a, keepdims_t) {                                           \
-    static_assert(_axes_ascending(_norm_axis(Axes, (long)E::rank())...), "keepdims: axes must be distinct and ascending"); \
-    auto r = NAME<Axes...>(a); auto kv = _keepdims<_norm_axis(Axes, (long)E::rank())...>(r);           \
-    tensor<typename decltype(r)::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::stack> c{}; \
-    c.copy_(kv); return c; }                                                                          \
-template <long... Axes, class T,class E,class L,storage O,                                            \
+_TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                \
+    return _md::_red_finish_static<(long)E::rank(), Axes...>(_md::reduce_to<T>(_md::axreduce<Axes...>(a, INIT, _md::OP{})), tags...); } \
+template <long... Axes, class T,class E,class L,storage O, class... Tags, class R = reduce_type_t<T>,   \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto NAME(const tensor<T,E,L,O> & a, keepdims_t) {                                           \
-    static_assert(_axes_ascending(_norm_axis(Axes, (long)E::rank())...), "keepdims: axes must be distinct and ascending"); \
-    auto r = NAME<Axes...>(a); auto kv = _keepdims<_norm_axis(Axes, (long)E::rank())...>(r);           \
-    tensor<typename decltype(r)::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::heap> c(kv.extents()); \
-    c.copy_(kv); return c; }                                                                          \
-template <class Acc, long... Axes, class T,class E,class L,storage O,                                 \
+_TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                \
+    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(_md::reduce_to<T>(_md::axreduce<Axes...>(a, INIT, _md::OP{})), tags...); } \
+template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags, class R = Acc,     \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto NAME(const tensor<T,E,L,O> & a, keepdims_t) {                                           \
-    static_assert(_axes_ascending(_norm_axis(Axes, (long)E::rank())...), "keepdims: axes must be distinct and ascending"); \
-    auto r = NAME<Acc, Axes...>(a); auto kv = _keepdims<_norm_axis(Axes, (long)E::rank())...>(r);      \
-    tensor<typename decltype(r)::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::stack> c{}; \
-    c.copy_(kv); return c; }                                                                          \
-template <class Acc, long... Axes, class T,class E,class L,storage O,                                 \
+_TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                \
+    return _md::_red_finish_static<(long)E::rank(), Axes...>(_md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})), tags...); } \
+template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags, class R = Acc,     \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto NAME(const tensor<T,E,L,O> & a, keepdims_t) {                                           \
-    static_assert(_axes_ascending(_norm_axis(Axes, (long)E::rank())...), "keepdims: axes must be distinct and ascending"); \
-    auto r = NAME<Acc, Axes...>(a); auto kv = _keepdims<_norm_axis(Axes, (long)E::rank())...>(r);      \
-    tensor<typename decltype(r)::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::heap> c(kv.extents()); \
-    c.copy_(kv); return c; }                                                                          \
-/* value forms: NAME(a, axis<Axes...>{}, keepdims) == NAME<Axes...>(a, keepdims) */                    \
-template <long... Axes, class T,class E,class L,storage O,                                            \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t) { return NAME<Axes...>(a, keepdims); } \
-template <long... Axes, class T,class E,class L,storage O,                                            \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t) { return NAME<Axes...>(a, keepdims); } \
-template <class Acc, long... Axes, class T,class E,class L,storage O,                                 \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t) { return NAME<Acc, Axes...>(a, keepdims); } \
-template <class Acc, long... Axes, class T,class E,class L,storage O,                                 \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto NAME(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t) { return NAME<Acc, Axes...>(a, keepdims); } \
-/* compose with a trailing into(dest): NAME<Axes...>(a, keepdims, into(d)) */                          \
-template <long... Axes, class T,class E,class L,storage O, class D,                                   \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto & NAME(const tensor<T,E,L,O> & a, keepdims_t, into_t<D> out) { out.dest.copy_(NAME<Axes...>(a, keepdims)); return out.dest; } \
-template <long... Axes, class T,class E,class L,storage O, class D,                                   \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto & NAME(const tensor<T,E,L,O> & a, keepdims_t, into_t<D> out) { out.dest.copy_(NAME<Axes...>(a, keepdims)); return out.dest; } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class D,                        \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto & NAME(const tensor<T,E,L,O> & a, keepdims_t, into_t<D> out) { out.dest.copy_(NAME<Acc, Axes...>(a, keepdims)); return out.dest; } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class D,                        \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto & NAME(const tensor<T,E,L,O> & a, keepdims_t, into_t<D> out) { out.dest.copy_(NAME<Acc, Axes...>(a, keepdims)); return out.dest; } \
-/* value form + into: NAME(a, axis<Axes...>{}, keepdims, into(d)) */                                   \
-template <long... Axes, class T,class E,class L,storage O, class D,                                   \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto & NAME(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t, into_t<D> out) { return NAME<Axes...>(a, keepdims, out); } \
-template <long... Axes, class T,class E,class L,storage O, class D,                                   \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto & NAME(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t, into_t<D> out) { return NAME<Axes...>(a, keepdims, out); } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class D,                        \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto & NAME(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t, into_t<D> out) { return NAME<Acc, Axes...>(a, keepdims, out); } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class D,                        \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto & NAME(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t, into_t<D> out) { return NAME<Acc, Axes...>(a, keepdims, out); }
-_TNY_RED_KEEPDIMS(sum)  _TNY_RED_KEEPDIMS(prod)  _TNY_RED_KEEPDIMS(max)  _TNY_RED_KEEPDIMS(min)  _TNY_RED_KEEPDIMS(sqnorm)
-// _TNY_RED_KEEPDIMS(mean) is invoked after mean's own axis-form definitions below
-// (same template shape, so the macro applies unchanged); #undef there.
+_TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                \
+    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(_md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})), tags...); }
+_TNY_RED_AXIS_CORE(sum,    R(0),                 r_add)
+_TNY_RED_AXIS_CORE(prod,   R(1),                 r_mul)
+_TNY_RED_AXIS_CORE(max,    _reduce_seed_lowest<R>(),  r_max)
+_TNY_RED_AXIS_CORE(min,    _reduce_seed_highest<R>(), r_min)
+_TNY_RED_AXIS_CORE(sqnorm, R(0),                 r_addsq)   // Σaᵢ² over the named axes (result type = T, like sum)
+#undef _TNY_RED_AXIS_CORE
+
+/** @brief Generic trailing keyword-bag entry point, shared by every reduction
+ *  with this axis shape (`sum`/`prod`/`max`/`min`/`sqnorm`/`mean`/`norm`; `dot`
+ *  has its own, being binary/axis-less): `NAME(a, dtype<Acc>{})`,
+ *  `NAME(a, axis<Axes...>{})`, `NAME(a, into(d))`, `NAME<Acc>(a, axis<Axes...>{},
+ *  keepdims, into(d))`, ... any SUBSET of `dtype`/`axis`/`keepdims`/`into`, in any
+ *  ORDER — replacing the old one-hand-written-overload-per-arrangement approach.
+ *  Requires at least one trailing tag (`Tag0`) so it never competes with the
+ *  plain `NAME(a)`/`NAME<Acc>(a)` bare overload, or with the explicit-`Axes...`
+ *  template overloads above (`_TNY_RED_AXIS_CORE`) — those stay told apart by
+ *  template-argument KIND exactly as before (`NAME<0>(a, ...)` binds the
+ *  `long... Axes` template; `NAME<double>(a, ...)`/`NAME(a, ...)` bind this one).
+ *  Dispatches to the explicit-`Axes...` core via a small per-NAME helper
+ *  (`_NAME_axed`) that pattern-matches the discovered `axis<Axes...>` TAG back
+ *  into a real non-type template-argument pack (the only way to turn a value tag
+ *  into `Axes...` for an explicit-template call) — `_md::_red_dyn` (tensor.h)
+ *  computes the same static/dynamic split from that same tag. */
+#define _TNY_RED_TAGGED(NAME)                                                                            \
+namespace _md {                                                                                          \
+template <class Acc, class AxisTag> struct _##NAME##_axed;                                               \
+template <class Acc, long A0, long... Rest> struct _##NAME##_axed<Acc, axis<A0, Rest...>> {              \
+    template <class T,class E,class L,storage O, class... Tags>                                          \
+    static decltype(auto) call(const tensor<T,E,L,O> & a, Tags... tags) {                                \
+        if constexpr (cs::is_void<Acc>::value) return NAME<A0,Rest...>(a, tags...);                      \
+        else return NAME<Acc,A0,Rest...>(a, tags...);                                                    \
+    }                                                                                                     \
+};                                                                                                        \
+}                                                                                                         \
+template <class Acc = void, class T,class E,class L,storage O, class Tag0, class... Tags,                \
+          class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                              \
+          cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value==0, int> = 0>                                  \
+_TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags) {                      \
+    static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template known<Tag0,Tags...>(), \
+                  #NAME ": unrecognized keyword argument");                                              \
+    static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template unique<Tag0,Tags...>(), \
+                  #NAME ": a keyword was given more than once");                                         \
+    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
+    if constexpr (AxisTag::rank == 0) {                                                                  \
+        auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                  \
+        if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {                                  \
+            out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(NAME<RAcc>(a))); \
+            return out.dest;                                                                             \
+        } else return NAME<RAcc>(a);                                                                     \
+    } else return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, tag0, tags...);                            \
+}                                                                                                          \
+template <class Acc = void, class T,class E,class L,storage O, class Tag0, class... Tags,                \
+          class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                              \
+          cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value!=0, int> = 0>                                  \
+_TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags) {                      \
+    static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template known<Tag0,Tags...>(), \
+                  #NAME ": unrecognized keyword argument");                                              \
+    static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template unique<Tag0,Tags...>(), \
+                  #NAME ": a keyword was given more than once");                                         \
+    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
+    return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, tag0, tags...);                                   \
+}
+_TNY_RED_TAGGED(sum) _TNY_RED_TAGGED(prod) _TNY_RED_TAGGED(max) _TNY_RED_TAGGED(min) _TNY_RED_TAGGED(sqnorm)
+// _TNY_RED_TAGGED(mean)/(norm) are invoked after their own axis-core definitions
+// below (same shape, so the macro applies unchanged); #undef after norm's.
 
 /** @brief Mean over the named axes -> a lower-rank tensor (sum / reduced count).
  *         For a floating `T`, accumulates in the reduce type and the result is cast
  *         to `T`. For an INTEGER `T` the result element type is `double` (numpy:
  *         integer mean is float64; divides in `double`, not truncating). `mean<Acc,
  *         Axes...>(a)` makes `Acc` both the accumulator and result type. */
-template <long... Axes, class T,class E,class L,storage O, class R = reduce_type_t<T>,
+// `Tags...` (keepdims/into, any subset/order) via the shared `_red_finish_*`
+// helpers, exactly like `_TNY_RED_AXIS_CORE`; mean's own int-vs-float branching
+// stays hand-written since it isn't shared by any other reduction.
+template <long... Axes, class T,class E,class L,storage O, class... Tags, class R = reduce_type_t<T>,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto mean(const tensor<T,E,L,O> & a) {
+_TNY_API  decltype(auto) mean(const tensor<T,E,L,O> & a, Tags... tags) {
     auto s = sum<R, Axes...>(a);                                          // sum in the (wide) reduce type
     const auto cnt = a.numel() / s.numel();
     if constexpr (cs::is_integral<T>::value) {                           // integer -> divide in double, return double
         auto o = _md::reduce_to<double>(static_cast<decltype(s)&&>(s));
-        o.div_(static_cast<double>(cnt)); return o;
-    } else { s.div_(static_cast<R>(cnt)); return _md::reduce_to<T>(static_cast<decltype(s)&&>(s)); }
+        o.div_(static_cast<double>(cnt));
+        return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(o)&&>(o), tags...);
+    } else {
+        s.div_(static_cast<R>(cnt));
+        auto o = _md::reduce_to<T>(static_cast<decltype(s)&&>(s));
+        return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(o)&&>(o), tags...);
+    }
 }
-template <long... Axes, class T,class E,class L,storage O, class R = reduce_type_t<T>,
+template <long... Axes, class T,class E,class L,storage O, class... Tags, class R = reduce_type_t<T>,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto mean(const tensor<T,E,L,O> & a) {
+_TNY_HOST decltype(auto) mean(const tensor<T,E,L,O> & a, Tags... tags) {
     auto s = sum<R, Axes...>(a);                                          // sum in the (wide) reduce type
     const auto cnt = a.numel() / s.numel();
     if constexpr (cs::is_integral<T>::value) {                           // integer -> divide in double, return double
         auto o = _md::reduce_to<double>(static_cast<decltype(s)&&>(s));
-        o.div_(static_cast<double>(cnt)); return o;
-    } else { s.div_(static_cast<R>(cnt)); return _md::reduce_to<T>(static_cast<decltype(s)&&>(s)); }
+        o.div_(static_cast<double>(cnt));
+        return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(o)&&>(o), tags...);
+    } else {
+        s.div_(static_cast<R>(cnt));
+        auto o = _md::reduce_to<T>(static_cast<decltype(s)&&>(s));
+        return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(o)&&>(o), tags...);
+    }
 }
-template <class Acc, long... Axes, class T,class E,class L,storage O,
+template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto mean(const tensor<T,E,L,O> & a) {
-    auto s = sum<Acc, Axes...>(a); s.div_(static_cast<Acc>(a.numel() / s.numel())); return s;
+_TNY_API  decltype(auto) mean(const tensor<T,E,L,O> & a, Tags... tags) {
+    auto s = sum<Acc, Axes...>(a); s.div_(static_cast<Acc>(a.numel() / s.numel()));
+    return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
 }
-template <class Acc, long... Axes, class T,class E,class L,storage O,
+template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto mean(const tensor<T,E,L,O> & a) {
-    auto s = sum<Acc, Axes...>(a); s.div_(static_cast<Acc>(a.numel() / s.numel())); return s;
+_TNY_HOST decltype(auto) mean(const tensor<T,E,L,O> & a, Tags... tags) {
+    auto s = sum<Acc, Axes...>(a); s.div_(static_cast<Acc>(a.numel() / s.numel()));
+    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
 }
-// value forms: mean(a, axis<Axes...>{}) == mean<Axes...>(a) (numpy `axis=`); forward to
-// the template form, keeping the static/dynamic split (integer->double rule preserved).
-template <long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto mean(const tensor<T,E,L,O> & a, axis<Axes...>) { return mean<Axes...>(a); }
-template <long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto mean(const tensor<T,E,L,O> & a, axis<Axes...>) { return mean<Axes...>(a); }
-template <class Acc, long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto mean(const tensor<T,E,L,O> & a, axis<Axes...>) { return mean<Acc, Axes...>(a); }
-template <class Acc, long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto mean(const tensor<T,E,L,O> & a, axis<Axes...>) { return mean<Acc, Axes...>(a); }
-_TNY_RED_KEEPDIMS(mean)
-#undef _TNY_RED_KEEPDIMS
+_TNY_RED_TAGGED(mean)
 
 /** @brief Inner product over matching extents. Accumulates in the reduce type of
  *         the promoted element type (`double` for small floats), result cast to
@@ -1274,9 +1283,25 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) 
     return static_cast<_reduce_result_t<Acc, promote_t<Ta,Tb>>>(
         _md::zipreduce_<R>(a, b, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
 }
-/** @brief Value-tag accumulator form: `dot(a, b, dtype<Acc>{})` == `dot<Acc>(a, b)`. */
-template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, class Acc>
-_TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, dtype<Acc>) { return dot<Acc>(a, b); }
+/** @brief Generic trailing keyword bag for `dot` (no axis concept, being binary):
+ *  `dot(a, b, dtype<Acc>{})`, `dot(a, b, into(d))`, or both composed in either
+ *  order — `dot`'s own small twin of `_TNY_RED_TAGGED` above (skips the
+ *  axis-tag/`_red_dyn` machinery entirely, since dot always reduces every
+ *  matching axis). Requires at least one trailing tag so it never competes with
+ *  the plain `dot<Acc=void>(a, b)` above. */
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
+          class Tag0, class... Tags>
+_TNY_API decltype(auto) dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) {
+    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), "dot: unrecognized keyword argument");
+    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), "dot: a keyword was given more than once");
+    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;
+    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
+    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {
+        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, "dot into(dest): dest must be rank-0 (a scalar cell)");
+        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(dot<RAcc>(a, b)));
+        return out.dest;
+    } else return dot<RAcc>(a, b);
+}
 
 /* ------------------------------------------------------------------ *
  *     Vector algebra & geometry (contained exact math)               *
@@ -1284,12 +1309,13 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, 
 
 /** @brief Squared Euclidean norm — the sum of squares `Σ aᵢ²`, over ALL axes.
  *         Just `dot(a, a)`: accumulates in the reduce type, result cast to the
- *         element type (`sqnorm<Acc>(a)` accumulates AND returns `Acc`). */
+ *         element type (`sqnorm<Acc>(a)` accumulates AND returns `Acc`). The
+ *         value-tag/axis/`keepdims`/`into` composition (`sqnorm(a, dtype<Acc>{})`,
+ *         `sqnorm(a, axis<0>{})`, ...) is handled generically by
+ *         `_TNY_RED_TAGGED` (invoked further below, right after `sqnorm`'s own
+ *         axis core — see `_TNY_RED_AXIS_CORE(sqnorm, ...)` above). */
 template <class Acc = void, class T, class E, class L, storage O>
 _TNY_API auto sqnorm(const tensor<T,E,L,O> & a) { return dot<Acc>(a, a); }
-/** @brief Value-tag accumulator form: `sqnorm(a, dtype<Acc>{})` == `sqnorm<Acc>(a)`. */
-template <class T, class E, class L, storage O, class Acc>
-_TNY_API auto sqnorm(const tensor<T,E,L,O> & a, dtype<Acc>) { return sqnorm<Acc>(a); }
 
 /** @brief Euclidean (L2) norm `√Σ aᵢ²`, over ALL axes. Accumulates the squares in
  *         the reduce type and takes the root there, then casts to the result type:
@@ -1303,101 +1329,48 @@ _TNY_API auto norm(const tensor<T,E,L,O> & a) {
                 cs::conditional_t<cs::is_floating_point<Res>::value, Res, double>>;   // take the root in a float type
     return static_cast<Res>(cs::sqrt(static_cast<D>(sqnorm<R>(a))));
 }
-/** @brief Value-tag accumulator form: `norm(a, dtype<Acc>{})` == `norm<Acc>(a)`. */
-template <class T, class E, class L, storage O, class Acc>
-_TNY_API auto norm(const tensor<T,E,L,O> & a, dtype<Acc>) { return norm<Acc>(a); }
 
 /* --- axis norm: √(Σaᵢ² over the named axes) -> a lower-rank tensor. Floating result
  *     (integer -> double, mean rule); norm<Acc,Axes...> makes Acc accumulator+result.
- *     Accumulates the squares in a floating type and takes the root there. --------- */
-template <long... Axes, class T,class E,class L,storage O,
+ *     Accumulates the squares in a floating type and takes the root there.
+ *     `Tags...` (keepdims/into, any subset/order) via `_red_finish_*`, exactly
+ *     like `_TNY_RED_AXIS_CORE` — hand-written since norm's deduced Res/R/D
+ *     differ from every other reduction's. Reducing (sqrt, cast to Res) BEFORE
+ *     applying `_red_finish_*` rather than after is equivalent: `unsqueeze` only
+ *     reshapes (no data change), so it commutes with the elementwise sqrt/cast
+ *     that follow it either way. --------- */
+template <long... Axes, class T,class E,class L,storage O, class... Tags,
           class Res = _mean_result_t<T>, class R = reduce_type_t<T>,
           class D   = cs::conditional_t<cs::is_floating_point<R>::value, R, double>,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto norm(const tensor<T,E,L,O> & a) { auto s = sqnorm<D, Axes...>(a); s.sqrt_(); return _md::reduce_to<Res>(static_cast<decltype(s)&&>(s)); }
-template <long... Axes, class T,class E,class L,storage O,
+_TNY_API  decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
+    auto s = sqnorm<D, Axes...>(a); s.sqrt_();
+    auto r = _md::reduce_to<Res>(static_cast<decltype(s)&&>(s));
+    return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(r)&&>(r), tags...);
+}
+template <long... Axes, class T,class E,class L,storage O, class... Tags,
           class Res = _mean_result_t<T>, class R = reduce_type_t<T>,
           class D   = cs::conditional_t<cs::is_floating_point<R>::value, R, double>,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto norm(const tensor<T,E,L,O> & a) { auto s = sqnorm<D, Axes...>(a); s.sqrt_(); return _md::reduce_to<Res>(static_cast<decltype(s)&&>(s)); }
-template <class Acc, long... Axes, class T,class E,class L,storage O,
+_TNY_HOST decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
+    auto s = sqnorm<D, Axes...>(a); s.sqrt_();
+    auto r = _md::reduce_to<Res>(static_cast<decltype(s)&&>(s));
+    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(r)&&>(r), tags...);
+}
+template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto norm(const tensor<T,E,L,O> & a) { auto s = sqnorm<Acc, Axes...>(a); s.sqrt_(); return s; }
-template <class Acc, long... Axes, class T,class E,class L,storage O,
+_TNY_API  decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
+    auto s = sqnorm<Acc, Axes...>(a); s.sqrt_();
+    return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
+}
+template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags,
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto norm(const tensor<T,E,L,O> & a) { auto s = sqnorm<Acc, Axes...>(a); s.sqrt_(); return s; }
-// value forms: norm(a, axis<Axes...>{}) == norm<Axes...>(a)
-template <long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto norm(const tensor<T,E,L,O> & a, axis<Axes...>) { return norm<Axes...>(a); }
-template <long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto norm(const tensor<T,E,L,O> & a, axis<Axes...>) { return norm<Axes...>(a); }
-template <class Acc, long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto norm(const tensor<T,E,L,O> & a, axis<Axes...>) { return norm<Acc, Axes...>(a); }
-template <class Acc, long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto norm(const tensor<T,E,L,O> & a, axis<Axes...>) { return norm<Acc, Axes...>(a); }
-
-/* --- norm keepdims: layers on sqnorm's keepdims (sqrt + the floating result type,
- * exactly like norm<Axes...>(a) layers on sqnorm<Axes...>(a)). Same 16-overload
- * shape as _TNY_RED_KEEPDIMS, hand-written since norm's deduced Res/R/D differ. */
-template <long... Axes, class T,class E,class L,storage O,
-          class Res = _mean_result_t<T>, class R = reduce_type_t<T>,
-          class D   = cs::conditional_t<cs::is_floating_point<R>::value, R, double>,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto norm(const tensor<T,E,L,O> & a, keepdims_t) { auto s = sqnorm<D, Axes...>(a, keepdims); s.sqrt_(); return _md::reduce_to<Res>(static_cast<decltype(s)&&>(s)); }
-template <long... Axes, class T,class E,class L,storage O,
-          class Res = _mean_result_t<T>, class R = reduce_type_t<T>,
-          class D   = cs::conditional_t<cs::is_floating_point<R>::value, R, double>,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto norm(const tensor<T,E,L,O> & a, keepdims_t) { auto s = sqnorm<D, Axes...>(a, keepdims); s.sqrt_(); return _md::reduce_to<Res>(static_cast<decltype(s)&&>(s)); }
-template <class Acc, long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto norm(const tensor<T,E,L,O> & a, keepdims_t) { auto s = sqnorm<Acc, Axes...>(a, keepdims); s.sqrt_(); return s; }
-template <class Acc, long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto norm(const tensor<T,E,L,O> & a, keepdims_t) { auto s = sqnorm<Acc, Axes...>(a, keepdims); s.sqrt_(); return s; }
-// value forms: norm(a, axis<Axes...>{}, keepdims) == norm<Axes...>(a, keepdims)
-template <long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto norm(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t) { return norm<Axes...>(a, keepdims); }
-template <long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto norm(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t) { return norm<Axes...>(a, keepdims); }
-template <class Acc, long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto norm(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t) { return norm<Acc, Axes...>(a, keepdims); }
-template <class Acc, long... Axes, class T,class E,class L,storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto norm(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t) { return norm<Acc, Axes...>(a, keepdims); }
-// compose with a trailing into(dest)
-template <long... Axes, class T,class E,class L,storage O, class D2,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto & norm(const tensor<T,E,L,O> & a, keepdims_t, into_t<D2> out) { out.dest.copy_(norm<Axes...>(a, keepdims)); return out.dest; }
-template <long... Axes, class T,class E,class L,storage O, class D2,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto & norm(const tensor<T,E,L,O> & a, keepdims_t, into_t<D2> out) { out.dest.copy_(norm<Axes...>(a, keepdims)); return out.dest; }
-template <class Acc, long... Axes, class T,class E,class L,storage O, class D2,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto & norm(const tensor<T,E,L,O> & a, keepdims_t, into_t<D2> out) { out.dest.copy_(norm<Acc, Axes...>(a, keepdims)); return out.dest; }
-template <class Acc, long... Axes, class T,class E,class L,storage O, class D2,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto & norm(const tensor<T,E,L,O> & a, keepdims_t, into_t<D2> out) { out.dest.copy_(norm<Acc, Axes...>(a, keepdims)); return out.dest; }
-// value form + into
-template <long... Axes, class T,class E,class L,storage O, class D2,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto & norm(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t, into_t<D2> out) { return norm<Axes...>(a, keepdims, out); }
-template <long... Axes, class T,class E,class L,storage O, class D2,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto & norm(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t, into_t<D2> out) { return norm<Axes...>(a, keepdims, out); }
-template <class Acc, long... Axes, class T,class E,class L,storage O, class D2,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  auto & norm(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t, into_t<D2> out) { return norm<Acc, Axes...>(a, keepdims, out); }
-template <class Acc, long... Axes, class T,class E,class L,storage O, class D2,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST auto & norm(const tensor<T,E,L,O> & a, axis<Axes...>, keepdims_t, into_t<D2> out) { return norm<Acc, Axes...>(a, keepdims, out); }
+_TNY_HOST decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
+    auto s = sqnorm<Acc, Axes...>(a); s.sqrt_();
+    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
+}
+_TNY_RED_TAGGED(norm)
+#undef _TNY_RED_TAGGED
 
 /** @brief Out-of-place unit vector `a / norm(a)` -> a NEW dense tensor (static
  *         shape -> stack, dynamic -> heap). The result element type is floating
@@ -1582,68 +1555,12 @@ _TNY_API auto mean(const tensor<T,E,L,O> & a) {
     const D m = static_cast<D>(sum<R>(a)) / static_cast<D>(a.numel());
     return static_cast<Res>(m);
 }
-/** @brief Value-tag accumulator form: `mean(a, dtype<Acc>{})` == `mean<Acc>(a)`. */
-template <class T, class E, class L, storage O, class Acc>
-_TNY_API auto mean(const tensor<T,E,L,O> & a, dtype<Acc>) { return mean<Acc>(a); }
-
-/* ------------------------------------------------------------------ *
- *     into(dest) on reductions — numpy/pytorch `out=`                 *
- * ------------------------------------------------------------------ *
- * A FULL reduction writes its scalar into a rank-0 destination
- * (`local<T>{}`, or `wrap(&x, shape<>{})` over an address) — one store,
- * no allocation; a non-rank-0 dest is a `static_assert` (so forgetting the
- * axes fails loudly instead of splatting the grand total everywhere). An
- * AXIS reduction copies its lower-rank result into `dest` (via `copy_`, so
- * `dest` is broadcast-compatible with the reduced shape). `dest` may differ
- * in dtype (result cast) / be a strided slot. Returns `dest&`. The three
- * template shapes mirror
- * the reductions themselves: bare (`sum(a, into(d))`) and leading-type
- * (`sum<double>(a, into(d))`) are the FULL forms; a leading axis
- * (`sum<0>(a, into(d))`) or type+axis (`sum<double,0>(a, into(d))`)
- * selects the AXIS form (static result -> _TNY_API, dynamic -> _TNY_HOST,
- * so a device path never calls the host allocator). */
-#define _TNY_RED_INTO(NAME)                                                                          \
-template <class Acc = void, class T,class E,class L,storage O, class D>                              \
-_TNY_API auto & NAME(const tensor<T,E,L,O> & a, into_t<D> out) {                                     \
-    static_assert(D::rank() == 0, "full reduction into(dest): dest must be rank-0 (a scalar cell); " \
-                  "name the axes — NAME<Axes...>(a, into(dest)) — for a lower-rank destination");     \
-    out.dest.fill_(static_cast<typename D::element_type>(NAME<Acc>(a))); return out.dest; }          \
-template <long... Axes, class T,class E,class L,storage O, class D,                                  \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto & NAME(const tensor<T,E,L,O> & a, into_t<D> out) { out.dest.copy_(NAME<Axes...>(a)); return out.dest; } \
-template <long... Axes, class T,class E,class L,storage O, class D,                                  \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto & NAME(const tensor<T,E,L,O> & a, into_t<D> out) { out.dest.copy_(NAME<Axes...>(a)); return out.dest; } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class D,                       \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto & NAME(const tensor<T,E,L,O> & a, into_t<D> out) { out.dest.copy_(NAME<Acc, Axes...>(a)); return out.dest; } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class D,                       \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto & NAME(const tensor<T,E,L,O> & a, into_t<D> out) { out.dest.copy_(NAME<Acc, Axes...>(a)); return out.dest; } \
-/* value forms take into too: NAME(a, axis<Axes...>{}, into(d)) == NAME<Axes...>(a, into(d)) */      \
-template <long... Axes, class T,class E,class L,storage O, class D,                                  \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto & NAME(const tensor<T,E,L,O> & a, axis<Axes...>, into_t<D> out) { return NAME<Axes...>(a, out); } \
-template <long... Axes, class T,class E,class L,storage O, class D,                                  \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto & NAME(const tensor<T,E,L,O> & a, axis<Axes...>, into_t<D> out) { return NAME<Axes...>(a, out); } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class D,                       \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  auto & NAME(const tensor<T,E,L,O> & a, axis<Axes...>, into_t<D> out) { return NAME<Acc, Axes...>(a, out); } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class D,                       \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST auto & NAME(const tensor<T,E,L,O> & a, axis<Axes...>, into_t<D> out) { return NAME<Acc, Axes...>(a, out); }
-_TNY_RED_INTO(sum)  _TNY_RED_INTO(prod)  _TNY_RED_INTO(max)  _TNY_RED_INTO(min)
-_TNY_RED_INTO(mean) _TNY_RED_INTO(sqnorm) _TNY_RED_INTO(norm)
-#undef _TNY_RED_INTO
-
-/** @brief `dot(a, b, into(d))` — inner product written into a rank-0 dest. */
-template <class Acc = void, class Ta,class Ea,class La,storage Oa,
-          class Tb,class Eb,class Lb,storage Ob, class D>
-_TNY_API auto & dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) {
-    static_assert(D::rank() == 0, "dot into(dest): dest must be rank-0 (a scalar cell)");
-    out.dest.fill_(static_cast<typename D::element_type>(dot<Acc>(a, b))); return out.dest;
-}
+// `mean(a, dtype<Acc>{})`, `into(dest)`, and their composition with an axis list
+// / `keepdims` are handled generically by `_TNY_RED_TAGGED(mean)` above (right
+// after mean's own axis core) — same as sum/prod/max/min/sqnorm/norm. `dot`'s
+// own bare `into(dest)`/`dtype<Acc>` composition is handled by its dedicated
+// Tags... overload just above (`dot`'s twin of `_TNY_RED_TAGGED`, since it has
+// no axis concept).
 
 /* ------------------------------------------------------------------ *
  *     Reductions AS METHODS (parity with the free sum(a)/dot(a,b))   *
@@ -1659,45 +1576,36 @@ _TNY_API auto & dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b
 // restate default template arguments).
 #define _TNY_RED_AXIS_IF(E, CMP)                                                                           \
     cs::enable_if_t<(sizeof...(Ax) > 0) && _md::reduced_extents<E,Ax...>::rank_dynamic() CMP 0, int>
+#define _TNY_RED_TAGGED_IF(E, CMP)                                                                         \
+    class AxisTag, cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value CMP 0, int>
 #define _TNY_RED_AXIS_DEF(NAME, API, CMP)                                                                  \
-template <class T,class E,class L,storage O> template <long... Ax, _TNY_RED_AXIS_IF(E, CMP)>               \
-API auto tensor<T,E,L,O>::NAME() const { return tny::NAME<Ax...>(*this); }                                 \
-template <class T,class E,class L,storage O> template <class Acc, long... Ax, _TNY_RED_AXIS_IF(E, CMP)>    \
-API auto tensor<T,E,L,O>::NAME() const { return tny::NAME<Acc, Ax...>(*this); }                            \
-template <class T,class E,class L,storage O> template <long... Ax, _TNY_RED_AXIS_IF(E, CMP)>               \
-API auto tensor<T,E,L,O>::NAME(axis<Ax...>) const { return tny::NAME<Ax...>(*this); }                      \
-template <class T,class E,class L,storage O> template <class Acc, long... Ax, _TNY_RED_AXIS_IF(E, CMP)>    \
-API auto tensor<T,E,L,O>::NAME(axis<Ax...>) const { return tny::NAME<Acc, Ax...>(*this); }                 \
-template <class T,class E,class L,storage O> template <long... Ax, class D, _TNY_RED_AXIS_IF(E, CMP)>      \
-API auto & tensor<T,E,L,O>::NAME(into_t<D> out) const { return tny::NAME<Ax...>(*this, out); }             \
-template <class T,class E,class L,storage O> template <class Acc, long... Ax, class D, _TNY_RED_AXIS_IF(E, CMP)> \
-API auto & tensor<T,E,L,O>::NAME(into_t<D> out) const { return tny::NAME<Acc, Ax...>(*this, out); }        \
-template <class T,class E,class L,storage O> template <long... Ax, class D, _TNY_RED_AXIS_IF(E, CMP)>      \
-API auto & tensor<T,E,L,O>::NAME(axis<Ax...>, into_t<D> out) const { return tny::NAME<Ax...>(*this, out); } \
-template <class T,class E,class L,storage O> template <class Acc, long... Ax, class D, _TNY_RED_AXIS_IF(E, CMP)> \
-API auto & tensor<T,E,L,O>::NAME(axis<Ax...>, into_t<D> out) const { return tny::NAME<Acc, Ax...>(*this, out); }
+template <class T,class E,class L,storage O> template <long... Ax, class... Tags, _TNY_RED_AXIS_IF(E, CMP)> \
+API decltype(auto) tensor<T,E,L,O>::NAME(Tags... tags) const { return tny::NAME<Ax...>(*this, tags...); }  \
+template <class T,class E,class L,storage O> template <class Acc, long... Ax, class... Tags, _TNY_RED_AXIS_IF(E, CMP)> \
+API decltype(auto) tensor<T,E,L,O>::NAME(Tags... tags) const { return tny::NAME<Acc, Ax...>(*this, tags...); }
+#define _TNY_RED_TAGGED_DEF(NAME, API, CMP)                                                                \
+template <class T,class E,class L,storage O> template <class Acc, class Tag0, class... Tags, _TNY_RED_TAGGED_IF(E, CMP)> \
+API decltype(auto) tensor<T,E,L,O>::NAME(Tag0 tag0, Tags... tags) const { return tny::NAME<Acc>(*this, tag0, tags...); }
 #define _TNY_RED_METHOD_DEF(NAME)                                                                          \
 template <class T,class E,class L,storage O> template <class Acc>                                          \
 _TNY_API auto tensor<T,E,L,O>::NAME() const { return tny::NAME<Acc>(*this); }                              \
-template <class T,class E,class L,storage O> template <class Acc, class D>                                 \
-_TNY_API auto & tensor<T,E,L,O>::NAME(into_t<D> out) const { return tny::NAME<Acc>(*this, out); }          \
-template <class T,class E,class L,storage O> template <class Acc>                                          \
-_TNY_API auto tensor<T,E,L,O>::NAME(dtype<Acc>) const { return tny::NAME<Acc>(*this); }                    \
 _TNY_RED_AXIS_DEF(NAME, _TNY_API,  ==)                                                                     \
-_TNY_RED_AXIS_DEF(NAME, _TNY_HOST, !=)
+_TNY_RED_AXIS_DEF(NAME, _TNY_HOST, !=)                                                                     \
+_TNY_RED_TAGGED_DEF(NAME, _TNY_API,  ==)                                                                   \
+_TNY_RED_TAGGED_DEF(NAME, _TNY_HOST, !=)
 _TNY_RED_METHOD_DEF(sum)    _TNY_RED_METHOD_DEF(prod)  _TNY_RED_METHOD_DEF(max)
 _TNY_RED_METHOD_DEF(min)    _TNY_RED_METHOD_DEF(mean)  _TNY_RED_METHOD_DEF(sqnorm)
 _TNY_RED_METHOD_DEF(norm)
 #undef _TNY_RED_METHOD_DEF
+#undef _TNY_RED_TAGGED_DEF
 #undef _TNY_RED_AXIS_DEF
+#undef _TNY_RED_TAGGED_IF
 #undef _TNY_RED_AXIS_IF
-// dot (binary): m.dot(b) / m.dot<Acc>(b) / m.dot(b, into(cell)).
+// dot (binary, no axis form): m.dot(b) / m.dot<Acc>(b) / m.dot(b, dtype<Acc>{}, into(cell)).
 template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob>
 _TNY_API auto tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::dot<Acc>(*this, b); }
-template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class D>
-_TNY_API auto & tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) const { return tny::dot<Acc>(*this, b, out); }
-template <class T,class E,class L,storage O> template <class Tb,class Eb,class Lb,storage Ob, class Acc>
-_TNY_API auto tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b, dtype<Acc>) const { return tny::dot<Acc>(*this, b); }
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags>
+_TNY_API decltype(auto) tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const { return tny::dot<Acc>(*this, b, tag0, tags...); }
 
 /* ------------------------------------------------------------------ *
  *     Out-of-place producers AS METHODS (parity with a.add(b))       *

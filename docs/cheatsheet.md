@@ -240,19 +240,25 @@ normalize(a, into(y));  cross(a, b, into(N.at(i)));   // cross into a slot ("cro
 //   type BOTH accumulator and result: sum<double>(a), dot<double>(a,b).
 sum(a); prod(a); max(a); min(a); mean(a); dot(a, b);   // sum<Acc>(a), mean<Acc>(a), ...
 a.sum(); a.mean(); a.dot(b); a.sum<0>(); a.mean(axis<1>{});  // ALSO methods (parity; same overloads)
-sum(a, dtype<double>{});  a.sum(dtype<double>{});  // value-tag Acc == sum<double>(a) (bare form only)
-sum(a, into(cell)); dot(a, b, into(cell));  // into(dest): FULL reduction -> a RANK-0 dest
-                      //   (local<T,shape<>>{} or wrap(&x,shape<>{})); dtype casts, returns dest&
+sum(a, dtype<double>{});  a.sum(dtype<double>{});  // value-tag Acc == sum<double>(a) — a GENERIC
+                      //   trailing keyword bag (tny::_kw, kwargs.h): dtype/axis/keepdims/into
+                      //   compose in ANY subset, ANY order (see below), not just this bare form.
+sum(a, into(cell)); dot(a, b, into(cell)); dot(a, b, dtype<float>{}, into(cell));  // into(dest):
+                      //   FULL reduction -> a RANK-0 dest (local<T,shape<>>{} or wrap(&x,shape<>{}));
+                      //   dtype casts, returns dest&. dot composes dtype+into too (no axis concept).
 allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
 // axis reductions -> lower-rank tensor (named axes removed; negatives wrap). Same
 //   rule: accumulate in reduce_type, result element type = the tensor's type;
 //   sum<Acc, Axes...>(a) makes Acc accumulator AND result (leading TYPE = acc, int = axis).
+//   That <Acc,Axes...> vs <Axes...> EXPLICIT TEMPLATE split stays (no universal template
+//   param in C++17) — everything past it (axis<...>/dtype/keepdims/into) is a generic bag.
 sum<Axes...>(a); prod<...>(a); max<...>(a); min<...>(a); mean<...>(a);  // sum<Acc,Axes...>(a)
 sum(a, axis<0,2>{}); mean(a, axis<-1>{}); sum<double>(a, axis<0>{});    // numpy `axis=` value form
 sum<0>(a, into(buf)); mean(a, axis<1>{}, into(buf));  // into(dest) -> copies lower-rank result
 sum<0>(a, keepdims);  sum(a, axis<0>{}, keepdims);    // keepdims: reduced axis stays size-1 (numpy
-                      //   keepdims=True) -> broadcasts back over a. Every axis reduction; composes
-                      //   with a leading Acc and into(dest): sum<0>(a, keepdims, into(buf))
+                      //   keepdims=True) -> broadcasts back over a. Every axis reduction.
+sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf));  // ...and it ALL composes, any subset/order:
+                      //   dtype x axis x keepdims x into == sum<double,0>(a, keepdims, into(buf))
 
 // vector algebra & geometry (contained exact math; on views, host+device)
 sqnorm(a);            // Σaᵢ² over all axes (== dot(a,a)); sqnorm<Acc> forces acc+result

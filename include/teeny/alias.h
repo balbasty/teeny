@@ -212,6 +212,11 @@ template <auto... Es> struct _is_anyshape<anyshape<Es...>> : cs::true_type {};
  *  count from the back, as everywhere in teeny). `rank` is the axis count. */
 template <long... Axes> struct axis { static constexpr cs::size_t rank = sizeof...(Axes); };
 namespace _kw { template <long... Axes> struct is_keyword<axis<Axes...>> : cs::true_type {}; }
+/** @brief `_is_axis_tag<X>::value` is true iff `X` is an `axis<Axes...>` instantiation —
+ *  lets a generic trailing keyword bag (`_kw`) find the axis-selector tag among
+ *  `dtype<...>`/`into_t<...>`/`keepdims_t`/... siblings. */
+template <class> struct _is_axis_tag : cs::false_type {};
+template <long... Axes> struct _is_axis_tag<axis<Axes...>> : cs::true_type {};
 
 /** @brief Compile-time **element-type tag** — a value carrier for `T`, the
  *  sibling of `axis<...>` for the dtype argument. It lets a type-parameterised
@@ -250,15 +255,20 @@ using dtype_arg_t = typename _dtype_resolve<Expl, Dflt, Tags...>::type;
 /** @brief Keep-this-axis marker for slicing (an alias of `full_extent`). */
 constexpr cs::full_extent_t all{};
 
-/** @brief numpy/pytorch `keepdims=True` tag for axis reductions — pass as the
- *  last argument (before an `into(dest)`, if any) to keep the reduced axes as
- *  size-1 instead of removing them, so the result broadcasts back against the
- *  input: `sum<0>(a, keepdims)`, `sum(a, axis<0,2>{}, keepdims)`. A distinct
- *  empty-tag type, like `all`/`none`, so it never collides with another
- *  argument. */
+/** @brief numpy/pytorch `keepdims=True` tag for axis reductions — pass as any
+ *  trailing keyword (composes with `dtype<...>`/`axis<...>`/`into(dest)` in any
+ *  order) to keep the reduced axes as size-1 instead of removing them, so the
+ *  result broadcasts back against the input: `sum<0>(a, keepdims)`,
+ *  `sum(a, axis<0,2>{}, keepdims)`. A distinct empty-tag type, like `all`/`none`,
+ *  so it never collides with another argument. */
 struct keepdims_t {};
 constexpr keepdims_t keepdims{};
 namespace _kw { template <> struct is_keyword<keepdims_t> : cs::true_type {}; }
+/** @brief `_is_keepdims_tag<X>::value` is true iff `X` is `keepdims_t` — lets a
+ *  generic trailing keyword bag (`_kw`) find it among `dtype<...>`/`axis<...>`/
+ *  `into_t<...>` siblings. */
+template <class> struct _is_keepdims_tag : cs::false_type {};
+template <> struct _is_keepdims_tag<keepdims_t> : cs::true_type {};
 
 _TNY_NAMESPACE_END(tny)
 

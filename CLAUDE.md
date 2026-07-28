@@ -347,13 +347,19 @@ auto m = a < b; a == 2.0; 3.0 < a;    // ==,!=,<,<=,>,>= ; scalar either side
 sum(a); prod(a); max(a); min(a); mean(a); dot(a,b);
 a.sum(); a.mean(); a.dot(b); a.sum<0>(); a.mean(axis<1>{}); a.sum<double>();  // ALSO methods
                       //   (parity with the free forms): every reduction + sqnorm/norm/dot, all the
-                      //   same overload shapes (full / axis / <Acc> / axis<...> value form / into).
+                      //   same overload shapes (full / axis / <Acc> / a generic trailing keyword bag).
 sum(a, dtype<double>{});  a.sum(dtype<double>{});  // value-tag accumulator: == sum<double>(a)
-                      //   (numpy's dtype=; bare, all-axes form only — not yet wired up to compose
-                      //   with axis<...>/into, use the explicit <Acc>/<Acc,Axes...> form for those).
-sum(a, into(cell)); dot(a,b,into(cell));  // into(dest) too: a FULL reduction writes its scalar
-                      //   into a RANK-0 dest (local<T,shape<>>{}, or wrap(&x,shape<>{}) over an
-                      //   address; non-rank-0 dest = static_assert); dtype casts, returns dest&.
+                      //   (numpy's dtype=) — a GENERIC trailing keyword bag (kwargs.h's `_kw`):
+                      //   dtype<...>/axis<...>/keepdims/into(dest) compose in ANY subset, ANY
+                      //   order: sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf)) works,
+                      //   same as sum<double,0>(a, keepdims, into(buf)). The explicit `<Acc,Axes...>`
+                      //   template split still exists (C++17 has no universal template parameter to
+                      //   unify "leading type = accumulator" vs "leading int = axis") — only the
+                      //   TRAILING bag is generic. dot has the same dtype/into composition (no axis).
+sum(a, into(cell)); dot(a,b,into(cell)); dot(a,b,dtype<float>{},into(cell));  // into(dest): a FULL
+                      //   reduction writes its scalar into a RANK-0 dest (local<T,shape<>>{}, or
+                      //   wrap(&x,shape<>{}) over an address; non-rank-0 dest = static_assert);
+                      //   dtype casts, returns dest&.
 allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
 // --- vector algebra & geometry (contained exact math; NO solves/inversion/optimisation) ---
 sqnorm(a);  norm(a);                   // Σaᵢ² / √Σaᵢ² over ALL axes. sqnorm==dot(a,a); norm floating
@@ -377,8 +383,11 @@ sum<0>(a); mean<0,2>(a); max<1>(a); min<-1>(a); prod<0>(a); sum<double,0>(a);
 sum<0>(a, into(buf)); mean(a, axis<1>{}, into(buf));  // into(dest) too -> copies the lower-rank
                       //   result into buf (any spelling: <Axes>, <Acc,Axes>, or the axis<...> value form)
 sum<0>(a, keepdims); sum(a, axis<0>{}, keepdims);  // keepdims: reduced axis kept as size-1 (numpy
-                      //   keepdims=True), broadcasts back over a. sum/prod/max/min/mean/sqnorm/norm;
-                      //   composes with a leading Acc and into(dest): sum<0>(a, keepdims, into(buf))
+                      //   keepdims=True), broadcasts back over a. sum/prod/max/min/mean/sqnorm/norm.
+sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf));  // ...and every trailing keyword composes,
+                      //   any subset/order (dtype/axis/keepdims/into) — see the `_TNY_RED_TAGGED`
+                      //   generic entry point in math.h, next to `sum<Acc,Axes...>(a, keepdims,
+                      //   into(buf))`'s explicit-template twin (`_TNY_RED_AXIS_CORE`).
 
 // --- nd-peel: iterate a SUBSET of axes, each yielding a lower-rank view ---
 for (auto line : peel<0,1>(t)) f(line);   // peel axes 0,1; each `line` is a view. The range-for is
@@ -505,9 +514,10 @@ does). Three selector vocabularies:
   next to `axis`), numpy's `dtype=` namesake: `empty(shape<3,3>{}, dtype<double>{})`
   == `empty<double>(shape<3,3>{})`, likewise `zeros`/`ones`/`full`/`arange` and
   `a.to(dtype<float>{})` == `a.to<float>()`. Also reused as the reduction
-  accumulator: `sum(a, dtype<double>{})` == `sum<double>(a)` (bare, all-axes form
-  only — composing with `axis<...>`/`into(dest)` isn't wired up yet, use the
-  explicit `<Acc>`/`<Acc,Axes...>` template form for those).
+  accumulator: `sum(a, dtype<double>{})` == `sum<double>(a)`, and composes freely
+  with `axis<...>`/`keepdims`/`into(dest)` in any subset/order (the generic
+  trailing keyword bag, `tny::_kw` in `kwargs.h` — see `_TNY_RED_TAGGED` in
+  math.h): `sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf))`.
 - **`Int<k>()` / `shape<...>{}` / a layout tag** — the single-selector ops (or a
   variadic `Int<>`-per-axis pack, for `permute`): `t.squeeze(Int<1>())` (one axis),
   `t.permute(Int<2>(),Int<0>(),Int<1>())`, `t.reshape(Int<6>(),Int<-1>())`,
