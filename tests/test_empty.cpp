@@ -101,6 +101,28 @@ int main()
     static_assert(decltype(asr)::ownership == storage::stack, "arange<T,N>() still -> stack");
     if (asr(2) != 2.0) return 12;
 
+    // ---- #281: zeros/ones/full/arange on the generic keyword mechanism -- the
+    //      same dtype/storage/layout composition empty() got in #280 ------------
+    auto zlf = zeros(shape<2,3>{}, fcontiguous{}, dtype<double>{});
+    static_assert(cs::is_same<decltype(zlf)::layout_type, fcontiguous>::value, "zeros: layout honoured");
+    static_assert(cs::is_same<decltype(zlf)::element_type, double>::value,     "zeros: dtype honoured");
+    if (zlf(1,2) != 0.0) return 17;
+
+    auto olf = ones(shape<2,3>{}, storage_c<storage::heap>{}, fcontiguous{});
+    static_assert(decltype(olf)::ownership == storage::heap,                   "ones: storage honoured");
+    static_assert(cs::is_same<decltype(olf)::layout_type, fcontiguous>::value,  "ones: layout honoured");
+    if (olf(0,0) != 1.f) return 18;   // T still defaults to float with no dtype tag
+
+    auto flf = full(shape<2,3>{}, 5, fcontiguous{}, dtype<double>{});
+    static_assert(cs::is_same<decltype(flf)::layout_type, fcontiguous>::value, "full: layout honoured");
+    static_assert(cs::is_same<decltype(flf)::element_type, double>::value,    "full: dtype tag overrides value's own type");
+    if (flf(1,1) != 5.0) return 19;
+
+    auto adv = arange(4, storage_c<storage::heap>{}, dtype<double>{});
+    static_assert(decltype(adv)::ownership == storage::heap,                 "arange: storage honoured");
+    static_assert(cs::is_same<decltype(adv)::element_type, double>::value,   "arange: dtype honoured, either order");
+    if (adv(3) != 3.0) return 20;
+
     // ---- empty is UNINITIALISED (numpy np.empty), but the zero-init paths stay zeroed ----
     // The storage_policy ctor split (value-init default + `_uninit` ctor) must NOT
     // cost stack triviality (only copy/move/dtor matter) — a stack empty is still

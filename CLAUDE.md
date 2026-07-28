@@ -305,6 +305,11 @@ zeros(sh, dtype<T>{}); full(sh,v,dtype<T>{}); arange(n, dtype<T>{});  // value-t
 zeros(sh, dtype<T>{}, storage_c<storage::pinned>{});  // ...or compose BOTH value tags, either
                       //   order (zeros(sh, storage_c<...>{}, dtype<T>{}) too) — no explicit
                       //   template argument at all. Same for empty/ones/full/arange.
+empty(sh, fcontiguous{}, dtype<T>{}, storage_c<storage::heap>{});  // the generic keyword
+                      //   mechanism (#277-#281): dtype/storage_c/a layout tag compose in ANY
+                      //   order/subset — empty/zeros/ones/full all take a layout tag this way;
+                      //   arange has no layout keyword (1-D has no C/F distinction). Not yet
+                      //   extended to wrap/make_* (#282).
 
 // --- math (out-of-place -> NEW tensor; static shape -> stack, else heap/host) ---
 // result type = promote(A,B): C++ rules, but among floats the LOWER width wins
