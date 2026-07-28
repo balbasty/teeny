@@ -44,6 +44,7 @@ TESTS = \
 	$(BUILDDIR)/test_reduce_methods \
 	$(BUILDDIR)/test_dtype \
 	$(BUILDDIR)/test_wrap_layout_tag \
+	$(BUILDDIR)/test_wrap_compose \
 	$(BUILDDIR)/test_wrap_mdspan \
 	$(BUILDDIR)/test_ops \
 	$(BUILDDIR)/test_fold \

@@ -87,7 +87,10 @@ using mapped = tensor<T, Shape, Layout, storage::mapped>;
 
 /* --- functional factories (deduce the Shape type from the argument; `T` defaults
  *     to `float`, like the host factories). Thin spellings of the unified
- *     `empty<T, storage::gpu/pinned/mapped>` factory (tensor.h). --- */
+ *     `empty<T, storage::gpu/pinned/mapped>` factory (tensor.h). Each takes the
+ *     same trailing `dtype`/layout keyword-tag bag as `empty` (#282; no
+ *     `storage_c` — the backend is fixed by the function name), matching
+ *     `make_local`/`make_heap`'s doc comment. --- */
 template <class T = void, class Layout = void, class Shape, class... Tags>
 _TNY_HOST auto make_gpu(Shape e, Tags... tags)    { return empty<T, storage::gpu,    Layout>(e, tags...); }
 template <class T = void, class Layout = void, class Shape, class... Tags>
