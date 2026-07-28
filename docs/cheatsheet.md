@@ -236,6 +236,9 @@ allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (bro
 sum<Axes...>(a); prod<...>(a); max<...>(a); min<...>(a); mean<...>(a);  // sum<Acc,Axes...>(a)
 sum(a, axis<0,2>{}); mean(a, axis<-1>{}); sum<double>(a, axis<0>{});    // numpy `axis=` value form
 sum<0>(a, into(buf)); mean(a, axis<1>{}, into(buf));  // into(dest) -> copies lower-rank result
+sum<0>(a, keepdims);  sum(a, axis<0>{}, keepdims);    // keepdims: reduced axis stays size-1 (numpy
+                      //   keepdims=True) -> broadcasts back over a. Every axis reduction; composes
+                      //   with a leading Acc and into(dest): sum<0>(a, keepdims, into(buf))
 
 // vector algebra & geometry (contained exact math; on views, host+device)
 sqnorm(a);            // Σaᵢ² over all axes (== dot(a,a)); sqnorm<Acc> forces acc+result

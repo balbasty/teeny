@@ -73,5 +73,48 @@ int main() {
     static_assert(cs::is_same<decltype(sum(d, axis<0>{})), decltype(sum<0>(d))>::value, "dynamic sum axis value form");
     if (sum(d, axis<0>{})(0) != 3.0 || sum(d, axis<0>{})(2) != 7.0) return 13;
 
+    // ---- keepdims: keep the reduced axes as size-1 (numpy `keepdims=True`) -----
+    auto ks = sum<0>(m, keepdims);                    // (2,3) -> (1,3), same values as sum<0>(m)
+    static_assert(decltype(ks)::rank() == 2, "keepdims keeps rank");
+    static_assert(decltype(ks)::extents_type::static_extent(0) == 1, "reduced axis folds to static 1");
+    static_assert(decltype(ks)::extents_type::static_extent(1) == 3, "kept axis extent unchanged");
+    if (ks(0,0)!=3.0 || ks(0,1)!=5.0 || ks(0,2)!=7.0) return 14;
+
+    auto ks1 = sum<1>(m, keepdims);                   // (2,3) -> (2,1)
+    if (ks1(0,0)!=3.0 || ks1(1,0)!=12.0) return 15;
+
+    // value form: NAME(a, axis<...>{}, keepdims) == NAME<...>(a, keepdims)
+    static_assert(cs::is_same<decltype(sum(m, axis<0>{}, keepdims)), decltype(sum<0>(m, keepdims))>::value,
+                  "keepdims value form matches template form");
+    if (sum(m, axis<0>{}, keepdims)(0,1) != 5.0) return 16;
+
+    // leading TYPE (Acc) + keepdims, both spellings
+    static_assert(cs::is_same<decltype(sum<double,0>(m, keepdims)), decltype(sum<double>(m, axis<0>{}, keepdims))>::value,
+                  "Acc keepdims value form matches template form");
+    if (sum<float,0>(m, keepdims)(0,2) != 7.0f) return 17;
+
+    // every reduction gets it: prod/max/min/mean/sqnorm/norm
+    if (prod<0>(m, keepdims)(0,1) != 4.0) return 18;      // 1*4
+    if (max<0>(m, keepdims)(0,2)  != 5.0) return 19;
+    if (min<1>(m, keepdims)(1,0)  != 3.0) return 20;
+    if (mean<1>(m, keepdims)(0,0) != 1.0) return 21;      // (0+1+2)/3
+    auto v3 = local<double, shape<3>>(); v3(0)=3; v3(1)=0; v3(2)=4;
+    auto v3k = v3.unsqueeze<0>();                          // (1,3): a rank-2 "batch of vectors" case
+    if (sqnorm<1>(v3k, keepdims)(0,0) != 25.0) return 22;   // 9+0+16
+    if (!(norm<1>(v3k, keepdims)(0,0) == 5.0))  return 23;  // sqrt(25)
+
+    // composes with into(dest) — dest matches the KEPT-DIMS shape
+    auto kd = local<double, shape<1,3>>();
+    sum<0>(m, keepdims, into(kd));
+    if (kd(0,0)!=3.0 || kd(0,2)!=7.0) return 24;
+    auto kd2 = local<double, shape<1,3>>();
+    sum(m, axis<0>{}, keepdims, into(kd2));
+    if (kd2(0,1)!=5.0) return 25;
+
+    // dynamic-shape source stays on the heap path
+    auto dk = sum<0>(d, keepdims);                    // (2,3) dynamic -> (1,3): axis0 removed was dynamic
+    static_assert(decltype(dk)::rank() == 2, "dynamic keepdims keeps rank");
+    if (dk(0,0)!=3.0 || dk(0,2)!=7.0) return 26;
+
     return 0;
 }

@@ -234,6 +234,24 @@ A fully-static result is stack-owned (host and device); any dynamic extent makes
 it heap-owned (host only — it allocates, so it is not callable on the device
 path). Reducing over every axis is the scalar form above.
 
+### `keepdims` — keep the reduced axes as size-1
+
+Pass `keepdims` as the last argument (before a trailing `into(dest)`, if any) to
+keep the named axes as size-1 instead of removing them — numpy/pytorch's
+`keepdims=True` — so the result **broadcasts back** against the input without an
+extra `unsqueeze`:
+
+```cpp
+sum<0>(a, keepdims);              // (H,W) -> (1,W), instead of (W,)
+sum(a, axis<0,2>{}, keepdims);    // value form takes it too
+sum<double,0>(a, keepdims);       // composes with a leading Acc type
+sum<0>(a, keepdims, into(dest));  // and with into(dest) — dest matches the kept-dims shape
+```
+
+Applies to every axis reduction (`sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`).
+`keepdims` is a distinct empty-tag value (like `all`/`none`), so it never collides
+with another argument.
+
 ### Accumulator type vs result type
 
 A reduction **accumulates** in a wide **reduce type** for precision, then **casts
