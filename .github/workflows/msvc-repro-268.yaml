@@ -1,0 +1,53 @@
+name: MSVC scratch repro (#268)
+
+# Manual-only, single-file compiles for iterating on the #268 MSVC operator()
+# overload-resolution defect, without paying for the full CMake/CTest build
+# (test-cmake-matrix.yaml) or the macOS leg of that matrix. Never runs on
+# push/PR -- workflow_dispatch only. Scratch: delete scratch_msvc268/ and this
+# workflow once the #268 investigation is done, win or lose.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Commit / Branch / Tag / SHA to checkout
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+
+      # Same rewrite as test-cmake-matrix.yaml: the CCCL submodule is pinned via
+      # SSH in .gitmodules, so point it at HTTPS for an unauthenticated runner.
+      - name: Fetch CCCL submodule
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --recursive
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Compile order_a.cpp
+        continue-on-error: true
+        run: cl /std:c++17 /EHsc /nologo /I include /I external\cccl\libcudacxx\include /Fe:order_a.exe scratch_msvc268\order_a.cpp
+
+      - name: Compile order_b.cpp
+        continue-on-error: true
+        run: cl /std:c++17 /EHsc /nologo /I include /I external\cccl\libcudacxx\include /Fe:order_b.exe scratch_msvc268\order_b.cpp
+
+      - name: Compile isolated.cpp
+        continue-on-error: true
+        run: cl /std:c++17 /EHsc /nologo /I include /I external\cccl\libcudacxx\include /Fe:isolated.exe scratch_msvc268\isolated.cpp
+
+      - name: Compile preceded.cpp
+        continue-on-error: true
+        run: cl /std:c++17 /EHsc /nologo /I include /I external\cccl\libcudacxx\include /Fe:preceded.exe scratch_msvc268\preceded.cpp
