@@ -46,7 +46,8 @@ empty<T>(shape, storage_c<storage::gpu>{});   // value-tag backend form (same re
 empty(shape, dtype<T>{});            // value-tag ELEMENT-TYPE form: deduces T, no .template needed.
                                      //   O stays a leading explicit template arg: empty<storage::gpu>(shape, dtype<T>{})
 empty(shape, fcontiguous{}, dtype<double>{});   // a layout tag composes with dtype/storage_c, any
-                                                 //   order/subset (empty only so far, #277-#280)
+                                                 //   order/subset (also zeros/ones/full; arange has no
+                                                 //   layout keyword, #277-#281)
 make_local<T>(shape);  make_heap<T>(shape);            // thin spellings of empty<T,storage::stack/heap>
 make_gpu<T>(shape); make_pinned<T>(shape); make_mapped<T>(shape);   // empty<T,storage::gpu/...>; T defaults to float
 

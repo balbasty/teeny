@@ -1726,126 +1726,140 @@ _TNY_HOST auto make_heap(Shape e) { return empty<T, storage::heap, Layout>(e); }
  *  host-accessible backends (stack/heap/pinned/mapped) are allowed; a device
  *  (`gpu`) fill needs a kernel launch, so it is a `static_assert` steering you to
  *  `to<storage::gpu>(full<T>(s, v))`. Split by resolved ownership for the
- *  `_TNY_API`/`_TNY_HOST` annotation. */
-template <class T = void, storage O = storage_deduce, class Layout = ccontiguous, class Shape, class V,
-          class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API auto full(Shape e, V v) {
-    static_assert(!_is_dtype<V>::value, "full(shape, v): v looks like a dtype<T> tag, not a fill value — "
-        "did you mean full(shape, v, dtype<T>{}) (value first, dtype tag last)?");
-    auto t = empty<ET, O, Layout>(e); t.fill_(static_cast<ET>(v)); return t;
+ *  `_TNY_API`/`_TNY_HOST` annotation.
+ *
+ *  Element type, backend, and layout may each be given as a leading explicit
+ *  template argument OR as a trailing value tag, in ANY order and ANY subset,
+ *  same as `empty` (#280/#281): `full(e, v, fcontiguous{})`,
+ *  `full(e, v, storage_c<storage::heap>{}, dtype<double>{})`. */
+template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class V, class... Tags,
+          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+_TNY_API auto full(Shape e, V v, Tags... /*tags*/) {
+    static_assert(!_kw::is_keyword<V>::value, "full(shape, v, ...): the fill VALUE must come before any keyword tag — "
+        "did you mean full(shape, v, dtype<T>{}, ...)?");
+    using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
+    static_assert(ok::known<Tags...>(), "full(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
+    static_assert(ok::unique<Tags...>(), "full(): the same keyword was given twice");
+    using ET = dtype_arg_t<T, V, Tags...>;
+    using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
+    auto t = empty<ET, storage::stack, LO>(e); t.fill_(static_cast<ET>(v)); return t;
 }
-template <class T = void, storage O = storage_deduce, class Layout = ccontiguous, class Shape, class V,
-          class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
-_TNY_HOST auto full(Shape e, V v) {
-    static_assert(!_is_dtype<V>::value, "full(shape, v): v looks like a dtype<T> tag, not a fill value — "
-        "did you mean full(shape, v, dtype<T>{}) (value first, dtype tag last)?");
-    static_assert(storage_is_host_accessible(storage_resolve(O, Shape::rank_dynamic() == 0)),
+template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class V, class... Tags,
+          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+_TNY_HOST auto full(Shape e, V v, Tags... /*tags*/) {
+    static_assert(!_kw::is_keyword<V>::value, "full(shape, v, ...): the fill VALUE must come before any keyword tag — "
+        "did you mean full(shape, v, dtype<T>{}, ...)?");
+    using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
+    static_assert(ok::known<Tags...>(), "full(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
+    static_assert(ok::unique<Tags...>(), "full(): the same keyword was given twice");
+    using ET = dtype_arg_t<T, V, Tags...>;
+    constexpr storage R = storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+    static_assert(storage_is_host_accessible(R),
         "zeros/ones/full<..., storage::gpu>: a device fill needs a kernel launch; use to<storage::gpu>(full<T>(shape, v)) (or to<storage::gpu>(zeros<T>(shape))), or empty<T, storage::gpu>(shape) then a memset.");
-    auto t = empty<ET, O, Layout>(e); t.fill_(static_cast<ET>(v)); return t;
+    using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
+    auto t = empty<ET, R, LO>(e); t.fill_(static_cast<ET>(v)); return t;
 }
-/** @brief Value-tag backend form: `full<T>(extents, v, storage_c<storage::pinned>{})`. */
-template <class T = void, class Layout = ccontiguous, class Shape, class V, storage O>
-_TNY_HOST auto full(Shape e, V v, storage_c<O>) {
-    static_assert(!_is_dtype<V>::value, "full(shape, v, storage_c<O>{}): v looks like a dtype<T> tag, not a "
-        "fill value — did you mean full(shape, v, dtype<T>{}, storage_c<O>{})?");
-    return full<T, O, Layout>(e, v);
-}
-/** @brief Value-tag element-type form: `full(extents, v, dtype<T>{})` — deduces `T`
- *  from the tag instead of an explicit `<T>` template argument (overrides the value's
- *  own type, same as explicit `full<T>(e, v)`). */
+/** @brief Legacy forwarder for the one spelling the generic entry point above
+ *  cannot cover: a LEADING explicit template argument that means the BACKEND
+ *  rather than the element type, because a `dtype<T>{}` tag makes `T` deducible
+ *  from the call instead — `full<storage::pinned>(e, v, dtype<double>{})`. See
+ *  `empty()`'s twin (tensor.h) for the full explanation; the same partial-
+ *  ordering mechanism applies here. */
 template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class V, class T,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
 _TNY_API auto full(Shape e, V v, dtype<T>) { return full<T, O, Layout>(e, v); }
 template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class V, class T,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
 _TNY_HOST auto full(Shape e, V v, dtype<T>) { return full<T, O, Layout>(e, v); }
-/** @brief Composed value-tag form: `full(extents, v, dtype<T>{}, storage_c<O>{})` (or the
- *  reverse order) — both `T` and the backend by value. Always `_TNY_HOST`, matching the
- *  `storage_c`-only form. */
-template <class Layout = ccontiguous, class Shape, class V, class T, storage O>
-_TNY_HOST auto full(Shape e, V v, dtype<T>, storage_c<O>) { return full<T, O, Layout>(e, v); }
-template <class Layout = ccontiguous, class Shape, class V, class T, storage O>
-_TNY_HOST auto full(Shape e, V v, storage_c<O>, dtype<T>) { return full<T, O, Layout>(e, v); }
 
 /** @brief `zeros<T>(extents)` / `ones<T>(extents)` — a new tensor of 0s / 1s.
- *         `T` defaults to `float`. Same ownership deduction and backend selector
- *         as `full` (a device backend `static_assert`s — fill via
- *         `to<storage::gpu>(zeros<T>(shape))`); the annotation is split to match the
- *         `full` overload each routes to. */
-template <class T = float, storage O = storage_deduce, class Layout = ccontiguous, class Shape,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API  auto zeros(Shape e) { return full<T, O, Layout>(e, T(0)); }
-template <class T = float, storage O = storage_deduce, class Layout = ccontiguous, class Shape,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
-_TNY_HOST auto zeros(Shape e) { return full<T, O, Layout>(e, T(0)); }
-template <class T = float, class Layout = ccontiguous, class Shape, storage O>
-_TNY_HOST auto zeros(Shape e, storage_c<O>) { return zeros<T, O, Layout>(e); }
-/** @brief Value-tag element-type form: `zeros(extents, dtype<T>{})` — deduces `T`
- *  from the tag instead of an explicit `<T>` template argument. */
+ *         `T` defaults to `float`. Same ownership deduction, backend selector, and
+ *         `_TNY_API`/`_TNY_HOST` split as `full`; also composes `dtype`/`storage_c`/a
+ *         layout tag in ANY order/subset, same as `empty` (#280/#281):
+ *         `zeros(e, dtype<double>{})`, `zeros(e, fcontiguous{}, storage_c<storage::heap>{})`.
+ *         A device backend `static_assert`s — fill via `to<storage::gpu>(zeros<T>(shape))`. */
+template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+_TNY_API  auto zeros(Shape e, Tags... /*tags*/) {
+    using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
+    static_assert(ok::known<Tags...>(), "zeros(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
+    static_assert(ok::unique<Tags...>(), "zeros(): the same keyword was given twice");
+    using ET = dtype_arg_t<T, float, Tags...>;
+    using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
+    return full<ET, storage::stack, LO>(e, ET(0));
+}
+template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+_TNY_HOST auto zeros(Shape e, Tags... /*tags*/) {
+    using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
+    static_assert(ok::known<Tags...>(), "zeros(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
+    static_assert(ok::unique<Tags...>(), "zeros(): the same keyword was given twice");
+    using ET = dtype_arg_t<T, float, Tags...>;
+    constexpr storage R = storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+    using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
+    return full<ET, R, LO>(e, ET(0));
+}
+/** @brief Legacy forwarder — see `full()`'s twin above. */
 template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
 _TNY_API  auto zeros(Shape e, dtype<T>) { return zeros<T, O, Layout>(e); }
 template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
 _TNY_HOST auto zeros(Shape e, dtype<T>) { return zeros<T, O, Layout>(e); }
-/** @brief Composed value-tag form: `zeros(extents, dtype<T>{}, storage_c<O>{})` (or the
- *  reverse order) — both `T` and the backend by value. Always `_TNY_HOST`, matching the
- *  `storage_c`-only form. */
-template <class Layout = ccontiguous, class Shape, class T, storage O>
-_TNY_HOST auto zeros(Shape e, dtype<T>, storage_c<O>) { return zeros<T, O, Layout>(e); }
-template <class Layout = ccontiguous, class Shape, class T, storage O>
-_TNY_HOST auto zeros(Shape e, storage_c<O>, dtype<T>) { return zeros<T, O, Layout>(e); }
-template <class T = float, storage O = storage_deduce, class Layout = ccontiguous, class Shape,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API  auto ones(Shape e) { return full<T, O, Layout>(e, T(1)); }
-template <class T = float, storage O = storage_deduce, class Layout = ccontiguous, class Shape,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
-_TNY_HOST auto ones(Shape e) { return full<T, O, Layout>(e, T(1)); }
-template <class T = float, class Layout = ccontiguous, class Shape, storage O>
-_TNY_HOST auto ones(Shape e, storage_c<O>) { return ones<T, O, Layout>(e); }
-/** @brief Value-tag element-type form: `ones(extents, dtype<T>{})` — deduces `T`
- *  from the tag instead of an explicit `<T>` template argument. */
+
+template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+_TNY_API  auto ones(Shape e, Tags... /*tags*/) {
+    using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
+    static_assert(ok::known<Tags...>(), "ones(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
+    static_assert(ok::unique<Tags...>(), "ones(): the same keyword was given twice");
+    using ET = dtype_arg_t<T, float, Tags...>;
+    using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
+    return full<ET, storage::stack, LO>(e, ET(1));
+}
+template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+_TNY_HOST auto ones(Shape e, Tags... /*tags*/) {
+    using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
+    static_assert(ok::known<Tags...>(), "ones(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
+    static_assert(ok::unique<Tags...>(), "ones(): the same keyword was given twice");
+    using ET = dtype_arg_t<T, float, Tags...>;
+    constexpr storage R = storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+    using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
+    return full<ET, R, LO>(e, ET(1));
+}
+/** @brief Legacy forwarder — see `full()`'s twin above. */
 template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
 _TNY_API  auto ones(Shape e, dtype<T>) { return ones<T, O, Layout>(e); }
 template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
 _TNY_HOST auto ones(Shape e, dtype<T>) { return ones<T, O, Layout>(e); }
-/** @brief Composed value-tag form: `ones(extents, dtype<T>{}, storage_c<O>{})` (or the
- *  reverse order) — both `T` and the backend by value. Always `_TNY_HOST`, matching the
- *  `storage_c`-only form. */
-template <class Layout = ccontiguous, class Shape, class T, storage O>
-_TNY_HOST auto ones(Shape e, dtype<T>, storage_c<O>) { return ones<T, O, Layout>(e); }
-template <class Layout = ccontiguous, class Shape, class T, storage O>
-_TNY_HOST auto ones(Shape e, storage_c<O>, dtype<T>) { return ones<T, O, Layout>(e); }
 
 /** @brief `arange<T>(n)` — a 1-D tensor `[0, 1, ..., n-1]` (heap, host). `T`
  *         defaults to `int64_t` (an integer range, like numpy `arange(n)`). A
  *         host-accessible backend may be named — `arange<T, storage::pinned>(n)` or
  *         `arange<T>(n, storage_c<storage::pinned>{})`; a device backend `static_assert`s
- *         (use `to<storage::gpu>(arange<T>(n))`). The static-N forms below stay stack. */
-template <class T = cs::int64_t, storage O = storage_deduce>
-_TNY_HOST auto arange(long n) {
+ *         (use `to<storage::gpu>(arange<T>(n))`). The static-N forms below stay stack.
+ *         `T`/backend compose via the generic keyword mechanism too (#280/#281):
+ *         `arange(n, dtype<double>{}, storage_c<storage::pinned>{})`, either order. No
+ *         layout keyword — a 1-D tensor has no C/F distinction. */
+template <class T = void, storage O = storage_deduce, class... Tags>
+_TNY_HOST auto arange(long n, Tags... /*tags*/) {
+    using ok = _kw::accepts<_is_dtype, _is_storage_tag>;
+    static_assert(ok::known<Tags...>(), "arange(): unrecognised trailing argument — expected dtype<T>{} or storage_c<...>{}");
+    static_assert(ok::unique<Tags...>(), "arange(): the same keyword was given twice");
+    using ET = dtype_arg_t<T, cs::int64_t, Tags...>;
     using E = cs::dextents<cs::int64_t, 1>;
-    static_assert(storage_is_host_accessible(storage_resolve(O, false)),
+    constexpr storage R = storage_resolve(storage_arg<O, storage_deduce, Tags...>(), false);
+    static_assert(storage_is_host_accessible(R),
         "arange<..., storage::gpu>: a device fill needs a kernel launch; use to<storage::gpu>(arange<T>(n)).");
-    auto t = empty<T, O, ccontiguous>(E{n}); t.iota_(); return t;
+    auto t = empty<ET, R, ccontiguous>(E{n}); t.iota_(); return t;
 }
-/** @brief Value-tag backend form: `arange<T>(n, storage_c<storage::pinned>{})`. */
-template <class T = cs::int64_t, storage O>
-_TNY_HOST auto arange(long n, storage_c<O>) { return arange<T, O>(n); }
-/** @brief Value-tag element-type form: `arange(n, dtype<T>{})` — deduces `T` from
- *  the tag instead of an explicit `<T>` template argument. */
+/** @brief Legacy forwarder — see `full()`'s twin above (the analogous "leading
+ *  O when a dtype tag is present" spelling: `arange<storage::pinned>(n, dtype<double>{})`). */
 template <storage O = storage_deduce, class T>
 _TNY_HOST auto arange(long n, dtype<T>) { return arange<T, O>(n); }
-/** @brief Composed value-tag form: `arange(n, dtype<T>{}, storage_c<O>{})` (or the
- *  reverse order) — both `T` and the backend by value. */
-template <class T, storage O>
-_TNY_HOST auto arange(long n, dtype<T>, storage_c<O>) { return arange<T, O>(n); }
-template <class T, storage O>
-_TNY_HOST auto arange(long n, storage_c<O>, dtype<T>) { return arange<T, O>(n); }
 /** @brief Static `arange<T, N>()` — a stack `[0..N-1]` (host+device, folds). */
 template <class T = cs::int64_t, long N>
 _TNY_API auto arange() { tensor<T, cs::extents<cs::int64_t, static_cast<cs::size_t>(N)>, ccontiguous, storage::stack> t{}; t.iota_(); return t; }
