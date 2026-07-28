@@ -1242,6 +1242,19 @@ public:
     template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0> _TNY_API auto unsqueeze(I) const noexcept { return unsqueeze<static_cast<long>(I::value)>(); }
     template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && (_is_ic<I>::value && ...), int> = 0> _TNY_API auto permute(I...)       noexcept { return permute<static_cast<long>(I::value)...>(); }
     template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && (_is_ic<I>::value && ...), int> = 0> _TNY_API auto permute(I...) const noexcept { return permute<static_cast<long>(I::value)...>(); }
+
+    /** @brief Value form: `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise
+     *         `unsqueeze`/`permute`. `squeeze`/`unsqueeze`/`permute` are axis-LIST
+     *         ops (like `peel`/`take_along`/the reductions), so — unlike the
+     *         single-axis `Int<k>()` form above — they take the `axis<...>` tag: a
+     *         single distinct-typed argument, so no `.template` is needed on a
+     *         dependent receiver. */
+    template <long... Axes> _TNY_API auto squeeze(axis<Axes...>)       noexcept { return squeeze<Axes...>(); }
+    template <long... Axes> _TNY_API auto squeeze(axis<Axes...>) const noexcept { return squeeze<Axes...>(); }
+    template <long... Axes> _TNY_API auto unsqueeze(axis<Axes...>)       noexcept { return unsqueeze<Axes...>(); }
+    template <long... Axes> _TNY_API auto unsqueeze(axis<Axes...>) const noexcept { return unsqueeze<Axes...>(); }
+    template <long... Axes> _TNY_API auto permute(axis<Axes...>)       noexcept { return permute<Axes...>(); }
+    template <long... Axes> _TNY_API auto permute(axis<Axes...>) const noexcept { return permute<Axes...>(); }
     template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && (_is_ic<I>::value && ...), int> = 0> _TNY_API auto reshape(I...)       noexcept { return reshape<static_cast<long>(I::value)...>(); }
     template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && (_is_ic<I>::value && ...), int> = 0> _TNY_API auto reshape(I...) const noexcept { return reshape<static_cast<long>(I::value)...>(); }
     template <class NewE> _TNY_API auto recast(NewE)       { return recast<NewE>(); }

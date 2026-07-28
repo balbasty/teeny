@@ -197,5 +197,29 @@ int main()
     for (long i=0;i<3;++i) for (long j=0;j<4;++j)
         if (ds(i,j) != hw(i,j)) return 39;
 
+    // ---- axis<...> value form on squeeze / unsqueeze / permute (#243) --
+    auto pv  = t.permute(axis<2,0,1>{});                 // == t.permute<2,0,1>()
+    auto pv2 = t.permute<2,0,1>();
+    static_assert(cs::is_same<decltype(pv), decltype(pv2)>::value, "permute(axis<...>) == permute<...>() (same type)");
+    for (long i=0;i<4;++i) for (long j=0;j<2;++j) for (long k=0;k<3;++k)
+        if (pv(i,j,k) != pv2(i,j,k)) return 40;
+
+    auto unv  = hw.unsqueeze(axis<1,3>{});               // == hw.unsqueeze<1,3>()
+    auto unv2 = hw.unsqueeze<1,3>();
+    static_assert(cs::is_same<decltype(unv), decltype(unv2)>::value, "unsqueeze(axis<...>) == unsqueeze<...>() (same type)");
+    for (long i=0;i<3;++i) for (long j=0;j<4;++j)
+        if (unv(i,0,j,0) != unv2(i,0,j,0)) return 41;
+
+    auto sqv  = q4.squeeze(axis<0,2>{});                 // == q4.squeeze<0,2>()
+    auto sqv2 = q4.squeeze<0,2>();
+    static_assert(cs::is_same<decltype(sqv), decltype(sqv2)>::value, "squeeze(axis<...>) == squeeze<...>() (same type)");
+    for (long i=0;i<3;++i) for (long j=0;j<4;++j)
+        if (sqv(i,j) != sqv2(i,j)) return 42;
+
+    // single-axis axis<> form still works (arity, not a special case)
+    auto un1  = hw.unsqueeze(axis<0>{});
+    auto un1r = hw.unsqueeze<0>();
+    static_assert(cs::is_same<decltype(un1), decltype(un1r)>::value, "unsqueeze(axis<0>{}) == unsqueeze<0>() (same type)");
+
     return 0;
 }
