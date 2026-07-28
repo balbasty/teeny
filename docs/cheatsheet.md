@@ -33,9 +33,10 @@ gpu<T, E, L>  pinned<T, E, L>  mapped<T, E, L>  // CUDA memory (from <teeny/cuda
 
 ```cpp
 wrap(ptr, shape);  wrap<Layout>(ptr, shape);  // a view (C-order / chosen layout)
+wrap(ptr, shape, fcontiguous{});               // value-tag layout (deduced, no .template)
 wrap(ptr, shape, {s0, s1, ...});              // view with RUNTIME strides (dynamic_strides)
 wrap(ptr, shape, strides<S...>{});           // view with COMPILE-TIME strides (fold into type)
-as_tensor(any_mdspan);                        // wrap an mdspan/submdspan result
+as_tensor(any_mdspan);  wrap(any_mdspan);      // wrap an mdspan/submdspan result (same thing)
 
 make_view(ptr, shape);           // alias of wrap that deduces the extents type
 empty<T>(shape);                 // UNINITIALISED (np.empty); deduces stack (static) / heap (dynamic)
@@ -55,6 +56,8 @@ zeros<T, storage::pinned>(shape);  arange<T>(n, storage_c<storage::pinned>{});  
                     // host-accessible backend (stack/heap/pinned/mapped); a gpu fill
                     // static_asserts -> use to<storage::gpu>(zeros<T>(shape))
 zeros(shape, dtype<T>{});  full(shape, v, dtype<T>{});  arange(n, dtype<T>{});   // value-tag T (also ones)
+zeros(shape, fcontiguous{});  full(shape, v, fcontiguous{});   // value-tag LAYOUT (also empty/ones;
+                    //   not arange, always 1-D). Tidier than zeros<T,storage_deduce,fcontiguous>(shape)
 ```
 
 ---

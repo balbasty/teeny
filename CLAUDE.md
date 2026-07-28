@@ -135,11 +135,15 @@ owned<T,E,L>    // heap-owned (host, move-only)    e.g. owned<double, DynE>(DynE
 gpu/pinned/mapped<T,E,L>   // from cuda.h
 ```
 
-Factories: `wrap(ptr, extents)` / `wrap<Layout>(ptr, extents)`,
+Factories: `wrap(ptr, extents)` / `wrap<Layout>(ptr, extents)` / `wrap(ptr, extents,
+fcontiguous{})` (value-tag layout: same as `wrap<fcontiguous>`, deduced, no
+`.template`),
 `wrap(ptr, extents, {s...})` (runtime strides -> dynamic_strides),
 `wrap<S...>(ptr, extents, {dyn...})` (mixed static/runtime strides),
 `wrap(ptr, extents, strides<S...>{})` (compile-time strides),
-`as_tensor(any_mdspan)` (wrap a submdspan/mdspan result as a view). Every `wrap`
+`as_tensor(any_mdspan)` / `wrap(any_mdspan)` (wrap a submdspan/mdspan result as a
+view — same thing, `as_tensor` is what teeny's own view-producing ops call
+internally). Every `wrap`
 overload takes an optional trailing memory-space tag `storage_c<Space>{}` (or the
 no-braces `storage_v<Space>`), default `storage::view` (host). Pass the plain BACKEND the
 memory lives in — `wrap(dptr, e, storage_v<storage::gpu>)` wraps a **device** pointer,
@@ -285,6 +289,9 @@ auto z = zeros<T>(shape); ones<T>(sh); full(sh,v); arange<T>(n);  // creation. z
 zeros(sh, dtype<T>{}); full(sh,v,dtype<T>{}); arange(n, dtype<T>{});  // value-tag T (deduced,
                       //   no .template); backend stays a LEADING explicit template arg since T is
                       //   now deduced — zeros<storage::pinned>(sh, dtype<T>{}). Same for empty().
+zeros(sh, fcontiguous{}); full(sh,v,fcontiguous{});  // value-tag LAYOUT (also empty/ones): tidier
+                      //   than zeros<T,storage_deduce,fcontiguous>(sh); T/backend stay leading
+                      //   explicit template args — zeros<double,storage::heap>(sh, fcontiguous{}).
 
 // --- math (out-of-place -> NEW tensor; static shape -> stack, else heap/host) ---
 // result type = promote(A,B): C++ rules, but among floats the LOWER width wins

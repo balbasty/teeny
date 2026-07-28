@@ -43,11 +43,11 @@ Factories:
 | factory | makes |
 |---|---|
 | `wrap(ptr, shape)` | C-order view |
-| `wrap<fcontiguous>(ptr, shape)` | F-order view (the layout is a template argument) |
+| `wrap<fcontiguous>(ptr, shape)` / `wrap(ptr, shape, fcontiguous{})` | F-order view — template or value-tag spelling (the value form deduces the layout, no `.template` on a dependent receiver) |
 | `wrap(ptr, shape, strides<Sx,Sy,...>{})` | view with compile-time strides (may be negative) |
 | `wrap(ptr, shape, {s0,s1,...})` | view with runtime strides (`dynamic_strides`) |
 | `wrap<S...>(ptr, shape, {dyn...})` | mixed static/runtime strides (`dynamic_stride` slots) |
-| `as_tensor(any_mdspan)` | wrap a raw `mdspan`/`submdspan` result as a view |
+| `as_tensor(any_mdspan)` / `wrap(any_mdspan)` | wrap a raw `mdspan`/`submdspan` result as a view — both spellings, same result; `as_tensor` is what teeny's own view-producing ops (`permute`/`flip`/…) call internally |
 | `make_view(ptr, shape)` | an alias of `wrap` in the `make_*` family (same result) |
 
 `wrap` already deduces the shape type from its argument, so `make_view` is a plain
@@ -136,13 +136,15 @@ auto a = arange<long>(10);             // [0,1,…,9] (1-D heap)
 ```
 
 You can override the deduced ownership by naming a backend, and override the
-default `ccontiguous` layout with a layout template argument:
+default `ccontiguous` layout with a layout template argument — or the tidier
+value-tag spelling, `fcontiguous{}` as a plain argument:
 
 ```cpp
 auto h = make_heap<double>(shape<3,3>{});               // force HEAP for a static shape
 auto e = empty<double, storage::heap>(shape<3,3>{});    // same, via empty
 auto f = make_local<double, fcontiguous>(shape<3,3>{}); // stack, F-order (column-major)
 auto g = zeros<float, storage_deduce, fcontiguous>(shape<-1,4>{n});  // F-order zeros
+auto g2 = zeros(shape<-1,4>{n}, fcontiguous{});          // same, value-tag layout (no .template)
 ```
 
 ## Getting a view from an owning tensor
