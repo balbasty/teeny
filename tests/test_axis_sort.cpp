@@ -46,5 +46,31 @@ int main() {
     static_assert(cs::is_same<decltype(uv), decltype(ua)>::value, "");
     if (uv.shape(1)!=ua.shape(1) || uv.shape(3)!=ua.shape(3)) return 9;
 
+    // ---- 3+ axes, negative and positive MIXED, in scrambled order --------------
+    // (review request on #292: confirm this isn't just a happy-path 2-axis check)
+    auto c  = local<double, shape<2,3>>{};                 // rank 2 -> final rank 5
+    auto ur = c.unsqueeze<0,2,4>();                        // reference: ascending, all positive
+    static_assert(ur.rank() == 5, "");
+    if (ur.shape(0)!=1 || ur.shape(1)!=2 || ur.shape(2)!=1 || ur.shape(3)!=3 || ur.shape(4)!=1) return 10;
+    auto un3 = c.unsqueeze<-1,-5,-3>();                    // all-negative, scrambled (-1,-5,-3 -> 4,0,2)
+    static_assert(cs::is_same<decltype(un3), decltype(ur)>::value, "");
+    if (un3.shape(0)!=ur.shape(0) || un3.shape(1)!=ur.shape(1) || un3.shape(2)!=ur.shape(2) ||
+        un3.shape(3)!=ur.shape(3) || un3.shape(4)!=ur.shape(4))                                return 11;
+    auto um3 = c.unsqueeze<2,-1,0>();                      // mixed sign, scrambled (2,-1,0 -> 2,4,0)
+    static_assert(cs::is_same<decltype(um3), decltype(ur)>::value, "");
+    if (um3.shape(0)!=ur.shape(0) || um3.shape(1)!=ur.shape(1) || um3.shape(2)!=ur.shape(2) ||
+        um3.shape(3)!=ur.shape(3) || um3.shape(4)!=ur.shape(4))                                return 12;
+
+    auto d  = local<double, shape<1,2,1,3,1>>{};           // axes 0,2,4 are the size-1 ones
+    auto sr = d.squeeze<0,2,4>();                          // reference: ascending, all positive
+    static_assert(sr.rank() == 2, "");
+    if (sr.shape(0)!=2 || sr.shape(1)!=3) return 13;
+    auto sn3 = d.squeeze<-1,-5,-3>();                      // all-negative, scrambled (-1,-5,-3 -> 4,0,2)
+    static_assert(cs::is_same<decltype(sn3), decltype(sr)>::value, "");
+    if (sn3.shape(0)!=sr.shape(0) || sn3.shape(1)!=sr.shape(1)) return 14;
+    auto sm3 = d.squeeze<2,-1,0>();                        // mixed sign, scrambled (2,-1,0 -> 2,4,0)
+    static_assert(cs::is_same<decltype(sm3), decltype(sr)>::value, "");
+    if (sm3.shape(0)!=sr.shape(0) || sm3.shape(1)!=sr.shape(1)) return 15;
+
     return 0;
 }
