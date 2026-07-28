@@ -17,7 +17,11 @@ int main()
     auto C = A + B;
     static_assert(decltype(C)::ownership == storage::stack, "out-of-place result is stack-owned");
     static_assert(decltype(C)::is_static, "result extent statically known");
+    // Same CCCL layout_right EBO gap as test_tensor.cpp's stack_33 (#295): the
+    // sizeof-exact guarantee doesn't hold on real MSVC there either.
+#if !defined(_MSC_VER) || defined(__clang__)
     static_assert(sizeof(C) == 4*sizeof(double), "result stores exactly its data");
+#endif
     if (C(0,0)!=11 || C(0,1)!=22 || C(1,0)!=33 || C(1,1)!=44) return 1;
 
     if ((A - B)(0,0) != -9)  return 2;
