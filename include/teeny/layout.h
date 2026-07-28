@@ -14,6 +14,21 @@ _TNY_NAMESPACE_BEGIN(tny)
 
 namespace cs = cuda::std;
 
+// MSVC two-phase-lookup / private-inheritance workaround (#294, generalized by
+// #315): MSVC can mis-resolve, or misattribute to an unrelated type's private
+// EBO base, a qualified `E::rank()`/`E::static_extent(d)` call made directly
+// inside a class that has a private multi-inheritance EBO base (like
+// `strides<...>::mapping`, right below) -- or, per #315, even a call on a type
+// with NO such relationship at all, elsewhere in the same translation unit. A
+// namespace-scope function template has no enclosing class scope to conflict
+// with. Defined here (rather than tensor.h, which needs the exact same
+// helpers) because layout.h is the earliest-included header that needs them;
+// tensor.h/axis.h reuse this single definition instead of duplicating it.
+template <class E>
+_TNY_API constexpr cs::size_t _shape_rank() { return E::rank(); }
+template <class E>
+_TNY_API constexpr cs::size_t _shape_static_extent(cs::size_t d) { return E::static_extent(d); }
+
 /**
  * @brief Per-dimension dynamic-stride sentinel.
  *
@@ -89,7 +104,7 @@ struct strides {
         using rank_type    = typename Shape::rank_type;
         using layout_type  = strides;
         using _dyn         = _dyn_strides<index_type, strides::ndyn()>;
-        static_assert(N == Shape::rank(), "strides: one stride per dimension");
+        static_assert(N == _shape_rank<Shape>(), "strides: one stride per dimension");
 
         mapping() = default;
 
@@ -123,12 +138,12 @@ struct strides {
         _TNY_API constexpr index_type operator()(I... i) const noexcept {
             const index_type id[] = { static_cast<index_type>(i)... };
             index_type off = 0;
-            for (rank_type r = 0; r < Shape::rank(); ++r) off += id[r] * stride(r);
+            for (rank_type r = 0; r < _shape_rank<Shape>(); ++r) off += id[r] * stride(r);
             return off;
         }
         _TNY_API constexpr index_type required_span_size() const noexcept {
             index_type n = 1;
-            for (rank_type r = 0; r < Shape::rank(); ++r) {
+            for (rank_type r = 0; r < _shape_rank<Shape>(); ++r) {
                 if (extents().extent(r) == 0) return 0;
                 n += (static_cast<index_type>(extents().extent(r)) - 1) * stride(r);
             }
@@ -217,16 +232,16 @@ _TNY_API constexpr cs::int64_t _src_sstride() {
     if constexpr (_is_strides<L>::value) return _static_stride_at<Ax, L>::value;
     else if constexpr (cs::is_same<L, ccontiguous>::value) {
         cs::int64_t s = 1;
-        for (cs::size_t d = Ax + 1; d < E::rank(); ++d) {
-            if (E::static_extent(d) == cs::dynamic_extent) return dynamic_stride;
-            s *= static_cast<cs::int64_t>(E::static_extent(d));
+        for (cs::size_t d = Ax + 1; d < _shape_rank<E>(); ++d) {
+            if (_shape_static_extent<E>(d) == cs::dynamic_extent) return dynamic_stride;
+            s *= static_cast<cs::int64_t>(_shape_static_extent<E>(d));
         }
         return s;
     } else if constexpr (cs::is_same<L, fcontiguous>::value) {
         cs::int64_t s = 1;
         for (cs::size_t d = 0; d < Ax; ++d) {
-            if (E::static_extent(d) == cs::dynamic_extent) return dynamic_stride;
-            s *= static_cast<cs::int64_t>(E::static_extent(d));
+            if (_shape_static_extent<E>(d) == cs::dynamic_extent) return dynamic_stride;
+            s *= static_cast<cs::int64_t>(_shape_static_extent<E>(d));
         }
         return s;
     } else return dynamic_stride;

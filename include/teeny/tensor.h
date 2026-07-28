@@ -50,20 +50,12 @@ as_tensor(const MD & m);
 template <class Shape>
 _TNY_API constexpr bool _is_static_shape() { return Shape::rank_dynamic() == 0; }
 
-// Same MSVC quirk as `_is_static_shape` above, for `Shape::rank()`. Generic in
-// its own right (E is just a template parameter, not necessarily *this*
-// tensor's own Shape) -- so it's also the fix for #315: a call like
-// `NewE::rank()` inside `_recast`, where `NewE` is an UNRELATED type
-// parameter, still trips the same MSVC misattribution (it blames the
-// enclosing class's own private EBO base, even though NewE has no relation to
-// it) when spelled as a direct qualified call. Routed through here instead.
-template <class E>
-_TNY_API constexpr cs::size_t _shape_rank() { return E::rank(); }
-
-// Same MSVC quirk, for `Shape::static_extent(d)` (also generic over any
-// extents-like E, per `_shape_rank`'s comment above).
-template <class E>
-_TNY_API constexpr cs::size_t _shape_static_extent(cs::size_t d) { return E::static_extent(d); }
+// `_shape_rank<E>()`/`_shape_static_extent<E>(d)` (the same MSVC quirk as
+// `_is_static_shape` above, for `E::rank()`/`E::static_extent(d)`) live in
+// layout.h instead of here -- it needs them too (`strides<...>::mapping`'s own
+// body), and layout.h is included before this point, so tensor.h just reuses
+// that one definition (#315: also fixes `_recast`'s `NewE::rank()`, an
+// UNRELATED type parameter that trips the same misattribution).
 
 namespace _md {
 /* --- extents of an AXIS reduction: the input extents with `Axes...` dropped
