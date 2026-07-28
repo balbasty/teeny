@@ -81,9 +81,19 @@ using reduced_extents = decltype(reduced_ext_<E, Axes...>(cs::make_index_sequenc
  * given -- the bare, all-axes reduction) is never dynamic (a full reduction is
  * always a scalar, never allocates) -- that is the primary template below;
  * the partial specialization below handles a real (non-empty) axis list. */
+// Same MSVC two-phase-lookup quirk `_is_static_shape`/`_shape_rank` (above, in
+// the enclosing `tny` scope) work around for `tensor`'s own body: MSVC can
+// mis-resolve `reduced_extents<...>::rank_dynamic()` when it's evaluated
+// directly in a class TEMPLATE's static-member initializer rather than inside
+// an ordinary function body. Route it through a plain function template
+// (only instantiated when actually called, unlike a static member initializer)
+// so `_red_dyn`'s partial specialization below doesn't retrigger it.
+template <class E, long... Axes>
+_TNY_API constexpr cs::size_t _red_dyn_value() { return reduced_extents<E, Axes...>::rank_dynamic(); }
+
 template <class E, class AxisTag> struct _red_dyn { static constexpr cs::size_t value = 0; };
 template <class E, long A0, long... Rest> struct _red_dyn<E, axis<A0, Rest...>> {
-    static constexpr auto value = reduced_extents<E, A0, Rest...>::rank_dynamic();
+    static constexpr auto value = _red_dyn_value<E, A0, Rest...>();
 };
 }  // namespace _md
 
