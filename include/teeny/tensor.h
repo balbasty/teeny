@@ -1645,6 +1645,17 @@ template <class Layout = ccontiguous, class Shape, class T, storage O>
 _TNY_HOST auto empty(Shape e, dtype<T>, storage_c<O>) { return empty<T, O, Layout>(e); }
 template <class Layout = ccontiguous, class Shape, class T, storage O>
 _TNY_HOST auto empty(Shape e, storage_c<O>, dtype<T>) { return empty<T, O, Layout>(e); }
+/** @brief Value-tag layout form: `empty(extents, fcontiguous{})` — deduces the layout
+ *  from a bare `ccontiguous{}`/`fcontiguous{}` argument instead of an explicit
+ *  `<..., Layout>` template argument. `T`/`O` stay leading explicit template args. */
+template <class T = float, storage O = storage_deduce, class Shape, class Layout,
+          cs::enable_if_t<(cs::is_same<Layout, ccontiguous>::value || cs::is_same<Layout, fcontiguous>::value) &&
+                           storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+_TNY_API auto empty(Shape e, Layout) { return empty<T, O, Layout>(e); }
+template <class T = float, storage O = storage_deduce, class Shape, class Layout,
+          cs::enable_if_t<(cs::is_same<Layout, ccontiguous>::value || cs::is_same<Layout, fcontiguous>::value) &&
+                           storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+_TNY_HOST auto empty(Shape e, Layout) { return empty<T, O, Layout>(e); }
 
 /** @brief `make_local<T>(extents)` — a stack-owned tensor (static shape).
  *         `T` defaults to `float` (numpy's default float dtype). Thin spelling of
@@ -1714,6 +1725,19 @@ template <class Layout = ccontiguous, class Shape, class V, class T, storage O>
 _TNY_HOST auto full(Shape e, V v, dtype<T>, storage_c<O>) { return full<T, O, Layout>(e, v); }
 template <class Layout = ccontiguous, class Shape, class V, class T, storage O>
 _TNY_HOST auto full(Shape e, V v, storage_c<O>, dtype<T>) { return full<T, O, Layout>(e, v); }
+/** @brief Value-tag layout form: `full(extents, v, fcontiguous{})` — deduces the layout
+ *  from a bare `ccontiguous{}`/`fcontiguous{}` argument instead of an explicit template
+ *  argument. `T` (default: the value's type) / `O` stay leading explicit template args. */
+template <class T = void, storage O = storage_deduce, class Shape, class V, class Layout,
+          class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
+          cs::enable_if_t<(cs::is_same<Layout, ccontiguous>::value || cs::is_same<Layout, fcontiguous>::value) &&
+                           storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+_TNY_API auto full(Shape e, V v, Layout) { return full<ET, O, Layout>(e, v); }
+template <class T = void, storage O = storage_deduce, class Shape, class V, class Layout,
+          class ET = cs::conditional_t<cs::is_same<T, void>::value, V, T>,
+          cs::enable_if_t<(cs::is_same<Layout, ccontiguous>::value || cs::is_same<Layout, fcontiguous>::value) &&
+                           storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+_TNY_HOST auto full(Shape e, V v, Layout) { return full<ET, O, Layout>(e, v); }
 
 /** @brief `zeros<T>(extents)` / `ones<T>(extents)` — a new tensor of 0s / 1s.
  *         `T` defaults to `float`. Same ownership deduction and backend selector
@@ -1743,6 +1767,17 @@ template <class Layout = ccontiguous, class Shape, class T, storage O>
 _TNY_HOST auto zeros(Shape e, dtype<T>, storage_c<O>) { return zeros<T, O, Layout>(e); }
 template <class Layout = ccontiguous, class Shape, class T, storage O>
 _TNY_HOST auto zeros(Shape e, storage_c<O>, dtype<T>) { return zeros<T, O, Layout>(e); }
+/** @brief Value-tag layout form: `zeros(extents, fcontiguous{})` — deduces the layout
+ *  from a bare `ccontiguous{}`/`fcontiguous{}` argument instead of an explicit template
+ *  argument. `T`/`O` stay leading explicit template args. */
+template <class T = float, storage O = storage_deduce, class Shape, class Layout,
+          cs::enable_if_t<(cs::is_same<Layout, ccontiguous>::value || cs::is_same<Layout, fcontiguous>::value) &&
+                           storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+_TNY_API  auto zeros(Shape e, Layout) { return zeros<T, O, Layout>(e); }
+template <class T = float, storage O = storage_deduce, class Shape, class Layout,
+          cs::enable_if_t<(cs::is_same<Layout, ccontiguous>::value || cs::is_same<Layout, fcontiguous>::value) &&
+                           storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+_TNY_HOST auto zeros(Shape e, Layout) { return zeros<T, O, Layout>(e); }
 template <class T = float, storage O = storage_deduce, class Layout = ccontiguous, class Shape,
           cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
 _TNY_API  auto ones(Shape e) { return full<T, O, Layout>(e, T(1)); }
@@ -1766,6 +1801,17 @@ template <class Layout = ccontiguous, class Shape, class T, storage O>
 _TNY_HOST auto ones(Shape e, dtype<T>, storage_c<O>) { return ones<T, O, Layout>(e); }
 template <class Layout = ccontiguous, class Shape, class T, storage O>
 _TNY_HOST auto ones(Shape e, storage_c<O>, dtype<T>) { return ones<T, O, Layout>(e); }
+/** @brief Value-tag layout form: `ones(extents, fcontiguous{})` — deduces the layout
+ *  from a bare `ccontiguous{}`/`fcontiguous{}` argument instead of an explicit template
+ *  argument. `T`/`O` stay leading explicit template args. */
+template <class T = float, storage O = storage_deduce, class Shape, class Layout,
+          cs::enable_if_t<(cs::is_same<Layout, ccontiguous>::value || cs::is_same<Layout, fcontiguous>::value) &&
+                           storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+_TNY_API  auto ones(Shape e, Layout) { return ones<T, O, Layout>(e); }
+template <class T = float, storage O = storage_deduce, class Shape, class Layout,
+          cs::enable_if_t<(cs::is_same<Layout, ccontiguous>::value || cs::is_same<Layout, fcontiguous>::value) &&
+                           storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+_TNY_HOST auto ones(Shape e, Layout) { return ones<T, O, Layout>(e); }
 
 /** @brief `arange<T>(n)` — a 1-D tensor `[0, 1, ..., n-1]` (heap, host). `T`
  *         defaults to `int64_t` (an integer range, like numpy `arange(n)`). A

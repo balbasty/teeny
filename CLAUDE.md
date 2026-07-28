@@ -288,6 +288,9 @@ zeros(sh, dtype<T>{}); full(sh,v,dtype<T>{}); arange(n, dtype<T>{});  // value-t
 zeros(sh, dtype<T>{}, storage_c<storage::pinned>{});  // ...or compose BOTH value tags, either
                       //   order (zeros(sh, storage_c<...>{}, dtype<T>{}) too) — no explicit
                       //   template argument at all. Same for empty/ones/full/arange.
+zeros(sh, fcontiguous{}); full(sh,v,fcontiguous{});  // value-tag LAYOUT (also empty/ones): tidier
+                      //   than zeros<T,storage_deduce,fcontiguous>(sh); T/backend stay leading
+                      //   explicit template args — zeros<double,storage::heap>(sh, fcontiguous{}).
 
 // --- math (out-of-place -> NEW tensor; static shape -> stack, else heap/host) ---
 // result type = promote(A,B): C++ rules, but among floats the LOWER width wins

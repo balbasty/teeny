@@ -136,13 +136,15 @@ auto a = arange<long>(10);             // [0,1,…,9] (1-D heap)
 ```
 
 You can override the deduced ownership by naming a backend, and override the
-default `ccontiguous` layout with a layout template argument:
+default `ccontiguous` layout with a layout template argument — or the tidier
+value-tag spelling, `fcontiguous{}` as a plain argument:
 
 ```cpp
 auto h = make_heap<double>(shape<3,3>{});               // force HEAP for a static shape
 auto e = empty<double, storage::heap>(shape<3,3>{});    // same, via empty
 auto f = make_local<double, fcontiguous>(shape<3,3>{}); // stack, F-order (column-major)
 auto g = zeros<float, storage_deduce, fcontiguous>(shape<-1,4>{n});  // F-order zeros
+auto g2 = zeros(shape<-1,4>{n}, fcontiguous{});          // same, value-tag layout (no .template)
 ```
 
 ## Getting a view from an owning tensor

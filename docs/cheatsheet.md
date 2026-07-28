@@ -57,6 +57,8 @@ zeros<T, storage::pinned>(shape);  arange<T>(n, storage_c<storage::pinned>{});  
 zeros(shape, dtype<T>{});  full(shape, v, dtype<T>{});  arange(n, dtype<T>{});   // value-tag T (also ones)
 zeros(shape, dtype<T>{}, storage_c<S>{});  // ...or compose BOTH tags, either order (also
                     //   storage_c<S>{}, dtype<T>{}) — no explicit template arg at all (also empty/ones/full)
+zeros(shape, fcontiguous{});  full(shape, v, fcontiguous{});   // value-tag LAYOUT (also empty/ones;
+                    //   not arange, always 1-D). Tidier than zeros<T,storage_deduce,fcontiguous>(shape)
 ```
 
 ---
