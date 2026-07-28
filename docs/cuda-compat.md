@@ -104,7 +104,7 @@ the practical minimums:
 | **g++** | 7 (first C++17) | tested on 11–14 |
 | **clang++** | 9 | tested on 18 |
 | **AppleClang** (macOS) | 9 | tested on `macos-latest` |
-| **MSVC** (Windows) | 2019 (v19.20) | tested on `windows-latest`, currently failing — [#268](https://github.com/balbasty/teeny/issues/268) |
+| **MSVC** (Windows) | 2019 (v19.20) | tested on `windows-latest`, currently failing — [#295](https://github.com/balbasty/teeny/issues/295)/[#296](https://github.com/balbasty/teeny/issues/296) |
 
 For a **CUDA device build**, the host compiler must also be one your `nvcc`
 supports — each CUDA release caps the host g++/clang/MSVC version (e.g. CUDA 12.6
@@ -113,10 +113,14 @@ the exact per-toolkit host-compiler ranges.
 
 Linux, macOS, and Windows are all exercised in CI: Linux via `make` (g++/clang++),
 macOS and Windows via the CMake + CTest build (each `tests/test_*.cpp` is a CTest
-target). MSVC currently fails to compile teeny at all (a compiler-specific defect
-in `operator()`'s overload resolution, [#268](https://github.com/balbasty/teeny/issues/268))
-— the Windows CI job is `continue-on-error` until that's fixed, so only Linux and
-macOS are proven-portable today.
+target). MSVC used to fail to compile teeny at all (a compiler-specific defect in
+`operator()`'s overload resolution, [#268](https://github.com/balbasty/teeny/issues/268),
+fixed). Fixing it let compilation get far enough to uncover further pre-existing,
+independent MSVC-only defects that #268 had been masking — empty-base-optimization
+not applying ([#295](https://github.com/balbasty/teeny/issues/295)) and some
+axis-reduction overloads failing to resolve ([#296](https://github.com/balbasty/teeny/issues/296)).
+The Windows CI job stays `continue-on-error` until those are fixed too, so only
+Linux and macOS are proven-portable today.
 
 ## Choosing a toolkit for your target hardware
 
