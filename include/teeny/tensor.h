@@ -1527,10 +1527,19 @@ _TNY_API bool index_fits(const tensor<T,E,L,O> & t) { return t.template index_fi
  *         for page-locked host memory). Since `wrap` always yields a VIEW, the space
  *         folds to its view kind (`gpu -> gpu_view`, …) via `storage_view_of` — you
  *         never spell the `_view` kinds. Symmetric with `as_anyrank<Space>` /
- *         `from_dlpack<T,Space>`. */
-template <class Layout = ccontiguous, storage Space = storage::view, class T, class Shape>
-_TNY_API tensor<T, Shape, Layout, storage_view_of(Space)> wrap(T * p, Shape e, storage_c<Space> = {}) {
-    using Tn = tensor<T, Shape, Layout, storage_view_of(Space)>;
+ *         `from_dlpack<T,Space>`.
+ *
+ *         The trailing argument is a keyword-tag bag (#277/#282), not a fixed
+ *         `storage_c<Space>` parameter — today the only recognised keyword is
+ *         `storage_c`/`storage_v`, but a future keyword (e.g. a `stream` tag) lands
+ *         on all four `wrap` positional forms without touching any of them again. */
+template <class Layout = ccontiguous, storage Space = storage_deduce, class T, class Shape, class... Tags>
+_TNY_API auto wrap(T * p, Shape e, Tags... /*tags*/) {
+    using ok = _kw::accepts<_is_storage_tag>;
+    static_assert(ok::known<Tags...>(), "wrap(): unrecognised trailing argument — expected storage_c<...>{}/storage_v<...>");
+    static_assert(ok::unique<Tags...>(), "wrap(): the same keyword was given twice");
+    constexpr storage R = storage_arg<Space, storage::view, Tags...>();
+    using Tn = tensor<T, Shape, Layout, storage_view_of(R)>;
     return Tn(p, typename Tn::mapping_type(e));
 }
 
@@ -1540,10 +1549,14 @@ _TNY_API tensor<T, Shape, Layout, storage_view_of(Space)> wrap(T * p, Shape e, s
  *  `.template`. Composes with a trailing `storage_c<Space>{}` exactly like the template
  *  form. (`strides<S...>{}` keeps its own dedicated overload above — it carries the
  *  static strides themselves, not just a layout kind, so it is not a `Layout` here.) */
-template <class Layout, storage Space = storage::view, class T, class Shape,
+template <class Layout, storage Space = storage_deduce, class T, class Shape, class... Tags,
           cs::enable_if_t<cs::is_same<Layout, ccontiguous>::value || cs::is_same<Layout, fcontiguous>::value, int> = 0>
-_TNY_API tensor<T, Shape, Layout, storage_view_of(Space)> wrap(T * p, Shape e, Layout, storage_c<Space> = {}) {
-    using Tn = tensor<T, Shape, Layout, storage_view_of(Space)>;
+_TNY_API auto wrap(T * p, Shape e, Layout, Tags... /*tags*/) {
+    using ok = _kw::accepts<_is_storage_tag>;
+    static_assert(ok::known<Tags...>(), "wrap(): unrecognised trailing argument — expected storage_c<...>{}/storage_v<...>");
+    static_assert(ok::unique<Tags...>(), "wrap(): the same keyword was given twice");
+    constexpr storage R = storage_arg<Space, storage::view, Tags...>();
+    using Tn = tensor<T, Shape, Layout, storage_view_of(R)>;
     return Tn(p, typename Tn::mapping_type(e));
 }
 
@@ -1572,10 +1585,13 @@ _TNY_API auto wrap(const MD & md) { return as_tensor<OW>(md); }
  *         applies the update to the same element repeatedly — a host-debug check
  *         rejects an in-place write whose destination has an `extent > 1` axis with
  *         stride 0. `clone()` to a dense tensor first if you need to write. */
-template <storage Space = storage::view, class T, class Shape>
-_TNY_API tensor<T, Shape, cs::layout_stride, storage_view_of(Space)>
-wrap(T * p, Shape e, cs::array<typename Shape::index_type, Shape::rank()> st, storage_c<Space> = {}) {
-    using Tn = tensor<T, Shape, cs::layout_stride, storage_view_of(Space)>;
+template <storage Space = storage_deduce, class T, class Shape, class... Tags>
+_TNY_API auto wrap(T * p, Shape e, cs::array<typename Shape::index_type, Shape::rank()> st, Tags... /*tags*/) {
+    using ok = _kw::accepts<_is_storage_tag>;
+    static_assert(ok::known<Tags...>(), "wrap(): unrecognised trailing argument — expected storage_c<...>{}/storage_v<...>");
+    static_assert(ok::unique<Tags...>(), "wrap(): the same keyword was given twice");
+    constexpr storage R = storage_arg<Space, storage::view, Tags...>();
+    using Tn = tensor<T, Shape, cs::layout_stride, storage_view_of(R)>;
     return Tn(p, typename Tn::mapping_type(e, st));
 }
 
@@ -1587,14 +1603,17 @@ wrap(T * p, Shape e, cs::array<typename Shape::index_type, Shape::rank()> st, st
  *         cannot carry runtime strides. For a **mix** of static and runtime
  *         strides, use the template form below; for all-runtime strides the
  *         `{s...}` overload above (a `layout_stride` view) is simplest. */
-template <cs::int64_t... Strides, storage Space = storage::view, class T, class Shape>
-_TNY_API tensor<T, Shape, strides<Strides...>, storage_view_of(Space)>
-wrap(T * p, Shape e, strides<Strides...>, storage_c<Space> = {}) {
+template <cs::int64_t... Strides, storage Space = storage_deduce, class T, class Shape, class... Tags>
+_TNY_API auto wrap(T * p, Shape e, strides<Strides...>, Tags... /*tags*/) {
     static_assert(strides<Strides...>::all_static(),
         "wrap(ptr, shape, strides<...>{}): a strides<> tag carries only COMPILE-TIME "
         "strides; for mixed strides use wrap<S...>(ptr, shape, {runtime slots}), or "
         "for all-runtime strides pass the values as `{s0, s1, ...}`");
-    using Tn = tensor<T, Shape, strides<Strides...>, storage_view_of(Space)>;
+    using ok = _kw::accepts<_is_storage_tag>;
+    static_assert(ok::known<Tags...>(), "wrap(): unrecognised trailing argument — expected storage_c<...>{}/storage_v<...>");
+    static_assert(ok::unique<Tags...>(), "wrap(): the same keyword was given twice");
+    constexpr storage R = storage_arg<Space, storage::view, Tags...>();
+    using Tn = tensor<T, Shape, strides<Strides...>, storage_view_of(R)>;
     return Tn(p, typename Tn::mapping_type(e));
 }
 
@@ -1610,10 +1629,13 @@ wrap(T * p, Shape e, strides<Strides...>, storage_c<Space> = {}) {
  *         The static slots fold into the type; only the runtime ones are stored.
  *         A trailing `storage_c<Space>{}` tags the memory space (default host; the plain
  *         backend folds to its view kind, e.g. `storage::gpu -> gpu_view`). */
-template <cs::int64_t S0, cs::int64_t... Srest, storage Space = storage::view, class T, class Shape>   // S0 forces explicit <...>
-_TNY_API tensor<T, Shape, strides<S0, Srest...>, storage_view_of(Space)>
-wrap(T * p, Shape e, cs::array<typename Shape::index_type, strides<S0, Srest...>::ndyn()> dyn, storage_c<Space> = {}) {
-    using Tn = tensor<T, Shape, strides<S0, Srest...>, storage_view_of(Space)>;
+template <cs::int64_t S0, cs::int64_t... Srest, storage Space = storage_deduce, class T, class Shape, class... Tags>   // S0 forces explicit <...>
+_TNY_API auto wrap(T * p, Shape e, cs::array<typename Shape::index_type, strides<S0, Srest...>::ndyn()> dyn, Tags... /*tags*/) {
+    using ok = _kw::accepts<_is_storage_tag>;
+    static_assert(ok::known<Tags...>(), "wrap(): unrecognised trailing argument — expected storage_c<...>{}/storage_v<...>");
+    static_assert(ok::unique<Tags...>(), "wrap(): the same keyword was given twice");
+    constexpr storage R = storage_arg<Space, storage::view, Tags...>();
+    using Tn = tensor<T, Shape, strides<S0, Srest...>, storage_view_of(R)>;
     return Tn(p, typename Tn::mapping_type(e, dyn));
 }
 
@@ -1642,9 +1664,10 @@ using owned = tensor<T, Shape, Layout, storage::heap>;
  * type is deduced, so a runtime-built shape needs no `decltype` spelling.       */
 
 /** @brief `make_view<L>(ptr, extents)` — a non-owning view (alias of `wrap`).
- *         Takes the same optional trailing `storage_c<Space>{}` memory-space tag. */
-template <class Layout = ccontiguous, storage Space = storage::view, class T, class Shape>
-_TNY_API auto make_view(T * p, Shape e, storage_c<Space> tag = {}) { return wrap<Layout>(p, e, tag); }
+ *         Takes the same optional trailing keyword-tag bag as `wrap` (#282) —
+ *         today just `storage_c<Space>{}`/`storage_v<Space>`. */
+template <class Layout = ccontiguous, storage Space = storage_deduce, class T, class Shape, class... Tags>
+_TNY_API auto make_view(T * p, Shape e, Tags... tags) { return wrap<Layout, Space>(p, e, tags...); }
 
 /** @brief `empty<T>(extents)` — a new UNINITIALISED tensor. The one factory the
  *  `make_*` family fuses into: ownership is **deduced** from the shape (fully
@@ -1702,14 +1725,16 @@ _TNY_HOST auto empty(Shape e, dtype<T>) { return empty<T, O, Layout>(e); }
 
 /** @brief `make_local<T>(extents)` — a stack-owned tensor (static shape).
  *         `T` defaults to `float` (numpy's default float dtype). Thin spelling of
- *         `empty<T, storage::stack>`. */
-template <class T = float, class Layout = ccontiguous, class Shape>
-_TNY_API auto make_local(Shape = Shape{}) { return empty<T, storage::stack, Layout>(Shape{}); }
+ *         `empty<T, storage::stack>`. Takes the same trailing `dtype`/layout
+ *         keyword-tag bag as `empty` (#282; no `storage_c` — the backend is fixed). */
+template <class T = void, class Layout = void, class Shape, class... Tags>
+_TNY_API auto make_local(Shape e = Shape{}, Tags... tags) { return empty<T, storage::stack, Layout>(e, tags...); }
 
 /** @brief `make_heap<T>(extents)` — a heap-owned tensor (host, move-only).
- *         `T` defaults to `float`. Thin spelling of `empty<T, storage::heap>`. */
-template <class T = float, class Layout = ccontiguous, class Shape>
-_TNY_HOST auto make_heap(Shape e) { return empty<T, storage::heap, Layout>(e); }
+ *         `T` defaults to `float`. Thin spelling of `empty<T, storage::heap>`. Takes
+ *         the same trailing `dtype`/layout keyword-tag bag as `empty` (#282). */
+template <class T = void, class Layout = void, class Shape, class... Tags>
+_TNY_HOST auto make_heap(Shape e, Tags... tags) { return empty<T, storage::heap, Layout>(e, tags...); }
 
 /* --- numpy-style creation factories: static shape -> stack (host+device),   *
  *     dynamic shape -> heap (host only), mirroring the out-of-place ops.       */

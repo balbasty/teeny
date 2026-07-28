@@ -90,6 +90,7 @@ stack (host+device), dynamic shape → heap (host only):
 | `make_local<T>(shape)` | `local<T,E>` | `T` (=`float`); = `empty<T,storage::stack>` |
 | `make_heap<T>(shape)` | `owned<T,E>` | `T` (=`float`); = `empty<T,storage::heap>` |
 | `make_gpu<T>(shape)` / `make_pinned<T>` / `make_mapped<T>` | CUDA owner | `T` (=`float`); = `empty<T,storage::gpu/…>` |
+| `make_local`/`make_heap`/`make_gpu`/`make_pinned`/`make_mapped(shape, dtype<T>{}/layout tag)` | same, T/layout as given | `make_*` also forwards a trailing `dtype`/layout tag bag to `empty` (#282) — `make_heap(shape, dtype<double>{}, fcontiguous{})` |
 | `zeros<T>(shape)` / `ones<T>(shape)` | stack or heap | `T` (=`float`) |
 | `full(shape, v)` | stack or heap | **the value's type** (`full<T>(…)` to force) |
 | `arange<T>(n)` | `owned<T, shape<-1>>` | `T` (=`int64_t`); 1-D `[0,n)` |
@@ -97,7 +98,7 @@ stack (host+device), dynamic shape → heap (host only):
 | `zeros<T, storage::S>(shape)` (also `ones`/`full`/`arange`) | owner in space `S` | host-accessible backend (`stack`/`heap`/`pinned`/`mapped`); `storage::gpu` `static_assert`s → `to<storage::gpu>(zeros<T>(shape))`. Value-tag: `zeros<T>(shape, storage_c<storage::S>{})` |
 | `empty(shape, dtype<T>{})` (also `zeros`/`ones`/`full`/`arange`) | same as `<T>` | value-tag element-type form — deduces `T` from the tag instead of an explicit `<T>` template argument, so a type-dependent receiver needs no `.template`. A backend override stays a *leading* explicit template arg since `T` is now deduced: `empty<storage::gpu>(shape, dtype<T>{})` |
 | `empty(shape, dtype<T>{}, storage_c<S>{})` / `empty(shape, storage_c<S>{}, dtype<T>{})` (also `zeros`/`ones`/`full`/`arange`) | same as `<T,S>` | **both** value tags at once, either order — no explicit template argument needed at all |
-| `empty(shape, ccontiguous{}/fcontiguous{})`, composed with `dtype<T>{}`/`storage_c<S>{}` in ANY order/subset (also `zeros`/`ones`/`full`/`arange`, except `arange` has no layout) | same, layout as given | the generic keyword mechanism (#277-#281): a bare layout tag, alone or alongside `dtype`/`storage_c` in any order — `empty(shape, fcontiguous{}, dtype<double>{})`, `zeros(shape, storage_c<storage::heap>{}, fcontiguous{}, dtype<double>{})`, `arange(n, storage_c<storage::pinned>{}, dtype<double>{})`. Not yet extended to `wrap`/`make_*` (#282) |
+| `empty(shape, ccontiguous{}/fcontiguous{})`, composed with `dtype<T>{}`/`storage_c<S>{}` in ANY order/subset (also `zeros`/`ones`/`full`/`arange`, except `arange` has no layout) | same, layout as given | the generic keyword mechanism (#277-#281): a bare layout tag, alone or alongside `dtype`/`storage_c` in any order — `empty(shape, fcontiguous{}, dtype<double>{})`, `zeros(shape, storage_c<storage::heap>{}, fcontiguous{}, dtype<double>{})`, `arange(n, storage_c<storage::pinned>{}, dtype<double>{})`. `wrap` (#282) is on the same mechanism for its `storage_c` tag, but has no `dtype` keyword (`T` is deduced from the pointer) and keeps `Layout` as a distinct positional slot (a 3rd-argument value tag or template arg), not a composable keyword |
 
 ---
 

@@ -88,12 +88,12 @@ using mapped = tensor<T, Shape, Layout, storage::mapped>;
 /* --- functional factories (deduce the Shape type from the argument; `T` defaults
  *     to `float`, like the host factories). Thin spellings of the unified
  *     `empty<T, storage::gpu/pinned/mapped>` factory (tensor.h). --- */
-template <class T = float, class Layout = ccontiguous, class Shape>
-_TNY_HOST auto make_gpu(Shape e)    { return empty<T, storage::gpu,    Layout>(e); }
-template <class T = float, class Layout = ccontiguous, class Shape>
-_TNY_HOST auto make_pinned(Shape e) { return empty<T, storage::pinned, Layout>(e); }
-template <class T = float, class Layout = ccontiguous, class Shape>
-_TNY_HOST auto make_mapped(Shape e) { return empty<T, storage::mapped, Layout>(e); }
+template <class T = void, class Layout = void, class Shape, class... Tags>
+_TNY_HOST auto make_gpu(Shape e, Tags... tags)    { return empty<T, storage::gpu,    Layout>(e, tags...); }
+template <class T = void, class Layout = void, class Shape, class... Tags>
+_TNY_HOST auto make_pinned(Shape e, Tags... tags) { return empty<T, storage::pinned, Layout>(e, tags...); }
+template <class T = void, class Layout = void, class Shape, class... Tags>
+_TNY_HOST auto make_mapped(Shape e, Tags... tags) { return empty<T, storage::mapped, Layout>(e, tags...); }
 
 /* ------------------------------------------------------------------ *
  *     Memory-backend `to` — the CUDA half of pytorch's `.to`         *
