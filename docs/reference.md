@@ -54,7 +54,7 @@ Wrap existing memory (→ view):
 | Call | Returns | Notes |
 |---|---|---|
 | `wrap(ptr, shape)` | `view<T,E>` | C-order (`ccontiguous`) |
-| `wrap<Layout>(ptr, shape)` | `view<T,E,Layout>` | chosen layout |
+| `wrap<Layout>(ptr, shape)` / `wrap(ptr, shape, Layout{})` | `view<T,E,Layout>` | chosen layout — template arg, or the value-tag spelling (`ccontiguous{}`/`fcontiguous{}`, deduced, no `.template`) |
 | `wrap(ptr, shape, {s0,s1,…})` | `view<T,E,dynamic_strides>` | **runtime** strides (elements; may be negative). A **stride-0** axis self-overlaps — fine to read (broadcast), but an in-place write is a host-debug error (`clone()` first) |
 | `wrap<S...>(ptr, shape, {dyn…})` | `view<T,E,strides<S...>>` | **mixed** static/runtime strides (`dynamic_stride` slots) |
 | `wrap(ptr, shape, strides<S...>{})` | `view<T,E,strides<S...>>` | **compile-time** strides (fold into the type) |

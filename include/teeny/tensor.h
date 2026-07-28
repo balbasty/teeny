@@ -1514,6 +1514,19 @@ _TNY_API tensor<T, Shape, Layout, storage_view_of(Space)> wrap(T * p, Shape e, s
     return Tn(p, typename Tn::mapping_type(e));
 }
 
+/** @brief Value-tag layout form: `wrap(p, e, fcontiguous{})` == `wrap<fcontiguous>(p, e)` —
+ *  deduces the layout from a bare `ccontiguous{}`/`fcontiguous{}` argument instead of an
+ *  explicit `<Layout>` template argument, so a type-dependent receiver needs no
+ *  `.template`. Composes with a trailing `storage_c<Space>{}` exactly like the template
+ *  form. (`strides<S...>{}` keeps its own dedicated overload above — it carries the
+ *  static strides themselves, not just a layout kind, so it is not a `Layout` here.) */
+template <class Layout, storage Space = storage::view, class T, class Shape,
+          cs::enable_if_t<cs::is_same<Layout, ccontiguous>::value || cs::is_same<Layout, fcontiguous>::value, int> = 0>
+_TNY_API tensor<T, Shape, Layout, storage_view_of(Space)> wrap(T * p, Shape e, Layout, storage_c<Space> = {}) {
+    using Tn = tensor<T, Shape, Layout, storage_view_of(Space)>;
+    return Tn(p, typename Tn::mapping_type(e));
+}
+
 /** @brief Wrap `p` as a non-owning view with explicit **runtime strides** (a
  *         `layout_stride` view). Pass one stride per dimension — an `array` or a
  *         braced list — in ELEMENTS; strides may be negative (a reversed view).

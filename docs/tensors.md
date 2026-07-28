@@ -43,7 +43,7 @@ Factories:
 | factory | makes |
 |---|---|
 | `wrap(ptr, shape)` | C-order view |
-| `wrap<fcontiguous>(ptr, shape)` | F-order view (the layout is a template argument) |
+| `wrap<fcontiguous>(ptr, shape)` / `wrap(ptr, shape, fcontiguous{})` | F-order view — template or value-tag spelling (the value form deduces the layout, no `.template` on a dependent receiver) |
 | `wrap(ptr, shape, strides<Sx,Sy,...>{})` | view with compile-time strides (may be negative) |
 | `wrap(ptr, shape, {s0,s1,...})` | view with runtime strides (`dynamic_strides`) |
 | `wrap<S...>(ptr, shape, {dyn...})` | mixed static/runtime strides (`dynamic_stride` slots) |
