@@ -10,7 +10,7 @@ using cs::extents;
 
 int main() {
     // ---- compound assignment: scalar rhs ------------------------------
-    auto a = local<double, extents<long,2,3>>(); a.fill_(1.0);
+    auto a = local<double, shape<2,3>>(); a.fill_(1.0);
     a += 2.0;                       // 3
     a *= 2.0;                       // 6
     a -= 1.0;                       // 5
@@ -18,12 +18,12 @@ int main() {
     for (long i=0;i<2;++i) for (long j=0;j<3;++j) if (a(i,j) != 1.0) return 1;
 
     // ---- compound assignment: tensor rhs (broadcasts) -----------------
-    auto col = local<double, extents<long,2,1>>(); col(0,0)=10; col(1,0)=20;
+    auto col = local<double, shape<2,1>>(); col(0,0)=10; col(1,0)=20;
     a += col;                       // row 0 -> 11, row 1 -> 21
     for (long j=0;j<3;++j) if (a(0,j)!=11.0 || a(1,j)!=21.0) return 2;
 
     // ---- scalar on the left: + * commute, - / reversed ----------------
-    auto b = local<double, extents<long,3>>(); b(0)=1; b(1)=2; b(2)=4;
+    auto b = local<double, shape<3>>(); b(0)=1; b(1)=2; b(2)=4;
     auto sub = 10.0 - b;            // 9,8,6
     if (sub(0)!=9.0 || sub(1)!=8.0 || sub(2)!=6.0) return 3;
     auto dvd = 8.0 / b;             // 8,4,2
@@ -32,7 +32,7 @@ int main() {
     if (neg(0)!=-1.0 || neg(2)!=-4.0) return 5;
 
     // ---- rank-0 <-> scalar interop ------------------------------------
-    auto m = local<double, extents<long,2,3>>(); m.iota_(0.0, 1.0);   // 0..5
+    auto m = local<double, shape<2,3>>(); m.iota_(0.0, 1.0);   // 0..5
     double v = m.at(1, 2);          // implicit rank-0 -> double
     if (v != 5.0) return 6;
     m.at(0, 0) = 42.0;              // assign through the rank-0 view
@@ -40,42 +40,42 @@ int main() {
     if (m.at(1,1).item() != 4.0) return 8;
 
     // ---- Atomic flag on the host == plain accumulate ------------------
-    auto acc = local<double, extents<long,4>>(); acc.zero_();
+    auto acc = local<double, shape<4>>(); acc.zero_();
     acc.at(2).add_<true>(1.5);
     acc.at(2).add_<true>(2.5);      // 4.0
     acc.at(3).add_<true>(9.0);      // scatter into one cell (atomic on device)
     if (acc(2) != 4.0 || acc(3) != 9.0) return 9;
 
     // atomic add_ over a whole view (region scatter), host path
-    auto reg = local<double, extents<long,3>>(); reg.fill_(1.0);
-    auto one = local<double, extents<long,3>>(); one.fill_(2.0);
+    auto reg = local<double, shape<3>>(); reg.fill_(1.0);
+    auto one = local<double, shape<3>>(); one.fill_(2.0);
     reg.add_<true>(one);            // 3,3,3
     if (reg(0)!=3.0 || reg(2)!=3.0) return 10;
 
     // ---- rounding / sign / clamp (in-place and free) ------------------
-    auto g = local<double, extents<long,4>>(); g(0)=-1.7; g(1)=2.3; g(2)=0.0; g(3)=3.5;
+    auto g = local<double, shape<4>>(); g(0)=-1.7; g(1)=2.3; g(2)=0.0; g(3)=3.5;
     auto fl = floor(g); if (fl(0)!=-2.0 || fl(1)!=2.0 || fl(3)!=3.0) return 11;
     auto sg = sign(g);  if (sg(0)!=-1.0 || sg(2)!=0.0 || sg(3)!=1.0) return 12;
     auto gr = g.clone(); gr.round_(); if (gr(0)!=-2.0 || gr(1)!=2.0 || gr(3)!=4.0) return 13;
     auto gc = g.clone(); gc.clamp_(0.0, 3.0); if (gc(0)!=0.0 || gc(1)!=2.3 || gc(3)!=3.0) return 14;
 
     // ---- minimum / maximum (broadcast) + mean -------------------------
-    auto x = local<double, extents<long,3>>(); x(0)=1; x(1)=5; x(2)=3;
-    auto y = local<double, extents<long,3>>(); y(0)=4; y(1)=2; y(2)=3;
+    auto x = local<double, shape<3>>(); x(0)=1; x(1)=5; x(2)=3;
+    auto y = local<double, shape<3>>(); y(0)=4; y(1)=2; y(2)=3;
     auto mn = minimum(x,y); if (mn(0)!=1 || mn(1)!=2 || mn(2)!=3) return 15;
     auto mx = maximum(x,2.5); if (mx(0)!=2.5 || mx(1)!=5 || mx(2)!=3) return 16;
     if (mean(x) != 3.0) return 17;
 
     // ---- ++ / -- (prefix in place; postfix static -> stack copy) ------
-    auto p = local<double, extents<long,2>>(); p.fill_(5.0);
+    auto p = local<double, shape<2>>(); p.fill_(5.0);
     ++p; if (p(0)!=6.0) return 18;
     --p; --p; if (p(0)!=4.0) return 19;
     auto pre = p++;                 // postfix returns pre-value (4), p becomes 5
     if (pre(0)!=4.0 || p(0)!=5.0) return 20;
 
     // ---- bitwise (integer element types) ------------------------------
-    auto bi = local<int, extents<long,2>>(); bi(0)=0xC; bi(1)=0x6;   // 1100, 0110
-    auto bj = local<int, extents<long,2>>(); bj(0)=0xA; bj(1)=0xF;   // 1010, 1111
+    auto bi = local<int, shape<2>>(); bi(0)=0xC; bi(1)=0x6;   // 1100, 0110
+    auto bj = local<int, shape<2>>(); bj(0)=0xA; bj(1)=0xF;   // 1010, 1111
     auto ba = bi & bj; if (ba(0)!=0x8 || ba(1)!=0x6) return 21;
     auto bo = bi | bj; if (bo(0)!=0xE) return 22;
     auto bx = bi ^ bj; if (bx(0)!=0x6) return 23;

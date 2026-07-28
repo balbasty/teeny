@@ -43,16 +43,16 @@ int main()
     double Avals[3][3] = {{4,1,1},{1,3,0},{1,0,2}};
     for (int i=0;i<3;++i) for (int j=0;j<3;++j) pad[i*4 + j] = Avals[i][j];
 
-    auto A = wrap(pad, extents<long,3,3>{}, strides<4,1>{});   // compile-time strides (4,1)
+    auto A = wrap(pad, shape<3,3>{}, strides<4,1>{});   // compile-time strides (4,1)
     static_assert(decltype(A)::rank() == 2, "matrix");
 
     // factor + solve, with stack-owned L and x (fully static shape)
-    auto L = local<double, extents<long,3,3>>();            // 9 doubles, no padding
+    auto L = local<double, shape<3,3>>();            // 9 doubles, no padding
     static_assert(sizeof(L) == 9*sizeof(double), "stack matrix is exactly its data");
     cholesky(A, L);
 
-    auto b = local<double, extents<long,3>>();
-    auto x = local<double, extents<long,3>>();
+    auto b = local<double, shape<3>>();
+    auto x = local<double, shape<3>>();
     b(0)=6; b(1)=4; b(2)=3;
     solve(L, b, x);
 

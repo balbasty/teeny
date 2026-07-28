@@ -7,8 +7,8 @@ namespace cs = cuda::std;
 static bool close(double a, double b){ return std::fabs(a-b) < 1e-9; }
 
 int main() {
-    auto A = local<double, extents<long,2,2>>();
-    auto B = local<double, extents<long,2,2>>();
+    auto A = local<double, shape<2,2>>();
+    auto B = local<double, shape<2,2>>();
     A(0,0)=1; A(0,1)=2; A(1,0)=3; A(1,1)=4;
     B(0,0)=10;B(0,1)=20;B(1,0)=30;B(1,1)=40;
 
@@ -35,17 +35,17 @@ int main() {
     if (Q(1,0) != 9) return 10;                 // 3^2
 
     // (6) unary out-of-place + in-place
-    auto E = local<double, extents<long,3>>(); E(0)=0; E(1)=1; E(2)=2;
+    auto E = local<double, shape<3>>(); E(0)=0; E(1)=1; E(2)=2;
     if (!close(exp(E)(1), std::exp(1.0))) return 11;
     if (!close(sqrt(A)(1,1), 2.0)) return 12;   // sqrt(4)
     auto N = A; N.neg_();
     if (N(0,0) != -1) return 13;
-    auto Ab = local<double, extents<long,2>>(); Ab(0)=-3; Ab(1)=5; Ab.abs_();
+    auto Ab = local<double, shape<2>>(); Ab(0)=-3; Ab(1)=5; Ab.abs_();
     if (Ab(0) != 3 || Ab(1) != 5) return 14;
     if (!close(sin(E)(2), std::sin(2.0))) return 15;
 
     // dynamic out-of-place (host, heap)
-    using DynE = extents<long, dynamic_extent>;
+    using DynE = shape<dynamic_extent>;
     auto Da = owned<double, DynE>(DynE{3}); Da(0)=1; Da(1)=2; Da(2)=3;
     auto Dc = Da.mul(2.0);
     static_assert(decltype(Dc)::ownership == storage::heap, "dynamic -> heap");

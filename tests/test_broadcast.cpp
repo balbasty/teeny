@@ -5,8 +5,8 @@ namespace cs = cuda::std;
 
 int main() {
     // out-of-place broadcast: (3,1) + (3,4) -> (3,4)
-    auto col = local<double, extents<long,3,1>>();
-    auto M   = local<double, extents<long,3,4>>();
+    auto col = local<double, shape<3,1>>();
+    auto M   = local<double, shape<3,4>>();
     for (long i=0;i<3;++i) col(i,0) = (i+1)*100;      // 100,200,300
     for (long i=0;i<3;++i) for (long j=0;j<4;++j) M(i,j) = i*4+j;
     auto R = col + M;
@@ -16,7 +16,7 @@ int main() {
         if (R(i,j) != col(i,0) + M(i,j)) return 1;
 
     // (1,4) + (3,4) -> (3,4)
-    auto row = local<double, extents<long,1,4>>();
+    auto row = local<double, shape<1,4>>();
     for (long j=0;j<4;++j) row(0,j) = j*10;
     auto R2 = M + row;
     for (long i=0;i<3;++i) for (long j=0;j<4;++j)
@@ -33,7 +33,7 @@ int main() {
     if (S(2,3) != 2*M(2,3)) return 4;
 
     // dynamic broadcast -> heap (host)
-    using D2 = extents<long,dynamic_extent,dynamic_extent>;
+    using D2 = shape<dynamic_extent,dynamic_extent>;
     auto Dc = owned<double,D2>(D2{3,1}); for(long i=0;i<3;++i) Dc(i,0)=i+1;
     auto Dm = owned<double,D2>(D2{3,4}); for(long i=0;i<3;++i)for(long j=0;j<4;++j) Dm(i,j)=i+j;
     auto Dr = Dc + Dm;
@@ -67,7 +67,7 @@ int main() {
     double eb[4]; for(int j=0;j<4;++j) eb[j]=M(1,j); auto erow = wrap(eb, shape<4>{});
     if (!allclose(wrap(&M(1,0), shape<4>{}), erow)) return 15;   // (4,) vs (4,)
     // dynamic + lower static rank: (n,4) dyn + (4,) -> heap
-    auto Dv = owned<double, extents<long,dynamic_extent,4>>(extents<long,dynamic_extent,4>{3});
+    auto Dv = owned<double, shape<dynamic_extent,4>>(shape<dynamic_extent,4>{3});
     for(long i=0;i<3;++i) for(long j=0;j<4;++j) Dv(i,j)=i*4+j;
     auto Rdyn = Dv + v;
     static_assert(decltype(Rdyn)::ownership==storage::heap, "dyn left-pad -> heap");

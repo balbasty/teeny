@@ -10,24 +10,24 @@ using cs::extents;
 
 int main() {
     // ---- fill_ / zero_ / copy_ ----------------------------------------
-    auto a = local<double, extents<long,2,3>>();
+    auto a = local<double, shape<2,3>>();
     a.fill_(7.0);
     for (long i=0;i<2;++i) for (long j=0;j<3;++j) if (a(i,j) != 7.0) return 1;
     a.zero_();
     if (sum(a) != 0.0) return 2;
 
-    auto b = local<double, extents<long,2,3>>();
+    auto b = local<double, shape<2,3>>();
     for (long i=0;i<2;++i) for (long j=0;j<3;++j) b(i,j) = i*3+j;
     a.copy_(b);
     for (long i=0;i<2;++i) for (long j=0;j<3;++j) if (a(i,j) != b(i,j)) return 3;
 
     // copy_ broadcasts a (2,1) column across the row axis
-    auto col = local<double, extents<long,2,1>>(); col(0,0)=10; col(1,0)=20;
+    auto col = local<double, shape<2,1>>(); col(0,0)=10; col(1,0)=20;
     a.copy_(col);
     for (long j=0;j<3;++j) if (a(0,j)!=10 || a(1,j)!=20) return 4;
 
     // ---- at().add_<true>(): scatter-accumulate -------------------------
-    auto acc = local<double, extents<long,4>>(); acc.zero_();
+    auto acc = local<double, shape<4>>(); acc.zero_();
     acc.at(2).add_<true>(1.5);
     acc.at(2).add_<true>(2.5);          // accumulates
     acc.at(-1).add_<true>(9.0);         // negative index wraps -> index 3
@@ -42,7 +42,7 @@ int main() {
     // dispatched value is usable as a template argument
     int rank_seen = 0;
     dispatch_value<1,2,3>(3, [&](auto d){
-        auto t = local<double, extents<long, d.value>>();   // static extent from runtime D
+        auto t = local<double, shape<d.value>>();   // static extent from runtime D
         rank_seen = (int)t.extent(0);
     });
     if (rank_seen != 3) return 8;
@@ -50,7 +50,7 @@ int main() {
     // ---- peel_front<N>: peel the first N (batch) axes ---------------
     double buf[2*3*4];
     for (int i=0;i<2*3*4;++i) buf[i]=i;
-    auto t = wrap(buf, extents<long,2,3,4>{});
+    auto t = wrap(buf, shape<2,3,4>{});
     long count = 0, checksum = 0;
     for (auto line : peel_front<2>(t)) {                  // peel axes 0,1 -> (4,) lines
         ++count;
@@ -69,7 +69,7 @@ int main() {
     // ---- slicing: kept axes stay static, ranged axis resolves at runtime -
     // (a range goes through a layout_stride view — see the CCCL note in
     //  tensor.h — so the ranged axis is dynamic, but `all`-kept axes stay static)
-    auto M = local<double, extents<long,5,6>>();
+    auto M = local<double, shape<5,6>>();
     auto sv = M(all, slice(1, 4));                            // [1,4) on axis 1
     static_assert(decltype(sv)::extents_type::static_extent(0) == 5, "kept axis stays static");
     if (sv.extent(0) != 5 || sv.extent(1) != 3) return 11;

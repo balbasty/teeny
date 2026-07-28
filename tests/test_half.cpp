@@ -23,11 +23,11 @@ int main() {
     if (!approx(bfloat16(0.1), 0.1, 1e-2)) return 5;
 
     // ---- half tensor: element access, fill_, in-place broadcast math ---
-    auto a = local<half, extents<long,2,3>>();
+    auto a = local<half, shape<2,3>>();
     a.fill_(half(2.0));
     for (long i=0;i<2;++i) for (long j=0;j<3;++j) if (!approx(a(i,j), 2.0, 0.0)) return 6;
 
-    auto col = local<half, extents<long,2,1>>();
+    auto col = local<half, shape<2,1>>();
     col(0,0) = half(10.0); col(1,0) = half(20.0);
     a.mul_(col);                                    // broadcasts across axis 1
     if (!approx(a(0,2), 20.0, 0.0) || !approx(a(1,0), 40.0, 0.0)) return 7;
@@ -36,7 +36,7 @@ int main() {
     if (!approx(a(1,1), 41.0, 0.0)) return 8;
 
     // ---- out-of-place half+half -> half stack tensor -------------------
-    auto b = local<half, extents<long,2,3>>(); b.fill_(half(0.5));
+    auto b = local<half, shape<2,3>>(); b.fill_(half(0.5));
     auto c = a.add(b);
     static_assert(cs::is_same<decltype(c)::element_type, half>::value, "half + half -> half");
     if (!approx(c(0,0), 21.5, 0.0)) return 9;       // a(0,0)=20+1=21, +0.5
@@ -44,12 +44,12 @@ int main() {
     // ---- reduction accumulates in float (precision) -------------------
     // 2049 fp16 values of 1.0: fp16 can't represent 2049 exactly (gap > 1 above
     // 2048), but the float accumulator sums correctly, then rounds to fp16 2048.
-    auto big = local<half, extents<long,2049>>(); big.fill_(half(1.0));
+    auto big = local<half, shape<2049>>(); big.fill_(half(1.0));
     double s = static_cast<float>(sum(big));
     if (std::fabs(s - 2048.0) > 1.0) return 10;      // NOT stuck at ~1024 (half-acc bug)
 
     // ---- bfloat16 tensor basics ---------------------------------------
-    auto bf = local<bfloat16, extents<long,4>>();
+    auto bf = local<bfloat16, shape<4>>();
     for (long i=0;i<4;++i) bf(i) = bfloat16(i + 1);
     bf.mul_(bfloat16(2.0));
     if (!approx(bf(3), 8.0, 0.0)) return 11;
@@ -58,11 +58,11 @@ int main() {
     // ---- #47: explicit half/bfloat16 accumulator for max/min ----------
     // numeric_limits isn't specialized for the software half, so the max/min
     // SEED used to be 0 -> a max over ALL-NEGATIVE values wrongly returned 0.
-    auto neg = local<half, extents<long,3>>();
+    auto neg = local<half, shape<3>>();
     neg(0) = half(-5.0); neg(1) = half(-2.0); neg(2) = half(-9.0);
     if (!approx(max<half>(neg), -2.0, 0.0)) return 13;    // NOT 0 (the old bug)
     if (!approx(min<half>(neg), -9.0, 0.0)) return 14;
-    auto pos = local<bfloat16, extents<long,3>>();
+    auto pos = local<bfloat16, shape<3>>();
     pos(0) = bfloat16(3.0); pos(1) = bfloat16(7.0); pos(2) = bfloat16(4.0);
     if (!approx(min<bfloat16>(pos), 3.0, 0.0)) return 15; // NOT 0
     if (!approx(max<bfloat16>(pos), 7.0, 0.0)) return 16;
