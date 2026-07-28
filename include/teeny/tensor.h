@@ -611,10 +611,10 @@ private:
     }
 public:
     /** @brief Element access when every argument is an integer (negatives wrap). */
-    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    template <class... Args, cs::enable_if_t<_all_index<Args...>::value, int> = 0>
     _TNY_API T & operator()(Args... a) noexcept
     { return store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]; }
-    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    template <class... Args, cs::enable_if_t<_all_index<Args...>::value, int> = 0>
     _TNY_API const T & operator()(Args... a) const noexcept
     { return store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]; }
 
@@ -624,12 +624,12 @@ public:
      *         element: `x.at(i,j) = 3` writes it, `float v = x.at(i,j)` reads it
      *         (rank-0 tensors convert to/from `T`), and `x.at(i,j).atomic_add_(v)`
      *         is an atomic scatter. */
-    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    template <class... Args, cs::enable_if_t<_all_index<Args...>::value, int> = 0>
     _TNY_API auto at(Args... a) noexcept {
         using E0 = cs::extents<index_type>;   // rank 0
         return tensor<T, E0, ccontiguous, storage_view_of(O)>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
     }
-    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    template <class... Args, cs::enable_if_t<_all_index<Args...>::value, int> = 0>
     _TNY_API auto at(Args... a) const noexcept {
         using E0 = cs::extents<index_type>;
         return tensor<const T, E0, ccontiguous, storage_view_of(O)>(&store_.data()[_offset(cs::make_index_sequence<rank()>{}, a...)]);
@@ -641,10 +641,10 @@ public:
      *         inserts a size-1 axis (static extent 1, stride 0) at its position —
      *         all via the one gather (folds static strides into `strides<...>`;
      *         works on any source layout). `t(none,all,all)` == `unsqueeze<0>()`. */
-    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
+    template <class... Args, cs::enable_if_t<!_all_index<Args...>::value && !_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API auto operator()(Args... a) noexcept
     { return _slice_range(store_.data(), cs::make_index_sequence<sizeof...(a)>{}, a...); }
-    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
+    template <class... Args, cs::enable_if_t<!_all_index<Args...>::value && !_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API auto operator()(Args... a) const noexcept
     { return _slice_range(store_.data(), cs::make_index_sequence<sizeof...(a)>{}, a...); }
 
@@ -669,18 +669,18 @@ public:
      * forward step a negative stop collapses to an empty axis — "no wrap", not
      * "wrap then clamp".) */
     // element: every arg is an index
-    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    template <class... Args, cs::enable_if_t<_all_index<Args...>::value, int> = 0>
     _TNY_API T & uget(Args... a) noexcept
     { return store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]; }
-    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    template <class... Args, cs::enable_if_t<_all_index<Args...>::value, int> = 0>
     _TNY_API const T & uget(Args... a) const noexcept
     { return store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]; }
 
     // slice: at least one slice arg, no ellipsis -> a VIEW
-    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
+    template <class... Args, cs::enable_if_t<!_all_index<Args...>::value && !_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API auto uget(Args... a) noexcept
     { return _slice_range<false>(store_.data(), cs::make_index_sequence<sizeof...(a)>{}, a...); }
-    template <class... Args, cs::enable_if_t<!(_is_index<Args>::value && ...) && !_has_ellipsis<Args...>::value, int> = 0>
+    template <class... Args, cs::enable_if_t<!_all_index<Args...>::value && !_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API auto uget(Args... a) const noexcept
     { return _slice_range<false>(store_.data(), cs::make_index_sequence<sizeof...(a)>{}, a...); }
 
@@ -693,12 +693,12 @@ public:
     { return _ellip_call<false>(cs::make_tuple(a...), cs::make_index_sequence<rank() + _n_newaxis<Args...>()>{}); }
 
     /** @brief Unchecked `at`: a single element as a rank-0 VIEW, no negative wrap. */
-    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    template <class... Args, cs::enable_if_t<_all_index<Args...>::value, int> = 0>
     _TNY_API auto uat(Args... a) noexcept {
         using E0 = cs::extents<index_type>;
         return tensor<T, E0, ccontiguous, storage_view_of(O)>(&store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]);
     }
-    template <class... Args, cs::enable_if_t<(_is_index<Args>::value && ...), int> = 0>
+    template <class... Args, cs::enable_if_t<_all_index<Args...>::value, int> = 0>
     _TNY_API auto uat(Args... a) const noexcept {
         using E0 = cs::extents<index_type>;
         return tensor<const T, E0, ccontiguous, storage_view_of(O)>(&store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]);
@@ -1284,8 +1284,8 @@ public:
     template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0> _TNY_API auto squeeze(I)   const noexcept { return squeeze<static_cast<long>(I::value)>(); }
     template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0> _TNY_API auto unsqueeze(I)       noexcept { return unsqueeze<static_cast<long>(I::value)>(); }
     template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0> _TNY_API auto unsqueeze(I) const noexcept { return unsqueeze<static_cast<long>(I::value)>(); }
-    template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && (_is_ic<I>::value && ...), int> = 0> _TNY_API auto permute(I...)       noexcept { return permute<static_cast<long>(I::value)...>(); }
-    template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && (_is_ic<I>::value && ...), int> = 0> _TNY_API auto permute(I...) const noexcept { return permute<static_cast<long>(I::value)...>(); }
+    template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && _all_ic<I...>::value, int> = 0> _TNY_API auto permute(I...)       noexcept { return permute<static_cast<long>(I::value)...>(); }
+    template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && _all_ic<I...>::value, int> = 0> _TNY_API auto permute(I...) const noexcept { return permute<static_cast<long>(I::value)...>(); }
 
     /** @brief Value form: `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise
      *         `unsqueeze`/`permute`. `squeeze`/`unsqueeze`/`permute` are axis-LIST
@@ -1299,8 +1299,8 @@ public:
     template <long... Axes> _TNY_API auto unsqueeze(axis<Axes...>) const noexcept { return unsqueeze<Axes...>(); }
     template <long... Axes> _TNY_API auto permute(axis<Axes...>)       noexcept { return permute<Axes...>(); }
     template <long... Axes> _TNY_API auto permute(axis<Axes...>) const noexcept { return permute<Axes...>(); }
-    template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && (_is_ic<I>::value && ...), int> = 0> _TNY_API auto reshape(I...)       noexcept { return reshape<static_cast<long>(I::value)...>(); }
-    template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && (_is_ic<I>::value && ...), int> = 0> _TNY_API auto reshape(I...) const noexcept { return reshape<static_cast<long>(I::value)...>(); }
+    template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && _all_ic<I...>::value, int> = 0> _TNY_API auto reshape(I...)       noexcept { return reshape<static_cast<long>(I::value)...>(); }
+    template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && _all_ic<I...>::value, int> = 0> _TNY_API auto reshape(I...) const noexcept { return reshape<static_cast<long>(I::value)...>(); }
     template <class NewE> _TNY_API auto recast(NewE)       { return recast<NewE>(); }
     template <class NewE> _TNY_API auto recast(NewE) const { return recast<NewE>(); }
     // functional form with an explicit layout: recast(shape<...>{}, ccontiguous{}),
