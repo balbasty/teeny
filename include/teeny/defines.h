@@ -29,8 +29,15 @@
 // Restrict qualifier for a non-aliasing pointer. Used by the out-of-place
 // elementwise engines to mark a freshly-allocated DESTINATION that provably
 // cannot alias its (const) operands, unlocking the auto-vectorized linear write.
-// `__restrict__` is accepted by g++, clang++, and nvcc (device code included).
-#define _TNY_RESTRICT __restrict__
+// `__restrict__` is accepted by g++, clang++, and nvcc (device code included);
+// real MSVC (cl.exe) only recognizes the single-underscore `__restrict` (#311)
+// -- clang-cl defines both __clang__ and _MSC_VER, so it stays on the more
+// portable `__restrict__` spelling like every other compiler branch here.
+#if defined(_MSC_VER) && !defined(__clang__)
+#   define _TNY_RESTRICT __restrict
+#else
+#   define _TNY_RESTRICT __restrict__
+#endif
 
 // Portable full-unroll hint for a SMALL STATIC-trip-count loop (a downstream
 // static-C kernel's packed-index / per-axis inner loop) so it folds to immediates
