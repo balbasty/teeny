@@ -7,6 +7,7 @@
 #include <cuda/std/type_traits>
 #include <teeny/defines.h>
 #include <teeny/alias.h>
+#include <teeny/kwargs.h>
 #include <teeny/storage.h>
 #include <teeny/layout.h>
 #include <teeny/indexing.h>
@@ -28,6 +29,7 @@ struct tensor;
 // fused `alpha` of `add(b, alpha)`). Declared here so the tensor's out-of-place
 // members can name `into_t<D>`; the `into()` factory is defined after the class.
 template <class D> struct into_t { D & dest; };
+namespace _kw { template <class D> struct is_keyword<into_t<D>> : cs::true_type {}; }
 
 template <storage OW = storage::view, class MD>
 _TNY_API tensor<typename MD::element_type, typename MD::extents_type,

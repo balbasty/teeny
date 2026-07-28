@@ -4,6 +4,7 @@
 #include <cuda/std/cstddef>
 #include <cuda/std/type_traits>
 #include <teeny/defines.h>
+#include <teeny/kwargs.h>
 
 _TNY_NAMESPACE_BEGIN(tny)
 
@@ -76,6 +77,22 @@ template <storage O> using storage_c = cs::integral_constant<storage, O>;
 /** @brief A ready-made `storage_c<O>` VALUE — the no-braces spelling of the value tag:
  *         `wrap(p, e, storage_v<storage::gpu>)` instead of `storage_c<storage::gpu>{}`. */
 template <storage O> inline constexpr storage_c<O> storage_v{};
+template <class> struct _is_storage_tag : cs::false_type {};
+template <storage O> struct _is_storage_tag<storage_c<O>> : cs::true_type {};
+namespace _kw { template <storage O> struct is_keyword<storage_c<O>> : cs::true_type {}; }
+
+/** @brief storage_arg<Oexpl, Dflt, Tags...>(): the backend a call site should use --
+ *         an explicit template argument (Oexpl != storage_deduce) wins, else a
+ *         storage_c<O>{} tag found in Tags..., else the library default Dflt
+ *         (typically storage_deduce itself, resolved later from the shape by
+ *         storage_resolve). static_assert if BOTH an explicit Oexpl and a tag
+ *         were supplied for the same keyword. */
+template <storage Oexpl, storage Dflt, class... Tags>
+_TNY_API constexpr storage storage_arg() {
+    static_assert(Oexpl == storage_deduce || !_kw::has<_is_storage_tag, Tags...>(),
+        "storage given both as an explicit template argument and as a storage_c<...>{} tag -- pick one");
+    return Oexpl != storage_deduce ? Oexpl : _kw::find_t<_is_storage_tag, storage_c<Dflt>, Tags...>::value;
+}
 /** @brief Resolve a factory's ownership: an explicitly named mode passes through,
  *         `storage_deduce` becomes `stack` for a static shape / `heap` for a dynamic one. */
 _TNY_API constexpr storage storage_resolve(storage o, bool static_shape) noexcept {
