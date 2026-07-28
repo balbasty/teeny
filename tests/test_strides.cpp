@@ -84,5 +84,16 @@ int main() {
         for (long j = 0; j < 4; ++j)
             if (neg_tag(i,j) != neg(i,j)) return 13;
 
+    // --- rank-0 element access on a strides<...> mapping (squeeze to scalar) ---
+    // Regression for a zero-length-array bug (same class as #313): this
+    // mapping's operator() decoded I... into a bare `T id[]`, which is a
+    // zero-size array when I... is empty (rank-0) -- a GCC/Clang extension
+    // MSVC rejects.
+    auto v0 = local<double, shape<1>>();
+    v0(0) = 42;
+    auto s0 = v0.squeeze<0>();
+    static_assert(decltype(s0)::rank() == 0, "squeeze<0> on shape<1> -> rank 0");
+    if (s0() != 42) return 14;
+
     return 0;
 }
