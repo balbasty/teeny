@@ -13,6 +13,12 @@ on:
         description: Commit / Branch / Tag / SHA to checkout
         required: false
         default: ""
+  # workflow_dispatch alone can't be invoked via API until this file exists on
+  # the default branch -- push-trigger scoped to this one scratch branch so it
+  # runs immediately on this throwaway branch without touching main.
+  push:
+    branches:
+      - claude/msvc-268-scratch
 
 permissions:
   contents: read
