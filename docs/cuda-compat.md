@@ -103,15 +103,20 @@ the practical minimums:
 |---|---|---|
 | **g++** | 7 (first C++17) | tested on 11–14 |
 | **clang++** | 9 | tested on 18 |
-| **MSVC** (Windows) | 2019 (v19.20) | not in CI, but header-only C++17 + CCCL supports MSVC |
+| **AppleClang** (macOS) | 9 | tested on `macos-latest` |
+| **MSVC** (Windows) | 2019 (v19.20) | tested on `windows-latest`, currently failing — [#268](https://github.com/balbasty/teeny/issues/268) |
 
 For a **CUDA device build**, the host compiler must also be one your `nvcc`
 supports — each CUDA release caps the host g++/clang/MSVC version (e.g. CUDA 12.6
 allows g++ ≤ 13, CUDA 13.0 allows g++ ≤ 15). See NVIDIA's system requirements for
 the exact per-toolkit host-compiler ranges.
 
-Linux and Windows are both supported (teeny's own CI runs Linux g++/clang++;
-Windows/MSVC is expected to work but is not currently exercised in CI).
+Linux, macOS, and Windows are all exercised in CI: Linux via `make` (g++/clang++),
+macOS and Windows via the CMake + CTest build (each `tests/test_*.cpp` is a CTest
+target). MSVC currently fails to compile teeny at all (a compiler-specific defect
+in `operator()`'s overload resolution, [#268](https://github.com/balbasty/teeny/issues/268))
+— the Windows CI job is `continue-on-error` until that's fixed, so only Linux and
+macOS are proven-portable today.
 
 ## Choosing a toolkit for your target hardware
 

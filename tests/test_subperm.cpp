@@ -9,7 +9,7 @@ int main()
 {
     double buf[24];
     for (long i = 0; i < 24; ++i) buf[i] = i;
-    auto t = wrap(buf, extents<long,2,3,4>{});          // strides (12,4,1)
+    auto t = wrap(buf, shape<2,3,4>{});          // strides (12,4,1)
 
     // ---- sub<D>(i): bind an axis, drop it ------------------------------
     auto s1 = t.take_along<1>(2);                              // fix axis 1 -> (2,4)
@@ -36,7 +36,7 @@ int main()
     if (t(0,0,0) != 7.0) return 7;
 
     // ---- on a stack tensor ---------------------------------------------
-    auto m = local<double, extents<long,2,2>>();
+    auto m = local<double, shape<2,2>>();
     m(0,0)=1; m(0,1)=2; m(1,0)=3; m(1,1)=4;
     auto mt = m.permute<1,0>();                         // transpose view
     if (mt(0,1) != m(1,0) || mt(1,0) != m(0,1)) return 8;
@@ -130,7 +130,7 @@ int main()
     // unsqueeze positions are relative to the FINAL rank (numpy expand_dims), so
     // (H,W).unsqueeze<1,3>() -> (H,1,W,1): insert 1 into rank-2 -> (H,1,W), then
     // insert 3 into rank-3 -> appends.
-    auto hw = wrap(buf, extents<long,3,4>{});           // (H,W) = (3,4), strides (4,1)
+    auto hw = wrap(buf, shape<3,4>{});           // (H,W) = (3,4), strides (4,1)
     auto m2 = hw.unsqueeze<1,3>();
     static_assert(decltype(m2)::rank() == 4, "unsqueeze<1,3> -> rank 4");
     static_assert(decltype(m2)::extents_type::static_extent(0) == 3

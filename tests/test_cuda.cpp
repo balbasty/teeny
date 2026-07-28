@@ -10,7 +10,7 @@ using namespace tny;
 namespace cs = cuda::std;
 using cs::extents;
 using cs::dynamic_extent;
-using DynE = extents<long, dynamic_extent, dynamic_extent>;
+using DynE = shape<dynamic_extent, dynamic_extent>;
 
 static_assert(storage_is_owning(storage::gpu) && storage_is_owning(storage::pinned) && storage_is_owning(storage::mapped), "owning");
 static_assert(!storage_is_host_accessible(storage::gpu), "gpu memory not host-accessible");
@@ -32,7 +32,7 @@ int main()
     if (h(0,0) != 1 || h(1,1) != 4) return 3;
 
     // mapped (zero-copy) memory: same.
-    auto p = mapped<float, extents<long,3>>(extents<long,3>{});
+    auto p = mapped<float, shape<3>>(shape<3>{});
     p(0) = 7; if (p(0) != 7) return 4;
 
     // ---- #15: a VIEW of device memory carries its space (storage::gpu_view) -------

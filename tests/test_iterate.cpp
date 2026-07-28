@@ -9,7 +9,7 @@ int main()
 {
     double buf[24];
     for (long i = 0; i < 24; ++i) buf[i] = i;
-    auto t = wrap(buf, extents<long,2,3,4>{});         // C-contiguous (strides 12,4,1)
+    auto t = wrap(buf, shape<2,3,4>{});         // C-contiguous (strides 12,4,1)
 
     // ---- peel axis 0: 2 sub-views of shape (3,4) -----------------------
     auto r0 = peel<0>(t);
@@ -56,7 +56,7 @@ int main()
     //      PERMUTED source so the peeled axes have non-trivial (non-contiguous) strides
     //      and the odometer's carries are exercised against real strides.
     double b2[24]; for (long i = 0; i < 24; ++i) b2[i] = i;
-    auto tp = wrap(b2, extents<long,2,3,4>{}).permute<2,0,1>();   // (4,2,3), strides (1,12,4)
+    auto tp = wrap(b2, shape<2,3,4>{}).permute<2,0,1>();   // (4,2,3), strides (1,12,4)
     {
         auto rng = peel<0,1>(tp);                    // peel first two axes -> 8 cells, each (3,)
         long idx = 0;
@@ -88,7 +88,7 @@ int main()
     // ---- #110: mutation through an incremental cell lands in the source buffer ------
     {
         double b3[24]; for (long i = 0; i < 24; ++i) b3[i] = 0;
-        auto tt = wrap(b3, extents<long,2,3,4>{});
+        auto tt = wrap(b3, shape<2,3,4>{});
         double v = 1.0;
         for (auto line : peel<0,1>(tt)) { line.fill_(v); v += 1.0; }   // 6 lines, each set to 1..6
         for (long i0 = 0; i0 < 2; ++i0) for (long i1 = 0; i1 < 3; ++i1)

@@ -9,8 +9,8 @@ using cs::dynamic_extent;
 int main()
 {
     // ---- math on fully static tensors: a + b -> c (stack-owned) --------
-    auto A = local<double, extents<long,2,2>>();
-    auto B = local<double, extents<long,2,2>>();
+    auto A = local<double, shape<2,2>>();
+    auto B = local<double, shape<2,2>>();
     A(0,0)=1; A(0,1)=2; A(1,0)=3; A(1,1)=4;
     B(0,0)=10;B(0,1)=20;B(1,0)=30;B(1,1)=40;
 
@@ -25,30 +25,30 @@ int main()
     if ((B / A)(1,1) != 10)  return 4;
 
     // result type follows common_type (int + double -> double)
-    auto Ai = local<int, extents<long,2,2>>(); Ai(0,0)=5;
-    auto Ad = local<double, extents<long,2,2>>(); Ad(0,0)=0.5;
+    auto Ai = local<int, shape<2,2>>(); Ai(0,0)=5;
+    auto Ad = local<double, shape<2,2>>(); Ad(0,0)=0.5;
     static_assert(cs::is_same<decltype(Ai + Ad)::element_type, double>(), "common_type result");
     if ((Ai + Ad)(0,0) != 5.5) return 5;
 
     // ---- in-place on a strided view into a bigger buffer ---------------
     double buf[9]; for (int i=0;i<9;++i) buf[i]=i;
-    auto full = wrap(buf, extents<long,3,3>{});
+    auto full = wrap(buf, shape<3,3>{});
     full.add_(100.0);                              // scalar in place
     if (buf[0]!=100 || buf[8]!=108) return 6;
     full.mul_(2.0);
     if (buf[4]!=208) return 7;
 
-    auto ones = local<double, extents<long,3,3>>(); ones.add_(1.0);
+    auto ones = local<double, shape<3,3>>(); ones.add_(1.0);
     full.sub_(ones);                               // elementwise in place
     if (buf[4]!=207) return 8;
 
     // in-place works between a view and a stack tensor of matching shape
-    auto twos = local<double, extents<long,3,3>>(); twos.add_(2.0);
+    auto twos = local<double, shape<3,3>>(); twos.add_(2.0);
     ones.mul_(twos);                               // ones now all 2
     if (ones(1,1) != 2) return 9;
 
     // ---- reductions ----------------------------------------------------
-    auto R = local<double, extents<long,2,2>>();
+    auto R = local<double, shape<2,2>>();
     R(0,0)=1; R(0,1)=2; R(1,0)=3; R(1,1)=4;
     if (sum(R) != 10) return 10;
     if (dot(R, R) != 1+4+9+16) return 11;          // 30
@@ -57,7 +57,7 @@ int main()
     if (min(R) != 1)  return 22;
     // #56: dot's static gate now requires EXACT extent equality (not broadcast).
     // A rectangular (non-square, extents != 1) shape must still be accepted.
-    auto rk = local<double, extents<long,2,3>>(); rk.iota_(1.0, 1.0);   // 1..6
+    auto rk = local<double, shape<2,3>>(); rk.iota_(1.0, 1.0);   // 1..6
     if (dot(rk, rk) != 1+4+9+16+25+36) return 23;                       // 91
     // (dot(shape<2,3>, shape<1,3>) is now a compile error; no compile-fail
     //  harness exists in this repo to assert it — verified manually.)
@@ -67,7 +67,7 @@ int main()
     if (sum(full) != expect) return 12;
 
     // ---- out-of-place on DYNAMIC extents: allowed on the host, heap result
-    using DynE = extents<long, dynamic_extent, dynamic_extent>;
+    using DynE = shape<dynamic_extent, dynamic_extent>;
     auto Da = owned<double, DynE>(DynE{2,2});
     auto Db = owned<double, DynE>(DynE{2,2});
     Da(0,0)=1; Da(0,1)=2; Da(1,0)=3; Da(1,1)=4;

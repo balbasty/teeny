@@ -16,8 +16,8 @@ int main()
     {
         double b1[4] = {1, 2, 3, 4};
         double b2[4] = {1, 2, 3, 4};
-        auto a1 = wrap(b1, extents<long,2,2>{});
-        auto a2 = wrap(b2, extents<long,2,2>{});
+        auto a1 = wrap(b1, shape<2,2>{});
+        auto a2 = wrap(b2, shape<2,2>{});
         a1.atomic_add_(10.0);
         a2.add_<true>(10.0);
         for (int i = 0; i < 4; ++i) if (b1[i] != b2[i]) return 1;
@@ -34,11 +34,11 @@ int main()
     {
         double b1[6] = {0, 1, 2, 3, 4, 5};
         double b2[6] = {0, 1, 2, 3, 4, 5};
-        auto a1 = wrap(b1, extents<long,2,3>{});
-        auto a2 = wrap(b2, extents<long,2,3>{});
+        auto a1 = wrap(b1, shape<2,3>{});
+        auto a2 = wrap(b2, shape<2,3>{});
         // rhs of shape (3,) broadcasts over the leading axis
         double rb[3] = {10, 20, 30};
-        auto r = wrap(rb, extents<long,3>{});
+        auto r = wrap(rb, shape<3>{});
         a1.atomic_add_(r);
         a2.add_<true>(r);
         for (int i = 0; i < 6; ++i) if (b1[i] != b2[i]) return 5;
@@ -55,8 +55,8 @@ int main()
     {
         double b1[4] = {0, 0, 0, 0};
         double b2[4] = {0, 0, 0, 0};
-        auto a1 = wrap(b1, extents<long,2,2>{});
-        auto a2 = wrap(b2, extents<long,2,2>{});
+        auto a1 = wrap(b1, shape<2,2>{});
+        auto a2 = wrap(b2, shape<2,2>{});
         // several scatters into the same cell (would race on device; atomic there)
         a1.at(0, 1).atomic_add_(3.0);
         a1.at(0, 1).atomic_add_(4.0);
@@ -74,7 +74,7 @@ int main()
     // ---- the aliases return tensor& (chainable, like the in-place ops) ---
     {
         double b1[2] = {1, 1};
-        auto a1 = wrap(b1, extents<long,2>{});
+        auto a1 = wrap(b1, shape<2>{});
         static_assert(
             cs::is_same<decltype(a1.atomic_add_(1.0)), decltype(a1)&>::value,
             "atomic_add_ returns tensor&");

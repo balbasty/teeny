@@ -14,6 +14,7 @@ on:
       - examples/**
       - external/**
       - Makefile
+      - CMakeLists.txt
       - .github/workflows/test*.yaml
   pull_request:
     paths:
@@ -22,6 +23,7 @@ on:
       - examples/**
       - external/**
       - Makefile
+      - CMakeLists.txt
       - .github/workflows/test*.yaml
 
 permissions:
@@ -30,3 +32,5 @@ permissions:
 jobs:
   tests:
     uses: ./.github/workflows/test-matrix.yaml
+  tests-cmake:
+    uses: ./.github/workflows/test-cmake-matrix.yaml

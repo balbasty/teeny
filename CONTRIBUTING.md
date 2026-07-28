@@ -107,7 +107,13 @@ make CXX=g++ run-examples                               # the example kernels
   `-DTNY_NO_NEGATIVE_INDEX` — the compile-time fold and the runtime gather must
   agree under every flag (a divergence is UB).
 
-CI (`.github/workflows/`) runs the g++ and clang++ test matrix on every PR.
+CI (`.github/workflows/`) runs the g++ and clang++ test matrix on every PR, plus
+a macOS (AppleClang) and Windows (MSVC) CMake+CTest build — you don't need
+local access to either platform to be confident a PR is portable. The Windows
+job is currently `continue-on-error` (non-blocking): a pre-existing MSVC-only
+defect in `operator()`'s overload set ([#268](https://github.com/balbasty/teeny/issues/268))
+fails it independent of most PRs. macOS staying green is still a real, required
+signal.
 
 ---
 

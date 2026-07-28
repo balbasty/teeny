@@ -24,7 +24,7 @@ bool same3(const A & x, const B & y) {
 int main() {
     double buf[12];
     for (long i = 0; i < 12; ++i) buf[i] = i;
-    auto t = wrap(buf, extents<long,3,4>{});      // (H,W) = (3,4), strides (4,1)
+    auto t = wrap(buf, shape<3,4>{});      // (H,W) = (3,4), strides (4,1)
 
     // ---- `newaxis` is a named alias of `none` (same type/value; numpy's np.newaxis
     //      vs None distinction, collapsed to one teeny type) ----
@@ -110,7 +110,7 @@ int main() {
     if (!same3(an, a0)) return 18;
 
     // ---- a dynamic-shape source: none still inserts a STATIC 1 axis ----
-    auto td = wrap(buf, extents<long,cs::dynamic_extent,4>{3, 4});
+    auto td = wrap(buf, shape<cs::dynamic_extent,4>{3, 4});
     auto d0 = td(all, none, all);               // (3,?4) -> (3,1,4), axis0 dynamic
     static_assert(decltype(d0)::rank() == 3, "dynamic source, newaxis -> rank 3");
     static_assert(decltype(d0)::extents_type::static_extent(1) == 1, "newaxis static even on dynamic source");

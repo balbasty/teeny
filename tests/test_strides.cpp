@@ -12,8 +12,8 @@ int main() {
     // --- fully static strides: ptr-only ctor, folds, EBO (view == a pointer) ---
     tensor<double, shape<3,3>, strides<4,1>> A(pad);        // padded row stride 4
     static_assert(sizeof(A) == sizeof(double*), "static-strides view is just a pointer (EBO)");
-    static_assert(cs::is_same<decltype(A.stride(Int<0>())), cs::integral_constant<long,4>>::value, "stride 0 folds to 4");
-    static_assert(cs::is_same<decltype(A.stride(Int<1>())), cs::integral_constant<long,1>>::value, "stride 1 folds to 1");
+    static_assert(cs::is_same<decltype(A.stride(Int<0>())), cs::integral_constant<cs::int64_t,4>>::value, "stride 0 folds to 4");
+    static_assert(cs::is_same<decltype(A.stride(Int<1>())), cs::integral_constant<cs::int64_t,1>>::value, "stride 1 folds to 1");
     if (A(2,1) != pad[2*4+1]) return 1;
 
     // via wrap(..., strides<S...>{}) — compile-time strides fold into the type
@@ -24,12 +24,12 @@ int main() {
     // The clean spelling (analogue of shape<-1,3>{2}): static pattern in the
     // template, runtime strides for the dynamic_stride slots in braces.
     auto B = wrap<dynamic_stride, 1>(pad, shape<3,3>{}, {4});   // outer runtime 4, inner static 1
-    static_assert(cs::is_same<decltype(B.stride(Int<1>())), cs::integral_constant<long,1>>::value, "mixed: inner folds");
-    static_assert(cs::is_same<decltype(B.stride(Int<0>())), long>::value, "mixed: outer is runtime");
+    static_assert(cs::is_same<decltype(B.stride(Int<1>())), cs::integral_constant<cs::int64_t,1>>::value, "mixed: inner folds");
+    static_assert(cs::is_same<decltype(B.stride(Int<0>())), cs::int64_t>::value, "mixed: outer is runtime");
     if (B.stride(0) != 4 || B(2,1) != pad[2*4+1]) return 3;
     // it matches the explicit strides<dynamic_stride,1> mapping construction
     using MixL = strides<dynamic_stride, 1>;
-    MixL::mapping<shape<3,3>> m(shape<3,3>{}, cs::array<long,1>{4});
+    MixL::mapping<shape<3,3>> m(shape<3,3>{}, cs::array<cs::int64_t,1>{4});
     tensor<double, shape<3,3>, MixL> B2(pad, m);
     if (B2(2,1) != B(2,1)) return 30;
 
@@ -38,7 +38,7 @@ int main() {
     static_assert(!cs::is_same<strides<-1,1>, strides<dynamic_stride,1>>::value, "-1 stride != dynamic");
     // a reversed-row view: row r starts at pad[8 - 4r], columns forward
     tensor<double, shape<3,3>, strides<-4,1>> R(pad + 8);
-    static_assert(cs::is_same<decltype(R.stride(Int<0>())), cs::integral_constant<long,-4>>::value, "negative stride folds");
+    static_assert(cs::is_same<decltype(R.stride(Int<0>())), cs::integral_constant<cs::int64_t,-4>>::value, "negative stride folds");
     if (R(0,1) != pad[8+1] || R(1,0) != pad[4] || R(2,0) != pad[0]) return 7;
 
     // --- make_* factories (deduce the extents type) ---
@@ -73,7 +73,7 @@ int main() {
     auto st_tag = wrap(pad, shape<3,4>{}, strides<4,1>{});  // compile-time strides (fold)
     auto rt_arr = wrap(pad, shape<3,4>{}, {4,1});           // runtime strides (layout_stride)
     static_assert(decltype(st_tag.stride(Int<0>()))::value == 4, "static tag folds the stride");
-    static_assert(cs::is_same<decltype(rt_arr.stride(Int<0>())), long>::value, "runtime array stays runtime");
+    static_assert(cs::is_same<decltype(rt_arr.stride(Int<0>())), cs::int64_t>::value, "runtime array stays runtime");
     for (long i = 0; i < 3; ++i)
         for (long j = 0; j < 4; ++j)
             if (c_ord(i,j) != st_tag(i,j) || st_tag(i,j) != rt_arr(i,j)) return 12;
