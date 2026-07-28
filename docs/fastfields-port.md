@@ -7,6 +7,7 @@ work is specified here for a session that can.
 
 Everything needed to be *faithful* to the original algorithms is captured in
 this repo:
+
 - **Algorithm spec** — §5 (boundary conditions) and §6 (interpolation orders)
   are transcribed from the jitfields source; §4 gives each kernel's mechanics.
 - **Working reference** — `examples/fastfields/{bounds,spline,pushpull}.hpp` +
@@ -90,7 +91,7 @@ statements. On teeny it becomes: dispatch the *spatial rank* static, peel the
 runtime batch into the pointer, and keep the trailing `Sr = D+1` (spatial + channel)
 dims static — **the kernel instantiates once per `Sr`, not once per total rank.**
 
-```
+```text
 host ndarray (numpy/cupy/torch/dlpack)  ──as_anyrank(data,shape,stride,ndim)──►  anyrank
    │  strides are in ELEMENTS (dlpack); numpy's __array_interface__ gives BYTES — /itemsize first
    │  device data: as_anyrank<storage::gpu_view>(dptr,…)  (or from_dlpack<T,storage::gpu_view>)
@@ -116,6 +117,7 @@ dispatch_value<1,2,3>(spatial_ndim, [&](auto D){       // spatial rank -> static
   thread → occupancy). Opt in per launch site.
 
 Key facts carried from jitfields (§4.1):
+
 - The **channel axis is never parallelised** — parallelise the flat
   `(*batch, *spatial)` index; loop channels *inside* the kernel. Neighbours and
   weights are computed once per spatial location and reused across channels.
@@ -195,6 +197,7 @@ so the target axis is innermost, or peel a different axis each pass).
 Small dense/packed SPD systems per voxel. Storage types auto-detected from the
 element count: `Eye`(1), `Diag`(C), `ESTATICS`(2C-1), `Sym`(C(C+1)/2, packed
 diag-then-rows), `Full`(C²). Port:
+
 - `cholesky_solve.cpp` already implements dense Cholesky factor + solve on a
   the `wrap(..., strides<S...>{})` matrix with `local` work tensors — that is the `Full`/`Sym`
   path once you expand the packed matrix `tofull` into a `local<T, shape<C,C>>`.
@@ -236,7 +239,7 @@ gather reads `sign==0 ? 0 : sign<0 ? -data[i] : data[i]`, a scatter adds `sign·
 |---|---|---|---|
 | zero | identity | `(i<0‖i≥n)?0:1` | out-of-range ⇒ 0 |
 | replicate | `i≤0?0 : i≥n?n-1 : i` | 1 | nearest edge (clip) |
-| dct1 | reflect about border **centres**, period `(n-1)·2`: `t=(n-1)·2; c=|i|%t; c≥n?t-c:c` | 1 | `-1→1, n→n-2` |
+| dct1 | reflect about border **centres**, period `(n-1)·2`: `t=(n-1)·2; c=abs(i)%t; c≥n?t-c:c` | 1 | `-1→1, n→n-2` |
 | dct2 | reflect about border **edges**, period `n·2`: `t=n·2; c=i<0?t-((-i-1)%t)-1:i%t; c≥n?t-c-1:c` | 1 | Neumann; `-1→0, n→n-1` |
 | dst1 | `t=(n+1)·2; c=(i==-1)?0:(i<0?-i-2:i); c%=t; c==n?n-1:(c>n?t-c-2:c)` | `t=(n+1)·2; c=(i<0?n-i-1:i)%t; c%(n+1)==n?0:((c/(n+1))%2?-1:1)` | antisymmetric about first OOB centre |
 | dst2 | same index as dct2 | `c=i<0?n-i-1:i; (c/n)%2?-1:1` | Dirichlet |

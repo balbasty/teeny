@@ -1,0 +1,32 @@
+name: Lint docs markdown
+
+# Trigger: lint docs/**/*.md and the top-level *.md files on pushes to main
+# and on PRs that touch them. Rule config + globs live in
+# .markdownlint-cli2.jsonc at the repo root (also excludes the generated
+# docs/api/index.md).
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/**/*.md
+      - "*.md"
+      - .markdownlint-cli2.jsonc
+      - .github/workflows/docs-lint.yaml
+  pull_request:
+    paths:
+      - docs/**/*.md
+      - "*.md"
+      - .markdownlint-cli2.jsonc
+      - .github/workflows/docs-lint.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  markdownlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npx --yes markdownlint-cli2

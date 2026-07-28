@@ -23,9 +23,11 @@ valarray-like math layer, and kernel ergonomics (nd-peel, dynamic-rank dispatch)
 - **C++17** (the floor set by CCCL, which refuses to build lower).
 - A host compiler (tested: g++ 13, clang++ 18) and/or `nvcc`.
 - CCCL, vendored as a submodule:
+
   ```sh
   git submodule update --init --depth 1 external/cccl
   ```
+
   Add `-I include -I external/cccl/libcudacxx/include`.
 
 ## Using it in your build
