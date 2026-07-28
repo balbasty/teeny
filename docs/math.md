@@ -192,6 +192,26 @@ int8   + int8   -> int8  // numpy-like, not C++'s int-promoted result
 
 Opt back to standard (wider-float-wins) promotion with `-DTNY_STD_PROMOTION`.
 
+## Keyword arguments
+
+Reductions (and, elsewhere in the API, factories like `empty`/`zeros`/`wrap`)
+accept a run of **keyword-like value tags** after their required positional
+arguments — here that's `dtype<T>{}`, `axis<...>{}`, `keepdims`, `into(dest)`.
+This is a design rule of the whole API, not something you need to know the
+mechanism for to use: keywords are **trailing** (after every positional
+argument), **order-free among themselves**, and there is **one of each kind
+per call** — matched by distinct type, so a call site can tell a misplaced or
+duplicated keyword apart from a real argument and reject it with a clear
+compile error instead of silently doing the wrong thing. That's why every
+combination below — `sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf))`,
+in any order — just works, without a hand-written overload for every
+arrangement. (The one exception: where a selector still needs an *explicit*
+`<...>` template argument — the `<Acc, Axes...>` reduction split, since C++17
+has no single template parameter that means "leading type = accumulator" *and*
+"leading int = axis" — that split stays; it's the keyword bag *past* it that's
+generic.) See [Tensors & ownership](tensors.md#factories) for the same
+contract on `empty`/`zeros`/`wrap`'s `dtype`/`storage_c`/layout keywords.
+
 ## Reductions
 
 Over all axes → a scalar:
