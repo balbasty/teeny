@@ -121,7 +121,12 @@ struct strides {
         }
         template <class... I>
         _TNY_API constexpr index_type operator()(I... i) const noexcept {
-            const index_type id[] = { static_cast<index_type>(i)... };
+            // Array size floored to 1: a rank-0 tensor (e.g. squeeze<0>() on a
+            // shape<1>) makes I... empty, and a genuine zero-length array is a
+            // GCC/Clang extension MSVC rejects (C2466, same class of bug as #313).
+            // The loop below is bounded by Shape::rank(), never the array's own
+            // size, so the unused padding slot at rank 0 is never read.
+            const index_type id[sizeof...(I) ? sizeof...(I) : 1] = { static_cast<index_type>(i)... };
             index_type off = 0;
             for (rank_type r = 0; r < Shape::rank(); ++r) off += id[r] * stride(r);
             return off;

@@ -250,9 +250,13 @@ template <class W, bool Restrict, class Cv, class C, class A, class B, class Op,
 _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
     using I = typename C::index_type;
     constexpr cs::size_t R = C::rank();   // c has the result (largest) rank; a,b right-align into it
-    const I ce[] = { c.extent(D)... }, sc[] = { c.stride(D)... };
-    const I ae[] = { static_cast<I>(bc_ext<R>(a, D))... }, sa[] = { static_cast<I>(bc_str<R>(a, D))... };
-    const I be[] = { static_cast<I>(bc_ext<R>(b, D))... }, sb[] = { static_cast<I>(bc_str<R>(b, D))... };
+    // Array size floored to 1 (rank-0 c -> empty D..., see scal_'s comment above).
+    const I ce[sizeof...(D) ? sizeof...(D) : 1] = { c.extent(D)... },
+            sc[sizeof...(D) ? sizeof...(D) : 1] = { c.stride(D)... };
+    const I ae[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(bc_ext<R>(a, D))... },
+            sa[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(bc_str<R>(a, D))... };
+    const I be[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(bc_ext<R>(b, D))... },
+            sb[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(bc_str<R>(b, D))... };
     // runtime shape check: each operand extent must equal c's or be 1 (a larger
     // rhs would silently truncate — the worst failure mode in a numerics lib).
     for (cs::size_t r = 0; r < sizeof...(D); ++r) {
@@ -320,8 +324,12 @@ _TNY_API void scal_(C & c, typename C::element_type s, Op op, cs::index_sequence
     using I  = typename C::index_type;
     using Cv = compute_type_t<typename C::element_type>;   // compute in float for half types
     const Cv sv = static_cast<Cv>(s);
-    const I e[]  = { c.extent(D)... };
-    const I sc[] = { c.stride(D)... };
+    // Array size floored to 1: a rank-0 `C` (e.g. `.at(i,j).add_(v)`) makes `D...`
+    // empty, and a genuine zero-length array is a GCC/Clang extension MSVC rejects
+    // (C2466). The loop below is bounded by `sizeof...(D)`, not the array size, so
+    // the unused padding slot when rank is 0 is never read.
+    const I e[sizeof...(D) ? sizeof...(D) : 1]  = { c.extent(D)... };
+    const I sc[sizeof...(D) ? sizeof...(D) : 1] = { c.stride(D)... };
     I n = 1;
     for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
     // Linear fast path. An in-place SCALAR op is a SINGLE-array read-modify-write (the
@@ -357,8 +365,9 @@ template <class C, cs::size_t... D>
 _TNY_API void iota_(C & c, typename C::element_type start, typename C::element_type step, cs::index_sequence<D...>) {
     check_dest_no_overlap(c, cs::index_sequence<D...>{});
     using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
-    const I e[]  = { c.extent(D)... };
-    const I sc[] = { c.stride(D)... };
+    // Array size floored to 1 (rank-0 dest -> empty D..., see scal_'s comment above).
+    const I e[sizeof...(D) ? sizeof...(D) : 1]  = { c.extent(D)... };
+    const I sc[sizeof...(D) ? sizeof...(D) : 1] = { c.stride(D)... };
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
     // Contiguous linear fast path: a pure single-array write (no read, no second
     // pointer) — vectorizes with one pointer, no `__restrict__` needed.
@@ -378,7 +387,10 @@ _TNY_API void iota_(C & c, typename C::element_type start, typename C::element_t
 template <bool Restrict, class Cv, class C, class A, class S, class Op, cs::size_t... D>
 _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
     using I = typename C::index_type;   // `Cv` = the op's compute type (arithmetic: dest compute type; compare: Rc)
-    const I e[] = { a.extent(D)... }, sa[] = { a.stride(D)... }, sc[] = { c.stride(D)... };
+    // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
+    const I e[sizeof...(D) ? sizeof...(D) : 1] = { a.extent(D)... },
+            sa[sizeof...(D) ? sizeof...(D) : 1] = { a.stride(D)... },
+            sc[sizeof...(D) ? sizeof...(D) : 1] = { c.stride(D)... };
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
     // Contiguous linear fast path (out-of-place only; `c` fresh, cannot alias `a`).
     if constexpr (Restrict) {
@@ -403,7 +415,10 @@ template <bool Restrict = false, class C, class A, class S, class Op> _TNY_API v
 template <bool Restrict, class C, class A, class Uop, cs::size_t... D>
 _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
-    const I e[] = { a.extent(D)... }, sa[] = { a.stride(D)... }, sc[] = { c.stride(D)... };
+    // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
+    const I e[sizeof...(D) ? sizeof...(D) : 1] = { a.extent(D)... },
+            sa[sizeof...(D) ? sizeof...(D) : 1] = { a.stride(D)... },
+            sc[sizeof...(D) ? sizeof...(D) : 1] = { c.stride(D)... };
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
     // Contiguous linear fast path (out-of-place only; `c` fresh, cannot alias `a`).
     if constexpr (Restrict) {
@@ -541,10 +556,11 @@ template <class Uop, class Out, class A>          _TNY_API void uop_to (Out & o,
 template <class R, class A, class B, cs::size_t... D>
 _TNY_API R zipreduce_(const A & a, const B & b, cs::index_sequence<D...>) {
     using I = typename A::index_type;
-    const I e[]  = { a.extent(D)... };
-    const I be[] = { b.extent(D)... };
-    const I sa[] = { a.stride(D)... };
-    const I sb[] = { b.stride(D)... };
+    // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
+    const I e[sizeof...(D) ? sizeof...(D) : 1]  = { a.extent(D)... };
+    const I be[sizeof...(D) ? sizeof...(D) : 1] = { b.extent(D)... };
+    const I sa[sizeof...(D) ? sizeof...(D) : 1] = { a.stride(D)... };
+    const I sb[sizeof...(D) ? sizeof...(D) : 1] = { b.stride(D)... };
     for (cs::size_t r = 0; r < sizeof...(D); ++r)
         _TNY_CHECK(e[r] == be[r], "dot: operand extents must match exactly (no broadcast)");
     I n = 1;
@@ -564,8 +580,9 @@ _TNY_API R zipreduce_(const A & a, const B & b, cs::index_sequence<D...>) {
 template <class R, class A, class Op, cs::size_t... D>
 _TNY_API R reduce_(const A & a, R init, Op op, cs::index_sequence<D...>) {
     using I = typename A::index_type;
-    const I e[]  = { a.extent(D)... };
-    const I sa[] = { a.stride(D)... };
+    // Array size floored to 1 (rank-0 operand -> empty D..., see scal_'s comment above).
+    const I e[sizeof...(D) ? sizeof...(D) : 1]  = { a.extent(D)... };
+    const I sa[sizeof...(D) ? sizeof...(D) : 1] = { a.stride(D)... };
     I n = 1;
     for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
     R acc = init;
@@ -595,9 +612,10 @@ template <class R, class Out, class A, class Op, cs::size_t... D>
 _TNY_API void reduce_axes_(Out & out, const A & a, R init, Op op, const bool * reduced, cs::index_sequence<D...>) {
     using I = typename A::index_type; using Tout = typename Out::element_type;
     constexpr int N = sizeof...(D);
-    const I e[]  = { static_cast<I>(a.extent(D))... };
-    const I sa[] = { static_cast<I>(a.stride(D))... };
-    I so[N]; int oi = 0;                                   // output stride per input axis (0 if reduced)
+    // Array size floored to 1 (rank-0 `a` -> empty D..., see scal_'s comment above).
+    const I e[N ? N : 1]  = { static_cast<I>(a.extent(D))... };
+    const I sa[N ? N : 1] = { static_cast<I>(a.stride(D))... };
+    I so[N ? N : 1]; int oi = 0;                           // output stride per input axis (0 if reduced)
     for (int d = 0; d < N; ++d) { if (reduced[d]) so[d] = I(0); else { so[d] = static_cast<I>(out.stride(oi)); ++oi; } }
     const I on = static_cast<I>(out.numel());
     for (I k = 0; k < on; ++k) out.data()[k] = static_cast<Tout>(init);
@@ -710,8 +728,11 @@ template <class R, class A, class B, cs::size_t... D>
 _TNY_API bool allclose_(const A & a, const B & b, R rtol, R atol, cs::index_sequence<D...>) {
     using I = typename A::index_type;
     constexpr cs::size_t Rk = sizeof...(D);   // result (broadcast) rank; a,b right-align (left-pad)
-    const I ae[] = { static_cast<I>(bc_ext<Rk>(a, D))... }, sa[] = { static_cast<I>(bc_str<Rk>(a, D))... };
-    const I be[] = { static_cast<I>(bc_ext<Rk>(b, D))... }, sb[] = { static_cast<I>(bc_str<Rk>(b, D))... };
+    // Array size floored to 1 (rank-0 result -> empty D..., see scal_'s comment above).
+    const I ae[Rk ? Rk : 1] = { static_cast<I>(bc_ext<Rk>(a, D))... },
+            sa[Rk ? Rk : 1] = { static_cast<I>(bc_str<Rk>(a, D))... };
+    const I be[Rk ? Rk : 1] = { static_cast<I>(bc_ext<Rk>(b, D))... },
+            sb[Rk ? Rk : 1] = { static_cast<I>(bc_str<Rk>(b, D))... };
     I ce[sizeof...(D) ? sizeof...(D) : 1], n = 1;
     for (cs::size_t r = 0; r < sizeof...(D); ++r) {
         ce[r] = ae[r] == 1 ? be[r] : ae[r];
