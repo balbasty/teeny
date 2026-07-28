@@ -210,7 +210,7 @@ See [Views & structure](structure.md#nd-peel-iterate-a-subset-of-axes).
 
 ```cpp
 // in-place (broadcasts tensor rhs; also scalar rhs). atomic_add_/atomic_sub_
-// accumulate ATOMICALLY on device (underlying form: add_<Atomic>/sub_<Atomic>).
+// accumulate ATOMICALLY, host and device (underlying form: add_<Atomic>/sub_<Atomic>).
 a.add_(x); a.sub_(x); a.mul_(x); a.div_(x);   a.atomic_add_(x); a.atomic_sub_(s);
 y.add_(x, alpha); y.sub_(x, alpha);  // fused axpy: y += alpha*x / y -= alpha*x (x broadcasts)
 a += x; a -= s; a *= x; a /= s;  // compound-assign
@@ -220,7 +220,7 @@ a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_(); a.pow_(e); a.clamp_(lo
 a & b; a | b; a ^ b; ~a; a &= b; a |= s;  // bitwise (INTEGER element types only)
 a.fill_(v); a.zero_(); a.copy_(b); a.iota_(start, step);
 a.map_(f); a.zip_with_(g, b);  auto c = a.map(f);  // user functor (device-safe)
-a.at(i...).atomic_add_(v);                         // scatter-accumulate (atomic on device)
+a.at(i...).atomic_add_(v);                         // scatter-accumulate (atomic, host and device)
 
 // out-of-place -> new tensor (promotes types; static->stack, dyn->heap)
 auto c = a + b;  a.add(b);  a * 2.0;  2.0 - a;  1.0 / a;  -a;  a.pow(b);

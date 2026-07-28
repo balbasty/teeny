@@ -38,6 +38,7 @@ TESTS = \
 	$(BUILDDIR)/test_tensor \
 	$(BUILDDIR)/test_math \
 	$(BUILDDIR)/test_atomic_alias \
+	$(BUILDDIR)/test_atomic_fetch_add \
 	$(BUILDDIR)/test_mathops \
 	$(BUILDDIR)/test_vecalg \
 	$(BUILDDIR)/test_into \
@@ -170,6 +171,10 @@ runex-%: $(BUILDDIR)/ex_%
 # test_cuda needs the fake CUDA runtime on the include path.
 $(BUILDDIR)/test_cuda: tests/test_cuda.cpp | $(BUILDDIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -Itests/fakecuda $(TESTFLAGS) -o $@ $<
+
+# test_atomic_fetch_add uses std::thread (#257 host atomic stress test).
+$(BUILDDIR)/test_atomic_fetch_add: tests/test_atomic_fetch_add.cpp | $(BUILDDIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -pthread $(TESTFLAGS) -o $@ $<
 
 run-%: $(BUILDDIR)/test_%
 	@ $(BUILDDIR)/test_$* && echo "  PASS  test_$*" || { echo "  FAIL  test_$*"; exit 1; }

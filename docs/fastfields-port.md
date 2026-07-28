@@ -62,7 +62,7 @@ as `shape_type`/`extents_type`), with per-dimension static/dynamic shape and str
 |---|---|
 | kernel-passable strided view | `wrap(ptr, extents)`, `wrap<fcontiguous>(...)`, `wrap(ptr, ext, strides<S...>{})`, `as_tensor(submdspan_result)` |
 | element / folded stride | `t(i,j,k)`, `t.data()[off]`, `t.stride(Int<d>())` (static) / `t.stride(d)` (runtime) |
-| **scatter (push)** | `t.at(i...).atomic_add_(v)` — **atomic on device** |
+| **scatter (push)** | `t.at(i...).atomic_add_(v)` — **atomic on host and device** |
 | assign / init | `t.copy_(src)` (broadcasts), `t.fill_(v)`, `t.zero_()`, `t.iota_(a,b)` |
 | in-place / reduce math | `t.add_(x)/mul_(x)/…` (broadcasts), `sum/dot/min/max`. Contiguous out-of-place and in-place scalar/unary ops **auto-vectorize** (see `efficient-kernels.md`) |
 | **peel arbitrary batch** | `peel_front<-Sr>()` on an `anyrank` (keep the trailing `Sr` dims static, peel the runtime batch) → `dextents<_,Sr>` cells; `peel_front_at<-Sr>(i)` for a grid-stride index; `size_front<-Sr>()` = cell count. On a static-rank tensor with a *known* batch count, positive `peel_front<Nbatch>(t)` |
@@ -316,8 +316,10 @@ Vendor teeny (`include/teeny/` + `examples/fastfields/{bounds,spline}.hpp`) into
   recursion over static D (the reference `pull_rec`/`push_rec`).
 - Delete `Pointer<T,S>` static-stride pointer → `wrap(ptr, ext, strides<S...>{})` /
   `stride(Int<d>())`.
-- Replace the `has_atomic_add` fork with `fetch_add` (atomic on device, `+=` on
-  host) — keep the batch-parallel/spatial-sequential path only for element types
-  without device atomics.
+- Replace the `has_atomic_add` fork with `fetch_add` (atomic on device via
+  `atomicAdd`, and atomic on the host too via `cuda::std::atomic_ref` for
+  arithmetic element types, #257) — keep the batch-parallel/spatial-sequential
+  path only for the non-arithmetic (`half`/`bfloat16`) element types that have
+  no atomic representation to route through.
 - Keep the giant order/bound/rank switches only at the **dispatch boundary**
   (`dispatch_value`), not threaded through every function.

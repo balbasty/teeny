@@ -32,11 +32,12 @@ auto old = a++;                         // postfix: pre-value as a stack copy
     write whose destination has an `extent > 1` axis with stride 0; `clone()` to a
     dense tensor first if you need to write.
 
-`atomic_add_`/`atomic_sub_` accumulate a delta **atomically on device** — the
+`atomic_add_`/`atomic_sub_` accumulate a delta **atomically**, on device
+(`atomicAdd`) and on the host (`cuda::std::atomic_ref`) alike — the
 scatter/"push" accumulate. Both a broadcasting tensor rhs and a scalar rhs:
 
 ```cpp
-a.atomic_add_(b);    // accumulate a delta, atomic on device
+a.atomic_add_(b);    // accumulate a delta, atomic on host and device
 a.atomic_sub_(2.0);
 ```
 
@@ -92,12 +93,14 @@ a.iota_(start, step);                 // start, start+step, … (row-major)
 a.map_(f);                            // *this = f(*this)      (user functor)
 a.zip_with_(g, b);                    // *this = g(*this, b)   (broadcasts)
 auto c = a.map(f);                    // out-of-place variant
-a.at(i, j).atomic_add_(v);            // scatter: a(i,j) += v — ATOMIC on device
+a.at(i, j).atomic_add_(v);            // scatter: a(i,j) += v — ATOMIC on host and device
 ```
 
 `map_`/`zip_with_` take a functor **struct** (a lambda would need
 `--extended-lambda` under nvcc). `at(i...).atomic_add_(v)` is the write half of a
-scatter/"push" kernel (`atomicAdd` on device).
+scatter/"push" kernel — `atomicAdd` on device, `cuda::std::atomic_ref` on the
+host, so a push kernel parallelised with `std::thread`/OpenMP over overlapping
+outputs is race-free on the host too.
 
 ## Out-of-place ops → a new tensor
 

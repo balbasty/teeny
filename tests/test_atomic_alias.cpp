@@ -6,9 +6,11 @@ namespace cs = cuda::std;
 using cs::extents;
 
 // atomic_add_/atomic_sub_ are the readable aliases of add_<true>/sub_<true>.
-// On the host the atomic write is a plain += (see fetch_add), so the alias must
-// produce exactly the same result as the underlying <true> form, element by
-// element — for a broadcasting tensor rhs, a scalar rhs, and a rank-0 at() cell.
+// On the host the atomic write is a REAL atomic (cuda::std::atomic_ref, #257),
+// so the alias must produce exactly the same result as the underlying <true>
+// form, element by element — for a broadcasting tensor rhs, a scalar rhs, and
+// a rank-0 at() cell. (The genuine multi-threaded race-freedom proof lives in
+// test_atomic_fetch_add.cpp; this file only checks single-threaded parity.)
 
 int main()
 {
@@ -83,6 +85,25 @@ int main()
             "atomic_sub_ returns tensor&");
         a1.atomic_add_(1.0).atomic_add_(1.0);   // chain
         if (b1[0] != 3) return 13;
+    }
+
+    // ---- element types fetch_add's atomic_ref path deliberately EXCLUDES ----
+    // (#257 follow-up): bool (libcu++'s atomic_ref<bool> has no fetch_add) and
+    // long double (atomic_ref<long double> needs a 16-byte atomic RMW, which
+    // pulls in libatomic and fails to LINK on toolchains that don't provide
+    // it). Both must still compile, link, and produce the correct VALUE via
+    // the plain `*p += v` fallback -- not a regression from before #257, just
+    // still not thread-safe for these two types.
+    {
+        bool bb[1] = {false};
+        auto ab = wrap(bb, shape<1>{});
+        ab.atomic_add_(true);
+        if (bb[0] != true) return 14;
+
+        long double lb[1] = {1.0L};
+        auto al = wrap(lb, shape<1>{});
+        al.atomic_add_(2.5L);
+        if (lb[0] != 3.5L) return 15;
     }
 
     return 0;

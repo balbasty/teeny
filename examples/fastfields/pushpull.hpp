@@ -5,7 +5,7 @@
 // static spatial rank D (here D = MD::rank()); per axis the neighbours, weights
 // (spline.hpp) and boundary index+sign (bounds.hpp) are formed once and shared.
 // PUSH is the exact adjoint of PULL: same neighbours/weights, but it
-// SCATTER-ACCUMULATES with tny::fetch_add (atomic on device) instead of reading.
+// SCATTER-ACCUMULATES with tny::fetch_add (atomic on host and device, #257) instead of reading.
 //
 // Single channel here for clarity; multi-channel is an inner `for c` loop that
 // reuses the same neighbours (channel axis last, stride C) — see the handoff.
@@ -48,7 +48,7 @@ double pull_rec(const MD & inp, const axis_nb * nb, long off, double w, int sgn)
     return acc;
 }
 
-// --- scatter: out[·] += val * (Π weights) * (Π signs), atomic on device ------
+// --- scatter: out[·] += val * (Π weights) * (Π signs), atomic on host and device --
 template <int d, int D, class MD>
 void push_rec(MD & out, const axis_nb * nb, long off, double wv, int sgn) {
     const axis_nb & a = nb[d];

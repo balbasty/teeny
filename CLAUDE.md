@@ -282,7 +282,7 @@ a.add_(2.0); a.mul_(0.5);                     // scalar rhs
 y.add_(x, alpha); y.sub_(x, alpha);           // FUSED axpy: y += alpha*x / y -= alpha*x (x
                                               //   broadcasts). scaled copy y=alpha*x = y.zero_().add_(x,alpha)
 a += b; a -= 2.0; a *= b; a /= 2.0;           // compound-assign sugar (scalar or tensor)
-a.atomic_add_(b); a.atomic_sub_(2.0);         // ATOMIC accumulate (device scatter/push);
+a.atomic_add_(b); a.atomic_sub_(2.0);         // ATOMIC accumulate, host and device (scatter/push);
                                               //   underlying form: add_<Atomic>/sub_<Atomic>
 a.neg_(); a.abs_(); a.exp_(); a.log_();       // unary in-place
 a.sin_(); a.cos_(); a.sqrt_(); a.tanh_(); a.pow_(3.0);
@@ -295,7 +295,7 @@ a.fill_(0.0); a.zero_(); a.copy_(b);          // b broadcasts into a
 a.iota_(start, step);                         // 0,1,2,... (row-major)
 a.map_(f); a.zip_with_(g, b); auto c = a.map(f);  // user functor (device-safe struct)
 a.at(i, j).atomic_add_(v);                    // scatter-accumulate: a(i,j) += v,
-                                              //   ATOMIC on device (push/splat write)
+                                              //   ATOMIC on host and device (push/splat write)
 auto z = zeros<T>(shape); ones<T>(sh); full(sh,v); arange<T>(n);  // creation. zeros/ones
                       //   default T=float; full's T = value type; arange defaults T=int64.
                       //   Static: arange<T,N>() / arange<T>(Int<N>()) -> stack [0..N-1].
