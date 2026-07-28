@@ -3,18 +3,29 @@
 These return **views** (no copy) that rearrange, reshape, or iterate a tensor.
 Axis template arguments are signed — **negatives count from the back**.
 
-Every axis argument has a **value form** too: pass a static integer
-(`Int<k>()`) instead of the `<k>` template argument — `t.squeeze(Int<1>())` ==
-`t.squeeze<1>()`, and likewise for `permute`/`flip`/`unsqueeze`/`reshape`. Both
-spellings compile to the same code; the tabs below **lead with the value form**.
-
-The axis-**list** ops — `permute`, `squeeze`, `unsqueeze` — additionally take an
-`axis<...>{}` tag (a compile-time axis list, sibling of `shape<...>`, the same one
+The axis-**list** ops — `permute`, `squeeze`, `unsqueeze` — take an `axis<...>{}`
+tag (a compile-time axis list, sibling of `shape<...>`, the same one
 `peel`/`take_along`/the reductions use): `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`,
 `t.permute(axis<2,0,1>{})` == `t.permute<2,0,1>()`. Being a single distinct-typed
-argument, it needs no `.template` on a dependent receiver.
+argument, it needs no `.template` on a dependent receiver — reach for this spelling
+first.
+
+Every axis argument also has a plain **value form**: pass a static integer
+(`Int<k>()`) instead of the `<k>` template argument — `t.squeeze(Int<1>())` ==
+`t.squeeze<1>()`, and likewise for `permute`/`flip`/`unsqueeze`/`reshape`. All
+three spellings compile to the same code; the tabs below lead with `axis<...>{}`
+where an op supports it, then the `Int<k>()` value form, then the explicit
+template form.
 
 ## Rearrange axes
+
+=== "axis<...> form"
+
+    ```cpp
+    t.permute(axis<2,0,1>{});    // reorder axes (a permutation of 0..N-1)
+    t.permute(axis<-1,0,1>{});   // negatives count from the back
+    // flip is single-axis, not an axis-list op — use the Int<k>()/template form below
+    ```
 
 === "value form"
 
@@ -34,6 +45,17 @@ argument, it needs no `.template` on a dependent receiver.
     ```
 
 ## Add / drop / reshape
+
+=== "axis<...> form"
+
+    ```cpp
+    t.unsqueeze(axis<2>{});    // insert a size-1 axis (numpy newaxis) -> rank+1
+    t.unsqueeze(axis<-1>{});   // append a trailing axis, e.g. (H,W) -> (H,W,1)
+    t.squeeze(axis<3>{});      // drop a specific size-1 axis -> rank-1
+    t.squeeze();               // drop EVERY statically-size-1 axis
+    // reshape/flatten aren't axis-list ops (they take dimension SIZES, not axis
+    // positions) — use the Int<k>()/template form below
+    ```
 
 === "value form"
 
