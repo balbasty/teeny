@@ -35,7 +35,7 @@ _TNY_API auto fold_mapping(const OE & oe, const Idx * rstr) {
     if constexpr (SF::all_static()) { (void)rstr; return Map(oe); }
     else {
         cs::array<Idx, SF::ndyn()> dyn{};
-        for (cs::size_t r = 0; r < OE::rank(); ++r)
+        for (cs::size_t r = 0; r < _shape_rank<OE>(); ++r)
             if (SF::S_[r] == dynamic_stride) dyn[SF::slot(r)] = rstr[r];
         return Map(oe, dyn);
     }
@@ -55,8 +55,8 @@ _TNY_API auto retype_mapping(const OE & oe, const Idx * rstr) {
     if constexpr (_contiguous_layout<L>::value) { (void)rstr; return typename L::template mapping<OE>(oe); }
     else if constexpr (_is_strides<L>::value)   return fold_mapping<L>(oe, rstr);
     else {   // layout_stride (or any runtime-strided mapping): carry all axes
-        cs::array<Idx, OE::rank()> st{};
-        for (cs::size_t r = 0; r < OE::rank(); ++r) st[r] = rstr[r];
+        cs::array<Idx, _shape_rank<OE>()> st{};
+        for (cs::size_t r = 0; r < _shape_rank<OE>(); ++r) st[r] = rstr[r];
         return typename L::template mapping<OE>(oe, st);
     }
 }
@@ -67,7 +67,7 @@ template <class MD, cs::size_t... P>
 _TNY_API auto perm_md(const MD & v, cs::index_sequence<P...>) {
     using El  = typename MD::element_type; using Idx = typename MD::index_type;
     using E   = typename MD::extents_type; using L   = typename MD::layout_type;
-    using PE  = cs::extents<Idx, E::static_extent(P)...>;
+    using PE  = cs::extents<Idx, _shape_static_extent<E>(P)...>;
     using SF  = strides< _src_sstride<P, L, E>()... >;
     PE pe(static_cast<Idx>(v.extent(P))...);
     const Idx rstr[sizeof...(P) ? sizeof...(P) : 1] = { static_cast<Idx>(v.stride(P))... };
@@ -95,7 +95,7 @@ _TNY_API auto flip_md(const MD & v, cs::index_sequence<D...>) {
 template <cs::size_t AX, class MD, cs::size_t... J>
 _TNY_API auto unsqueeze_md(const MD & v, cs::index_sequence<J...>) {
     using El  = typename MD::element_type; using Idx = typename MD::index_type;
-    if constexpr (MD::extents_type::rank() == 0) {
+    if constexpr (_shape_rank<typename MD::extents_type>() == 0) {
         // rank-0 -> rank-1 (AX is necessarily 0): one size-1 axis over the same
         // element. A rank-0 source has no strides to read (CCCL constrains
         // `stride()` to rank > 0, and `static_extent(0)` is out of range), so the
@@ -105,7 +105,7 @@ _TNY_API auto unsqueeze_md(const MD & v, cs::index_sequence<J...>) {
         return cs::mdspan<El, OE, SF>(v.data_handle(), typename SF::template mapping<OE>(OE{}));
     } else {
         using E   = typename MD::extents_type; using L   = typename MD::layout_type;
-        using OE  = cs::extents<Idx, (J == AX ? cs::size_t(1) : E::static_extent(J < AX ? J : J - 1))...>;
+        using OE  = cs::extents<Idx, (J == AX ? cs::size_t(1) : _shape_static_extent<E>(J < AX ? J : J - 1))...>;
         using SF  = strides< (J == AX ? cs::int64_t(1) : _src_sstride<(J == AX ? cs::size_t(0) : (J < AX ? J : J - 1)), L, E>())... >;
         OE oe(static_cast<Idx>(J == AX ? Idx(1) : v.extent(J < AX ? J : J - 1))...);
         const Idx rstr[sizeof...(J) ? sizeof...(J) : 1] =
@@ -119,7 +119,7 @@ template <cs::size_t AX, class MD, cs::size_t... J>
 _TNY_API auto squeeze_md(const MD & v, cs::index_sequence<J...>) {
     using El  = typename MD::element_type; using Idx = typename MD::index_type;
     using E   = typename MD::extents_type; using L   = typename MD::layout_type;
-    using OE  = cs::extents<Idx, E::static_extent(J < AX ? J : J + 1)...>;
+    using OE  = cs::extents<Idx, _shape_static_extent<E>(J < AX ? J : J + 1)...>;
     using SF  = strides< _src_sstride<(J < AX ? J : J + 1), L, E>()... >;
     OE oe(static_cast<Idx>(v.extent(J < AX ? J : J + 1))...);
     const Idx rstr[sizeof...(J) ? sizeof...(J) : 1] =

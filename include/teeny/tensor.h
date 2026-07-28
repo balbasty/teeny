@@ -50,9 +50,12 @@ as_tensor(const MD & m);
 template <class Shape>
 _TNY_API constexpr bool _is_static_shape() { return Shape::rank_dynamic() == 0; }
 
-// Same MSVC quirk as `_is_static_shape` above, for `Shape::rank()`.
-template <class Shape>
-_TNY_API constexpr cs::size_t _shape_rank() { return Shape::rank(); }
+// `_shape_rank<E>()`/`_shape_static_extent<E>(d)` (the same MSVC quirk as
+// `_is_static_shape` above, for `E::rank()`/`E::static_extent(d)`) live in
+// layout.h instead of here -- it needs them too (`strides<...>::mapping`'s own
+// body), and layout.h is included before this point, so tensor.h just reuses
+// that one definition (#315: also fixes `_recast`'s `NewE::rank()`, an
+// UNRELATED type parameter that trips the same misattribution).
 
 namespace _md {
 /* --- extents of an AXIS reduction: the input extents with `Axes...` dropped
@@ -113,16 +116,16 @@ template <class E, long A0, long... Rest> struct _red_dyn<E, axis<A0, Rest...>> 
 template <class Shape, class Layout, long Ax, class Map>
 _TNY_API constexpr auto _axis_extent(const Map & m) noexcept {
     using Idx = typename Shape::index_type;
-    constexpr cs::size_t D = _norm_axis(Ax, Shape::rank());      // -1 = last axis
-    if constexpr (Shape::static_extent(D) != cs::dynamic_extent)
-        return cs::integral_constant<Idx, static_cast<Idx>(Shape::static_extent(D))>{};
+    constexpr cs::size_t D = _norm_axis(Ax, _shape_rank<Shape>());      // -1 = last axis
+    if constexpr (_shape_static_extent<Shape>(D) != cs::dynamic_extent)
+        return cs::integral_constant<Idx, static_cast<Idx>(_shape_static_extent<Shape>(D))>{};
     else
         return static_cast<Idx>(m.extents().extent(D));
 }
 template <class Shape, class Layout, long Ax, class Map>
 _TNY_API constexpr auto _axis_stride(const Map & m) noexcept {
     using Idx = typename Shape::index_type;
-    constexpr cs::size_t D = _norm_axis(Ax, Shape::rank());
+    constexpr cs::size_t D = _norm_axis(Ax, _shape_rank<Shape>());
     // The compile-time stride is exactly what the layout + extents derive: a
     // strides<> baked value, or the contiguous product of the trailing (C) /
     // leading (F) STATIC extents — so it folds even for a partially-dynamic
@@ -146,7 +149,7 @@ struct _geom_view {
     using index_type   = typename Shape::index_type;
     mapping_type m;
 
-    static constexpr cs::size_t rank() noexcept { return Shape::rank(); }
+    static constexpr cs::size_t rank() noexcept { return _shape_rank<Shape>(); }
 
     template <class Idx, cs::enable_if_t<_is_ic<Idx>::value, int> = 0>
     _TNY_API constexpr auto operator[](Idx) const noexcept {
@@ -379,7 +382,7 @@ struct tensor : private Layout::template mapping<Shape> {
 private:
     static constexpr index_type _static_numel() noexcept {
         index_type n = 1;
-        for (cs::size_t r = 0; r < rank(); ++r) n *= static_cast<index_type>(Shape::static_extent(r));
+        for (cs::size_t r = 0; r < rank(); ++r) n *= static_cast<index_type>(_shape_static_extent<Shape>(r));
         return n;
     }
 public:
@@ -581,7 +584,7 @@ private:
     template <class Arg, cs::size_t SrcAx>
     _TNY_API static constexpr cs::size_t _arg_src_ext() noexcept {
         if constexpr (_is_newaxis<Arg>::value) return cs::dynamic_extent;   // unused
-        else                                   return Shape::static_extent(SrcAx);
+        else                                   return _shape_static_extent<Shape>(SrcAx);
     }
     template <bool Wrap = true, class P, cs::size_t... Ax, class... Args>
     _TNY_API auto _slice_range(P p, cs::index_sequence<Ax...> argseq, Args... a) const {
@@ -995,7 +998,7 @@ private:
     template <long... NewExt, cs::size_t... Rs>
     static constexpr _rs_static_t<sizeof...(NewExt)> _reshape_static_impl(cs::index_sequence<Rs...>) {
         constexpr cs::size_t R = sizeof...(Rs), M = sizeof...(NewExt);
-        cs::array<index_type, R ? R : 1> se{ static_cast<index_type>(Shape::static_extent(Rs))... };
+        cs::array<index_type, R ? R : 1> se{ static_cast<index_type>(_shape_static_extent<Shape>(Rs))... };
         cs::array<index_type, R ? R : 1> ss{ static_cast<index_type>(_src_sstride<Rs, Layout, Shape>())... };
         const long ne[M ? M : 1] = { NewExt... };
         index_type n = 1; for (cs::size_t r = 0; r < R; ++r) n *= se[r];
@@ -1106,12 +1109,12 @@ public:
 private:
     template <class El, class NewE, class NewL, cs::size_t... D>
     _TNY_API auto _recast(El * p, cs::index_sequence<D...>) const {
-        static_assert(NewE::rank() == rank(), "recast: rank must match");
+        static_assert(_shape_rank<NewE>() == rank(), "recast: rank must match");
         // recast re-types the EXTENTS (to recover statically-known dims). Each static
         // dim of NewE must equal the runtime extent (a genuine mismatch is a bug —
         // validated host-debug). The STRIDES come from `NewL`:
-        ( _TNY_CHECK(NewE::static_extent(D) == cs::dynamic_extent ||
-                     static_cast<index_type>(NewE::static_extent(D)) == static_cast<index_type>(extent(D)),
+        ( _TNY_CHECK(_shape_static_extent<NewE>(D) == cs::dynamic_extent ||
+                     static_cast<index_type>(_shape_static_extent<NewE>(D)) == static_cast<index_type>(extent(D)),
                      "recast: a static dim does not match the actual extent"), ... );
         NewE oe(cs::array<index_type, rank()>{ static_cast<index_type>(extent(D))... });
         // The OUTPUT layout: `keep_strides` (default) PRESERVES the source layout —
@@ -1253,7 +1256,7 @@ private:
     // axis (index 0), keep the rest. (A dynamic axis that is 1 only at run time
     // can't be dropped — the rank must stay static.)
     template <cs::size_t D> static _TNY_API auto _sq_arg() noexcept {
-        if constexpr (Shape::static_extent(D) == 1) return cs::integral_constant<index_type, 0>{};
+        if constexpr (_shape_static_extent<Shape>(D) == 1) return cs::integral_constant<index_type, 0>{};
         else                                          return cs::full_extent;
     }
     template <class P, cs::size_t... D>
@@ -1264,7 +1267,7 @@ private:
     // the multi-axis fold calls. An out-of-range axis short-circuits (its own
     // static_assert reports it) so `static_extent` is never asked for a bad rank.
     template <cs::size_t... A> static _TNY_API constexpr bool _all_extent1() noexcept
-    { return ((A >= rank() || Shape::static_extent(A) == cs::dynamic_extent || Shape::static_extent(A) == 1) && ...); }
+    { return ((A >= rank() || _shape_static_extent<Shape>(A) == cs::dynamic_extent || _shape_static_extent<Shape>(A) == 1) && ...); }
 public:
     /** @brief Drop a size-1 axis `Ax` (negatives wrap) -> a rank-(N-1) view.
      *         `squeeze()` (no axis) drops EVERY statically-size-1 axis. */
@@ -1272,7 +1275,7 @@ public:
     _TNY_API auto squeeze() noexcept {
         if constexpr (Ax == _ax_all) return _squeeze_all(store_.data(), cs::make_index_sequence<rank()>{});
         else { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range");
-               static_assert(Shape::static_extent(A) == cs::dynamic_extent || Shape::static_extent(A) == 1,
+               static_assert(_shape_static_extent<Shape>(A) == cs::dynamic_extent || _shape_static_extent<Shape>(A) == 1,
                              "squeeze: axis must have extent 1");
                _TNY_CHECK(extent(A) == index_type(1), "squeeze: axis must have extent 1");   // runtime check for a dynamic extent
                return as_tensor<storage_view_of(O)>(_detail::squeeze_md<A>(mdspan(), cs::make_index_sequence<rank() - 1>{})); }
@@ -1281,7 +1284,7 @@ public:
     _TNY_API auto squeeze() const noexcept {
         if constexpr (Ax == _ax_all) return _squeeze_all(store_.data(), cs::make_index_sequence<rank()>{});
         else { constexpr cs::size_t A = _norm_axis(Ax, rank()); static_assert(A < rank() && rank() > 0, "squeeze: axis out of range");
-               static_assert(Shape::static_extent(A) == cs::dynamic_extent || Shape::static_extent(A) == 1,
+               static_assert(_shape_static_extent<Shape>(A) == cs::dynamic_extent || _shape_static_extent<Shape>(A) == 1,
                              "squeeze: axis must have extent 1");
                _TNY_CHECK(extent(A) == index_type(1), "squeeze: axis must have extent 1");   // runtime check for a dynamic extent
                return as_tensor<storage_view_of(O)>(_detail::squeeze_md<A>(mdspan(), cs::make_index_sequence<rank() - 1>{})); }
@@ -1625,7 +1628,7 @@ _TNY_API auto wrap(const MD & md) { return as_tensor<OW>(md); }
  *         rejects an in-place write whose destination has an `extent > 1` axis with
  *         stride 0. `clone()` to a dense tensor first if you need to write. */
 template <storage Space = storage_deduce, class T, class Shape, class... Tags>
-_TNY_API auto wrap(T * p, Shape e, cs::array<typename Shape::index_type, Shape::rank()> st, Tags... /*tags*/) {
+_TNY_API auto wrap(T * p, Shape e, cs::array<typename Shape::index_type, _shape_rank<Shape>()> st, Tags... /*tags*/) {
     using ok = _kw::accepts<_is_storage_tag>;
     static_assert(ok::known<Tags...>(), "wrap(): unrecognised trailing argument — expected storage_c<...>{}/storage_v<...>");
     static_assert(ok::unique<Tags...>(), "wrap(): the same keyword was given twice");
