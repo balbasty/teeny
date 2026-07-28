@@ -36,6 +36,10 @@ add_library(teeny::teeny ALIAS teeny)
 
 target_compile_features(teeny INTERFACE cxx_std_17)   # the floor CCCL enforces
 
+# SCRATCH (investigation only, see #316): try MSVC's conformant parser to see
+# whether it collapses several MSVC-only defects (#294/#296/#311/#315) at once.
+target_compile_options(teeny INTERFACE $<$<CXX_COMPILER_ID:MSVC>:/permissive->)
+
 target_include_directories(teeny INTERFACE
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include>")
