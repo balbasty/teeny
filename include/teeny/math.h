@@ -94,10 +94,25 @@ struct rhs  { template <class X, class Y> _TNY_API X operator()(X, Y y) const { 
 struct nrhs { template <class X, class Y> _TNY_API X operator()(X, Y y) const { return -static_cast<X>(y); } }; // c += (-b) atomic sub
 struct setc { template <class X> _TNY_API X operator()(X, X s) const { return s; } };                          // c = s
 
+// Ops whose result never depends on their FIRST ("current value") argument at all
+// (rhs/nrhs/setc — pure assignment, ignoring whatever was already at the destination).
+// An engine's decode loop uses this to skip reading the destination before computing
+// op(...): harmless for w_set (the read is merely redundant there), but for the w_add
+// atomic writer it's more than redundant — reading c's own memory ordinarily while
+// another thread may be atomically RMW-ing that same location via fetch_add's
+// atomic_ref is a genuine data race, even though the loaded value is thrown away.
+// Keyed on the OP, not the writer: any future op that genuinely needs the current
+// value keeps the read no matter which writer commits it (default false = safe).
+template <class Op> struct _ignores_lhs : cs::false_type {};
+template <> struct _ignores_lhs<rhs>  : cs::true_type {};
+template <> struct _ignores_lhs<nrhs> : cs::true_type {};
+template <> struct _ignores_lhs<setc> : cs::true_type {};
+
 /* ---- write policies: how an engine commits op(...) to c ---------- *
- * `w_set` overwrites; `w_add` accumulates ATOMICALLY on device (the   *
- * scatter/push write). In-place add_/sub_ pick the policy via their   *
- * `Atomic` flag; every other engine defaults to w_set.                */
+ * `w_set` overwrites; `w_add` accumulates ATOMICALLY on host AND      *
+ * device (#257; the scatter/push write). In-place add_/sub_ pick the  *
+ * policy via their `Atomic` flag; every other engine defaults to      *
+ * w_set.                                                              */
 struct w_set { template <class P, class V> _TNY_API void operator()(P * p, V v) const { *p = static_cast<P>(v); } };
 struct w_add { template <class P, class V> _TNY_API void operator()(P * p, V v) const { fetch_add(p, static_cast<P>(v)); } };
 
@@ -286,7 +301,16 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
             oa += (ae[d] == 1 ? I(0) : k) * sa[d];
             ob += (be[d] == 1 ? I(0) : k) * sb[d];
         }
-        W{}(&c.data()[oc], op(static_cast<Cv>(a.data()[oa]), static_cast<Cv>(b.data()[ob])));
+        // Same rationale as scal_'s decode loop: rhs/nrhs (the only ops paired with
+        // the atomic writer w_add, via atomic_add_(b)/atomic_sub_(b)) ignore their
+        // first argument outright, and here `a` IS `c` (atomic_add_ calls
+        // bzip<w_add>(*this, *this, b, rhs{})) — so reading a.data()[oa] would be an
+        // ordinary (non-atomic) load racing the concurrent atomic_ref RMW that same
+        // fetch_add is performing on that very object.
+        if constexpr (!_ignores_lhs<Op>::value)
+            W{}(&c.data()[oc], op(static_cast<Cv>(a.data()[oa]), static_cast<Cv>(b.data()[ob])));
+        else
+            W{}(&c.data()[oc], op(Cv{}, static_cast<Cv>(b.data()[ob])));
     }
 }
 // A self-overlapping DESTINATION — an axis with extent>1 AND stride 0 — makes an
@@ -352,14 +376,12 @@ _TNY_API void scal_(C & c, typename C::element_type s, Op op, cs::index_sequence
         for (int d = static_cast<int>(sizeof...(D)) - 1; d >= 0; --d) {
             I k = rem % e[d]; rem /= e[d]; oc += k * sc[d];
         }
-        // w_set's op (add/sub/mul/div/...) is a genuine read-modify-write, so it
-        // needs the current value. An atomic writer (w_add) is only ever paired
-        // with rhs/nrhs (#257 doc: "the op commits a DELTA... rather than a
-        // read-modify-write"), which ignore their first argument outright — so
-        // skip reading c.data()[oc] there. Reading it anyway would be an ordinary
-        // (non-atomic) load racing the concurrent atomic_ref RMW on the same
-        // object, i.e. a real data race even though the discarded value is unused.
-        if constexpr (cs::is_same<W, w_set>::value)
+        // Most ops (add/sub/mul/div/...) are a genuine read-modify-write and need
+        // the current value; rhs/nrhs/setc (_ignores_lhs) don't, so skip reading
+        // c.data()[oc] for them — with an atomic writer (w_add) that ordinary
+        // (non-atomic) read would otherwise race the concurrent atomic_ref RMW on
+        // the same object, even though the loaded value is discarded either way.
+        if constexpr (!_ignores_lhs<Op>::value)
             W{}(&c.data()[oc], op(static_cast<Cv>(c.data()[oc]), sv));
         else
             W{}(&c.data()[oc], op(Cv{}, sv));
@@ -771,8 +793,9 @@ _TNY_API bool allclose_(const A & a, const B & b, R rtol, R atol, cs::index_sequ
  * ------------------------------------------------------------------ */
 
 // tensor rhs (broadcasts). add_/sub_ take an `Atomic` flag: when true the write
-// is `fetch_add` (atomic on device) — the scatter/"push" accumulate — so the op
-// commits a DELTA (rhs, or -rhs for sub) rather than a read-modify-write.
+// is `fetch_add` (atomic on host and device, #257) — the scatter/"push"
+// accumulate — so the op commits a DELTA (rhs, or -rhs for sub) rather than a
+// read-modify-write.
 template <class T,class E,class L,storage O> template <bool Atomic, class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::add_(const B & b) {
     if constexpr (Atomic) _md::bzip<_md::w_add>(*this,*this,b,_md::rhs{});

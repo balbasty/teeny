@@ -37,7 +37,7 @@ auto old = a++;                         // postfix: pre-value as a stack copy
 scatter/"push" accumulate. Both a broadcasting tensor rhs and a scalar rhs:
 
 ```cpp
-a.atomic_add_(b);    // accumulate a delta, atomic on device
+a.atomic_add_(b);    // accumulate a delta, atomic on host and device
 a.atomic_sub_(2.0);
 ```
 

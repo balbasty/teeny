@@ -39,11 +39,12 @@ int main() {
     if (m(0,0) != 42.0) return 7;
     if (m.at(1,1).item() != 4.0) return 8;
 
-    // ---- Atomic flag on the host == plain accumulate ------------------
+    // ---- Atomic flag: single-threaded value check (real host atomicity is ----
+    // proven under actual contention by test_atomic_fetch_add.cpp, #257) --------
     auto acc = local<double, shape<4>>(); acc.zero_();
     acc.at(2).add_<true>(1.5);
     acc.at(2).add_<true>(2.5);      // 4.0
-    acc.at(3).add_<true>(9.0);      // scatter into one cell (atomic on device)
+    acc.at(3).add_<true>(9.0);      // scatter into one cell (atomic, host and device)
     if (acc(2) != 4.0 || acc(3) != 9.0) return 9;
 
     // atomic add_ over a whole view (region scatter), host path

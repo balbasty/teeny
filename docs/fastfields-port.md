@@ -62,7 +62,7 @@ as `shape_type`/`extents_type`), with per-dimension static/dynamic shape and str
 |---|---|
 | kernel-passable strided view | `wrap(ptr, extents)`, `wrap<fcontiguous>(...)`, `wrap(ptr, ext, strides<S...>{})`, `as_tensor(submdspan_result)` |
 | element / folded stride | `t(i,j,k)`, `t.data()[off]`, `t.stride(Int<d>())` (static) / `t.stride(d)` (runtime) |
-| **scatter (push)** | `t.at(i...).atomic_add_(v)` — **atomic on device** |
+| **scatter (push)** | `t.at(i...).atomic_add_(v)` — **atomic on host and device** |
 | assign / init | `t.copy_(src)` (broadcasts), `t.fill_(v)`, `t.zero_()`, `t.iota_(a,b)` |
 | in-place / reduce math | `t.add_(x)/mul_(x)/…` (broadcasts), `sum/dot/min/max`. Contiguous out-of-place and in-place scalar/unary ops **auto-vectorize** (see `efficient-kernels.md`) |
 | **peel arbitrary batch** | `peel_front<-Sr>()` on an `anyrank` (keep the trailing `Sr` dims static, peel the runtime batch) → `dextents<_,Sr>` cells; `peel_front_at<-Sr>(i)` for a grid-stride index; `size_front<-Sr>()` = cell count. On a static-rank tensor with a *known* batch count, positive `peel_front<Nbatch>(t)` |

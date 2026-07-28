@@ -193,23 +193,32 @@ struct _geom_view {
  * outputs, which a plain `+=` would race. Device -> `atomicAdd` (`double`
  * needs sm_60+, `__half` sm_70+; not all integer widths have an overload —
  * that surfaces as an nvcc error at instantiation). Host, arithmetic `T`
- * (every case teeny's own math actually stores) -> `cuda::std::atomic_ref<T>`
- * (libcu++'s C++17-usable backport of `std::atomic_ref`) so a push kernel
- * parallelised with `std::thread`/OpenMP over overlapping outputs is genuinely
- * race-free, matching the device semantics instead of merely documenting the
- * caller must work around it.
+ * EXCLUDING `bool`/`long double` -> `cuda::std::atomic_ref<T>` (libcu++'s
+ * C++17-usable backport of `std::atomic_ref`) so a push kernel parallelised
+ * with `std::thread`/OpenMP over overlapping outputs is genuinely race-free,
+ * matching the device semantics instead of merely documenting the caller
+ * must work around it.
  *
- * Non-arithmetic `T` (a portable software `half`/`bfloat16` struct, i.e. NOT
- * compiled under `__CUDACC__`) has no hardware atomic representation to route
- * through `atomic_ref`; it keeps the old plain `*p += v` (still not
- * thread-safe there — same as before this fix, not a regression).
+ * The remaining element types keep the old plain `*p += v` (still not
+ * thread-safe there — same as before this fix, not a regression): `bool`
+ * (libcu++'s `atomic_ref<bool>` has no `fetch_add`) and `long double`
+ * (`atomic_ref<long double>` needs a 16-byte atomic RMW, which pulls in
+ * `libatomic` and fails to LINK on common toolchains that don't provide it
+ * — a working build must not start failing to link just because a caller
+ * touches `atomic_add_` on a `long double` tensor). Non-arithmetic `T` (a
+ * portable software `half`/`bfloat16` struct, OR the native `__half`/
+ * `__nv_bfloat16` CUDA types under `__CUDACC__` on a host translation unit)
+ * has no atomic representation to route through `atomic_ref` either way.
  */
 template <class T>
 _TNY_API void fetch_add(T * p, T v) noexcept {
 #ifdef __CUDA_ARCH__
     atomicAdd(p, v);
 #else
-    if constexpr (cs::is_arithmetic<T>::value) cs::atomic_ref<T>(*p).fetch_add(v);
+    if constexpr (cs::is_arithmetic<T>::value
+                  && !cs::is_same<T, bool>::value
+                  && !cs::is_same<T, long double>::value)
+        cs::atomic_ref<T>(*p).fetch_add(v);
     else *p += v;
 #endif
 }
@@ -1387,11 +1396,11 @@ public:
 
     /* --- atomic accumulate aliases: readable spelling of the atomic scatter *
      * "push" write. `atomic_add_(x)` == `add_<true>(x)`, `atomic_sub_(x)` == *
-     * `sub_<true>(x)` — atomic on device (a delta commit, not a read-modify- *
-     * write). Both a broadcasting tensor rhs and a scalar rhs, mirroring the *
-     * add_/sub_ overloads. Works on a rank-0 at(i...) result, so             *
-     * `a.at(i,j).atomic_add_(v)` is the scatter-accumulate idiom. The        *
-     * underlying form is add_<Atomic>/sub_<Atomic>. */
+     * `sub_<true>(x)` — atomic on both host and device (#257; a delta       *
+     * commit, not a read-modify-write). Both a broadcasting tensor rhs and  *
+     * a scalar rhs, mirroring the add_/sub_ overloads. Works on a rank-0    *
+     * at(i...) result, so `a.at(i,j).atomic_add_(v)` is the scatter-        *
+     * accumulate idiom. The underlying form is add_<Atomic>/sub_<Atomic>. */
     template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & atomic_add_(const B & b);
     template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & atomic_sub_(const B & b);
     _TNY_API tensor & atomic_add_(T s);
