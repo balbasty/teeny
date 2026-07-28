@@ -107,7 +107,9 @@ make CXX=g++ run-examples                               # the example kernels
   `-DTNY_NO_NEGATIVE_INDEX` — the compile-time fold and the runtime gather must
   agree under every flag (a divergence is UB).
 
-CI (`.github/workflows/`) runs the g++ and clang++ test matrix on every PR.
+CI (`.github/workflows/`) runs the g++ and clang++ test matrix on every PR, plus
+a macOS (AppleClang) and Windows (MSVC) CMake+CTest build — you don't need
+local access to either platform to be confident a PR is portable.
 
 ---
 
