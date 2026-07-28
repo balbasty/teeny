@@ -63,17 +63,17 @@ jobs:
       # pattern or specific to teeny's mdspan-based tensor.
       - name: Compile bare_repro.cpp (no CCCL/mdspan)
         continue-on-error: true
-        run: cl /std:c++17 /EHsc /nologo /Fe:bare_repro.exe scratch_msvc268\bare_repro.cpp && bare_repro.exe
+        run: cl /std:c++17 /EHsc /nologo /Fe:bare_repro.exe scratch_msvc268\bare_repro.cpp && .\bare_repro.exe
 
       # FIX ATTEMPT A: same overload-set shape, but the enable_if fold-expression
       # moves into a named trait instead of sitting inline in enable_if_t<...>.
       - name: Compile fix_a_named_trait.cpp
         continue-on-error: true
-        run: cl /std:c++17 /EHsc /nologo /Fe:fix_a.exe scratch_msvc268\fix_a_named_trait.cpp && fix_a.exe
+        run: cl /std:c++17 /EHsc /nologo /Fe:fix_a.exe scratch_msvc268\fix_a_named_trait.cpp && .\fix_a.exe
 
       # FIX ATTEMPT B: no enable_if-partitioned overload set at all -- one
       # operator() template per const-qualification, if-constexpr dispatch
       # inside. This is the issue's originally suggested remedy.
       - name: Compile fix_b_if_constexpr.cpp
         continue-on-error: true
-        run: cl /std:c++17 /EHsc /nologo /Fe:fix_b.exe scratch_msvc268\fix_b_if_constexpr.cpp && fix_b.exe
+        run: cl /std:c++17 /EHsc /nologo /Fe:fix_b.exe scratch_msvc268\fix_b_if_constexpr.cpp && .\fix_b.exe
