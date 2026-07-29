@@ -414,8 +414,8 @@ optimisation — those stay out of teeny).
 | `sqnorm<Axes...>(a)` / `sqnorm(a, axis<...>{})` | lower-rank tensor | Σ aᵢ² over the named axes (reduction API, like `sum`); `sqnorm<Acc,Axes...>` |
 | `norm(a)` | floating (`T` for float `T`, **`double`** for integer `T`) | √Σ aᵢ² (L2 / Frobenius over all axes); `norm<Acc>` forces accumulator+result |
 | `norm<Axes...>(a)` / `norm(a, axis<...>{})` | lower-rank tensor (floating) | √Σ aᵢ² over the named axes; `norm<Acc,Axes...>` |
-| `sqdist(a, b)` | `promote(Ta,Tb)` (accumulated wide) | Σ(aᵢ-bᵢ)²; == `sqnorm(a-b)`, one fused pass. Binary only (no axis form, like `dot`); `sqdist<Acc>` forces accumulator+result |
-| `dist(a, b)` | floating (`double` for integer operands) | √Σ(aᵢ-bᵢ)²; == `norm(a-b)`, one fused pass; `dist<Acc>` forces accumulator+result |
+| `sqdist(a, b)` | `promote(Ta,Tb)` (accumulated wide) | Σ(aᵢ-bᵢ)²; mathematically `sqnorm(a-b)`, one fused pass (bit-exact only for `double` operands). Binary only (no axis form, like `dot`); `sqdist<Acc>` forces accumulator+result |
+| `dist(a, b)` | floating (`double` for integer operands) | √Σ(aᵢ-bᵢ)²; mathematically `norm(a-b)`, one fused pass (bit-exact only for `double` operands); `dist<Acc>` forces accumulator+result |
 | `a.normalize_()` | `tensor&` | in place `a /= norm(a)`; floating element types only; zero vector → NaN |
 | `a.normalize_<Axes...>()` | `tensor&` | in place, over the named axes (keepdim broadcast); axes distinct & ascending |
 | `normalize(a)` | new tensor (floating; integer → `double`) | out-of-place unit vector; static → stack, dynamic → heap |
