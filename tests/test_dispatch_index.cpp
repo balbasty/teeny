@@ -17,8 +17,8 @@ int main() {
     int w = 0;
 
     // (1) dispatch_index: an in-range view runs the int32 arm.
-    auto small = wrap(buf, shape<-1,-1>{2,3}, {3,1});
-    dispatch_index(small, Rec{&w});
+    auto sm = wrap(buf, shape<-1,-1>{2,3}, {3,1});
+    dispatch_index(sm, Rec{&w});
     if (w != 4) return 1;
 
     // (2) dispatch_index: a >2^31-span view runs the wide (int64) arm.
@@ -50,8 +50,8 @@ int main() {
     if (w != 8) return 6;
 
     // (7) element identity: the int32 arm addresses exactly the same elements.
-    auto v32 = small.reindex<cs::int32_t>();
-    for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j) if (v32(i,j) != small(i,j)) return 7;
+    auto v32 = sm.reindex<cs::int32_t>();
+    for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j) if (v32(i,j) != sm(i,j)) return 7;
 
     // (8) NEGATIVE strides: dispatch a flipped view -> int32 arm, addresses correctly.
     auto fl = wrap(buf, shape<3,4>{}).flip<0>();               // strides<-4,1>, negative stride

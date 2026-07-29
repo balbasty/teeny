@@ -52,9 +52,9 @@ int main() {
     auto u = local<double, shape<3>>(); u(0)=1; u(1)=2; u(2)=3;
     auto w = local<double, shape<3>>(); w(0)=1; w(1)=2; w(2)=3 + 1e-9;   // within tol
     if (!allclose(u, w)) return 14;
-    auto far = local<double, shape<3>>(); far(0)=1; far(1)=2; far(2)=3.1;
-    if (allclose(u, far)) return 15;
-    if (!allclose(u, far, /*rtol*/0.1)) return 16;                       // loose tol -> close
+    auto pt3 = local<double, shape<3>>(); pt3(0)=1; pt3(1)=2; pt3(2)=3.1;
+    if (allclose(u, pt3)) return 15;
+    if (!allclose(u, pt3, /*rtol*/0.1)) return 16;                       // loose tol -> close
     // broadcasts a scalar-shaped operand
     auto ones3 = local<double, shape<3>>(); ones3.fill_(1.0);
     auto one1  = local<double, shape<1>>(); one1(0)=1.0;
