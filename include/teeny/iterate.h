@@ -697,7 +697,7 @@ template <cs::size_t Rank, cs::size_t Axis> struct scan_complement_t
 // `line(i) = carry` (the new carry doubles as the new element -- a running
 // fold in place, e.g. `carry = min(carry + w, line(i))` is exactly a 1-D
 // Felzenszwalb L1 sweep, see examples/distance_transform.cpp's hand-written
-// twin). A reverse sweep is just `auto rv = t.flip<Axis>(); scan_<Axis>(rv, init, f);`.
+// twin). A reverse sweep is just `scan_<Axis>(t.flip<Axis>(), init, f)`.
 template <cs::size_t A, class Tn, class Carry, class F, cs::size_t... I>
 _TNY_API void scan_lines(Tn & t, Carry init, F f, cs::index_sequence<I...>) {
     using Idx = typename Tn::index_type;
@@ -767,7 +767,10 @@ _TNY_API auto scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) { ret
  *         numpy-style broadcast, `dest` must match rather than merely receive
  *         a broadcast copy, since `scan_` then walks `dest`'s own axis
  *         numbering) -- one copy, no fresh allocation beyond that; device-safe.
- *         Returns `dest&`. */
+ *         `copy_` casts INTO `dest`'s element type FIRST, so if `dest`'s dtype
+ *         differs from `t`'s the whole recurrence then runs in `dest`'s own
+ *         precision (unlike `index_select`/the reductions' own `into(dest)`,
+ *         which only cast the FINAL result). Returns `dest&`. */
 template <long Axis, class T, class E, class L, storage O, class Carry, class F, class D>
 _TNY_API auto & scan(const tensor<T,E,L,O> & t, Carry init, F f, into_t<D> out) {
     using DstE = typename D::extents_type;

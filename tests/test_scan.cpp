@@ -104,8 +104,10 @@ int main() {
     scan_(r3.flip<0>(), axis<0>{}, 0.0, sum_op{});
     for (long i=0;i<5;++i) if (r3(i) != rref[i]) return 15;
 
-    // into(dest) with a DIFFERENT element type: casts on write, like the rest
-    // of the library's into(dest) forms (index_select, reductions).
+    // into(dest) with a DIFFERENT element type: copy_ casts FIRST, then scan_
+    // walks dest in DEST's own precision (unlike index_select/reductions'
+    // into(dest), which only cast the FINAL result) -- with values that round
+    // exactly in float this still matches the double computation elementwise.
     auto fdest = local<float, shape<4>>(); fdest.zero_();
     scan<0>(s, 0.0, sum_op{}, into(fdest));
     for (long i=0;i<4;++i) if (fdest(i) != static_cast<float>(sref[i])) return 16;
