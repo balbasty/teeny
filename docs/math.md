@@ -172,12 +172,16 @@ refers to:
 auto N = local<double, shape<4,3>>();        // four 3-vectors, one per row
 cross(a, b, into(N(i, all)));                // row i        <- a × b
 sum(m, axis<0>{}, into(rows(j, all)));       // row j        <- a column sum
-sum(a, into(cells.at(k)));                   // one cell of a matrix of scalars
+auto cells = local<double, shape<2,2>>();    // a matrix of scalars
+sum(a, into(cells.at(i, j)));                // one cell     <- a full reduction
 ```
 
 Use such a call for its **effect** — don't keep the `dest&` it returns, since the
 temporary view it refers to is gone at the end of the statement (`auto & r =
-cross(a, b, into(N(i, all)))` dangles). A temporary *owning* tensor is not a
+cross(a, b, into(N(i, all)))` dangles). The same rule applies to the `into(...)`
+tag itself: don't name it and reuse it later (`auto tag = into(N(i, all));`
+followed by a separate statement using `tag`) — the temporary view `into()`
+captured is just as gone by then. A temporary *owning* tensor is not a
 legal destination at all (`into(zeros<double>(shape<3>{}))` is a compile error):
 its storage would die with the statement, so the result would be thrown away.
 

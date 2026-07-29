@@ -362,7 +362,7 @@ what lets `add`/`sub` also take the fused `alpha`). `y` may alias an operand and
 have a different dtype (the result is cast to it).
 
 **`y` may be a slice**, written straight out of a view-producing op —
-`cross(a, b, into(N(i, all)))`, `sum(a, into(cells.at(k)))`,
+`cross(a, b, into(N(i, all)))`, `sum(a, into(cells.at(i, j)))`,
 `x.add(y, into(z.permute<1,0>()))`. Those ops return their view by value, and
 `into()` accepts such a temporary, so a slot of a bigger output needs no named
 intermediate; the write lands in the storage the slice refers to. Use the call for

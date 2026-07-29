@@ -289,7 +289,7 @@ normalize(a, into(y));  cross(a, b, into(N(i, all)));  // cross into row i of a 
                       //   The dest may be a TEMPORARY VIEW: every view-producing op (slicing,
                       //   at, permute, take_along, ...) returns by value, and into() takes one
                       //   directly -- no named intermediate for "a slot of a bigger output".
-                      //   sum(a, into(cells.at(k))); sum(m, axis<0>{}, into(rows(j, all)));
+                      //   sum(a, into(cells.at(i,j))); sum(m, axis<0>{}, into(rows(j, all)));
                       //   Use the call for its EFFECT; the returned dest& dangles past the
                       //   statement. A temporary OWNING tensor (into(zeros<T>(sh))) is a
                       //   compile error -- its storage would die with the statement.

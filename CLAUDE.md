@@ -383,7 +383,7 @@ normalize(a, into(y)); cross(a, b, into(N(i, all)));  // cross into row i of a m
 // y may be a TEMPORARY VIEW (#380): every view-producing op (slicing/at/permute/take_along/
 //   peel_at) returns its view BY VALUE, and into() binds an RVALUE view, so "a slot of a
 //   bigger output" needs no named intermediate -- cross(a,b,into(N(i,all))),
-//   sum(a,into(cells.at(k))), sum(m,axis<0>{},into(rows(j,all))). Gated to the non-owning
+//   sum(a,into(cells.at(i,j))), sum(m,axis<0>{},into(rows(j,all))). Gated to the non-owning
 //   VIEW storages (storage_is_view): a temporary view aliases storage the caller owns
 //   elsewhere, so the write outlives the call, while a temporary OWNING dest
 //   (into(zeros<T>(sh)), into(local<T,E>{})) is a static_assert -- its storage dies with the

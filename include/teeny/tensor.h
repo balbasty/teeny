@@ -1786,7 +1786,7 @@ _TNY_API into_t<tensor<T,E,L,O>> into(tensor<T,E,L,O> & d) noexcept { return int
 
 /** @brief `into(y)` over a TEMPORARY **view** — the destination may be written
  *         straight out of a view-producing op, with no named intermediate:
- *         `cross(a, b, into(N(i, all)))`, `sum(a, into(cells.at(i)))`,
+ *         `cross(a, b, into(N(i, all)))`, `sum(a, into(cells.at(i, j)))`,
  *         `x.add(y, into(z.permute<1,0>()))`. Every view-producing op (slicing,
  *         `at`, `permute`, `unsqueeze`, `take_along`, `peel_at`, …) returns its
  *         view BY VALUE, so without this overload the most natural destination
