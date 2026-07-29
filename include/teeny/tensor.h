@@ -1784,6 +1784,37 @@ public:
 template <class T, class E, class L, storage O>
 _TNY_API into_t<tensor<T,E,L,O>> into(tensor<T,E,L,O> & d) noexcept { return into_t<tensor<T,E,L,O>>{ d }; }
 
+/** @brief `into(y)` over a TEMPORARY **view** — the destination may be written
+ *         straight out of a view-producing op, with no named intermediate:
+ *         `cross(a, b, into(N(i, all)))`, `sum(a, into(cells.at(i, j)))`,
+ *         `x.add(y, into(z.permute<1,0>()))`. Every view-producing op (slicing,
+ *         `at`, `permute`, `unsqueeze`, `take_along`, `peel_at`, …) returns its
+ *         view BY VALUE, so without this overload the most natural destination
+ *         there is — a slot of a bigger output — had to be given a name first,
+ *         which is exactly the boilerplate `into(dest)` exists to remove.
+ *
+ *         Restricted to the non-owning VIEW storages (`view`/`gpu_view`/
+ *         `pinned_view`/`mapped_view`): a temporary view aliases backing storage
+ *         the caller owns elsewhere, so the write outlives the call, and the view
+ *         itself lives to the end of the full expression that contains the
+ *         producer. A temporary OWNING tensor (`into(zeros<double>(shape<3>{}))`,
+ *         `into(local<double,shape<3>>{})`) is rejected instead: its storage dies
+ *         with the expression, so the result would be computed and thrown away.
+ *
+ *         The one sharp edge: use the call for its EFFECT, don't keep the `dest&`
+ *         it returns — `auto & r = cross(a, b, into(N(i, all)))` dangles once the
+ *         temporary view goes away (same rule as `for (auto v : peel<0>(t))` and
+ *         the other temporaries in the library). */
+template <class T, class E, class L, storage O>
+_TNY_API into_t<tensor<T,E,L,O>> into(tensor<T,E,L,O> && d) noexcept {
+    static_assert(storage_is_view(O),
+        "into(dest): a TEMPORARY destination must be a non-owning VIEW (a slice / at() / "
+        "permute / peel cell of storage owned elsewhere). A temporary OWNING tensor dies "
+        "with the expression, so the result would be discarded -- name the destination "
+        "first, then pass into(that).");
+    return into_t<tensor<T,E,L,O>>{ d };
+}
+
 /** @brief Free forms of `reindex`/`index_fits` — deduce the tensor, so a
  *         type-dependent receiver avoids `.template`: `reindex<int32_t>(t)`,
  *         `index_fits<int32_t>(t)`. (`Idx2` is a TYPE, so there is no value form.) */

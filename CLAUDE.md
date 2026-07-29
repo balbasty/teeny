@@ -386,7 +386,16 @@ auto c = a.add(b,alpha); a.sub(b,alpha);  // FUSED out-of-place axpy: a +/- alph
 //   (#357); tensor rhs: the _TNY_CHECK (its static gate compares the two OPERANDS, not y).
 a.add(b, into(y)); a.mul(2.0, into(y)); a.add(b, alpha, into(y));  // elementwise / scalar / fused
 exp(a, into(y)); sqrt(a, into(y)); minimum(a,b,into(y)); clamp(a,lo,hi,into(y));
-normalize(a, into(y)); cross(a, b, into(N.at(i)));   // cross into a slot (the "crossto")
+normalize(a, into(y)); cross(a, b, into(N(i, all)));  // cross into row i of a matrix (the "crossto")
+// y may be a TEMPORARY VIEW (#380): every view-producing op (slicing/at/permute/take_along/
+//   peel_at) returns its view BY VALUE, and into() binds an RVALUE view, so "a slot of a
+//   bigger output" needs no named intermediate -- cross(a,b,into(N(i,all))),
+//   sum(a,into(cells.at(i,j))), sum(m,axis<0>{},into(rows(j,all))). Gated to the non-owning
+//   VIEW storages (storage_is_view): a temporary view aliases storage the caller owns
+//   elsewhere, so the write outlives the call, while a temporary OWNING dest
+//   (into(zeros<T>(sh)), into(local<T,E>{})) is a static_assert -- its storage dies with the
+//   full expression, so the result would be discarded. Use such a call for its EFFECT: the
+//   dest& it returns dangles past the statement (same rule as for (auto v : peel<0>(t))).
 
 // --- comparisons -> a bool tensor (broadcast); reduce with .all()/.any() ---
 auto m = a < b; a == 2.0; 3.0 < a;    // ==,!=,<,<=,>,>= ; scalar either side
@@ -431,7 +440,8 @@ a.normalize_();  auto u = normalize(a);// in place a/=norm(a) (floating) / out-o
                       //   normalize static->stack, dynamic->heap; zero vector -> NaN (no epsilon)
 a.normalize_<1>(); normalize<-1>(a);   // ...over NAMED AXES (keepdim broadcast); axes distinct & ascending
 auto c = cross(a,b);  a.cross_(b);     // 3D cross product (rank-1, length 3): new / in place (a=a×b).
-                      //   Into a separate slot: slot.copy_(cross(a,b)). (no crossto_/out-param form.)
+                      //   Into a separate slot: cross(a,b,into(slot)) -- the slot may be a slice
+                      //   of a bigger array, cross(a,b,into(N(i,all))). (no crossto_ spelling.)
 // --- axis reductions -> a lower-rank TENSOR (named axes removed; negatives wrap).
 //   Same rule: accumulate in reduce_type, result element type = the tensor's type
 //   (mean over an integer tensor is the exception: DOUBLE, like the scalar mean).

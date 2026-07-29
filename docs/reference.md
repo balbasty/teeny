@@ -361,6 +361,16 @@ allocation) and return `y&`, instead of a fresh tensor — the kernel-friendly `
 what lets `add`/`sub` also take the fused `alpha`). `y` may alias an operand and may
 have a different dtype (the result is cast to it).
 
+**`y` may be a slice**, written straight out of a view-producing op —
+`cross(a, b, into(N(i, all)))`, `sum(a, into(cells.at(i, j)))`,
+`x.add(y, into(z.permute<1,0>()))`. Those ops return their view by value, and
+`into()` accepts such a temporary, so a slot of a bigger output needs no named
+intermediate; the write lands in the storage the slice refers to. Use the call for
+its effect and don't keep the `dest&` it returns (the temporary view is gone at the
+end of the statement). A temporary *owning* tensor is rejected at compile time
+(`into(zeros<double>(shape<3>{}))`) — its storage would die with the statement, so
+the result would be discarded.
+
 **`y`'s shape is checked.** It must match the result the producer would have
 allocated — the source's own shape for a unary or scalar-rhs op, the broadcast
 shape for a tensor-rhs one. There is no stretching on the way *out*: only the
@@ -389,7 +399,7 @@ width and in signedness alike, and `y` keeps its own type; see
 | `a.add(b, alpha, into(y))` `a.sub(b, alpha, into(y))` | `y&` (fused axpy into `y`) |
 | `exp(a, into(y))` … (every unary) | `y&` |
 | `minimum(a,b,into(y))` `maximum(a,s,into(y))` `clamp(a,lo,hi,into(y))` | `y&` |
-| `normalize(a, into(y))` `cross(a,b,into(y))` | `y&` |
+| `normalize(a, into(y))` `cross(a,b,into(y))` `cross(a,b,into(N(i,all)))` | `y&` / the slice's `dest&` |
 | `sum(a, into(cell))` … `dot(a,b,into(cell))` `sqdist(a,b,into(cell))` | `cell&` (full reduction → **rank-0** dest) |
 | `sum<0>(m, into(buf))` `mean(m, axis<1>{}, into(buf))` | `buf&` (axis reduction → lower-rank dest) |
 

@@ -159,8 +159,31 @@ a.add(2.0, into(y));          // scalar rhs works too
 exp(a, into(y));  sqrt(a, into(y));  neg(a, into(y));   // every unary
 minimum(a, b, into(y));  maximum(a, s, into(y));  clamp(a, lo, hi, into(y));
 normalize(a, into(y));
-cross(a, b, into(N.at(i)));   // 3D cross into a preallocated slot ("crossto")
+cross(a, b, into(N(i, all)));  // 3D cross straight into row i of a matrix ("crossto")
 ```
+
+**The destination may be a slice, written in place.** Every view-producing op —
+slicing, `at`, `permute`, `unsqueeze`, `take_along`, … — hands back its view *by
+value*, and `into()` takes one of those directly, so a slot of a bigger output
+needs no named intermediate. The write goes through to the storage the slice
+refers to:
+
+```cpp
+auto N = local<double, shape<4,3>>();        // four 3-vectors, one per row
+cross(a, b, into(N(i, all)));                // row i        <- a × b
+sum(m, axis<0>{}, into(rows(j, all)));       // row j        <- a column sum
+auto cells = local<double, shape<2,2>>();    // a matrix of scalars
+sum(a, into(cells.at(i, j)));                // one cell     <- a full reduction
+```
+
+Use such a call for its **effect** — don't keep the `dest&` it returns, since the
+temporary view it refers to is gone at the end of the statement (`auto & r =
+cross(a, b, into(N(i, all)))` dangles). The same rule applies to the `into(...)`
+tag itself: don't name it and reuse it later (`auto tag = into(N(i, all));`
+followed by a separate statement using `tag`) — the temporary view `into()`
+captured is just as gone by then. A temporary *owning* tensor is not a
+legal destination at all (`into(zeros<double>(shape<3>{}))` is a compile error):
+its storage would die with the statement, so the result would be thrown away.
 
 `into(y)` is a **distinct type**, so it never collides with a scalar argument —
 which is what lets `add`/`sub` also offer the **fused out-of-place axpy** (the
@@ -365,7 +388,7 @@ a.normalize_<1>();  normalize<-1>(a);  normalize(a, axis<1>{});   // OVER NAMED 
 
 auto c = cross(a, b);       // 3D cross product a × b -> new stack 3-vector (rank-1, length 3)
 a.cross_(b);                // in place: a becomes a × b (mirrors add_/mul_; aliasing-safe)
-slot.copy_(cross(a, b));    // write into a preallocated slot with no new vocabulary
+cross(a, b, into(N(i, all)));   // straight into a preallocated slot — row i of a matrix
 ```
 
 `sqnorm`/`norm` are reductions: with no axes they reduce over everything (so `norm`
@@ -385,8 +408,9 @@ are kept as size-1 so the norm broadcasts back). Axes must be distinct and ascen
 one at the call site if you need it. `cross` is defined only for rank-1, length-3
 operands (a `static_assert` catches a wrong static length; a runtime length is
 debug-checked). Its in-place form is the member `a.cross_(b)` (`a = a × b`); to
-write into a *separate* buffer, `slot.copy_(cross(a, b))` — the result is a tiny
-stack 3-vector, so there is no meaningful copy cost.
+write into a *separate* buffer, pass a destination — `cross(a, b, into(slot))`,
+where `slot` may itself be a slice of a bigger array (`N(i, all)` for row `i` of
+a matrix of 3-vectors), computed in one pass with nothing allocated.
 
 ## Comparisons → a bool tensor
 
