@@ -226,7 +226,11 @@ for (auto [a,b,c] : peel_zip<Axes...>(x,y,z)) ...;  // zip-peel 2 or 3 tensors i
                                                  //   DISTINCT name from peel, not an overload).
                                                  //   Operands may differ in shape if BROADCAST-
                                                  //   compatible (numpy right-align); Axes... are
-                                                 //   in the BROADCAST rank's numbering.
+                                                 //   in the BROADCAST rank's numbering. They may also
+                                                 //   differ in INDEX TYPE -- the cells carry one wide
+                                                 //   (and, on mixed signedness, signed) enough for
+                                                 //   every operand, so a flipped operand zipped with
+                                                 //   an unsigned-indexed one still steps backwards.
 peel_zip(x, y, axis<Axes...>{});                 // value form: axis<...> TRAILING (after every
                                                  //   positional tensor -- unlike take_along/peel_at's
                                                  //   leading tag)

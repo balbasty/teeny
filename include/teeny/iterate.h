@@ -475,7 +475,28 @@ struct peel_zip_range {
     using Tup = cs::tuple<typename Ops::md_type...>;
     static constexpr cs::size_t Nop = sizeof...(Ops);
     static constexpr cs::size_t Nd  = Seq::size();
-    using Idx = cs::common_type_t<typename Ops::md_type::index_type...>;
+    // The type this range decodes offsets in — AND the index type every cell it
+    // hands out carries. It must represent every extent and stride value ANY
+    // operand can produce, so it is `math.h`'s signedness-aware `_offset_int_t`
+    // (the same rule `bzip_`/`zipreduce_decode_`/`scalo_`/`unaryo_`/`allclose_`
+    // decode in — one rule for every multi-tensor engine, #362), NOT
+    // `cs::common_type_t`: common_type applies the usual arithmetic conversions,
+    // so at EQUAL width the UNSIGNED type wins (`common_type_t<int32_t,uint32_t>`
+    // is `uint32_t`), and a flipped operand's stride of -1 then zero-extends to
+    // 4294967295 — a cell base pointer ~4G elements past the buffer (SEGV).
+    // Both halves of this line matter, and `_offset_int_t` fixes both at once:
+    //   - the DECODE (`peel_zip_axis`'s `off += idx[p] * sd`, and `gather_peel_zip`'s
+    //     `data_handle() + off`), exactly as in the four engines above; and
+    //   - the CELL's own type. A `peel_zip` cell is a VIEW of its operand, not a
+    //     fresh allocation, so unlike a broadcast RESULT (`_wider_index_t`'s
+    //     documented rationale) its kept-axis strides can legitimately be NEGATIVE
+    //     — an unsigned index type cannot represent them even when the base
+    //     pointer happens to come out right.
+    // `_offset_int_t` is already variadic (its rule is stated over a participant
+    // SET), so the 2- and 3-operand `peel_zip` forms both use it unchanged, and
+    // for an all-signed or all-unsigned set it is the plain widest — the same
+    // type `common_type_t` picks, so every non-mixed zip is byte-identical.
+    using Idx = _offset_int_t<typename Ops::md_type::index_type...>;
     using OE  = zip_oe_t<Idx, Seq, R, typename Ops::md_type::extents_type...>;
     using Ks  = cs::index_sequence_for<Ops...>;
 
@@ -597,7 +618,13 @@ struct peel_zip_range {
  *         long as they're broadcast-compatible; `Axes...` name axes in the
  *         BROADCAST rank's numbering — the larger of the two operands' own
  *         ranks — negatives wrap against it). A distinct name from `peel` (see
- *         the design note above `peel_zip_range`), not an overload. */
+ *         the design note above `peel_zip_range`), not an overload.
+ *
+ *         The operands need not share an INDEX TYPE: the cells carry one wide
+ *         enough — and, where the operands disagree on signedness, signed enough
+ *         — to address every operand exactly, so a reversed view (`flip`, or a
+ *         negative slice step) zipped against an unsigned-indexed tensor steps
+ *         backwards instead of wrapping to a huge positive offset (#362). */
 template <long... Axes, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
 _TNY_API auto peel_zip(tensor<Ta,Ea,La,Oa> & a, tensor<Tb,Eb,Lb,Ob> & b) {
     constexpr cs::size_t R = _md::bc_rank_n<Ea::rank(), Eb::rank()>();
