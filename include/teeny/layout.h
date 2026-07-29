@@ -38,7 +38,7 @@ _TNY_API constexpr cs::size_t _shape_static_extent(cs::size_t d) { return E::sta
  * stride. Instead a reserved out-of-band value (`INT64_MIN`) marks a dynamic
  * stride, leaving every ordinary stride (including negatives) expressible.
  */
-inline constexpr cs::int64_t dynamic_stride = cs::numeric_limits<cs::int64_t>::min();
+inline constexpr cs::int64_t dynamic_stride = (cs::numeric_limits<cs::int64_t>::min)();
 
 // storage for the dynamic strides only — EMPTY (EBO) when there are none, so a
 // fully-static `strides<...>` mapping carries no runtime stride data.
