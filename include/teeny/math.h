@@ -596,12 +596,19 @@ constexpr cs::size_t _static_numel() { return _static_numel_<E>(cs::make_index_s
  * One fused pass, NO intermediate tensor materialised. */
 template <class R, class A, class B, class Op, cs::size_t... D>
 _TNY_API R zipreduce_decode_(const A & a, const B & b, Op op, cs::index_sequence<D...>) {
-    using I = typename A::index_type;
+    // Offsets are computed in the WIDER of the two operands' index types (#342),
+    // the same rule the broadcast result carries (`_wider_index_t`, #167): each
+    // operand's own offsets fit its own index type, so the wider one holds both.
+    // Taking the FIRST operand's alone truncated the second's extents/strides —
+    // a hard `-Wc++11-narrowing` error under clang, a silently wrong offset under
+    // g++ once a stride overflowed it. A tie (the usual same-width pair) keeps the
+    // first operand's type, so the common case is unchanged.
+    using I = _wider_index_t<typename A::extents_type, typename B::extents_type>;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
-    const I e[sizeof...(D) ? sizeof...(D) : 1]  = { a.extent(D)... };
-    const I be[sizeof...(D) ? sizeof...(D) : 1] = { b.extent(D)... };
-    const I sa[sizeof...(D) ? sizeof...(D) : 1] = { a.stride(D)... };
-    const I sb[sizeof...(D) ? sizeof...(D) : 1] = { b.stride(D)... };
+    const I e[sizeof...(D) ? sizeof...(D) : 1]  = { static_cast<I>(a.extent(D))... };
+    const I be[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(b.extent(D))... };
+    const I sa[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.stride(D))... };
+    const I sb[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(b.stride(D))... };
     for (cs::size_t r = 0; r < sizeof...(D); ++r)
         _TNY_CHECK(e[r] == be[r], "dot/sqdist: operand extents must match exactly (no broadcast)");
     I n = 1;
