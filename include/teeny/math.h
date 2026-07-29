@@ -157,6 +157,7 @@ struct r_any { template <class X> _TNY_API bool operator()(bool a, X x) const { 
 /* ---- reduce ops (acc = op(acc, x)) ------------------------------- */
 struct r_add { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a + static_cast<A>(x); } };
 struct r_addsq { template <class A, class X> _TNY_API A operator()(A a, X x) const { A xx = static_cast<A>(x); return a + xx * xx; } };  // Σx² (for sqnorm/norm)
+struct zip_sqdiff { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { X d = x - static_cast<X>(y); return d * d; } };  // (x-y)² (for sqdist/dist)
 struct r_mul { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a * static_cast<A>(x); } };
 struct r_max { template <class A, class X> _TNY_API A operator()(A a, X x) const { A y = static_cast<A>(x); return y > a ? y : a; } };
 struct r_min { template <class A, class X> _TNY_API A operator()(A a, X x) const { A y = static_cast<A>(x); return y < a ? y : a; } };
@@ -584,9 +585,10 @@ template <class Op, class Out, class A, class B> _TNY_API void oop_to (Out & o, 
 template <class Op, class Out, class A, class S>  _TNY_API void oops_to(Out & o, const A & a, S s, Op op) { scalo<false>(o, a, s, op); }
 template <class Uop, class Out, class A>          _TNY_API void uop_to (Out & o, const A & a, Uop f) { unaryo<false>(o, a, f); }
 
-/* ---- reduce a . b elementwise into a scalar (for dot) ------------ */
-template <class R, class A, class B, cs::size_t... D>
-_TNY_API R zipreduce_(const A & a, const B & b, cs::index_sequence<D...>) {
+/* ---- reduce op(a, b) elementwise into a scalar (dot: op=mul; sqdist: op=zip_sqdiff) --- *
+ * One fused pass, NO intermediate tensor materialised. */
+template <class R, class A, class B, class Op, cs::size_t... D>
+_TNY_API R zipreduce_(const A & a, const B & b, Op op, cs::index_sequence<D...>) {
     using I = typename A::index_type;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1]  = { a.extent(D)... };
@@ -594,7 +596,7 @@ _TNY_API R zipreduce_(const A & a, const B & b, cs::index_sequence<D...>) {
     const I sa[sizeof...(D) ? sizeof...(D) : 1] = { a.stride(D)... };
     const I sb[sizeof...(D) ? sizeof...(D) : 1] = { b.stride(D)... };
     for (cs::size_t r = 0; r < sizeof...(D); ++r)
-        _TNY_CHECK(e[r] == be[r], "dot: operand extents must match exactly (no broadcast)");
+        _TNY_CHECK(e[r] == be[r], "dot/sqdist: operand extents must match exactly (no broadcast)");
     I n = 1;
     for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
     R acc = R(0);
@@ -603,7 +605,7 @@ _TNY_API R zipreduce_(const A & a, const B & b, cs::index_sequence<D...>) {
         for (int d = static_cast<int>(sizeof...(D)) - 1; d >= 0; --d) {
             I k = rem % e[d]; rem /= e[d]; oa += k * sa[d]; ob += k * sb[d];
         }
-        acc += static_cast<R>(a.data()[oa]) * static_cast<R>(b.data()[ob]);
+        acc += op(static_cast<R>(a.data()[oa]), static_cast<R>(b.data()[ob]));
     }
     return acc;
 }
@@ -1385,7 +1387,7 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) 
                   "dot: operand extents must match exactly (no broadcast)");   // both-static, unequal -> compile error
     using R = _acc_t<Acc, promote_t<Ta,Tb>>;
     return static_cast<_reduce_result_t<Acc, promote_t<Ta,Tb>>>(
-        _md::zipreduce_<R>(a, b, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
+        _md::zipreduce_<R>(a, b, _md::mul{}, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
 }
 /** @brief Generic trailing keyword bag for `dot` (no axis concept, being binary):
  *  `dot(a, b, dtype<Acc>{})`, `dot(a, b, into(d))`, or both composed in either
