@@ -708,14 +708,29 @@ constexpr cs::size_t _static_numel() { return _static_numel_<E>(cs::make_index_s
  * One fused pass, NO intermediate tensor materialised. */
 template <class R, class A, class B, class Op, cs::size_t... D>
 _TNY_API R zipreduce_decode_(const A & a, const B & b, Op op, cs::index_sequence<D...>) {
-    // Offsets are computed in the WIDER of the two operands' index types (#342),
-    // the same rule the broadcast result carries (`_wider_index_t`, #167): each
-    // operand's own offsets fit its own index type, so the wider one holds both.
-    // Taking the FIRST operand's alone truncated the second's extents/strides —
-    // a hard `-Wc++11-narrowing` error under clang, a silently wrong offset under
-    // g++ once a stride overflowed it. A tie (the usual same-width pair) keeps the
-    // first operand's type, so the common case is unchanged.
-    using I = _wider_index_t<typename A::extents_type, typename B::extents_type>;
+    // Offsets are decoded in a type that holds EVERY value BOTH participants can
+    // produce (`_offset_int_t` above spells the rule out). Here the participants are
+    // just the two operands — unlike `bzip_`, this engine writes no tensor, only a
+    // scalar accumulator `acc` of the caller's reduce type `R`, so there is no third
+    // (destination) index type in play; the SAME rule applied to a two-element set.
+    // Taking the FIRST operand's index type alone truncated the second's
+    // extents/strides (#342) — a hard `-Wc++11-narrowing` error under clang, a
+    // silently wrong offset under g++ once a stride overflowed it. Widening by
+    // `sizeof` ALONE then still mis-addressed when the wider operand is UNSIGNED and
+    // the narrower one is SIGNED with a NEGATIVE stride (a flipped/reversed view):
+    // `static_cast<uint32_t>(-1)` is 4294967295, which zero-extends into the pointer
+    // offset instead of stepping backwards, and `a.data()[oa]` reads far off the front
+    // of the buffer (#355 — the same defect class `bzip_` carried in #346). So the
+    // pick is signedness-aware. For an all-signed or all-unsigned pair — every call
+    // site that is not this mixed case — `_offset_int_t` IS `_wider_index_t`
+    // (`_widest_int` of two left-folds to exactly `_wider_int_t`, same tie rule), so
+    // those instantiations are byte-identical to before.
+    //
+    // As in `bzip_`, the widening is internal only: neither operand's own type
+    // changes, each operand's offsets fit its own index type by construction, and
+    // `data()[off]` takes any integer, so nothing is narrowed back on the way out.
+    using I = _offset_int_t<typename A::extents_type::index_type,
+                            typename B::extents_type::index_type>;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1]  = { static_cast<I>(a.extent(D))... };
     const I be[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(b.extent(D))... };
