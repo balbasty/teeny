@@ -104,6 +104,33 @@ time first, so you don't need to think about it or list them ascending yourself.
 A single axis (or none, for `squeeze`) still means the one-axis form above —
 arity alone picks the multi-axis overload.
 
+### An empty axis list is a no-op
+
+`axis<>{}` names *no* axis, so `t.squeeze(axis<>{})` and `t.unsqueeze(axis<>{})`
+hand back the same shape and strides — the same rule numpy gives an empty axis
+tuple (`np.squeeze(a, axis=())` and `np.expand_dims(a, axis=())` both leave the
+shape alone). That matters for generic code that *computes* the axis list: when
+the computed set comes out empty, the call does nothing instead of quietly
+restructuring the tensor.
+
+```cpp
+auto t = wrap(buf, shape<1,2,1,3>{});
+t.squeeze(axis<>{});      // (1,2,1,3) -- unchanged, singleton axes kept
+t.unsqueeze(axis<>{});    // (1,2,1,3) -- unchanged, nothing inserted
+t.squeeze();              // (2,3)     -- the NO-ARGUMENT form still drops every singleton
+t.unsqueeze();            // (1,1,2,1,3) -- ...and still inserts at axis 0
+```
+
+The last two lines are the contrast worth remembering: **an empty axis *list* is
+not the same as *no argument at all*.** `squeeze()` (drop every statically-size-1
+axis) and `unsqueeze()` (insert at axis 0) keep their own meanings; only the
+`axis<...>{}` spelling reads an empty list as "no axes named".
+
+`permute` needs a *full* permutation of `rank()` axes, so `axis<>{}` is accepted
+there only for a rank-0 tensor (the one permutation of no axes, a no-op) and is a
+compile error for any other rank — an under-specified permutation is a mistake,
+not a no-op.
+
 `reshape`/`flatten` follow **numpy semantics**: they return a **view** whenever the
 new shape is reachable without a copy — not only from a C-contiguous tensor, but any
 layout that regroups in C-order (splitting a contiguous axis, merging a contiguous

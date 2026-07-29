@@ -1560,11 +1560,31 @@ public:
      *         ops (like `peel`/`take_along`/the reductions), so — unlike the
      *         single-axis `Int<k>()` form above — they take the `axis<...>` tag: a
      *         single distinct-typed argument, so no `.template` is needed on a
-     *         dependent receiver. */
-    template <long... Axes> _TNY_API auto squeeze(axis<Axes...>)       noexcept { return squeeze<Axes...>(); }
-    template <long... Axes> _TNY_API auto squeeze(axis<Axes...>) const noexcept { return squeeze<Axes...>(); }
-    template <long... Axes> _TNY_API auto unsqueeze(axis<Axes...>)       noexcept { return unsqueeze<Axes...>(); }
-    template <long... Axes> _TNY_API auto unsqueeze(axis<Axes...>) const noexcept { return unsqueeze<Axes...>(); }
+     *         dependent receiver.
+     *
+     *         An EMPTY list — `axis<>{}` — names no axis, so it is a **no-op**: the
+     *         same shape and strides back, as a view (numpy's own rule for an empty
+     *         axis tuple, `np.squeeze(a, axis=())` / `np.expand_dims(a, axis=())`;
+     *         same identity `_keepdims<>`/`take_along(axis<>{})`/`peel(t, axis<>{})`
+     *         already have). It is NOT the same as the no-argument `squeeze()`
+     *         (drop EVERY statically-size-1 axis) or `unsqueeze()` (insert at axis
+     *         0) — those keep their meanings; only the axis-LIST spelling reads an
+     *         empty list as "no axes named" (#369). Generic code that computes an
+     *         axis list therefore stays correct when the list comes out empty.
+     *
+     *         `permute` is the exception, and needs nothing added: it takes a FULL
+     *         permutation, so its own `sizeof...(Perm) == rank()` check already
+     *         accepts `axis<>{}` for a rank-0 tensor only (a no-op there — the one
+     *         permutation of no axes) and rejects it at compile time for any other
+     *         rank, rather than silently doing something else. */
+    template <long... Axes> _TNY_API auto squeeze(axis<Axes...>)       noexcept
+    { if constexpr (sizeof...(Axes) == 0) return view(); else return squeeze<Axes...>(); }
+    template <long... Axes> _TNY_API auto squeeze(axis<Axes...>) const noexcept
+    { if constexpr (sizeof...(Axes) == 0) return view(); else return squeeze<Axes...>(); }
+    template <long... Axes> _TNY_API auto unsqueeze(axis<Axes...>)       noexcept
+    { if constexpr (sizeof...(Axes) == 0) return view(); else return unsqueeze<Axes...>(); }
+    template <long... Axes> _TNY_API auto unsqueeze(axis<Axes...>) const noexcept
+    { if constexpr (sizeof...(Axes) == 0) return view(); else return unsqueeze<Axes...>(); }
     template <long... Axes> _TNY_API auto permute(axis<Axes...>)       noexcept { return permute<Axes...>(); }
     template <long... Axes> _TNY_API auto permute(axis<Axes...>) const noexcept { return permute<Axes...>(); }
     template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && _all_ic<I...>::value, int> = 0> _TNY_API auto reshape(I...)       noexcept { return reshape<static_cast<long>(I::value)...>(); }
