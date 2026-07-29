@@ -208,6 +208,17 @@ for (auto [m, cell] : peel<Axes...>(x).enumerate()) ...;  // ALSO yield the peel
                                                  //   axtab[d][m[d]]. OPT-IN (bare cell stays lean); composes
                                                  //   with .subrange(lo,hi). Or it.index(d) on the raw iterator.
 size_front<N>(x);                                // # cells peel_front<N> yields (no range built)
+
+for (auto [a,b,c] : peel_zip<Axes...>(x,y,z)) ...;  // zip-peel 2 or 3 tensors in LOCK-STEP: one
+                                                 //   cs::tuple<ViewX,ViewY,ViewZ> per step (a
+                                                 //   DISTINCT name from peel, not an overload).
+                                                 //   Operands may differ in shape if BROADCAST-
+                                                 //   compatible (numpy right-align); Axes... are
+                                                 //   in the BROADCAST rank's numbering.
+peel_zip(x, y, axis<Axes...>{});                 // value form: axis<...> TRAILING (after every
+                                                 //   positional tensor -- unlike take_along/peel_at's
+                                                 //   leading tag)
+peel_zip<Axes...>(x,y).enumerate();  peel_zip<Axes...>(x,y).subrange(lo,hi);  // same shape as peel's
 ```
 
 See [Views & structure](structure.md#nd-peel-iterate-a-subset-of-axes).

@@ -285,6 +285,10 @@ free **`to<Space>(t)`** (`cuda.h`) above, which is device-aware.
 | `peel_front<N>(t)` | a range of views | `N≥0`: peel the first `N` axes; `N<0`: keep the last `abs(N)`. Same incremental range-for + `subrange(lo,hi)` |
 | `peel_front_at<N>(t, i)` | → view | the `i`-th (random access / grid-stride) |
 | `size_front<N>(t)` | → index | # cells `peel_front<N>` yields (product of the peeled extents), no range built |
+| `peel_zip<Axes...>(a, b[, c])` | a range of `cs::tuple<ViewA,ViewB[,ViewC]>` | zip-peel 2 or 3 tensors' named axes in **lock-step** — a distinct name from `peel` (1 tensor → a view per step, 2+ → a tuple is a silent arity-driven return-type bifurcation, so it gets its own name, mirroring python's `zip()`). Operands may differ in shape if **broadcast-compatible** (numpy right-align, the rule `a+b` uses); `Axes...` are in the **broadcast rank's** numbering. Decodes fresh each step (no incremental cursor yet) |
+| `peel_zip(a, b[, c], axis<Axes...>{})` | same | value form — axis tag **trailing** (after every positional tensor), unlike `take_along`/`peel_at`'s leading tag |
+| `peel_zip<Axes...>(a, b[, c]).enumerate()` | a range of `{index, tuple}` | same shape as `peel(...).enumerate()` |
+| `peel_zip<Axes...>(a, b[, c]).subrange(lo,hi)` | a `[lo,hi)` sub-range | same shape as `peel(...).subrange()` |
 
 **Input → output type — peel cell.** Each yielded cell is a **view**
 (`storage_view_of(O)` — `gpu`/`gpu_view` source → `gpu_view`), element type `T`
