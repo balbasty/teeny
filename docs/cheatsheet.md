@@ -212,6 +212,7 @@ See [Views & structure](structure.md#nd-peel-iterate-a-subset-of-axes).
 // in-place (broadcasts tensor rhs; also scalar rhs). atomic_add_/atomic_sub_
 // accumulate ATOMICALLY, host and device (underlying form: add_<Atomic>/sub_<Atomic>).
 a.add_(x); a.sub_(x); a.mul_(x); a.div_(x);   a.atomic_add_(x); a.atomic_sub_(s);
+a.minimum_(x); a.maximum_(x);   // running min/max update: *this = min/max(*this, x)
 y.add_(x, alpha); y.sub_(x, alpha);  // fused axpy: y += alpha*x / y -= alpha*x (x broadcasts)
 a += x; a -= s; a *= x; a /= s;  // compound-assign
 ++a; --a; auto old = a++;        // prefix in place; postfix (static) -> stack copy

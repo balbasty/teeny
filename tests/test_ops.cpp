@@ -67,22 +67,36 @@ int main() {
     auto mx = maximum(x,2.5); if (mx(0)!=2.5 || mx(1)!=5 || mx(2)!=3) return 16;
     if (mean(x) != 3.0) return 17;
 
+    // ---- minimum_ / maximum_ (in place, #325): running min/max update ------
+    auto rmin = x.clone(); rmin.minimum_(y);   // min(1,4)=1, min(5,2)=2, min(3,3)=3
+    if (rmin(0)!=1 || rmin(1)!=2 || rmin(2)!=3) return 18;
+    auto rmax = x.clone(); rmax.maximum_(y);   // max(1,4)=4, max(5,2)=5, max(3,3)=3
+    if (rmax(0)!=4 || rmax(1)!=5 || rmax(2)!=3) return 19;
+    auto rmins = x.clone(); rmins.minimum_(2.5);   // min(1,2.5)=1, min(5,2.5)=2.5, min(3,2.5)=2.5
+    if (rmins(0)!=1 || rmins(1)!=2.5 || rmins(2)!=2.5) return 20;
+    auto rmaxs = x.clone(); rmaxs.maximum_(2.5);   // max(1,2.5)=2.5, max(5,2.5)=5, max(3,2.5)=3
+    if (rmaxs(0)!=2.5 || rmaxs(1)!=5 || rmaxs(2)!=3) return 21;
+    // running-min idiom: seed a "best" cell then fold in candidates one at a time
+    auto best = local<double, shape<>>(); best.fill_(1e30);
+    best.minimum_(5.0); best.minimum_(2.0); best.minimum_(9.0);
+    if (best.item() != 2.0) return 22;
+
     // ---- ++ / -- (prefix in place; postfix static -> stack copy) ------
     auto p = local<double, shape<2>>(); p.fill_(5.0);
-    ++p; if (p(0)!=6.0) return 18;
-    --p; --p; if (p(0)!=4.0) return 19;
+    ++p; if (p(0)!=6.0) return 23;
+    --p; --p; if (p(0)!=4.0) return 24;
     auto pre = p++;                 // postfix returns pre-value (4), p becomes 5
-    if (pre(0)!=4.0 || p(0)!=5.0) return 20;
+    if (pre(0)!=4.0 || p(0)!=5.0) return 25;
 
     // ---- bitwise (integer element types) ------------------------------
     auto bi = local<int, shape<2>>(); bi(0)=0xC; bi(1)=0x6;   // 1100, 0110
     auto bj = local<int, shape<2>>(); bj(0)=0xA; bj(1)=0xF;   // 1010, 1111
-    auto ba = bi & bj; if (ba(0)!=0x8 || ba(1)!=0x6) return 21;
-    auto bo = bi | bj; if (bo(0)!=0xE) return 22;
-    auto bx = bi ^ bj; if (bx(0)!=0x6) return 23;
-    auto bn = ~bi;     if (bn(0)!=~0xC) return 24;
-    bi &= bj;          if (bi(0)!=0x8) return 25;
-    bi |= 0x1;         if (bi(0)!=0x9) return 26;
+    auto ba = bi & bj; if (ba(0)!=0x8 || ba(1)!=0x6) return 26;
+    auto bo = bi | bj; if (bo(0)!=0xE) return 27;
+    auto bx = bi ^ bj; if (bx(0)!=0x6) return 28;
+    auto bn = ~bi;     if (bn(0)!=~0xC) return 29;
+    bi &= bj;          if (bi(0)!=0x8) return 30;
+    bi |= 0x1;         if (bi(0)!=0x9) return 31;
 
     return 0;
 }

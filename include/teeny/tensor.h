@@ -1388,6 +1388,15 @@ public:
     _TNY_API tensor & mul_(T s);
     _TNY_API tensor & div_(T s);
 
+    /* --- in-place running min/max: *this = min/max(*this, b) --- *
+     * tensor rhs broadcasts; a scalar rhs applies to all. For the running-  *
+     * min/max update idiom (e.g. best.minimum_(candidate) in a nearest-     *
+     * distance search) — mirrors add_/mul_'s tensor-or-scalar rhs shape. */
+    template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & minimum_(const B & b);
+    template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value, int> = 0> _TNY_API tensor & maximum_(const B & b);
+    _TNY_API tensor & minimum_(T s);
+    _TNY_API tensor & maximum_(T s);
+
     /* --- fused scaled accumulate (BLAS axpy): *this += alpha*b / *this -= *
      * alpha*b; the tensor rhs `b` broadcasts. `y.add_(x, a)` is axpy; a       *
      * scaled copy `y = a*x` is `y.zero_().add_(x, a)`. --------------------- */
