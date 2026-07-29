@@ -211,17 +211,84 @@ _TNY_API constexpr bool bc_static_ok_r(cs::index_sequence<D...>) {
 template <class Idx, class Ea, class Eb, cs::size_t R, cs::size_t... D>
 cs::extents<Idx, bc1(bc_sext<Ea, R>(D), bc_sext<Eb, R>(D))...>
 bcast_ext_(cs::index_sequence<D...>);
-// The broadcast RESULT carries the WIDER of the two operands' offset index types
-// (by `sizeof`; a tie keeps the first operand's, so same-width mixes are unchanged).
-// The engine `bzip_` casts both operands' extents/strides to the result index type,
-// so broadening is lossless AND fixes the truncation that a narrow result would cause
-// to a wide operand's strides. (It does not — and cannot from the types alone — widen
-// two equal-narrow operands whose broadcast SPAN overflows: that stays the caller's
-// responsibility, guarded by index_fits/dispatch_index at the boundary.)
+// The WIDER of two offset index TYPES (by `sizeof`; a tie keeps the first, so a
+// same-width pair — the overwhelmingly common case — is unchanged). This is a pure
+// WIDTH pick, used for the index type a broadcast RESULT carries: the result is a
+// fresh, C-contiguous allocation, so its own extents/strides are non-negative and
+// the wider of the two operands' widths holds all of them.
+// (It does not — and cannot from the types alone — widen two equal-narrow operands
+// whose combined SPAN overflows: that stays the caller's responsibility, guarded by
+// index_fits/dispatch_index at the boundary.)
+// NB it is NOT the type an engine may decode OFFSETS in — see `_offset_int_t` below,
+// which is signedness-aware; a pure width pick can select an unsigned type over a
+// signed participant's negative stride and turn it into a huge positive offset.
+template <class Ia, class Ib>
+using _wider_int_t = cs::conditional_t<(sizeof(Ib) > sizeof(Ia)), Ib, Ia>;
+// The broadcast RESULT carries the wider of the two OPERANDS' index types.
 template <class Ea, class Eb>
-using _wider_index_t = cs::conditional_t<
-    (sizeof(typename Eb::index_type) > sizeof(typename Ea::index_type)),
-    typename Eb::index_type, typename Ea::index_type>;
+using _wider_index_t = _wider_int_t<typename Ea::index_type, typename Eb::index_type>;
+
+/* ---- the type an ENGINE decodes its offsets in ---------------------------- *
+ * It must represent EVERY extent and stride value that ANY participant (the
+ * destination and both operands) can produce — otherwise a `static_cast` into it
+ * is legal but VALUE-CHANGING, which is exactly how the truncation bugs in this
+ * family (#342, #346) mis-addressed.
+ *
+ * `sizeof` alone is not enough. The widest participant can be UNSIGNED while a
+ * NARROWER one is SIGNED and carries a NEGATIVE stride (a flipped/reversed view):
+ * `static_cast<uint32_t>(-1)` is 4294967295, which zero-extends into the 64-bit
+ * pointer offset instead of stepping backwards, and the access lands far off the
+ * front of the buffer. So the pick is signedness-aware:
+ *   - all participants SIGNED   -> the widest of them (the previous rule, verbatim:
+ *     same type, same code, so every all-signed call site is untouched);
+ *   - all participants UNSIGNED -> the widest of them (likewise untouched). A
+ *     negative stride cannot arise here: teeny's negative-stride views REQUIRE a
+ *     signed index type (`flip` static_asserts it, a negative slice step only folds
+ *     for a signed index), so an unsigned participant only yields non-negative
+ *     extents and strides, all of which its own width holds;
+ *   - MIXED -> a SIGNED type wide enough for BOTH sides: at least as wide as the
+ *     widest participant, AND wide enough to hold the widest UNSIGNED participant's
+ *     full range (twice its size), capped at 64 bits.
+ * The 64-bit cap is the one place this leans on teeny's contract instead of proving
+ * containment outright: no signed type holds all of `uint64_t`. It costs nothing
+ * real — for `data()[off]` to be defined at all, `off` must fit `ptrdiff_t`, so on
+ * every platform teeny targets a reachable offset is within `int64_t`. teeny's own
+ * reach contract is signed throughout for the same reason (see `index_fits`).
+ *
+ * Only the MIXED case changes behaviour, and only where the previous type would
+ * have been wrong: a mixed pair with no negative stride and values inside both
+ * ranges decodes to the same offsets in the wider signed type as it did before. */
+template <cs::size_t N> struct _sint_of_size;
+template <> struct _sint_of_size<1> { using type = cs::int8_t;  };
+template <> struct _sint_of_size<2> { using type = cs::int16_t; };
+template <> struct _sint_of_size<4> { using type = cs::int32_t; };
+template <> struct _sint_of_size<8> { using type = cs::int64_t; };
+// widest of a pack by `sizeof`, left-folded so a tie keeps the FIRST (same tie rule,
+// and for the destination-first order used below the same answer, as `_wider_int_t`).
+template <class... I> struct _widest_int;
+template <class I0> struct _widest_int<I0> { using type = I0; };
+template <class I0, class I1, class... In> struct _widest_int<I0, I1, In...>
+    { using type = typename _widest_int<_wider_int_t<I0, I1>, In...>::type; };
+template <class T> struct _ident { using type = T; };
+// `sizeof` of the widest UNSIGNED member of the pack (0 if there is none) — the range
+// a signed pick has to grow past.
+template <class... I> constexpr cs::size_t _max_unsigned_size() {
+    cs::size_t m = 0;
+    ( (m = (!cs::is_signed<I>::value && sizeof(I) > m) ? sizeof(I) : m), ... );
+    return m;
+}
+template <class... I> struct _offset_int {
+    using _wide = typename _widest_int<I...>::type;
+    static constexpr bool _mixed = ( cs::is_signed<I>::value || ...) &&
+                                   (!cs::is_signed<I>::value || ...);
+    static constexpr cs::size_t _u     = _max_unsigned_size<I...>();
+    static constexpr cs::size_t _need  = _u * 2 > 8 ? 8 : _u * 2;           // signed: one size up
+    static constexpr cs::size_t _bytes = sizeof(_wide) > _need ? sizeof(_wide) : _need;
+    // `conditional_t` on the CARRIERS, so `_sint_of_size<_bytes>` is only completed
+    // when it is the one selected.
+    using type = typename cs::conditional_t<_mixed, _sint_of_size<_bytes>, _ident<_wide>>::type;
+};
+template <class... I> using _offset_int_t = typename _offset_int<I...>::type;
 template <class Ea, class Eb>
 using bcast_extents = decltype(bcast_ext_<_wider_index_t<Ea, Eb>, Ea, Eb,
     bc_rank(Ea::rank(), Eb::rank())>(cs::make_index_sequence<bc_rank(Ea::rank(), Eb::rank())>{}));
@@ -264,11 +331,36 @@ _TNY_HOST RE bcast_runtime_(const A & a, const B & b, cs::index_sequence<D...>) 
 // per-element mixed-radix decode is skipped. Any mismatch falls back unchanged.
 template <class W, bool Restrict, class Cv, class C, class A, class B, class Op, cs::size_t... D>
 _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
-    using I = typename C::index_type;
+    // Offsets are decoded in a type that holds EVERY value all THREE participants —
+    // the destination and both operands — can produce (#346; `_offset_int_t` above
+    // spells the rule out). Taking the DESTINATION's index type alone truncated a
+    // wider-indexed operand's extents/strides: silently, since the `static_cast<I>`s
+    // below suppress the narrowing diagnostic that caught the sibling
+    // `zipreduce_decode_` bug (#342). An OUT-OF-PLACE `c` already carries
+    // `_wider_index_t` of the two operands (#167), so it is the widest and the WIDTH
+    // half of this is a no-op there; it is the IN-PLACE ops (`c` IS `a`: `a.add_(b)`,
+    // `a.copy_(b)`, …) and a caller-supplied `into(dest)` that can hand us a NARROW
+    // destination next to a wide operand, and there `a.stride()` of 40000 folded to an
+    // int16 -25536 and read off the front of the buffer. The SIGNEDNESS half applies
+    // to both: a mixed-signedness trio (an unsigned-indexed operand next to a flipped,
+    // signed-indexed one) decodes in a signed type, so a stride of -1 stays -1 instead
+    // of becoming 4294967295.
+    //
+    // This is not a promise about `c`'s own type: `c`'s own offsets are computed from
+    // `c`'s own extents/strides, so they fit `c`'s index type by construction (a wider
+    // decode type only carries them in a larger register, same values), and nothing
+    // here is stored back into a tensor's type — `data()[off]` takes any integer.
+    // Symmetrically, each operand's offsets stay inside its own tensor: the loop
+    // counter `k` is bounded by `ce[d]`, and the extent checks just below pin
+    // `ae[d]`/`be[d]` to `ce[d]` (or 1 -> stride 0), so no operand is ever indexed
+    // past its own extent in any axis.
+    using I = _offset_int_t<typename C::index_type,
+                            typename A::extents_type::index_type,
+                            typename B::extents_type::index_type>;
     constexpr cs::size_t R = C::rank();   // c has the result (largest) rank; a,b right-align into it
     // Array size floored to 1 (rank-0 c -> empty D..., see scal_'s comment above).
-    const I ce[sizeof...(D) ? sizeof...(D) : 1] = { c.extent(D)... },
-            sc[sizeof...(D) ? sizeof...(D) : 1] = { c.stride(D)... };
+    const I ce[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(c.extent(D))... },
+            sc[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(c.stride(D))... };
     const I ae[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(bc_ext<R>(a, D))... },
             sa[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(bc_str<R>(a, D))... };
     const I be[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(bc_ext<R>(b, D))... },

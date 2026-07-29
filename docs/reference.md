@@ -318,7 +318,12 @@ broadcast → `int64`), independent of the element promotion.
 ### In-place (mutates `*this`, returns `tensor&`)
 
 A tensor rhs broadcasts (numpy-style; needs equal rank — `unsqueeze` first); a
-scalar rhs applies to every element.
+scalar rhs applies to every element. An in-place op keeps `*this`'s own offset
+index type (there is no new result to widen); the offset math runs internally in a
+type that covers every participant — both in width and in signedness — so a
+narrow-indexed destination is safe against a wide-indexed rhs, and an
+unsigned-indexed tensor is safe against a flipped (negative-stride) signed-indexed
+one — see [Mixing widths](shapes-strides.md#mixing-widths-in-a-broadcast).
 
 | Call | Notes |
 |---|---|

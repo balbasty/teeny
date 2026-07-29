@@ -664,6 +664,28 @@ is generic.
   same `_wider_index_t` for its offset math (#342) even though it yields a scalar,
   not a tensor — taking the first operand's index type alone narrowed the second's
   extents/strides (a hard clang error, a silently wrong offset under g++).
+  `bzip_` itself decodes its offsets in `_offset_int_t<C::index_type, Ia, Ib>` — a type
+  that holds every extent/stride value ALL THREE participants can produce (#346).
+  Out-of-place the result already carries the wider of the two operands (no-op), but
+  IN-PLACE (`c` is `a`) and `into(dest)` hand it a destination whose index type is fixed
+  by the caller's own tensor and may be NARROWER than an operand's; taking the
+  destination's alone truncated a wide rhs's strides — silently, since `bzip_`'s
+  `static_cast<I>`s suppress even the narrowing diagnostic that caught #342. The pick is
+  **signedness-aware, not `sizeof`-only**: an all-signed or all-unsigned set keeps the
+  plain widest (the identical type, so those call sites are untouched), but a MIXED set
+  decodes in a SIGNED type wide enough for both sides — at least the widest participant,
+  and past the widest UNSIGNED one's range (twice its size, capped at 64 bits). A width-
+  only pick can choose an unsigned type over a signed participant carrying a NEGATIVE
+  stride, and `static_cast<uint32_t>(-1)` = 4294967295 zero-extends into the pointer
+  offset instead of stepping backwards (a flipped view + an unsigned-indexed operand →
+  a write off the front of the buffer). All of this is internal only: no tensor's own
+  type changes, each tensor's offsets fit its own index type by construction, and
+  `data()[off]` takes any integer, so nothing is narrowed back. The 64-bit cap is the
+  one contract-backed step (no signed type holds all of `uint64_t`) — a reachable
+  offset must fit `ptrdiff_t` anyway, and teeny's reach contract is signed throughout
+  (`index_fits`). `_wider_int_t`/`_wider_index_t` stay the pure WIDTH pick: they name
+  the index type a fresh broadcast RESULT carries (non-negative extents, positive
+  strides), not the type an engine may decode offsets in.
   **Contiguous linear fast path (#161, #175):** contiguous elementwise ops replace the
   per-element mixed-radix decode with a flat `for(i) cp[i]=…` loop that auto-vectorizes.
   Two flavours by whether a second array is in play:

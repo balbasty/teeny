@@ -81,6 +81,12 @@ grow the destination.) A size-1 axis stretches over its partner as usual;
 If the two operands have different offset [index widths](shapes-strides.md#mixing-widths-in-a-broadcast)
 (e.g. an `int32`-indexed view and an `int64`-indexed one), the result takes the
 **wider** of the two — lossless, and it never truncates the wide operand's strides.
+In place (`a.add_(b)`) and into a caller-supplied `into(dest)` there is no new
+result to widen, so the offset math itself runs in a type that covers every tensor in
+play while each keeps its own: a narrow-indexed destination never truncates a
+wide-indexed right-hand side, in either direction. The same holds across
+**signedness** — an unsigned-indexed tensor next to a flipped (negative-stride)
+signed-indexed one computes in a signed type, so the negative stride stays negative.
 
 Broadcasting example — per-channel scale/bias over a `(C,H,W)` image with
 `(C,1,1)` parameters:
