@@ -234,6 +234,15 @@ t(0, slice<1,4>()); t(0, slice<0,8,2>());  // compile-time slice (bounds fold li
                       //   stride where derivable); a COMPILE-TIME range folds its extent
                       //   too (source static + static bounds), a runtime range's is dynamic.
 t.take_along<0,2>(i, slice(1,4));  // bind named axes only; keep every other axis
+t.subsample<Axes...>(k, starts...);  // coloured/strided sub-lattice (#258): take_along +
+                      //   slice(start,none,k) per named axis, one shared step k, per-axis
+                      //   start. Pure sugar, no new addressing power. k/starts accept a
+                      //   runtime value or Int<k>() (folds through slice()'s own static-range
+                      //   machinery -> a fully-static (start,k) pair keeps a folded static
+                      //   result, same as a hand-written slice()). Value form: t.subsample(
+                      //   axis<Axes...>{}, k, starts...) -- LEADING tag, same placement as
+                      //   take_along's own (a second variadic pack, the starts, needs the
+                      //   disambiguating tag up front, not trailing).
 t.index_select<Axis>(idx);         // gather along Axis by a rank-1 integer index
                       //   TENSOR (#326) — runtime DATA, unlike take_along's compile-time
                       //   indices. idx values wrap negative (built on take_along); static
@@ -243,8 +252,10 @@ t.index_select<Axis>(idx);         // gather along Axis by a rank-1 integer inde
                       //   isn't an affine mdspan view). into(dest) form too:
                       //   t.index_select<Axis>(idx, into(dest)) (no alloc, device-safe;
                       //   dest's axis-Axis extent must equal idx's, checked; dest must not
-                      //   alias t). Value form: t.index_select(idx, axis<Axis>{}) (no
-                      //   .template on a dependent receiver, like take_along's own axis<> form)
+                      //   alias t). Value form: t.index_select(idx, axis<Axis>{}) (TRAILING
+                      //   tag here -- unlike take_along/subsample's leading one, since
+                      //   index_select's only other arg, idx, is a single fixed positional,
+                      //   not an open pack, so a trailing tag is unambiguous and deducible)
 t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1) -> view
 t.flip<1>();          // reverse an axis (negative-stride view; needs signed index)
 t.unsqueeze<2>();     // insert size-1 axis at pos 2 (numpy newaxis) -> rank+1 view
