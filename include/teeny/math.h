@@ -511,11 +511,24 @@ _TNY_API void iota_(C & c, typename C::element_type start, typename C::element_t
 /* ---- c(i) = op(a(i), scalar) ------------------------------------- */
 template <bool Restrict, class Cv, class C, class A, class S, class Op, cs::size_t... D>
 _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
-    using I = typename C::index_type;   // `Cv` = the op's compute type (arithmetic: dest compute type; compare: Rc)
+    // Offsets are decoded in a type that holds every value BOTH participants — the
+    // destination and the source — can produce (#353; `_offset_int_t` above spells the
+    // rule out, and `bzip_` below carries the same note for its three-way version).
+    // Taking the DESTINATION's index type alone truncated a wider-indexed source's
+    // extents/strides. The allocating producers (`oops`) build `c` from `a`'s own
+    // extents type, so `C::index_type == A::index_type` there and this is a no-op; it
+    // is a caller-supplied `into(dest)` that can hand us a NARROW destination next to a
+    // wide source, and there `a.stride()` of 40000 folded to an int16 -25536 and read
+    // off the front of the buffer. Unlike `bzip_` this site was not even silent — the
+    // initializers below lacked the `static_cast<I>`s, so g++ warned (`-Wnarrowing`) and
+    // clang rejected the instantiation outright.
+    // `Cv` = the op's compute type (arithmetic: dest compute type; compare: Rc).
+    using I = _offset_int_t<typename C::index_type,
+                            typename A::extents_type::index_type>;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
-    const I e[sizeof...(D) ? sizeof...(D) : 1] = { a.extent(D)... },
-            sa[sizeof...(D) ? sizeof...(D) : 1] = { a.stride(D)... },
-            sc[sizeof...(D) ? sizeof...(D) : 1] = { c.stride(D)... };
+    const I e[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.extent(D))... },
+            sa[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.stride(D))... },
+            sc[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(c.stride(D))... };
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
     // Contiguous linear fast path (out-of-place only; `c` fresh, cannot alias `a`).
     if constexpr (Restrict) {
@@ -539,11 +552,18 @@ template <bool Restrict = false, class C, class A, class S, class Op> _TNY_API v
 /* ---- c(i) = uop(a(i))  and  c(i) = uop(c(i)) (in place) ---------- */
 template <bool Restrict, class C, class A, class Uop, cs::size_t... D>
 _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
-    using I = typename C::index_type; using Cv = compute_type_t<typename C::element_type>;
+    // Same rule (and the same reachability) as `scalo_` just above: the offsets decode
+    // in a type covering the destination AND the source, so a caller-supplied
+    // `into(dest)` narrower than the source no longer truncates the source's strides
+    // (#353). The allocating producer (`uop_out`) builds `c` from `a`'s extents type,
+    // so that path is unchanged.
+    using I = _offset_int_t<typename C::index_type,
+                            typename A::extents_type::index_type>;
+    using Cv = compute_type_t<typename C::element_type>;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
-    const I e[sizeof...(D) ? sizeof...(D) : 1] = { a.extent(D)... },
-            sa[sizeof...(D) ? sizeof...(D) : 1] = { a.stride(D)... },
-            sc[sizeof...(D) ? sizeof...(D) : 1] = { c.stride(D)... };
+    const I e[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.extent(D))... },
+            sa[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.stride(D))... },
+            sc[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(c.stride(D))... };
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
     // Contiguous linear fast path (out-of-place only; `c` fresh, cannot alias `a`).
     if constexpr (Restrict) {
@@ -896,7 +916,16 @@ _TNY_HOST auto reduce_to(tensor<RE, OE, ccontiguous, storage::heap> && r) {
 /* ---- allclose: |a-b| <= atol + rtol*|b| for every (broadcast) element ---- */
 template <class R, class A, class B, cs::size_t... D>
 _TNY_API bool allclose_(const A & a, const B & b, R rtol, R atol, cs::index_sequence<D...>) {
-    using I = typename A::index_type;
+    // Two read-only operands, so this is the `zipreduce_decode_` situation (#342) — but
+    // the pick is the signedness-aware `_offset_int_t`, not the pure width
+    // `_wider_index_t`: it is an OFFSET decode type, not the index type of a fresh
+    // result (see `_offset_int_t`'s note above). Taking the FIRST operand's index type
+    // alone truncated a wider-indexed `b`'s extents/strides, silently — the
+    // `static_cast<I>`s below suppress the narrowing diagnostic that caught #342 — and
+    // a 40000 stride folded to an int16 -25536 reads off the front of the buffer (#353).
+    // A same-signedness pair still resolves to the plain widest, so every ordinary call
+    // decodes exactly as before.
+    using I = _offset_int_t<typename A::index_type, typename B::index_type>;
     constexpr cs::size_t Rk = sizeof...(D);   // result (broadcast) rank; a,b right-align (left-pad)
     // Array size floored to 1 (rank-0 result -> empty D..., see scal_'s comment above).
     const I ae[Rk ? Rk : 1] = { static_cast<I>(bc_ext<Rk>(a, D))... },

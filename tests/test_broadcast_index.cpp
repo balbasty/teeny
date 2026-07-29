@@ -16,6 +16,12 @@
 // the unsigned type makes it 4294967295, which zero-extends into the pointer offset
 // instead of stepping backwards. So a MIXED-signedness set decodes in a signed type
 // wide enough for both sides; all-signed and all-unsigned sets keep the width pick.
+//
+// Checks 18+ carry the SAME rule (width and signedness both) through the three sibling
+// engines that had the same defect (#353): a scalar-rhs op (`a.mul(2.0, into(y))`), a
+// unary op (`neg(a, into(y))`), and `allclose(a, b)`. The first two truncated a
+// wider-indexed SOURCE into a caller-supplied `into(dest)`'s width; `allclose` truncated
+// a wider-indexed `b` into the FIRST operand's.
 #include <teeny/teeny.h>
 #include <cuda/std/type_traits>
 using namespace tny;
@@ -252,6 +258,165 @@ int main() {
         auto fp = wrap(pv, shape32<4>{});
         fp.copy_(fs);
         if (pv[0] != 4 || pv[1] != 3 || pv[2] != 2 || pv[3] != 1) return 30;
+    }
+
+    /* ---- the SIBLING engines: a scalar-rhs op, a unary op, and allclose (#353) --- *
+     * `bzip_` above is the two-operand elementwise engine. Three more decode offsets
+     * for more than one tensor and had the same defect:
+     *   - a scalar-rhs op (`a.mul(2.0, into(y))`) and a unary op (`neg(a, into(y))`)
+     *     took the DESTINATION's index type and truncated a wider-indexed SOURCE;
+     *   - `allclose(a, b)` took the FIRST operand's and truncated a wider-indexed `b`.
+     * The allocating spellings of the first two build their result from the source's
+     * own extents type, so only a caller-supplied `into(dest)` can make them narrow;
+     * `allclose` is reachable straight from the public call. As above every expected
+     * value is hand-computed from `big[k] == k + 0.5`, so a fix that stopped crashing
+     * but addressed the wrong element would still fail here. */
+    fill_big();
+
+    // (18) scalar-rhs op, narrow `into` dest + wide source (the reported repro).
+    {
+        auto bw = wrap(big, shape<2,2>{}, strides<40000,1>{});   // (0.5, 1.5, 40000.5, 40001.5)
+        double yd[4] = {0,0,0,0};
+        auto y16 = wrap(yd, shape_as<short,2,2>{});
+        static_assert(cs::is_same<idx_of<decltype(y16)>, short>::value, "into-dest stays int16");
+        static_assert(cs::is_same<idx_of<decltype(bw)>, cs::int64_t>::value, "source is int64");
+        bw.mul(2.0, into(y16));
+        if (yd[0] != 1.0 || yd[1] != 3.0) return 31;
+        if (yd[2] != 80001.0 || yd[3] != 80003.0) return 32;     // 2*40000.5, 2*40001.5
+        bw.add(0.5, into(y16));
+        if (yd[0] != 1.0 || yd[1] != 2.0) return 33;
+        if (yd[2] != 40001.0 || yd[3] != 40002.0) return 34;
+        // minimum/maximum against a scalar ride the same engine.
+        bw.minimum(2.0, into(y16));
+        if (yd[0] != 0.5 || yd[1] != 1.5 || yd[2] != 2.0 || yd[3] != 2.0) return 35;
+    }
+
+    // (19) unary op, narrow `into` dest + wide source. `neg`/`floor` keep the check
+    //      exact (no transcendental rounding to reason about).
+    {
+        auto bw = wrap(big, shape<2,2>{}, strides<40000,1>{});
+        double yd[4] = {0,0,0,0};
+        auto y16 = wrap(yd, shape_as<short,2,2>{});
+        neg(bw, into(y16));
+        if (yd[0] != -0.5 || yd[1] != -1.5) return 36;
+        if (yd[2] != -40000.5 || yd[3] != -40001.5) return 37;
+        floor(bw, into(y16));
+        if (yd[0] != 0.0 || yd[1] != 1.0 || yd[2] != 40000.0 || yd[3] != 40001.0) return 38;
+        bw.floor(into(y16));                                      // method spelling, same engine
+        if (yd[2] != 40000.0 || yd[3] != 40001.0) return 39;
+    }
+
+    // (20) allclose: narrow-indexed FIRST operand, wide-indexed second. The `big`
+    //      values are distinct per offset, so a truncated stride cannot accidentally
+    //      agree — a wrong offset reads a different number and flips the answer.
+    {
+        auto bw = wrap(big, shape<2,2>{}, strides<40000,1>{});
+        double eq[4] = {0.5, 1.5, 40000.5, 40001.5};              // exactly bw, element for element
+        auto e16 = wrap(eq, shape_as<short,2,2>{});
+        static_assert(cs::is_same<idx_of<decltype(e16)>, short>::value, "lhs stays int16");
+        if (!allclose(e16, bw)) return 40;
+        // perturb ONLY the far element: allclose must have read big[40001] to notice.
+        double ne[4] = {0.5, 1.5, 40000.5, 99.0};
+        auto n16 = wrap(ne, shape_as<short,2,2>{});
+        if (allclose(n16, bw)) return 41;
+        // ...and only the near one.
+        double n2[4] = {99.0, 1.5, 40000.5, 40001.5};
+        auto m16 = wrap(n2, shape_as<short,2,2>{});
+        if (allclose(m16, bw)) return 42;
+        // the mirror order (wide lhs, narrow rhs) was always fine — pin it.
+        if (!allclose(bw, e16)) return 43;
+    }
+
+    // (21) allclose with a STRETCHED narrow operand next to a wide-strided one: the
+    //      (2,1) lhs stretches over axis 1 of a (2,2) rhs whose row stride is 40000.
+    {
+        auto cols = wrap(big, shape<2,2>{}, strides<40000,0>{});   // rows (0.5,0.5) / (40000.5,40000.5)
+        double cold[2] = {0.5, 40000.5};
+        auto col16 = wrap(cold, shape_as<short,2,1>{});
+        if (!allclose(col16, cols)) return 44;
+        cold[1] = 7.0;                                             // only the far row moves
+        if (allclose(col16, cols)) return 45;
+    }
+
+    /* ---- mixed SIGNEDNESS through the same three engines. A width-only widening —
+     * the obvious "just take the wider of the two" fix — lands on the unsigned type and
+     * turns a -1 stride into 4294967295, so these pin the signedness half of the rule
+     * from BOTH directions: (22) is the case a width-only fix would have BROKEN (it was
+     * fine before, because the old code happened to pick the signed side), (23)/(24) are
+     * cases the old code already got wrong. */
+
+    // (22) scalar-rhs op: uint32-indexed source, flipped int16-indexed `into` dest — the
+    //      direction that only a signedness-BLIND widening gets wrong.
+    {
+        double sv[4] = {1,2,3,4};
+        auto us = wrap(sv, shape_as<unsigned int,4>{});
+        double dv[4] = {0,0,0,0};
+        auto fd = wrap(dv + 3, shape_as<short,4>{}, strides<-1>{});   // fd(k) is dv[3-k]
+        static_assert(cs::is_same<idx_of<decltype(us)>, unsigned int>::value, "source is uint32-indexed");
+        us.mul(10.0, into(fd));
+        if (dv[0] != 40 || dv[1] != 30 || dv[2] != 20 || dv[3] != 10) return 46;
+    }
+
+    // (23) the other order: flipped int16-indexed source, uint32-indexed dest, and the
+    //      equal-width int32-vs-uint32 pair a width-only pick cannot express at all.
+    {
+        double sv[4] = {1,2,3,4};
+        auto fs = wrap(sv + 3, shape_as<short,4>{}, strides<-1>{});   // reads (4,3,2,1)
+        double dv[4] = {0,0,0,0};
+        auto ud = wrap(dv, shape_as<unsigned int,4>{});
+        neg(fs, into(ud));
+        if (dv[0] != -4 || dv[1] != -3 || dv[2] != -2 || dv[3] != -1) return 47;
+        double ev[4] = {0,0,0,0};
+        auto f32 = wrap(sv + 3, shape32<4>{}, strides<-1>{});         // int32-indexed, stride -1
+        auto u32 = wrap(ev, shape_as<unsigned int,4>{});
+        f32.mul(2.0, into(u32));
+        if (ev[0] != 8 || ev[1] != 6 || ev[2] != 4 || ev[3] != 2) return 48;
+    }
+
+    // (24) allclose across signedness, both orders — including the equal-width
+    //      int32/uint32 pair, where a tie-keeps-the-first width pick chose the
+    //      unsigned type and the flipped operand's -1 stride blew past the buffer.
+    {
+        double sv[4] = {1,2,3,4};
+        double rv[4] = {4,3,2,1};
+        auto ua  = wrap(sv, shape_as<unsigned int,4>{});               // (1,2,3,4)
+        auto fb  = wrap(rv + 3, shape_as<short,4>{}, strides<-1>{});   // (1,2,3,4) reversed
+        if (!allclose(ua, fb)) return 49;
+        if (!allclose(fb, ua)) return 50;
+        auto f32 = wrap(rv + 3, shape32<4>{}, strides<-1>{});          // int32 vs uint32: equal width
+        if (!allclose(ua, f32)) return 51;
+        if (!allclose(f32, ua)) return 52;
+        rv[0] = 9.0;                                                   // == fb's LAST element
+        if (allclose(ua, fb)) return 53;
+    }
+
+    // (25) controls for these three engines: same-width same-signedness paths must be
+    //      untouched, and a mixed pair whose values all fit the narrow side must agree
+    //      element for element with the same-width spelling.
+    {
+        double sv[4] = {1,2,3,4};
+        double dv[4] = {0,0,0,0}, wv[4] = {0,0,0,0};
+        auto s64 = wrap(sv, shape<4>{});
+        auto d64 = wrap(dv, shape<4>{});
+        s64.mul(3.0, into(d64));
+        if (dv[0] != 3 || dv[1] != 6 || dv[2] != 9 || dv[3] != 12) return 54;
+        auto s16 = wrap(sv, shape_as<short,4>{});                      // narrow source, wide dest
+        auto w64 = wrap(wv, shape<4>{});
+        s16.mul(3.0, into(w64));
+        for (int i = 0; i < 4; ++i) if (wv[i] != dv[i]) return 55;
+        double uv[4] = {0,0,0,0};
+        auto u16 = wrap(uv, shape_as<short,4>{});                      // narrow dest, wide source
+        s64.mul(3.0, into(u16));
+        for (int i = 0; i < 4; ++i) if (uv[i] != dv[i]) return 56;
+        // all-unsigned mixed width (no negative stride is expressible there) and
+        // all-signed both keep the plain widest — same answers either way.
+        double pv[4] = {0,0,0,0};
+        auto su = wrap(sv, shape_as<unsigned short,4>{});
+        auto du = wrap(pv, shape_as<unsigned int,4>{});
+        neg(su, into(du));
+        if (pv[0] != -1 || pv[1] != -2 || pv[2] != -3 || pv[3] != -4) return 57;
+        if (!allclose(s64, s16)) return 58;
+        if (!allclose(su, du.mul(-1.0))) return 59;
     }
 
     return 0;
