@@ -73,6 +73,7 @@ TESTS = \
 	$(BUILDDIR)/test_subperm \
 	$(BUILDDIR)/test_takealong \
 	$(BUILDDIR)/test_index_select \
+	$(BUILDDIR)/test_peel_zip \
 	$(BUILDDIR)/test_alias \
 	$(BUILDDIR)/test_axis_sort \
 	$(BUILDDIR)/test_kwargs \

@@ -240,3 +240,42 @@ template-only.) `peel_front<N>` handles **arbitrary batch rank**: for a `(*batch
 tensor, `peel_front<Nbatch>` yields `(*spatial, C)` sub-views to parallelise
 over — one per CPU thread or CUDA thread. Each sub-view already has the batch
 offset baked into its pointer, so the inner kernel sees only spatial strides.
+
+### `peel_zip` — walk 2 or 3 tensors in lock-step
+
+`peel<Axes...>(t)` iterates ONE tensor. For 2 or 3 tensors that should be walked
+together — the classic case is a triangle's three per-vertex coordinate tensors —
+`peel_zip` yields one `cs::tuple` of views per step instead of independently
+peeling each and trusting the iteration stays in lock-step:
+
+```cpp
+for (auto [va, vb, vc] : peel_zip<0>(a, b, c)) work(va, vb, vc);  // one tuple per step
+```
+
+A **distinct name from `peel`**, not an overload: peeling 1 tensor yields a view
+per step, but 2+ would yield a tuple — a silent return-type bifurcation on arity
+that a typo'd extra argument could trigger unnoticed. (Python's own `zip()` is the
+same call: its own name, not an overload of single-iterable iteration.)
+
+The operands can differ in shape as long as they're **broadcast-compatible** —
+numpy's right-aligned rule, the same one `a + b` uses — and `Axes...` name axes in
+the **broadcast rank's** numbering (the larger of the operands' own ranks;
+negatives wrap against it):
+
+```cpp
+auto verts = local<double, shape<4,3>>();   // 4 triangles' vertex 0, xyz each
+auto w     = local<double, shape<4,1>>();   // one scalar weight per triangle
+for (auto [v, wt] : peel_zip<0>(verts, w)) { ... }   // wt's extent-1 axis broadcasts against v's 3 coords
+```
+
+Composes with `axis<...>{}` (trailing, after every positional tensor — a
+`peel_zip`-specific placement, unlike `take_along`/`peel_at`'s leading tag, since
+`peel_zip`'s tensor arguments are each a single fixed-arity positional rather than
+an open pack), `.enumerate()` (yields `(multi_index, tuple)`, same shape as the
+single-tensor form), and `.subrange(lo,hi)` for chunked/threaded sweeps:
+
+```cpp
+for (auto [va,vb,vc] : peel_zip(a, b, c, axis<0>{})) { ... }       // == peel_zip<0>(a,b,c)
+for (auto [m, cell] : peel_zip<0>(a, b).enumerate()) { ... }       // m[d] = coord of peeled axis d
+for (auto cell : peel_zip<0>(a, b).subrange(lo, hi)) { ... }       // a [lo,hi) chunk
+```

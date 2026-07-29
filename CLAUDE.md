@@ -68,7 +68,7 @@ include/teeny/
   math.h           in-place & out-of-place elementwise (broadcasting) + unary math
                    + reductions (sum/prod/max/min/dot). Members declared in
                    tensor.h, DEFINED here.
-  iterate.h        nd-peel: peel / peel_at / peel_front / peel_front_at
+  iterate.h        nd-peel: peel / peel_at / peel_front / peel_front_at / peel_zip
   dynamic.h        anyrank (rank-erased carrier) + peel_front<-Sr> + dispatch_rank
   cuda.h           gpu/pinned/mapped memory. Self-guarded (__has_include /
                    __CUDACC__): a no-op unless the CUDA runtime is reachable, so
@@ -425,6 +425,23 @@ for (auto [m, v] : peel<0,1>(t).enumerate()) g(m[0], m[1], v);  // ALSO yield th
                                           //   cell stays LEAN (no coord words); enumerate composes with
                                           //   subrange (.enumerate().subrange(lo,hi)). Or it.index(d) on the
                                           //   raw iterator. Peeled axes vary row-major (last listed fastest).
+
+// --- nd-peel: zip-peel 2 or 3 tensors in LOCK-STEP (#327) ---
+for (auto [a,b,c] : peel_zip<0>(x,y,z)) f(a,b,c);  // one cs::tuple<ViewX,ViewY,ViewZ> per step —
+                      //   the "triangle's three vertex tensors" idiom. DISTINCT name from peel
+                      //   (not an overload): 1 tensor -> a view, 2+ -> a tuple is a silent
+                      //   return-type bifurcation on arity (mirrors python's own zip() being its
+                      //   own name). Operands may differ in shape if BROADCAST-compatible (numpy
+                      //   right-align, same rule a+b uses); Axes... name axes in the BROADCAST
+                      //   rank's numbering (max of the operands' own ranks). Decodes fresh each
+                      //   step (no incremental cursor yet — a perf follow-up, not #327's scope).
+for (auto [a,b] : peel_zip(x, y, axis<0>{})) f(a,b);   // value form: axis<...> TRAILING (after
+                      //   every positional tensor — unlike take_along/peel_at's LEADING tag,
+                      //   which disambiguates a second variadic pack there; peel_zip's tensor
+                      //   args are each fixed-arity, so a trailing tag is unambiguous)
+for (auto [m, cell] : peel_zip<0>(x,y).enumerate()) g(m[0], cell);  // (multi_index, tuple) per
+                      //   step, same shape as the single-tensor peel's enumerate
+for (auto cell : peel_zip<0>(x,y).subrange(lo,hi)) f(cell);   // a [lo,hi) chunk
 
 // --- nd-peel: peel the FIRST N axes (arbitrary batch rank) ---
 for (auto v : peel_front<N>(t)) f(v);      // v is (*spatial, C); N = #batch dims. Incremental (as above);

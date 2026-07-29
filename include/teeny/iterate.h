@@ -2,8 +2,11 @@
 #define TNY_MD_ITERATE
 #include <cuda/std/mdspan>
 #include <cuda/std/utility>
+#include <cuda/std/tuple>
+#include <cuda/std/type_traits>
 #include <teeny/defines.h>
 #include <teeny/tensor.h>
+#include <teeny/math.h>   // peel_zip (#327) reuses math.h's broadcast rule (bc1/bc_sext/bc_ext/bc_str)
 
 _TNY_NAMESPACE_BEGIN(tny)
 
@@ -321,6 +324,331 @@ _TNY_API typename tensor<T,E,L,O>::index_type size_front(const tensor<T,E,L,O> &
 
 // (removed: `channel(md,c)` was just `peel_at<0>(md,c)`, and `batch_offset` — a
 //  raw F-order offset helper — was unused by any kernel. Use peel/peel_at.)
+
+/* ================================================================== *
+ *  peel_zip: walk 2 or 3 BROADCAST-compatible tensors in lock-step,   *
+ *  yielding a cs::tuple<ViewA,ViewB[,ViewC]> per step (#327) — the    *
+ *  "triangle's three vertex tensors" idiom. A distinct name from      *
+ *  `peel` (not an overload): 1 tensor -> a view per step, 2+ ->       *
+ *  a tuple per step is a silent return-type bifurcation on arity, a   *
+ *  real footgun (mirrors python's own `zip()` being its own name      *
+ *  rather than an overload of single-iterable iteration).             *
+ *                                                                    *
+ *  Broadcasting reuses math.h's EXISTING per-operand rule (bc1/       *
+ *  bc_sext/bc_ext/bc_str) verbatim — generalized here from 2 operands *
+ *  to N via a fold, not a new broadcasting RULE. Peeled/kept axes are *
+ *  named in BROADCAST-rank numbering (the largest operand's rank).    *
+ * ================================================================== */
+
+namespace _md {
+
+// max over a pack of ranks -> the broadcast RESULT rank (right-align; numpy:
+// result rank = the largest operand rank) — generalizes math.h's binary bc_rank.
+template <cs::size_t... Rs> constexpr cs::size_t bc_rank_n() {
+    cs::size_t m = 0; ( (m = m > Rs ? m : Rs), ... ); return m;
+}
+// STATIC per-axis broadcast extent: fold math.h's bc1/bc_sext over N operand
+// extents types, each individually right-aligned into result rank R.
+template <cs::size_t D, cs::size_t R, class... Es> constexpr cs::size_t bcn_sext() {
+    cs::size_t r = 1; ( (r = bc1(r, bc_sext<Es, R>(D))), ... ); return r;
+}
+// per-axis broadcast-compat check across N operands: every operand's own extent
+// must be 1, dynamic, or agree with the FOLDED result (equivalent to bc_axis_ok's
+// pairwise check for N==2; the correct generalization for N>2).
+template <cs::size_t D, cs::size_t R, class... Es> constexpr bool bcn_axis_ok() {
+    constexpr cs::size_t r = bcn_sext<D, R, Es...>();
+    bool ok = true; ( (ok = ok && bc_axis_ok(bc_sext<Es, R>(D), r)), ... ); return ok;
+}
+template <cs::size_t R, class... Es, cs::size_t... D>
+constexpr bool bcn_static_ok_r(cs::index_sequence<D...>) {
+    bool ok = true; ( (ok = ok && bcn_axis_ok<D, R, Es...>()), ... ); return ok;
+}
+// RUNTIME per-axis broadcast extent, same fold, over N operand mdspans.
+template <cs::size_t R, class I, class... MDs>
+_TNY_API I bcn_ext_rt(cs::size_t d, const MDs & ... m) {
+    I r = 1; ( (r = (static_cast<I>(bc_ext<R>(m, d)) == I(1) ? r : static_cast<I>(bc_ext<R>(m, d)))), ... ); return r;
+}
+// STATIC per-operand, per-broadcast-axis stride: 0 for a padded (out-of-rank) axis
+// or a KNOWN static stretch axis (extent==1); the source's own folded stride
+// (`_src_sstride`, layout.h) for a real axis; `dynamic_stride` if only known at
+// RUNTIME whether it stretches (a dynamic extent might turn out to be 1).
+template <cs::size_t D, cs::size_t R, class L, class E> constexpr cs::int64_t bc_src_sstride() {
+    constexpr cs::size_t off = R - E::rank();
+    if constexpr (D < off) return cs::int64_t(0);
+    else {
+        constexpr cs::size_t ax = D - off;
+        constexpr cs::size_t se = E::static_extent(ax);
+        if constexpr (se == 1) return cs::int64_t(0);
+        else if constexpr (se == cs::dynamic_extent) return dynamic_stride;
+        else return _src_sstride<ax, L, E>();
+    }
+}
+// shared (broadcast) kept-axis extents type: ONE static extents type reused by
+// EVERY operand's view at a zip step (peeled axes drop via `_drop_axis`, same
+// sentinel `gather_peel` uses).
+template <cs::size_t A, class Seq, cs::size_t R, class... Es>
+constexpr cs::size_t peel_zip_ext() { return peel_pos<A, Seq>::value >= 0 ? _drop_axis : bcn_sext<A, R, Es...>(); }
+template <class Idx, class Seq, cs::size_t R, class... Es, cs::size_t... A>
+typename _compact<Idx, peel_zip_ext<A, Seq, R, Es...>()...>::type zip_oe_(cs::index_sequence<A...>);
+template <class Idx, class Seq, cs::size_t R, class... Es>
+using zip_oe_t = decltype(zip_oe_<Idx, Seq, R, Es...>(cs::make_index_sequence<R>{}));
+
+// per (broadcast) axis, per operand: PEELED -> accumulate this operand's offset
+// contribution from the shared decoded coordinate; KEPT -> record this operand's
+// own runtime stride (into the dynamic slot `_str_compact` leaves open). Uses
+// `bc_str` (math.h) directly — 0 for a padded or broadcast-stretched axis, same
+// rule every elementwise op already uses per operand.
+template <cs::size_t A, cs::size_t R, class Seq, class MD, class I>
+_TNY_API void peel_zip_axis(const MD & v, const I * idx, I & off, I * str, cs::size_t & k) {
+    constexpr int p = peel_pos<A, Seq>::value;
+    const I sd = static_cast<I>(bc_str<R>(v, A));
+    if constexpr (p >= 0) off += idx[p] * sd;
+    else { str[k] = sd; ++k; }
+}
+// Build ONE operand's kept-axis view for a zip step: same shape as `gather_peel`,
+// but the KEPT-axis extents come from the SHARED `oe` (identical for every
+// operand in the zip) while the stride is THIS operand's own.
+template <storage OW, cs::size_t R, class Seq, class OE, class MD, cs::size_t... A>
+_TNY_API auto gather_peel_zip(const MD & v, const typename OE::index_type * idx, const OE & oe, cs::index_sequence<A...>) {
+    using El  = typename MD::element_type;
+    using Idx = typename OE::index_type;
+    using L   = typename MD::layout_type;
+    using E   = typename MD::extents_type;
+    using SF  = typename _str_compact<(peel_pos<A,Seq>::value >= 0 ? _sdrop : bc_src_sstride<A,R,L,E>())...>::type;
+    constexpr cs::size_t Nk = OE::rank();
+    Idx str[Nk ? Nk : 1] = {}; Idx off = 0; cs::size_t k = 0;
+    ( peel_zip_axis<A, R, Seq>(v, idx, off, str, k), ... );
+    return tensor<El, OE, SF, OW>(v.data_handle() + off, _detail::fold_mapping<SF>(oe, str));
+}
+
+// pairs a storage-view kind with its mdspan type -- lets `peel_zip_range` hold
+// ONE variadic `Ops...` pack instead of two parallel (and easy to desync) ones.
+template <storage OW, class MD> struct zop { static constexpr storage ow = OW; using md_type = MD; };
+
+// runtime broadcast extent for broadcast axis `d` (peeled OR kept -- this doesn't
+// care which), folded over every operand in the tuple (same rule as `bcn_ext_rt`,
+// unpacked from a `cs::tuple` via `K...`).
+template <cs::size_t R, class Idx, class Tup, cs::size_t... K>
+_TNY_API Idx zip_bc_ext(cs::size_t d, const Tup & srcs, cs::index_sequence<K...>) {
+    return bcn_ext_rt<R, Idx>(d, cs::get<K>(srcs)...);
+}
+// per-axis (across every operand): each operand's own extent must be 1, dynamic,
+// or agree with the folded broadcast extent `fd` for that axis (the RUNTIME twin
+// of `bcn_static_ok_r` -- a static extent already proved compatible at compile
+// time, so this only has teeth where an operand's extent is dynamic).
+template <cs::size_t R, class Idx, class Tup, cs::size_t... K>
+_TNY_API void zip_check_axis(cs::size_t d, const Tup & srcs, Idx fd, cs::index_sequence<K...>) {
+    ( _TNY_CHECK(static_cast<Idx>(bc_ext<R>(cs::get<K>(srcs), d)) == fd ||
+                 static_cast<Idx>(bc_ext<R>(cs::get<K>(srcs), d)) == Idx(1),
+        "peel_zip: broadcast: operand extent mismatch"), ... );
+}
+template <cs::size_t R, class Idx, class Tup, cs::size_t... K, cs::size_t... D>
+_TNY_API void zip_check_bcast(const Tup & srcs, cs::index_sequence<K...> ks, cs::index_sequence<D...>) {
+    ( zip_check_axis<R, Idx>(D, srcs, zip_bc_ext<R, Idx>(D, srcs, ks), ks), ... );
+}
+
+/** @brief A range of `cs::tuple<ViewA,ViewB[,ViewC]>` obtained by zip-peeling 2 or
+ *         3 broadcast-compatible tensors' `Axes...` in lock-step. `Ops...` are
+ *         `zop<OW,MD>` pairs (one per operand); `Seq` is the peeled (broadcast-
+ *         numbered) axis set; `R` is the broadcast rank. Supports `size()`,
+ *         random-access `operator[]`, range-for, `subrange(lo,hi)`, and
+ *         `.enumerate()` — the same shape as the single-tensor `peel_range`,
+ *         decoding the shared linear index fresh each step (no incremental
+ *         cursor yet — correctness first; a follow-up perf issue can add one, #327). */
+template <class Seq, cs::size_t R, class... Ops>
+struct peel_zip_range {
+    using Tup = cs::tuple<typename Ops::md_type...>;
+    static constexpr cs::size_t Nop = sizeof...(Ops);
+    static constexpr cs::size_t Nd  = Seq::size();
+    using Idx = cs::common_type_t<typename Ops::md_type::index_type...>;
+    using OE  = zip_oe_t<Idx, Seq, R, typename Ops::md_type::extents_type...>;
+    using Ks  = cs::index_sequence_for<Ops...>;
+
+    Tup srcs;
+
+    // one row of the mixed-radix decode: per (broadcast) PEELED axis, the shared
+    // extent every operand agrees on (folded across all of them).
+    template <cs::size_t... PA>
+    _TNY_API void _peeled_ext(Idx * e, cs::index_sequence<PA...>) const {
+        cs::size_t p = 0; ( (e[p++] = zip_bc_ext<R, Idx>(PA, srcs, Ks{})), ... );
+    }
+    _TNY_API Idx size() const {
+        Idx e[Nd ? Nd : 1]; _peeled_ext(e, Seq{});
+        Idx n = 1; for (cs::size_t p = 0; p < Nd; ++p) n *= e[p];
+        return n;
+    }
+    // debug-only broadcast-compat check across every operand (host-debug guard, a
+    // no-op under -DNDEBUG, same convention as every other runtime shape check).
+    _TNY_API void _check() const { zip_check_bcast<R, Idx>(srcs, Ks{}, cs::make_index_sequence<R>{}); }
+
+    // the shared per-KEPT-axis broadcast extents object (identical for every
+    // operand's cell) -- built once per step from all operands together. Needs
+    // exactly `OE::rank()` values (one per KEPT axis; peeled axes are already
+    // dropped from OE's own type), so this walks ALL R axes but only records the
+    // kept ones (mirrors `gather_peel`'s own k-counting).
+    template <cs::size_t A>
+    _TNY_API void _oe_axis(cs::array<Idx, OE::rank() ? OE::rank() : 1> & ea, cs::size_t & k) const {
+        if constexpr (peel_pos<A, Seq>::value < 0) { ea[k] = zip_bc_ext<R, Idx>(A, srcs, Ks{}); ++k; }
+    }
+    template <cs::size_t... A>
+    _TNY_API OE _oe(cs::index_sequence<A...>) const {
+        cs::array<Idx, OE::rank() ? OE::rank() : 1> ea{}; cs::size_t k = 0;
+        ( _oe_axis<A>(ea, k), ... );
+        return OE(ea);
+    }
+
+    // The `i`-th step: decode `i` over the shared peeled-axis space, then build
+    // every operand's cell against the SAME decoded coordinates + shared `oe`.
+    _TNY_API auto operator[](Idx i) const { return _at(i, cs::make_index_sequence<R>{}, Ks{}); }
+    template <cs::size_t... A, cs::size_t... K>
+    _TNY_API auto _at(Idx i, cs::index_sequence<A...> aseq, cs::index_sequence<K...>) const {
+        Idx e[Nd ? Nd : 1]; _peeled_ext(e, Seq{});
+        Idx idx[Nd ? Nd : 1] = {}; Idx rem = i;
+        for (int p = static_cast<int>(Nd) - 1; p >= 0; --p)
+        { const Idx ee = e[p]; idx[p] = ee ? rem % ee : Idx(0); rem = ee ? rem / ee : rem; }
+        OE oe = _oe(aseq);
+        return cs::make_tuple(gather_peel_zip<Ops::ow, R, Seq, OE>(cs::get<K>(srcs), idx, oe, aseq)...);
+    }
+
+    // Iterators hold a COPY of the range (just a tuple of mdspans -- cheap, no
+    // owning storage) rather than a pointer back to it: `peel_zip<Axes...>(a,b)`
+    // is typically a TEMPORARY (`for (auto x : peel_zip<0>(a,b).enumerate())`),
+    // and only the range-for's own range-expression gets lifetime-extended, not
+    // sub-expressions used to build it -- a pointer-to-range iterator would dangle
+    // the moment `.enumerate()`/`.subrange()` is chained straight onto a temporary
+    // (ASan-confirmed stack-use-after-scope during development). Mirrors the
+    // single-tensor `peel_range::enum_range`'s own "by VALUE -> safe on a
+    // temporary" comment, generalized here to the whole range, not just one mdspan.
+    struct iterator {
+        peel_zip_range rg; Idx lin;
+        _TNY_API auto operator*() const { return rg[lin]; }
+        _TNY_API iterator & operator++() { ++lin; return *this; }
+        _TNY_API bool operator!=(const iterator & o) const { return lin != o.lin; }
+        _TNY_API bool operator==(const iterator & o) const { return lin == o.lin; }
+    };
+    _TNY_API iterator begin() const { return { *this, Idx(0) }; }
+    _TNY_API iterator end()   const { return { *this, size() }; }
+
+    /** @brief A `[lo, hi)` slice for chunked/threaded sweeps (same shape as the
+     *         single-tensor peel's `subrange`). */
+    struct subrange_t {
+        iterator b, e;
+        _TNY_API iterator begin() const { return b; }
+        _TNY_API iterator end()   const { return e; }
+    };
+    _TNY_API subrange_t subrange(Idx lo, Idx hi) const { return { { *this, lo }, { *this, hi } }; }
+
+    // --- enumerate: range-for that ALSO yields the peeled multi-index --------
+    struct item { cs::array<Idx, Nd ? Nd : 1> index; decltype(cs::declval<const peel_zip_range &>()[Idx(0)]) cell; };
+    _TNY_API cs::array<Idx, Nd ? Nd : 1> _index_of(Idx lin) const {
+        Idx e[Nd ? Nd : 1]; _peeled_ext(e, Seq{});
+        cs::array<Idx, Nd ? Nd : 1> m{}; Idx rem = lin;
+        for (int p = static_cast<int>(Nd) - 1; p >= 0; --p)
+        { const Idx ee = e[p]; m[p] = ee ? rem % ee : Idx(0); rem = ee ? rem / ee : rem; }
+        return m;
+    }
+    struct enum_iterator {
+        peel_zip_range rg; Idx lin;
+        _TNY_API item operator*() const { return { rg._index_of(lin), rg[lin] }; }
+        _TNY_API enum_iterator & operator++() { ++lin; return *this; }
+        _TNY_API bool operator!=(const enum_iterator & o) const { return lin != o.lin; }
+        _TNY_API bool operator==(const enum_iterator & o) const { return lin == o.lin; }
+    };
+    struct enum_range {
+        peel_zip_range rg;
+        _TNY_API enum_iterator begin() const { return { rg, Idx(0) }; }
+        _TNY_API enum_iterator end()   const { return { rg, rg.size() }; }
+        struct enum_subrange {
+            enum_iterator b, e;
+            _TNY_API enum_iterator begin() const { return b; }
+            _TNY_API enum_iterator end()   const { return e; }
+        };
+        _TNY_API enum_subrange subrange(Idx lo, Idx hi) const { return { { rg, lo }, { rg, hi } }; }
+    };
+    _TNY_API enum_range enumerate() const { return { *this }; }
+};
+
+} // namespace _md
+
+/** @brief Zip-peel 2 tensors' `Axes...` in lock-step -> a range of
+ *         `cs::tuple<ViewA,ViewB>` (numpy-style broadcast: shapes may differ as
+ *         long as they're broadcast-compatible; `Axes...` name axes in the
+ *         BROADCAST rank's numbering — the larger of the two operands' own
+ *         ranks — negatives wrap against it). A distinct name from `peel` (see
+ *         the design note above `peel_zip_range`), not an overload. */
+template <long... Axes, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto peel_zip(tensor<Ta,Ea,La,Oa> & a, tensor<Tb,Eb,Lb,Ob> & b) {
+    constexpr cs::size_t R = _md::bc_rank_n<Ea::rank(), Eb::rank()>();
+    static_assert((_axis_in_range(Axes, R) && ...), "peel_zip: axis out of range");
+    static_assert(_all_distinct<_norm_axis(Axes, R)...>(), "peel_zip: axes must be distinct");
+    static_assert(_md::bcn_static_ok_r<R, Ea, Eb>(cs::make_index_sequence<R>{}), "peel_zip: incompatible static extents");
+    using Seq = cs::index_sequence<_norm_axis(Axes, R)...>;
+    using Range = _md::peel_zip_range<Seq, R,
+        _md::zop<storage_view_of(Oa), decltype(a.mdspan())>, _md::zop<storage_view_of(Ob), decltype(b.mdspan())>>;
+    Range rg{ typename Range::Tup(a.mdspan(), b.mdspan()) };
+    rg._check();
+    return rg;
+}
+template <long... Axes, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto peel_zip(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
+    constexpr cs::size_t R = _md::bc_rank_n<Ea::rank(), Eb::rank()>();
+    static_assert((_axis_in_range(Axes, R) && ...), "peel_zip: axis out of range");
+    static_assert(_all_distinct<_norm_axis(Axes, R)...>(), "peel_zip: axes must be distinct");
+    static_assert(_md::bcn_static_ok_r<R, Ea, Eb>(cs::make_index_sequence<R>{}), "peel_zip: incompatible static extents");
+    using Seq = cs::index_sequence<_norm_axis(Axes, R)...>;
+    using Range = _md::peel_zip_range<Seq, R,
+        _md::zop<storage_view_of(Oa), decltype(a.mdspan())>, _md::zop<storage_view_of(Ob), decltype(b.mdspan())>>;
+    Range rg{ typename Range::Tup(a.mdspan(), b.mdspan()) };
+    rg._check();
+    return rg;
+}
+// value form: peel_zip(a, b, axis<0,1>{}) == peel_zip<0,1>(a, b) -- trailing
+// axis<...> selector (keywords AFTER positionals, per the design discussion on
+// #327), unlike take_along/peel_at's LEADING axis<...> (which disambiguates a
+// second variadic arg pack there; peel_zip's tensor arguments are each a single,
+// fixed-arity positional, so a trailing tag is unambiguous and deducible).
+template <long... Axes, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto peel_zip(tensor<Ta,Ea,La,Oa> & a, tensor<Tb,Eb,Lb,Ob> & b, axis<Axes...>) { return peel_zip<Axes...>(a, b); }
+template <long... Axes, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto peel_zip(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, axis<Axes...>) { return peel_zip<Axes...>(a, b); }
+
+/** @brief Zip-peel 3 tensors' `Axes...` in lock-step -> a range of
+ *         `cs::tuple<ViewA,ViewB,ViewC>` (same broadcast/axis-numbering rule as
+ *         the 2-tensor form). The "triangle's three vertex tensors" idiom. */
+template <long... Axes, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, class Tc,class Ec,class Lc,storage Oc>
+_TNY_API auto peel_zip(tensor<Ta,Ea,La,Oa> & a, tensor<Tb,Eb,Lb,Ob> & b, tensor<Tc,Ec,Lc,Oc> & c) {
+    constexpr cs::size_t R = _md::bc_rank_n<Ea::rank(), Eb::rank(), Ec::rank()>();
+    static_assert((_axis_in_range(Axes, R) && ...), "peel_zip: axis out of range");
+    static_assert(_all_distinct<_norm_axis(Axes, R)...>(), "peel_zip: axes must be distinct");
+    static_assert(_md::bcn_static_ok_r<R, Ea, Eb, Ec>(cs::make_index_sequence<R>{}), "peel_zip: incompatible static extents");
+    using Seq = cs::index_sequence<_norm_axis(Axes, R)...>;
+    using Range = _md::peel_zip_range<Seq, R,
+        _md::zop<storage_view_of(Oa), decltype(a.mdspan())>, _md::zop<storage_view_of(Ob), decltype(b.mdspan())>,
+        _md::zop<storage_view_of(Oc), decltype(c.mdspan())>>;
+    Range rg{ typename Range::Tup(a.mdspan(), b.mdspan(), c.mdspan()) };
+    rg._check();
+    return rg;
+}
+template <long... Axes, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, class Tc,class Ec,class Lc,storage Oc>
+_TNY_API auto peel_zip(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, const tensor<Tc,Ec,Lc,Oc> & c) {
+    constexpr cs::size_t R = _md::bc_rank_n<Ea::rank(), Eb::rank(), Ec::rank()>();
+    static_assert((_axis_in_range(Axes, R) && ...), "peel_zip: axis out of range");
+    static_assert(_all_distinct<_norm_axis(Axes, R)...>(), "peel_zip: axes must be distinct");
+    static_assert(_md::bcn_static_ok_r<R, Ea, Eb, Ec>(cs::make_index_sequence<R>{}), "peel_zip: incompatible static extents");
+    using Seq = cs::index_sequence<_norm_axis(Axes, R)...>;
+    using Range = _md::peel_zip_range<Seq, R,
+        _md::zop<storage_view_of(Oa), decltype(a.mdspan())>, _md::zop<storage_view_of(Ob), decltype(b.mdspan())>,
+        _md::zop<storage_view_of(Oc), decltype(c.mdspan())>>;
+    Range rg{ typename Range::Tup(a.mdspan(), b.mdspan(), c.mdspan()) };
+    rg._check();
+    return rg;
+}
+template <long... Axes, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, class Tc,class Ec,class Lc,storage Oc>
+_TNY_API auto peel_zip(tensor<Ta,Ea,La,Oa> & a, tensor<Tb,Eb,Lb,Ob> & b, tensor<Tc,Ec,Lc,Oc> & c, axis<Axes...>)
+{ return peel_zip<Axes...>(a, b, c); }
+template <long... Axes, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, class Tc,class Ec,class Lc,storage Oc>
+_TNY_API auto peel_zip(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, const tensor<Tc,Ec,Lc,Oc> & c, axis<Axes...>)
+{ return peel_zip<Axes...>(a, b, c); }
 
 _TNY_NAMESPACE_END(tny)
 
