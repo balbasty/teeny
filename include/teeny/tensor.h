@@ -935,13 +935,16 @@ public:
      * @brief Sliding/strided window along axis `Axis` (pytorch `Tensor.unfold`):
      *        appends a NEW trailing axis of width `size`, stepped by `step`
      *        along `Axis` -> a rank-(N+1) view. `Axis`'s own extent shrinks to
-     *        the window COUNT `(extent(Axis) - size) / step + 1`, e.g.
+     *        the window COUNT `(shape(Axis) - size) / step + 1`, e.g.
      *        `t.unfold<0>(K, s)` == pytorch's `t.unfold(0, K, s)`. `size`/`step`
      *        accept a runtime value OR a compile-time one (`Int<k>()`), folding
      *        the output extent/stride to static where derivable (like `slice()`).
-     *        ND windows compose by chaining: `t.unfold<0>(K0,s0).unfold<1>(K1,s1)`
-     *        appends TWO window axes at the end (nitorch's nd-unfold pattern) —
-     *        no separate nd-unfold primitive is needed.
+     *        `size` must be in `[1, shape(Axis)]` and `step >= 1` — a
+     *        `static_assert` when both are known at compile time, a debug-time
+     *        check otherwise. ND windows compose by chaining:
+     *        `t.unfold<0>(K0,s0).unfold<1>(K1,s1)` appends TWO window axes at
+     *        the end (nitorch's nd-unfold pattern) — no separate nd-unfold
+     *        primitive is needed.
      */
     template <long Axis, class Sz, class St = cs::integral_constant<long,1>>
     _TNY_API auto unfold(Sz size, St step = St{}) noexcept {

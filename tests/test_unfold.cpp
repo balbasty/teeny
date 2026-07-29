@@ -82,5 +82,14 @@ int main() {
     if (ud.shape(0) != 3 || ud.shape(1) != 3) return 19;
     for (long i=0;i<3;++i) for (long j=0;j<3;++j) if (ud(i,j) != dyn(2*i+j)) return 20;
 
+    // step > 1 AND a non-unit source stride together: unfold axis 1 (the
+    // NON-unit-stride axis in F-order) with step 2.
+    auto fs = local<double, shape<5,7>, fcontiguous>();
+    for (long i=0;i<5;++i) for (long j=0;j<7;++j) fs(i,j) = i*10.0 + j;
+    auto ufs = fs.unfold<1>(3, 2);   // count (7-3)/2+1 = 3
+    if (ufs.shape(0) != 5 || ufs.shape(1) != 3 || ufs.shape(2) != 3) return 21;
+    for (long i=0;i<5;++i) for (long w=0;w<3;++w) for (long j=0;j<3;++j)
+        if (ufs(i,w,j) != fs(i, 2*w+j)) return 22;
+
     return 0;
 }
