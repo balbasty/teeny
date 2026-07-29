@@ -146,3 +146,12 @@ operands'), while every tensor keeps its own: the widening is internal, so
 in place is safe in either direction — a narrow-indexed destination combined with a
 wide-indexed right-hand side does not truncate that operand's strides, and a
 wide-indexed destination with a narrow right-hand side was never at risk.
+
+Mixing **signedness** is safe too. Width alone does not settle how those offsets are
+computed: `shape_as<Idx, ...>` accepts an unsigned index type, while a flipped or
+negative-step view has negative strides (which is exactly why such a view needs a
+*signed* index type). Where an unsigned-indexed tensor meets a signed-indexed one, the
+shared offset math runs in a signed type wide enough for both sides, so a stride of
+`-1` stays `-1` instead of turning into a huge positive offset. As above this is
+internal — every tensor keeps its own index type — and the ordinary case, where every
+tensor in the expression shares one signedness, computes exactly as it did before.

@@ -9,6 +9,13 @@
 // participating index types and leaves every tensor's own type alone. Before the fix a
 // narrow destination truncated a wide rhs's strides — silently, and straight off the
 // front of the buffer.
+//
+// Checks 13+ cover the SIGNEDNESS half of that rule. Width alone does not decide the
+// engine's offset type: when the widest participant is UNSIGNED and a narrower one is
+// SIGNED with a NEGATIVE stride (any flipped/reversed view), casting that -1 stride to
+// the unsigned type makes it 4294967295, which zero-extends into the pointer offset
+// instead of stepping backwards. So a MIXED-signedness set decodes in a signed type
+// wide enough for both sides; all-signed and all-unsigned sets keep the width pick.
 #include <teeny/teeny.h>
 #include <cuda/std/type_traits>
 using namespace tny;
@@ -165,6 +172,86 @@ int main() {
         auto k64 = wrap(big, shape<2,2>{});
         j16.add_(k64);
         for (int i = 0; i < 4; ++i) if (jd[i] != hd[i]) return 20;
+    }
+
+    /* ---- mixed SIGNEDNESS: an unsigned-indexed participant next to a flipped
+     * (negative-stride) signed one. A width-only pick lands on the unsigned type and
+     * turns the -1 stride into 4294967295 — a write/read far off the front of the
+     * buffer. Both orders, since either side can be the unsigned one. */
+
+    // (13) unsigned-indexed rhs, flipped int16-indexed destination (the reported case).
+    {
+        double sv[4] = {10, 20, 30, 40};
+        auto ub = wrap(sv, shape_as<unsigned int,4>{});                 // uint32-indexed rhs
+        double dv[4] = {0,0,0,0};
+        auto fd = wrap(dv + 3, shape_as<short,4>{}, strides<-1>{});     // int16-indexed, stride -1
+        static_assert(cs::is_same<idx_of<decltype(ub)>, unsigned int>::value, "rhs is uint32-indexed");
+        static_assert(cs::is_same<idx_of<decltype(fd)>, short>::value, "flipped dest stays int16");
+        fd.copy_(ub);                                                   // fd(k) is dv[3-k]
+        if (dv[0] != 40 || dv[1] != 30 || dv[2] != 20 || dv[3] != 10) return 21;
+        fd.add_(ub);                                                    // same pair, accumulating
+        if (dv[0] != 80 || dv[1] != 60 || dv[2] != 40 || dv[3] != 20) return 22;
+    }
+
+    // (14) the other order: flipped int16-indexed rhs, unsigned-indexed destination.
+    {
+        double sv[4] = {1, 2, 3, 4};
+        auto fb = wrap(sv + 3, shape_as<short,4>{}, strides<-1>{});     // int16-indexed, stride -1
+        double dv[4] = {0,0,0,0};
+        auto ud = wrap(dv, shape_as<unsigned int,4>{});                 // uint32-indexed dest
+        ud.copy_(fb);
+        if (dv[0] != 4 || dv[1] != 3 || dv[2] != 2 || dv[3] != 1) return 23;
+        ud.add_(fb, 2.0);                                               // fused axpy, same pair
+        if (dv[0] != 12 || dv[3] != 3) return 24;
+    }
+
+    // (15) EQUAL width, disagreeing signedness (int32 vs uint32) — the case a width-only
+    //      pick cannot express at all: it must step up to a signed 64-bit decode.
+    {
+        double sv[4] = {5, 6, 7, 8};
+        auto f32 = wrap(sv + 3, shape32<4>{}, strides<-1>{});           // int32-indexed, stride -1
+        double dv[4] = {0,0,0,0};
+        auto u32 = wrap(dv, shape_as<unsigned int,4>{});
+        u32.copy_(f32);
+        if (dv[0] != 8 || dv[1] != 7 || dv[2] != 6 || dv[3] != 5) return 25;
+        double ev[4] = {0,0,0,0};
+        auto fe32 = wrap(ev + 3, shape32<4>{}, strides<-1>{});          // ...and mirrored
+        auto ub32 = wrap(sv, shape_as<unsigned int,4>{});
+        fe32.copy_(ub32);
+        if (ev[0] != 8 || ev[1] != 7 || ev[2] != 6 || ev[3] != 5) return 26;
+    }
+
+    // (16) mixed signedness + a NEGATIVE stride + a broadcast axis + `into(dest)`.
+    {
+        double sv[2] = {100, 200};
+        auto ucol = wrap(sv, shape_as<unsigned int,2,1>{});             // (2,1) uint32, stretches
+        double dv[4] = {0,0,0,0};
+        // rows reversed: element (i,j) lands on dv[2*(1-i)+j]
+        auto fd = wrap(dv + 2, shape_as<short,2,2>{}, strides<-2,1>{});
+        fd.add_(ucol);
+        if (dv[0] != 200 || dv[1] != 200 || dv[2] != 100 || dv[3] != 100) return 27;
+        double gv[4] = {0,0,0,0};
+        auto gd = wrap(gv + 2, shape_as<short,2,2>{}, strides<-2,1>{});  // flipped `into` dest
+        auto uw = wrap(sv, shape_as<unsigned int,2,1>{});
+        uw.add(ucol, into(gd));
+        if (gv[0] != 400 || gv[1] != 400 || gv[2] != 200 || gv[3] != 200) return 28;
+    }
+
+    // (17) controls that must NOT move: an all-UNSIGNED mixed-width pair (no negative
+    //      stride is expressible there — teeny's flipped views need a signed index) and
+    //      an all-SIGNED flipped pair. Both keep the plain width pick.
+    {
+        double sv[4] = {1,2,3,4};
+        double dv[4] = {10,20,30,40};
+        auto ud = wrap(dv, shape_as<unsigned int,4>{});
+        auto us = wrap(sv, shape_as<unsigned short,4>{});
+        ud.add_(us);
+        if (dv[0] != 11 || dv[1] != 22 || dv[2] != 33 || dv[3] != 44) return 29;
+        double pv[4] = {0,0,0,0};
+        auto fs = wrap(sv + 3, shape<4>{}, strides<-1>{});              // int64-indexed, stride -1
+        auto fp = wrap(pv, shape32<4>{});
+        fp.copy_(fs);
+        if (pv[0] != 4 || pv[1] != 3 || pv[2] != 2 || pv[3] != 1) return 30;
     }
 
     return 0;
