@@ -948,8 +948,11 @@ public:
         static_assert(_axis_in_range(Axis, rank()), "unfold: axis out of range");
         constexpr cs::size_t A = _norm_axis(Axis, rank());
         static_assert(_unfold_static_ok<A, Sz, St>(), "unfold: size must be in [1, extent(Axis)] and step >= 1");
-        _TNY_CHECK(static_cast<index_type>(size) >= index_type(1) && static_cast<index_type>(step) >= index_type(1)
-                   && static_cast<index_type>(size) <= extent(A), "unfold: size must be in [1, extent(Axis)] and step >= 1");
+        // compare in a SIGNED type: index_type may be unsigned, and a negative runtime
+        // step/size would otherwise wrap to a huge unsigned value and pass `>= 1` (#339 review).
+        using _UfSIdx = cs::make_signed_t<index_type>;
+        _TNY_CHECK(static_cast<_UfSIdx>(size) >= _UfSIdx(1) && static_cast<_UfSIdx>(step) >= _UfSIdx(1)
+                   && static_cast<_UfSIdx>(size) <= static_cast<_UfSIdx>(extent(A)), "unfold: size must be in [1, extent(Axis)] and step >= 1");
         return as_tensor<storage_view_of(O)>(_detail::unfold_md<A>(mdspan(), size, step, cs::make_index_sequence<rank()>{}));
     }
     template <long Axis, class Sz, class St = cs::integral_constant<long,1>>
@@ -957,8 +960,11 @@ public:
         static_assert(_axis_in_range(Axis, rank()), "unfold: axis out of range");
         constexpr cs::size_t A = _norm_axis(Axis, rank());
         static_assert(_unfold_static_ok<A, Sz, St>(), "unfold: size must be in [1, extent(Axis)] and step >= 1");
-        _TNY_CHECK(static_cast<index_type>(size) >= index_type(1) && static_cast<index_type>(step) >= index_type(1)
-                   && static_cast<index_type>(size) <= extent(A), "unfold: size must be in [1, extent(Axis)] and step >= 1");
+        // compare in a SIGNED type: index_type may be unsigned, and a negative runtime
+        // step/size would otherwise wrap to a huge unsigned value and pass `>= 1` (#339 review).
+        using _UfSIdx = cs::make_signed_t<index_type>;
+        _TNY_CHECK(static_cast<_UfSIdx>(size) >= _UfSIdx(1) && static_cast<_UfSIdx>(step) >= _UfSIdx(1)
+                   && static_cast<_UfSIdx>(size) <= static_cast<_UfSIdx>(extent(A)), "unfold: size must be in [1, extent(Axis)] and step >= 1");
         return as_tensor<storage_view_of(O)>(_detail::unfold_md<A>(mdspan(), size, step, cs::make_index_sequence<rank()>{}));
     }
     /** @brief Value form: `t.unfold(Int<0>(), K, s)` == `t.unfold<0>(K, s)` —

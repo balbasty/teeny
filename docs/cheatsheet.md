@@ -144,8 +144,9 @@ x.subsample<Axes...>(k, starts...);  // coloured/strided sub-lattice: take_along
 x.unfold<Axis>(size, step);  x.unfold<Axis>(size);  // pytorch Tensor.unfold: appends a NEW
                     //   trailing axis of width `size` stepped by `step` along Axis (step
                     //   defaults to 1); Axis's own extent shrinks to the window COUNT
-                    //   (extent(Axis)-size)/step+1. size/step accept runtime or Int<> (folds
-                    //   static). ND windows compose by chaining: x.unfold<0>(k0,s0).unfold<1>(k1,s1).
+                    //   (shape(Axis)-size)/step+1. size/step accept runtime or Int<> (folds
+                    //   static); size in [1,shape(Axis)] and step>=1, checked (static_assert
+                    //   or debug-time). ND windows compose by chaining: x.unfold<0>(k0,s0).unfold<1>(k1,s1).
                     //   Value form: x.unfold(Int<Axis>(), size, step) -- single-axis Int<k>()
                     //   selector (like flip/squeeze), not an axis<...> list (only ONE axis binds).
 x.index_select<Axis>(idx);       // gather along Axis by a rank-1 integer index TENSOR

@@ -253,10 +253,12 @@ starting at a per-call offset" pattern, spelled out today via
     ```
 
 `Axis`'s own extent shrinks to the window **count**,
-`(extent(Axis) - size) / step + 1`; the new trailing axis holds one window's
+`(shape(Axis) - size) / step + 1`; the new trailing axis holds one window's
 `size` elements. `size`/`step` each accept a runtime value or a compile-time
 one (`Int<k>()`), folding the output extent to static where derivable (same
-convention as `slice()`):
+convention as `slice()`). `size` must be in `[1, shape(Axis)]` and `step >= 1`
+— checked (a `static_assert` when both are known at compile time, a debug-time
+check otherwise, like `index_select`'s own extent check):
 
 ```cpp
 t.unfold<0>(Int<3>(), Int<2>());   // size/step both compile-time -> static result

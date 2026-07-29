@@ -65,5 +65,22 @@ int main() {
     uw.at(0,1).atomic_add_(1.0);   // bump element 1 via window 0's second tap
     if (w(1) != 1.0) return 16;
 
+    // F-contiguous source: the new trailing axis's stride must be axis Axis's
+    // ORIGINAL (un-stepped) source stride, not assumed contiguous (#339 review).
+    auto f = local<double, shape<4,3>, fcontiguous>();
+    for (long i=0;i<4;++i) for (long j=0;j<3;++j) f(i,j) = i*10.0 + j;
+    auto uf = f.unfold<0>(2, 1);   // axis 0 (stride 1 in F-order) -> windows of 2 rows
+    if (uf.shape(0) != 3 || uf.shape(1) != 3 || uf.shape(2) != 2) return 17;
+    for (long i=0;i<3;++i) for (long j=0;j<3;++j) for (long a=0;a<2;++a)
+        if (uf(i,j,a) != f(i+a,j)) return 18;
+
+    // dynamic-shape source with RUNTIME size/step (the non-folding path).
+    auto dyn = make_heap<double>(shape<-1>{7});
+    for (long i=0;i<7;++i) dyn(i) = static_cast<double>(i);
+    long rsize = 3, rstep = 2;
+    auto ud = dyn.unfold<0>(rsize, rstep);   // count (7-3)/2+1 = 3
+    if (ud.shape(0) != 3 || ud.shape(1) != 3) return 19;
+    for (long i=0;i<3;++i) for (long j=0;j<3;++j) if (ud(i,j) != dyn(2*i+j)) return 20;
+
     return 0;
 }

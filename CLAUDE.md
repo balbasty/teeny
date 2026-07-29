@@ -246,10 +246,14 @@ t.subsample<Axes...>(k, starts...);  // coloured/strided sub-lattice (#258): tak
 t.unfold<Axis>(size, step);  t.unfold<Axis>(size);  // pytorch Tensor.unfold (#256): appends
                       //   a NEW trailing axis of width `size`, stepped by `step` along Axis
                       //   (step defaults to 1). Axis's own extent shrinks to the window COUNT
-                      //   (extent(Axis)-size)/step+1; the new trailing axis holds one window's
+                      //   (shape(Axis)-size)/step+1; the new trailing axis holds one window's
                       //   `size` elements, at stride = Axis's ORIGINAL (un-stepped) stride.
                       //   size/step accept a runtime value or Int<k>() (folds static, like
-                      //   slice()). Pure sugar over the existing gather -- a VIEW, so windows
+                      //   slice()); size in [1,shape(Axis)] and step>=1, checked (static_assert
+                      //   when both are static, debug-time _TNY_CHECK otherwise -- compared in
+                      //   a SIGNED type so a bogus negative runtime value can't wrap through an
+                      //   unsigned index_type and slip past the guard, #339 review).
+                      //   Pure sugar over the existing gather -- a VIEW, so windows
                       //   ALIAS when step < size (write-through touches every neighbouring
                       //   window, as in pytorch). ND windows compose by chaining one unfold
                       //   per axis (matches nitorch's nd-unfold, itself built on the single-
