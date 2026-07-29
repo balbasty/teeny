@@ -45,7 +45,13 @@ that process guide.
 
 ```text
 include/teeny/
-  defines.h        macros: _TNY_API / _TNY_HOST, namespace open/close
+  defines.h        macros: _TNY_API / _TNY_HOST (host+device / host-only), _TNY_EMPTY_BASES
+                   (MSVC empty-base fold), _TNY_RESTRICT (portable __restrict spelling),
+                   TNY_UNROLL (loop-unroll pragma), _TNY_CHECK (precondition assert,
+                   compiled out under NDEBUG) / _TNY_BOUND (opt-in TNY_HARDENED bounds
+                   check, itself assert-based), TNY_MAX_RANK (anyrank's inline-store rank
+                   cap, default 32), namespace open/close; also the min/max/interface
+                   Windows.h #undef block (outside the include guard, see MSVC traps below)
   alias.h          cs:: vocabulary into tny:: + Int<V>/... static ints + `all` + shape<...>
                    + axis<...>/dtype<...> value-carrier tags
   half.h           `half` (IEEE binary16) + `bfloat16` element types + compute_type
@@ -828,6 +834,37 @@ is generic.
   pack-of-packs decltype-extraction template mixing a TYPE pack specifically)
   through the tag-bundling pattern from the start, rather than
   discovering the failure on a real-MSVC CI round-trip.
+- **MSVC traps — five more recurring authoring rules** (found across the #267
+  CI-onboarding fix marathon; each is a rule a future contributor can violate,
+  not a one-off patch, so write NEW code to these from the start):
+  - **Named trait, not an inline fold, inside `enable_if_t<...>`.** MSVC fails
+    to resolve an overload set partitioned by a fold expression written
+    directly inside `enable_if_t<...>` (`operator()` overload resolution,
+    `tensor::rank()` private-access, #268/#297). Give the fold a name
+    (`_all_index`/`_all_ic` exist for exactly this) and gate on the named
+    trait instead.
+  - **Floor a pack-derived array to size 1.** `x[sizeof...(D)]` is a
+    zero-length array — a GCC/Clang extension MSVC rejects (`C2466`) — the
+    moment a rank-0 operand makes the pack empty. Always
+    `x[sizeof...(D) ? sizeof...(D) : 1]` (#313/#314, `math.h`/`layout.h`'s
+    rank-0 engines).
+  - **Inside `tensor`'s body, route a qualified `E::rank()` /
+    `E::static_extent(d)` through `_shape_rank`/`_shape_static_extent`** — even
+    when `E` is a template parameter unrelated to `tensor`'s own private EBO
+    base (#315/#318). Demonstrated cost: `index_select` (#326) put raw
+    `Ei::rank()`/`Ei::static_extent(0)`/`DstE::static_extent(A)` straight back
+    in one commit after this rule was established (#366) — nothing told the
+    author not to until now.
+  - **`long` is 32-bit on Windows (LLP64).** Anything that must hold a value
+    past `2^31` (an extent, stride, or offset) needs `cs::int64_t`, not `long`
+    (#320/#321).
+  - **Teeny headers `#undef min`/`max`/`interface` OUTSIDE the include guard**
+    (`defines.h`), which only restores Windows.h's macros correctly if every
+    teeny header includes `<cuda/std/...>` *before* `<teeny/defines.h>` —
+    CCCL's own headers pop the guard back at the end of each of theirs
+    (#328/#329). A new header written include-order-backwards silently breaks
+    this. Also: always write `numeric_limits<T>::min()`/`max()` parenthesized,
+    the standard workaround for the same macro collision.
 
 ## Adding a feature — checklist
 
