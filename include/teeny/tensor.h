@@ -1521,6 +1521,15 @@ public:
     _TNY_API auto dot(const tensor<Tb,Eb,Lb,Ob> & b) const;
     template <class Acc = void, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags>
     _TNY_API decltype(auto) dot(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const;
+    // sqdist/dist: same binary (no axis) shape as dot.
+    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob>
+    _TNY_API auto sqdist(const tensor<Tb,Eb,Lb,Ob> & b) const;
+    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags>
+    _TNY_API decltype(auto) sqdist(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const;
+    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob>
+    _TNY_API auto dist(const tensor<Tb,Eb,Lb,Ob> & b) const;
+    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags>
+    _TNY_API decltype(auto) dist(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const;
 
     /* --- in-place unary math (element-wise) ----------------------- */
     _TNY_API tensor & neg_();

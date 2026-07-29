@@ -263,6 +263,8 @@ sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf));  // ...and it ALL compo
 // vector algebra & geometry (contained exact math; on views, host+device)
 sqnorm(a);            // Σaᵢ² over all axes (== dot(a,a)); sqnorm<Acc> forces acc+result
 norm(a);              // √Σaᵢ² (L2/Frobenius); floating result (int -> double); norm<Acc> too
+sqdist(a,b); dist(a,b);// Σ(aᵢ-bᵢ)² / √Σ(aᵢ-bᵢ)² (one fused pass, no a-b intermediate); binary
+                      //   only (no axis form, like dot); sqdist<Acc>/dist<Acc>, dtype<Acc>{}/into
 a.normalize_();       // in place a /= norm(a) (floating types); zero vector -> NaN
 auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, dyn->heap)
 auto c = cross(a, b);  a.cross_(b);          // 3D cross (rank-1 length-3): new / in place (a = a×b)

@@ -347,7 +347,7 @@ have a different dtype (the result is cast to it); its extents are checked.
 | `exp(a, into(y))` … (every unary) | `y&` |
 | `minimum(a,b,into(y))` `maximum(a,s,into(y))` `clamp(a,lo,hi,into(y))` | `y&` |
 | `normalize(a, into(y))` `cross(a,b,into(y))` | `y&` |
-| `sum(a, into(cell))` … `dot(a,b,into(cell))` | `cell&` (full reduction → **rank-0** dest) |
+| `sum(a, into(cell))` … `dot(a,b,into(cell))` `sqdist(a,b,into(cell))` | `cell&` (full reduction → **rank-0** dest) |
 | `sum<0>(m, into(buf))` `mean(m, axis<1>{}, into(buf))` | `buf&` (axis reduction → lower-rank dest) |
 
 ### Comparisons → a `bool` tensor (broadcast), reduced with `.all()`/`.any()`
@@ -365,10 +365,11 @@ integers — then **cast the result back to the tensor's element type** `T`
 (`sum(float_tensor)` → `float`, computed in `double`). A leading **type** argument
 makes that type both the accumulator **and** the result.
 
-Every reduction here (plus `sqnorm`/`norm` below) is **also a method** — `a.sum()`,
-`a.mean()`, `a.dot(b)`, `a.sum<0>()`, `a.mean(axis<1>{})`, `a.norm()`,
-`a.sum(into(cell))` — with the same overload shapes as the free form. The free
-`sum(a)` spelling stays (generic code and the numpy reader both use it).
+Every reduction here (plus `sqnorm`/`norm`/`sqdist`/`dist` below) is **also a
+method** — `a.sum()`, `a.mean()`, `a.dot(b)`, `a.sqdist(b)`, `a.sum<0>()`,
+`a.mean(axis<1>{})`, `a.norm()`, `a.sum(into(cell))` — with the same overload
+shapes as the free form. The free `sum(a)` spelling stays (generic code and the
+numpy reader both use it).
 
 | Call | Returns | Notes |
 |---|---|---|
@@ -413,6 +414,8 @@ optimisation — those stay out of teeny).
 | `sqnorm<Axes...>(a)` / `sqnorm(a, axis<...>{})` | lower-rank tensor | Σ aᵢ² over the named axes (reduction API, like `sum`); `sqnorm<Acc,Axes...>` |
 | `norm(a)` | floating (`T` for float `T`, **`double`** for integer `T`) | √Σ aᵢ² (L2 / Frobenius over all axes); `norm<Acc>` forces accumulator+result |
 | `norm<Axes...>(a)` / `norm(a, axis<...>{})` | lower-rank tensor (floating) | √Σ aᵢ² over the named axes; `norm<Acc,Axes...>` |
+| `sqdist(a, b)` | `promote(Ta,Tb)` (accumulated wide) | Σ(aᵢ-bᵢ)²; mathematically `sqnorm(a-b)`, one fused pass (bit-exact only for `double` operands). Binary only (no axis form, like `dot`); `sqdist<Acc>` forces accumulator+result |
+| `dist(a, b)` | floating (`double` for integer operands) | √Σ(aᵢ-bᵢ)²; mathematically `norm(a-b)`, one fused pass (bit-exact only for `double` operands); `dist<Acc>` forces accumulator+result |
 | `a.normalize_()` | `tensor&` | in place `a /= norm(a)`; floating element types only; zero vector → NaN |
 | `a.normalize_<Axes...>()` | `tensor&` | in place, over the named axes (keepdim broadcast); axes distinct & ascending |
 | `normalize(a)` | new tensor (floating; integer → `double`) | out-of-place unit vector; static → stack, dynamic → heap |
@@ -431,7 +434,8 @@ arg makes that type *both* the accumulator and the result.
 |---|---|---|
 | `sum(a)` `prod(a)` `max(a)` `min(a)` | `T` (item type — accumulate wide, cast back; `sum(int8)` → `int8`) | `Acc` (e.g. `sum<int64_t>(a)` keeps the untruncated wide value) |
 | `mean(a)` | `T` for a **floating** `T`; **`double`** for an **integer** `T` (numpy: integer mean is float64, divided in `double`) | `Acc` |
-| `dot(a, b)` | `promote(Ta,Tb)` | `Acc` |
+| `dot(a, b)` `sqdist(a, b)` | `promote(Ta,Tb)` | `Acc` |
+| `dist(a, b)` | `double` for integer operands (mean rule) | `Acc` |
 | `sum<Axes...>(a)` `prod`/`max`/`min<Axes...>` | `T` (lower-rank tensor) | `Acc` |
 | `mean<Axes...>(a)` | `T` for floating `T`; **`double`** for integer `T` (lower-rank tensor) | `Acc` |
 

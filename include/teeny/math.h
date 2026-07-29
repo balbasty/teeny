@@ -77,6 +77,7 @@ struct add { template <class X, class Y> _TNY_API X operator()(X x, Y y) const {
 struct sub { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x - static_cast<X>(y); } };
 struct mul { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x * static_cast<X>(y); } };
 struct div { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x / static_cast<X>(y); } };
+struct zip_sqdiff { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { X d = x - static_cast<X>(y); return d * d; } };  // (x-y)² (combine for sqdist/dist's fused reduce)
 
 /* ---- fused scaled accumulate (axpy: out = x (+/-) coeff*y) -------- *
  * The coefficient rides in the functor; `bzip` runs the op in the      *
@@ -584,9 +585,10 @@ template <class Op, class Out, class A, class B> _TNY_API void oop_to (Out & o, 
 template <class Op, class Out, class A, class S>  _TNY_API void oops_to(Out & o, const A & a, S s, Op op) { scalo<false>(o, a, s, op); }
 template <class Uop, class Out, class A>          _TNY_API void uop_to (Out & o, const A & a, Uop f) { unaryo<false>(o, a, f); }
 
-/* ---- reduce a . b elementwise into a scalar (for dot) ------------ */
-template <class R, class A, class B, cs::size_t... D>
-_TNY_API R zipreduce_(const A & a, const B & b, cs::index_sequence<D...>) {
+/* ---- reduce op(a, b) elementwise into a scalar (dot: op=mul; sqdist: op=zip_sqdiff) --- *
+ * One fused pass, NO intermediate tensor materialised. */
+template <class R, class A, class B, class Op, cs::size_t... D>
+_TNY_API R zipreduce_(const A & a, const B & b, Op op, cs::index_sequence<D...>) {
     using I = typename A::index_type;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1]  = { a.extent(D)... };
@@ -594,7 +596,7 @@ _TNY_API R zipreduce_(const A & a, const B & b, cs::index_sequence<D...>) {
     const I sa[sizeof...(D) ? sizeof...(D) : 1] = { a.stride(D)... };
     const I sb[sizeof...(D) ? sizeof...(D) : 1] = { b.stride(D)... };
     for (cs::size_t r = 0; r < sizeof...(D); ++r)
-        _TNY_CHECK(e[r] == be[r], "dot: operand extents must match exactly (no broadcast)");
+        _TNY_CHECK(e[r] == be[r], "dot/sqdist: operand extents must match exactly (no broadcast)");
     I n = 1;
     for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
     R acc = R(0);
@@ -603,7 +605,7 @@ _TNY_API R zipreduce_(const A & a, const B & b, cs::index_sequence<D...>) {
         for (int d = static_cast<int>(sizeof...(D)) - 1; d >= 0; --d) {
             I k = rem % e[d]; rem /= e[d]; oa += k * sa[d]; ob += k * sb[d];
         }
-        acc += static_cast<R>(a.data()[oa]) * static_cast<R>(b.data()[ob]);
+        acc += op(static_cast<R>(a.data()[oa]), static_cast<R>(b.data()[ob]));
     }
     return acc;
 }
@@ -1385,7 +1387,7 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) 
                   "dot: operand extents must match exactly (no broadcast)");   // both-static, unequal -> compile error
     using R = _acc_t<Acc, promote_t<Ta,Tb>>;
     return static_cast<_reduce_result_t<Acc, promote_t<Ta,Tb>>>(
-        _md::zipreduce_<R>(a, b, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
+        _md::zipreduce_<R>(a, b, _md::mul{}, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
 }
 /** @brief Generic trailing keyword bag for `dot` (no axis concept, being binary):
  *  `dot(a, b, dtype<Acc>{})`, `dot(a, b, into(d))`, or both composed in either
@@ -1483,6 +1485,68 @@ _TNY_HOST decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
 }
 _TNY_RED_TAGGED(norm)
 #undef _TNY_RED_TAGGED
+
+/** @brief Squared Euclidean distance `Σ(aᵢ-bᵢ)²` between two same-shape tensors —
+ *         mathematically `sqnorm(a-b)`, computed as one fused pass with no `a-b`
+ *         intermediate (mirrors `dot`'s convenience-wrapper status over a manual
+ *         `sum(a*b)`). Each difference is formed and squared directly in the
+ *         accumulator type, so the result can be MORE accurate than the un-fused
+ *         `sqnorm(a-b)` spelling for a narrow element type (`a-b` there rounds to
+ *         the operands' own type before `sqnorm` widens it) — not necessarily
+ *         bit-identical, only for `double` operands are the two guaranteed equal.
+ *         Binary only (no axis-list form, like `dot`); `sqdist<Acc>(a,b)` makes
+ *         `Acc` accumulator AND result. */
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto sqdist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
+    static_assert(tensor<Ta,Ea,La,Oa>::rank() == tensor<Tb,Eb,Lb,Ob>::rank(), "sqdist: rank mismatch");
+    static_assert(_md::ext_static_eq<Ea, Eb>(cs::make_index_sequence<Ea::rank()>{}),
+                  "sqdist: operand extents must match exactly (no broadcast)");   // both-static, unequal -> compile error
+    using R = _acc_t<Acc, promote_t<Ta,Tb>>;
+    return static_cast<_reduce_result_t<Acc, promote_t<Ta,Tb>>>(
+        _md::zipreduce_<R>(a, b, _md::zip_sqdiff{}, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
+}
+
+/** @brief Euclidean distance `√Σ(aᵢ-bᵢ)²` — mathematically `norm(a-b)`, one fused
+ *         pass (see `sqdist`'s doc comment for the accuracy note). Floating result
+ *         (integer operands -> `double`, the `norm`/`mean` rule); `dist<Acc>(a,b)`
+ *         makes `Acc` accumulator AND result. */
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto dist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
+    using P   = promote_t<Ta,Tb>;
+    using Res = _reduce_result_t<Acc, _mean_result_t<P>>;   // floating result (double for integer P)
+    using R   = _acc_t<Acc, P>;                             // accumulate the squares in the reduce type
+    using D   = cs::conditional_t<cs::is_floating_point<R>::value, R,
+                cs::conditional_t<cs::is_floating_point<Res>::value, Res, double>>;   // take the root in a float type
+    return static_cast<Res>(cs::sqrt(static_cast<D>(sqdist<R>(a, b))));
+}
+
+// dtype/into trailing-bag form (dot's shape: binary, no axis, so no _TNY_RED_TAGGED).
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
+          class Tag0, class... Tags>
+_TNY_API decltype(auto) sqdist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) {
+    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), "sqdist: unrecognized keyword argument");
+    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), "sqdist: a keyword was given more than once");
+    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;
+    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
+    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {
+        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, "sqdist into(dest): dest must be rank-0 (a scalar cell)");
+        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(sqdist<RAcc>(a, b)));
+        return out.dest;
+    } else return sqdist<RAcc>(a, b);
+}
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
+          class Tag0, class... Tags>
+_TNY_API decltype(auto) dist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) {
+    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), "dist: unrecognized keyword argument");
+    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), "dist: a keyword was given more than once");
+    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;
+    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
+    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {
+        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, "dist into(dest): dest must be rank-0 (a scalar cell)");
+        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(dist<RAcc>(a, b)));
+        return out.dest;
+    } else return dist<RAcc>(a, b);
+}
 
 /** @brief Out-of-place unit vector `a / norm(a)` -> a NEW dense tensor (static
  *         shape -> stack, dynamic -> heap). The result element type is floating
@@ -1718,6 +1782,15 @@ template <class T,class E,class L,storage O> template <class Acc, class Tb,class
 _TNY_API auto tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::dot<Acc>(*this, b); }
 template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags>
 _TNY_API decltype(auto) tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const { return tny::dot<Acc>(*this, b, tag0, tags...); }
+// sqdist/dist: same binary (no axis) shape as dot.
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto tensor<T,E,L,O>::sqdist(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::sqdist<Acc>(*this, b); }
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags>
+_TNY_API decltype(auto) tensor<T,E,L,O>::sqdist(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const { return tny::sqdist<Acc>(*this, b, tag0, tags...); }
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto tensor<T,E,L,O>::dist(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::dist<Acc>(*this, b); }
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags>
+_TNY_API decltype(auto) tensor<T,E,L,O>::dist(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const { return tny::dist<Acc>(*this, b, tag0, tags...); }
 
 /* ------------------------------------------------------------------ *
  *     Out-of-place producers AS METHODS (parity with a.add(b))       *
