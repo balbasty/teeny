@@ -144,6 +144,8 @@ Negative integer indices wrap (count from the back).
 | `t(1, ellipsis, 2)` | → view or `T&` | `ellipsis` = `rank − #other args` copies of `all` (≤1 per call) |
 | `t.take_along<Axes...>(args...)` | → view | bind named axes only, keep the rest |
 | `t.take_along(axis<Axes...>{}, args...)` | → view | value form — `axis<...>` selector (numpy-like), no `.template` on a dependent receiver |
+| `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `take_along`); `idx` values wrap negative |
+| `t.index_select<Axis>(idx, into(dest))` | `dest&` | no-allocation, device-safe form |
 
 Slice specifiers:
 

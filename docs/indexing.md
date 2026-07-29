@@ -200,3 +200,34 @@ selector (a compile-time axis list, sibling of `shape<...>`, like numpy's
 `axis: int | list[int]`); being a single deduced argument it needs no `.template`
 on a type-dependent receiver, and it's the one spelling that disambiguates
 `take_along`'s two argument packs cleanly.
+
+## `index_select<Axis>` — gather by a runtime index tensor
+
+`take_along`'s bind arguments are known at the call site (a literal, a variable
+holding one index, a slice). `index_select` is for the opposite case: pulling
+elements along one axis using an arbitrary integer index **tensor** — data you
+don't know until runtime, e.g. an index buffer used to gather triangle vertices
+out of a vertex buffer:
+
+```cpp
+auto verts = local<double, shape<5,3>>();   // 5 vertices, 3 coords each
+auto idx   = local<long, shape<3>>();       // idx(0..2) = which vertices to pull
+idx(0) = 2; idx(1) = 0; idx(2) = 4;
+auto tri = verts.index_select<0>(idx);      // (3,3): rows 2, 0, 4 of verts
+```
+
+`idx` must be rank-1; axis `Axis`'s extent in the result becomes `idx`'s own
+extent (static when `idx`'s shape is static, so a compile-time-sized index
+buffer keeps the result on the stack). `idx`'s values wrap negative like any
+other teeny index (`index_select` is built on `take_along`, which already
+wraps), and repeated indices are fine — it's a gather, not a permutation.
+
+Because the index values are runtime data, `index_select` can't return a view
+(an arbitrary data-dependent gather isn't expressible as an affine mdspan
+mapping) — it always materialises a copy: static result → stack, dynamic →
+heap. Pass `into(dest)` to write straight into a preallocated buffer instead —
+one pass, no allocation, the device-safe form to use inside a kernel:
+
+```cpp
+verts.index_select<0>(idx, into(dest));     // dest must already have the right shape
+```
