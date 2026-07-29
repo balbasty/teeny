@@ -206,6 +206,30 @@ a.add(b, alpha, into(y));     // -> y,    a + alpha*b   (sub likewise)
 `into(y)` writes in a single pass; `y` may share memory with an operand, and `y`'s
 dtype need not match — the result is cast to it.
 
+**Only the result is cast.** The arithmetic itself runs in the *operands'* own
+precision — including a scalar right-hand side and the axpy coefficient — and `y`'s
+dtype applies to the store at the end. So `a.op(b, into(y))` gives exactly the same
+numbers as `y.copy_(a.op(b))`; the `into` form just skips the temporary:
+
+```cpp
+auto a = local<double, shape<3>>(); a(0)=1.5; a(1)=2.5; a(2)=3.5;
+auto y = local<int, shape<3>>();
+
+a.mul(0.5, into(y));          // y = {0, 1, 1}   (0.75, 1.25, 1.75 truncated on the store)
+exp(a, into(y));              // y = {4, 12, 33} (exp of 1.5/2.5/3.5, then truncated)
+```
+
+The flip side is that the operands' own promotion rule still applies, whatever `y`
+is: two integer tensors divide as integers even into a floating destination, exactly
+as they would without `into` (`y`'s dtype never promotes the operation).
+
+```cpp
+auto n = local<int, shape<2>>(); n(0)=7; n(1)=9;
+auto d = local<int, shape<2>>(); d.fill_(2);
+auto f = local<double, shape<2>>();
+n.div(d, into(f));            // f = {3, 4}  — integer division, == f.copy_(n.div(d))
+```
+
 **`y`'s shape is checked**, against the result the producer would otherwise have
 allocated: the source's own shape for a unary or scalar-rhs op, the broadcast shape
 for a tensor-rhs one. Only the *operands* broadcast — the destination never
@@ -244,7 +268,8 @@ no extra overload. A full reduction **requires** a rank-0 dest (a non-rank-0 des
 a `static_assert`, so forgetting the `<axes>` fails to compile rather than silently
 splatting the grand total); an axis reduction's dest is **broadcast-compatible**
 with the reduced shape (it goes through `copy_`). As elsewhere, `dest`'s dtype need
-not match (the result is cast), and the destination is returned by reference.
+not match — the accumulation runs in the reduction's own accumulator type and only
+the final result is cast — and the destination is returned by reference.
 
 ### Type promotion
 

@@ -420,7 +420,9 @@ auto c = minimum(a,b); maximum(a,2.0); clamp(a,lo,hi);   // elementwise binary m
 auto c = a.add(b,alpha); a.sub(b,alpha);  // FUSED out-of-place axpy: a +/- alpha*b (twin of add_(b,alpha))
 // --- into(dest): write a producer's result into a preallocated buffer -> dest& ---
 //   one fused pass, NO alloc; `into(y)` LAST arg. A distinct type (never conflated with
-//   a scalar alpha). y may alias an operand / differ in dtype (result cast). y's SHAPE is
+//   a scalar alpha). y may alias an operand / differ in dtype: the arithmetic runs in the
+//   OPERANDS' compute type (scalar rhs and axpy alpha included) and only the RESULT is cast
+//   to y, so a.op(b,into(y)) == y.copy_(a.op(b)) numerically (#379). y's SHAPE is
 //   CHECKED against the result — the source's own shape for a scalar-rhs/unary op (only
 //   operands broadcast, never the dest), the broadcast shape for a tensor rhs. Scalar-rhs/
 //   unary: compile error when both shapes are static, debug-time _TNY_CHECK otherwise
@@ -816,6 +818,36 @@ is generic.
   OPERANDS with each other, never either against `c`. Not a silent write (the
   `_TNY_CHECK` fires), just a later diagnosis than the two single-source engines now
   give — a candidate for a follow-up, out of #357's scope.
+  **The compute type `Cv` (#379)** is the OTHER type every one of these engines carries,
+  and it is about ARITHMETIC, not addressing: each element is widened to `Cv` before the
+  op and the result cast back to the destination's element type after it. There are two
+  suppliers. The IN-PLACE callers (`a.add_(b)`, `a.mul_(2.0)`, `a.exp_()`, …) leave it
+  unspecified, which resolves to the DESTINATION's compute type — and there the
+  destination IS the lhs operand, so that is a source type. Every OUT-OF-PLACE producer
+  names it from its OPERANDS: the comparisons pass `Rc` =
+  `compute_type_t<promote_t<Ta,Tb>>` (so `a < b` compares the values, not their bool
+  cast), and the `into(dest)` entry points (`oop_to`/`oops_to`/`uop_to`) pass exactly
+  what their allocating twin's `promote_t` destination would have carried. `into(dest)`
+  is the ONE path where the caller picks the destination's element type, so it is the one
+  place where "the destination's compute type" is NOT a source type — and taking it from
+  there ran the WHOLE computation in the destination's type, operands, scalar rhs and
+  axpy coefficient alike: `a.mul(0.5, into(int_y))` multiplied by `int(0.5)` == 0 (all
+  zeros), `exp(a, into(int_y))` exponentiated the truncated input, and
+  `a.add(b, 0.5, into(int_y))` left `y` == `a`. Silent, and the exact opposite of what
+  every doc promises (source precision throughout, the RESULT cast to `dest`). Naming
+  `Cv` from the operands restores the invariant that `x.op(y, into(dest))` is numerically
+  indistinguishable from `dest.copy_(x.op(y))` — which also means the operands' own
+  promotion rule still governs: two int tensors divide as INTS into a double dest, since
+  the dest's dtype is a cast target, never a promotion input. `scalo_`/`unaryo_`'s stores
+  had no explicit cast (their `Cv` used to BE `C`'s own type); they now cast to `Ce` like
+  `bzip_` always did. Zero change for every other caller — the allocating producers' dest
+  IS the promoted type, so the default resolves to the same type and the object code is
+  byte-identical (verified: the numeric-reference tests `test_pull`/`test_posdef`/
+  `test_distance_l1` compile to identical binaries; the only instruction-level change
+  anywhere in the suite is `test_into`'s one double-sources-into-a-float-dest sum, which
+  moves from `addss` to `addsd`). `scan`'s `into(dest)` remains the DELIBERATE exception:
+  it `copy_`s into `dest` FIRST, so the whole recurrence runs in `dest`'s precision — a
+  sequential carry has no "final result only" to cast (`docs/api-ux-review.md`'s F4-e).
   **Contiguous linear fast path (#161, #175):** contiguous elementwise ops replace the
   per-element mixed-radix decode with a flat `for(i) cp[i]=…` loop that auto-vectorizes.
   Two flavours by whether a second array is in play:

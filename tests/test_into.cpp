@@ -218,6 +218,100 @@ int main() {
     a.mul(2.0, into(fi2));  if (!close(fi2(0), 2.0) || !close(fi2(2), 6.0)) return 74;
     neg(a, into(fi2));      if (!close(fi2(2), -3.0))                       return 75;
 
+    // ========= dest's dtype casts the RESULT, not the arithmetic (#379) =========
+    // `into(dest)` is the one path where the caller picks the destination's element
+    // type, and what that type does is receive the CAST result: the computation
+    // itself runs in the operands' own precision, so every call below is numerically
+    // identical to `dest.copy_(a.op(b))` — the `into` form only skips the temporary.
+    // It used to take the compute type from the DEST, which re-ran the whole
+    // computation in that type: the operands, a scalar rhs and an axpy coefficient
+    // all truncated BEFORE the op. An `int` dest makes that visible in whole
+    // numbers (the buggy value is quoted on each line).
+    auto d3 = local<double, shape<3>>(); d3(0)=1.5; d3(1)=2.5; d3(2)=3.5;
+    auto o3 = local<double, shape<3>>(); o3.fill_(1.5);
+    auto yi = local<int, shape<3>>();
+
+    // scalar rhs: 1.5*0.5=0.75, 2.5*0.5=1.25, 3.5*0.5=1.75 -> {0,1,1}
+    yi.zero_(); d3.mul(0.5, into(yi));
+    if (yi(0)!=0 || yi(1)!=1 || yi(2)!=1)    return 76;   // was {0,0,0}: 0.5 became int(0.5)==0
+    // unary: exp(1.5)=4.4817, exp(2.5)=12.182, exp(3.5)=33.115 -> {4,12,33}
+    yi.zero_(); exp(d3, into(yi));
+    if (yi(0)!=4 || yi(1)!=12 || yi(2)!=33)  return 77;   // was {2,7,20}: exp of the TRUNCATED input
+    // tensor rhs: 1.5+1.5=3, 2.5+1.5=4, 3.5+1.5=5
+    yi.zero_(); d3.add(o3, into(yi));
+    if (yi(0)!=3 || yi(1)!=4 || yi(2)!=5)    return 78;   // was {2,3,4}: 1+1, 2+1, 3+1
+    // fused axpy: 1.5+0.5*1.5=2.25, 2.5+0.75=3.25, 3.5+0.75=4.25 -> {2,3,4}
+    yi.zero_(); d3.add(o3, 0.5, into(yi));
+    if (yi(0)!=2 || yi(1)!=3 || yi(2)!=4)    return 79;   // was {1,2,3}, i.e. d3 unchanged
+                                                          // (alpha became int(0.5)==0)
+    // ...and the same for the rest of the family, each against its allocating twin
+    // copied into the same dest (the invariant, checked rather than restated).
+    auto ri = local<int, shape<3>>();
+    yi.zero_(); d3.div(o3, into(yi));       ri.copy_(d3.div(o3));
+    if (yi(0)!=ri(0) || yi(1)!=ri(1) || yi(2)!=ri(2)) return 80;   // {1,1,2}
+    if (yi(0)!=1 || yi(1)!=1 || yi(2)!=2)   return 81;             // was {1,2,3}
+    yi.zero_(); d3.sub(o3, 0.5, into(yi));  ri.copy_(d3.sub(o3, 0.5));
+    if (yi(0)!=ri(0) || yi(2)!=ri(2))       return 82;             // 1.5-0.75=0.75 -> 0
+    if (yi(0)!=0 || yi(2)!=2)               return 83;             // 3.5-0.75=2.75 -> 2
+    yi.zero_(); minimum(d3, 2.2, into(yi)); ri.copy_(minimum(d3, 2.2));
+    if (yi(0)!=ri(0) || yi(1)!=ri(1))       return 84;             // {1,2,2}
+    if (yi(0)!=1 || yi(1)!=2 || yi(2)!=2)   return 85;
+    yi.zero_(); clamp(d3, 2.0, 3.0, into(yi)); ri.copy_(clamp(d3, 2.0, 3.0));
+    if (yi(0)!=ri(0) || yi(2)!=ri(2))       return 86;             // {2,2,3}
+    if (yi(0)!=2 || yi(1)!=2 || yi(2)!=3)   return 87;
+    yi.zero_(); sqrt(o3, into(yi));         ri.copy_(sqrt(o3));
+    if (yi(0)!=ri(0))                       return 88;             // √1.5=1.2247 -> 1
+    if (yi(0)!=1 || yi(2)!=1)               return 89;             // was 1 too (√1==1)
+
+    // The dest's STRIDES don't change the rule: a non-contiguous int dest takes the
+    // per-element decode path instead of the linear fast path, and must agree.
+    auto pad = local<int, shape<3,2>>(); pad.zero_();
+    auto icol = pad.take_along<1>(0);
+    d3.mul(0.5, into(icol));
+    if (pad(0,0)!=0 || pad(1,0)!=1 || pad(2,0)!=1) return 90;
+    if (pad(0,1)!=0 || pad(1,1)!=0 || pad(2,1)!=0) return 91;   // gaps untouched
+
+    // Not int-specific — a narrower FLOAT dest formed the value in its own precision
+    // too. Double sources, float dest, fused axpy: 1 + (1/3)*7 = 3.3333333333333335
+    // in double, whose nearest float is 3.33333325f; formed in float it is
+    // 3.33333349f (one ulp up). The reference is built in separate statements so no
+    // contraction can fuse it differently from the engine's own expression.
+    auto p1 = local<double, shape<1>>(); p1(0) = 1.0;
+    auto q1 = local<double, shape<1>>(); q1(0) = 7.0;
+    const double alpha3 = 1.0 / 3.0;
+    const double prod3  = alpha3 * 7.0;
+    const float  want3  = static_cast<float>(1.0 + prod3);
+    auto yf1 = local<float, shape<1>>();
+    yf1.zero_(); p1.add(q1, alpha3, into(yf1));
+    if (yf1(0) != want3)                    return 92;
+
+    // The compute type is the OPERANDS' promoted type — teeny's own `promote_t`, not
+    // "the widest type in sight". Two int sources divide as INTS even into a double
+    // dest, exactly as the allocating twin does (dest's dtype never promotes the op).
+    auto n7 = local<int, shape<2>>(); n7(0)=7; n7(1)=9;
+    auto n2 = local<int, shape<2>>(); n2.fill_(2);
+    auto rd2 = local<double, shape<2>>(); auto yd2 = local<double, shape<2>>();
+    yd2.zero_(); n7.div(n2, into(yd2)); rd2.copy_(n7.div(n2));
+    if (yd2(0)!=rd2(0) || yd2(1)!=rd2(1))   return 93;
+    if (yd2(0)!=3.0 || yd2(1)!=4.0)         return 94;   // 7/2=3, 9/2=4 (integer division)
+
+    // CONTROL: a dest whose dtype already matches the promoted operand type is
+    // unaffected — same values before and after the fix, on all four forms.
+    auto yd3 = local<double, shape<3>>();
+    yd3.zero_(); d3.mul(0.5, into(yd3));
+    if (!close(yd3(0),0.75) || !close(yd3(1),1.25) || !close(yd3(2),1.75)) return 95;
+    yd3.zero_(); exp(d3, into(yd3));
+    if (!close(yd3(0), std::exp(1.5)) || !close(yd3(2), std::exp(3.5)))   return 96;
+    yd3.zero_(); d3.add(o3, into(yd3));
+    if (!close(yd3(0),3.0) || !close(yd3(2),5.0))                         return 97;
+    yd3.zero_(); d3.add(o3, 0.5, into(yd3));
+    if (!close(yd3(0),2.25) || !close(yd3(2),4.25))                       return 98;
+    // ...and an int dest fed by int operands and an int scalar: nothing to cast at
+    // all, the whole computation was already in `int` both before and after.
+    auto ni = local<int, shape<3>>(); ni(0)=1; ni(1)=2; ni(2)=3;
+    yi.zero_(); ni.mul(3, into(yi));
+    if (yi(0)!=3 || yi(1)!=6 || yi(2)!=9)   return 99;
+
     // A MIS-SHAPED dest is now rejected: a compile error when both shapes are
     // fully static (the issue's own repro), a debug-time check otherwise. Left
     // commented out because neither a static_assert nor an assert() failure can

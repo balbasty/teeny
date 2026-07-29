@@ -289,6 +289,31 @@ template <class... I> struct _offset_int {
     using type = typename cs::conditional_t<_mixed, _sint_of_size<_bytes>, _ident<_wide>>::type;
 };
 template <class... I> using _offset_int_t = typename _offset_int<I...>::type;
+
+/* ---- the type an ENGINE runs its OP in (`Cv`) ------------------------------ *
+ * Distinct from `_offset_int_t` above (that one is about ADDRESSING): `Cv` is the
+ * arithmetic type each element is widened to before the op and cast back from
+ * after it. Every engine takes it as a template parameter, and there are exactly
+ * two suppliers:
+ *   - the IN-PLACE callers (`a.add_(b)`, `a.mul_(2.0)`, `a.exp_()`, …) leave it
+ *     unspecified (`void`), which resolves to the DESTINATION's compute type —
+ *     and there the destination IS the lhs operand, so that is a source type;
+ *   - every OUT-OF-PLACE producer names it from its OPERANDS: the comparisons
+ *     pass `Rc` (`compute_type_t<promote_t<A,B>>`, so `a < b` compares the values
+ *     rather than their bool cast) and the `into(dest)` entry points pass exactly
+ *     the type their allocating twin's destination would have carried (#379).
+ * `into(dest)` is the ONE path where the caller picks the destination's element
+ * type, so it is the one place where "the destination's compute type" is NOT a
+ * source type: taking it from there ran the whole computation — the operands, a
+ * scalar rhs, an axpy coefficient — in the destination's type, so
+ * `a.mul(0.5, into(int_y))` multiplied by `int(0.5)` == 0. The docs promise the
+ * opposite (source precision throughout, the RESULT cast to `dest`), which is what
+ * naming `Cv` from the operands restores: `x.op(y, into(dest))` is numerically
+ * indistinguishable from `dest.copy_(x.op(y))`, just without the temporary. */
+template <class Cv, class C> struct _cv_or_dest { using type = Cv; };
+template <class C> struct _cv_or_dest<void, C> { using type = compute_type_t<typename C::element_type>; };
+template <class Cv, class C> using _cv_or_dest_t = typename _cv_or_dest<Cv, C>::type;
+
 template <class Ea, class Eb>
 using bcast_extents = decltype(bcast_ext_<_wider_index_t<Ea, Eb>, Ea, Eb,
     bc_rank(Ea::rank(), Eb::rank())>(cs::make_index_sequence<bc_rank(Ea::rank(), Eb::rank())>{}));
@@ -320,9 +345,11 @@ _TNY_HOST RE bcast_runtime_(const A & a, const B & b, cs::index_sequence<D...>) 
     return RE(static_cast<I>(bc_ext<R>(a, D) == 1 ? bc_ext<R>(b, D) : bc_ext<R>(a, D))...);
 }
 
-// `Cv` is the type the op runs in: the destination's compute type for arithmetic
-// (default via the `bzip` wrapper), or the operands' compare type for a comparison
-// whose result is a bool mask (the `bcmp` wrapper passes it) — one engine, two uses.
+// `Cv` is the type the op runs in (`_cv_or_dest_t` above states the rule and who
+// supplies it): the destination's compute type for an IN-PLACE op (where the
+// destination is the lhs operand — the `bzip` wrapper's default), the operands'
+// promoted compute type for an out-of-place one (`oop`/`oop_to`), or their compare
+// type for a comparison whose result is a bool mask (`bcmp`) — one engine, three uses.
 // `Restrict` (set only by the OUT-OF-PLACE callers, where `c` is a fresh
 // allocation that provably cannot alias `a`/`b`) enables an auto-vectorizable
 // linear fast path: when the plain-store writer `w_set` is in use and every
@@ -455,7 +482,10 @@ _TNY_API void check_same_extents(const C & c, const A & a, cs::index_sequence<D.
 // `Restrict` defaults to false so every IN-PLACE caller (add_/sub_/.../copy_,
 // where `c` IS the destination and may alias the rhs) takes the safe decode path
 // byte-for-byte unchanged; the out-of-place `oop` passes true.
-template <class W = w_set, bool Restrict = false, class C, class A, class B, class Op>
+// `Cv` (the op's compute type) defaults to `void` = "the destination's compute
+// type", which is what every IN-PLACE caller wants (`c` IS the lhs operand there).
+// The out-of-place ones name it from the OPERANDS instead — see `_cv_or_dest_t`.
+template <class W = w_set, bool Restrict = false, class Cv = void, class C, class A, class B, class Op>
 _TNY_API void bzip(C & c, const A & a, const B & b, Op op) {
     // C holds the RESULT (largest) rank; operands may be shorter (left-padded).
     check_dest_no_overlap(c, cs::make_index_sequence<C::rank()>{});
@@ -463,7 +493,7 @@ _TNY_API void bzip(C & c, const A & a, const B & b, Op op) {
     static_assert(bc_static_ok_r<typename A::extents_type, typename B::extents_type, C::rank()>(
                       cs::make_index_sequence<C::rank()>{}),
                   "broadcast: incompatible static extents");
-    bzip_<W, Restrict, compute_type_t<typename C::element_type>>(c, a, b, op, cs::make_index_sequence<C::rank()>{});
+    bzip_<W, Restrict, _cv_or_dest_t<Cv, C>>(c, a, b, op, cs::make_index_sequence<C::rank()>{});
 }
 
 /* ---- c = op(c, scalar), elementwise ------------------------------ */
@@ -554,7 +584,10 @@ _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
     // off the front of the buffer. Unlike `bzip_` this site was not even silent — the
     // initializers below lacked the `static_cast<I>`s, so g++ warned (`-Wnarrowing`) and
     // clang rejected the instantiation outright.
-    // `Cv` = the op's compute type (arithmetic: dest compute type; compare: Rc).
+    // `Cv` = the op's compute type — see `_cv_or_dest_t` above for the rule (in-place:
+    // the destination's, which is the lhs operand's; out-of-place: the operands' own,
+    // #379; compare: `Rc`). It is NOT necessarily `C`'s own type, so the stores below
+    // cast to `Ce` explicitly, exactly as `bzip_`'s `w_set`/fast path do.
     //
     // Shape guard (#357): the bounds below come from `a` and the stores go through
     // `c`'s strides, so the two must agree in EVERY axis or the write runs off the
@@ -591,27 +624,30 @@ _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
             sa[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.stride(D))... },
             sc[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(c.stride(D))... };
     I n = 1; for (cs::size_t r = 0; r < sizeof...(D); ++r) n *= e[r];
+    using Ce = typename C::element_type;
     // Contiguous linear fast path (out-of-place only; `c` fresh, cannot alias `a`).
     if constexpr (Restrict) {
         if (c.is_contiguous() && a.is_contiguous()) {
-            typename C::element_type * _TNY_RESTRICT cp = c.data();
+            Ce * _TNY_RESTRICT cp = c.data();
             const typename A::element_type * ap = a.data();
             const Cv sv = static_cast<Cv>(s);
-            for (I i = 0; i < n; ++i) cp[i] = op(static_cast<Cv>(ap[i]), sv);   // mirrors the slow store
+            for (I i = 0; i < n; ++i) cp[i] = static_cast<Ce>(op(static_cast<Cv>(ap[i]), sv));   // mirrors the slow store
             return;
         }
     }
     for (I lin = 0; lin < n; ++lin) {
         I rem = lin, oa = 0, oc = 0;
         for (int d = (int)sizeof...(D)-1; d >= 0; --d) { I k = rem%e[d]; rem/=e[d]; oa+=k*sa[d]; oc+=k*sc[d]; }
-        c.data()[oc] = op(static_cast<Cv>(a.data()[oa]), static_cast<Cv>(s));
+        c.data()[oc] = static_cast<Ce>(op(static_cast<Cv>(a.data()[oa]), static_cast<Cv>(s)));
     }
 }
-template <bool Restrict = false, class C, class A, class S, class Op> _TNY_API void scalo(C & c, const A & a, S s, Op op)
-{ scalo_<Restrict, compute_type_t<typename C::element_type>>(c, a, s, op, cs::make_index_sequence<C::rank()>{}); }
+// `Cv` as in `bzip` (`void` = the destination's compute type; the out-of-place
+// producers name it from the operands — `_cv_or_dest_t`).
+template <bool Restrict = false, class Cv = void, class C, class A, class S, class Op> _TNY_API void scalo(C & c, const A & a, S s, Op op)
+{ scalo_<Restrict, _cv_or_dest_t<Cv, C>>(c, a, s, op, cs::make_index_sequence<C::rank()>{}); }
 
 /* ---- c(i) = uop(a(i))  and  c(i) = uop(c(i)) (in place) ---------- */
-template <bool Restrict, class C, class A, class Uop, cs::size_t... D>
+template <bool Restrict, class Cv, class C, class A, class Uop, cs::size_t... D>
 _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     // Same rule (and the same reachability) as `scalo_` just above: the offsets decode
     // in a type covering the destination AND the source, so a caller-supplied
@@ -631,6 +667,13 @@ _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     // while the tensor-rhs `a.add(a, into(y))` aborted. Redundant-but-harmless for
     // the in-place `unary`, which checks before delegating here (it needs its own
     // copy for the dense fast path it takes instead).
+    //
+    // `Cv` (the type `f` runs in) is a PARAMETER, not derived from `c`: `uop_to`
+    // (`into(dest)`) hands us a destination of the caller's choosing, and deriving
+    // the compute type from it evaluated `f` in that type — `exp(double_a,
+    // into(int_y))` exponentiated the TRUNCATED input (#379). It is the SOURCE's
+    // compute type there, exactly what `uop_out`'s own destination would have
+    // carried; the in-place `unary` still passes `void` (= `c`'s, which is `a`'s).
     static_assert(A::rank() == C::rank(), "into(dest): dest rank must match the source's");
     static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
                       cs::make_index_sequence<C::rank()>{}),
@@ -639,7 +682,7 @@ _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     check_dest_no_overlap(c, cs::index_sequence<D...>{});
     using I = _offset_int_t<typename C::index_type,
                             typename A::extents_type::index_type>;
-    using Cv = compute_type_t<typename C::element_type>;
+    using Ce = typename C::element_type;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.extent(D))... },
             sa[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.stride(D))... },
@@ -648,22 +691,23 @@ _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     // Contiguous linear fast path (out-of-place only; `c` fresh, cannot alias `a`).
     if constexpr (Restrict) {
         if (c.is_contiguous() && a.is_contiguous()) {
-            typename C::element_type * _TNY_RESTRICT cp = c.data();
+            Ce * _TNY_RESTRICT cp = c.data();
             const typename A::element_type * ap = a.data();
-            for (I i = 0; i < n; ++i) cp[i] = static_cast<Cv>(f(static_cast<Cv>(ap[i])));   // mirrors the slow store
+            for (I i = 0; i < n; ++i) cp[i] = static_cast<Ce>(f(static_cast<Cv>(ap[i])));   // mirrors the slow store
             return;
         }
     }
     for (I lin = 0; lin < n; ++lin) {
         I rem = lin, oa = 0, oc = 0;
         for (int d = (int)sizeof...(D)-1; d >= 0; --d) { I k = rem%e[d]; rem/=e[d]; oa+=k*sa[d]; oc+=k*sc[d]; }
-        c.data()[oc] = static_cast<Cv>(f(static_cast<Cv>(a.data()[oa])));
+        c.data()[oc] = static_cast<Ce>(f(static_cast<Cv>(a.data()[oa])));
     }
 }
 // `Restrict` is false for `unary` (in-place: c===a, must not restrict) and true
-// for `uop_out` (out-of-place: fresh dest).
-template <bool Restrict = false, class C, class A, class Uop> _TNY_API void unaryo(C & c, const A & a, Uop f)
-{ unaryo_<Restrict>(c, a, f, cs::make_index_sequence<C::rank()>{}); }
+// for `uop_out` (out-of-place: fresh dest). `Cv` as in `bzip`/`scalo` (`void` = the
+// destination's compute type; `uop_to` names the source's — `_cv_or_dest_t`).
+template <bool Restrict = false, class Cv = void, class C, class A, class Uop> _TNY_API void unaryo(C & c, const A & a, Uop f)
+{ unaryo_<Restrict, _cv_or_dest_t<Cv, C>>(c, a, f, cs::make_index_sequence<C::rank()>{}); }
 // In-place unary (`a.neg_()`/`exp_()`/`map_(f)`/…) is a SINGLE-array read-modify-write:
 // `a[i] = f(a[i])`. One pointer, so it vectorizes with NO `__restrict__` (nothing to
 // alias), and being ORDER-INDEPENDENT it walks the physical block of ANY dense view.
@@ -785,10 +829,30 @@ _TNY_HOST auto uop_out(const A & a, Uop f) {
  * fully static; `bzip_`'s is a `_TNY_CHECK` only, since `bzip`'s own static gate
  * (`bc_static_ok_r`) compares the two OPERANDS with each other, never either one
  * against `c`. Not a silent write either way — just a debug-time trip rather than
- * a compile error for a static mis-shaped tensor-rhs dest. */
-template <class Op, class Out, class A, class B> _TNY_API void oop_to (Out & o, const A & a, const B & b, Op op) { bzip<w_set, false>(o, a, b, op); }
-template <class Op, class Out, class A, class S>  _TNY_API void oops_to(Out & o, const A & a, S s, Op op) { scalo<false>(o, a, s, op); }
-template <class Uop, class Out, class A>          _TNY_API void uop_to (Out & o, const A & a, Uop f) { unaryo<false>(o, a, f); }
+ * a compile error for a static mis-shaped tensor-rhs dest.
+ *
+ * The dest's ELEMENT TYPE is likewise the caller's alone, and it is the RESULT that
+ * is cast to it — the arithmetic itself runs in the OPERANDS' compute type, so each
+ * of these hands its engine the very `Cv` its allocating twin would have got from
+ * its own `promote_t` destination (#379). Deriving `Cv` from the dest instead ran
+ * the whole computation in the dest's type, scalar rhs and axpy coefficient
+ * included: `a.mul(0.5, into(int_y))` multiplied by `int(0.5)` == 0, and
+ * `a.add(b, 0.5, into(int_y))` left `y` == `a`. With the operands' type, each
+ * `x.op(y, into(dest))` is numerically identical to `dest.copy_(x.op(y))` — the
+ * `into` form just skips the temporary. (A `half`/`bfloat16` DEST over half/float
+ * operands is unaffected: `compute_type_t` is `float` on both sides. Over WIDER
+ * operands it now computes in the wider type and narrows on the store, which is
+ * the same "cast the result" rule, not a half-specific carve-out.)
+ *
+ * The allocating producers (`oop`/`oops`/`uop_out`) keep the default: their
+ * destination IS built as the promoted type, so `compute_type_t<C::element_type>`
+ * already IS the operands' compute type there — same type, byte-identical code. */
+template <class Op, class Out, class A, class B> _TNY_API void oop_to (Out & o, const A & a, const B & b, Op op)
+{ bzip<w_set, false, compute_type_t<promote_t<typename A::element_type, typename B::element_type>>>(o, a, b, op); }
+template <class Op, class Out, class A, class S>  _TNY_API void oops_to(Out & o, const A & a, S s, Op op)
+{ scalo<false, compute_type_t<promote_t<typename A::element_type, S>>>(o, a, s, op); }
+template <class Uop, class Out, class A>          _TNY_API void uop_to (Out & o, const A & a, Uop f)
+{ unaryo<false, compute_type_t<typename A::element_type>>(o, a, f); }
 
 // static element count of a fully-static extents type (moved ahead of
 // zipreduce_/axreduce, #255: both static fast paths need it).

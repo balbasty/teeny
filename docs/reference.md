@@ -363,7 +363,10 @@ argument to any producer above to write the result into `y` (one fused pass, no
 allocation) and return `y&`, instead of a fresh tensor — the kernel-friendly `out=`.
 `into(y)` is a distinct type, so it never collides with a scalar argument (which is
 what lets `add`/`sub` also take the fused `alpha`). `y` may alias an operand and may
-have a different dtype (the result is cast to it).
+have a different dtype — the arithmetic still runs in the **operands'** precision
+(scalar right-hand side and axpy coefficient included) and only the **result** is
+cast to `y`'s type, so `a.op(b, into(y))` produces exactly the numbers
+`y.copy_(a.op(b))` would.
 
 **`y` may be a slice**, written straight out of a view-producing op —
 `cross(a, b, into(N(i, all)))`, `sum(a, into(cells.at(i, j)))`,
