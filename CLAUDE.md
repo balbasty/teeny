@@ -698,6 +698,17 @@ is generic.
   compile-time `cs::size_t` linear index, and it never touches an `index_type` at all —
   and a `ccontiguous` mapping's strides are products of extents, so a negative stride
   (which needs teeny's `strides<...>` layout anyway) cannot reach it.
+  The SAME `_offset_int_t` is what the other multi-tensor engines decode in (#353) —
+  every engine that walks more than one tensor uses it, so there is one rule, not five:
+  `scalo_` (scalar rhs, `c(i)=op(a(i),s)`) and `unaryo_` (`c(i)=uop(a(i))`) over
+  `<C::index_type, A::index_type>`, and `allclose_` over `<A::index_type,
+  B::index_type>`. `scalo_`/`unaryo_` are only reachable narrow through a caller's
+  `into(dest)` (their allocating producers build `c` from `a`'s own extents type) and
+  were not even silent — their initializers lacked the `static_cast<I>`s, so g++ warned
+  and clang rejected them; `allclose_` casts, so it was silent like `bzip_`. `scalo_`/
+  `unaryo_` also still take their loop BOUNDS from `a` and their strides from `c`
+  without checking the two agree, unlike `bzip_`'s `_TNY_CHECK` — a mis-shaped
+  `into(dest)` writes out of bounds unguarded (**#357**).
   **Contiguous linear fast path (#161, #175):** contiguous elementwise ops replace the
   per-element mixed-radix decode with a flat `for(i) cp[i]=…` loop that auto-vectorizes.
   Two flavours by whether a second array is in play:

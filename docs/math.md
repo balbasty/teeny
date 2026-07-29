@@ -84,9 +84,12 @@ If the two operands have different offset [index widths](shapes-strides.md#mixin
 In place (`a.add_(b)`) and into a caller-supplied `into(dest)` there is no new
 result to widen, so the offset math itself runs in a type that covers every tensor in
 play while each keeps its own: a narrow-indexed destination never truncates a
-wide-indexed right-hand side, in either direction. The same holds across
-**signedness** — an unsigned-indexed tensor next to a flipped (negative-stride)
-signed-indexed one computes in a signed type, so the negative stride stays negative.
+wide-indexed right-hand side, in either direction. That holds for every producer that
+takes an `into(dest)` — a scalar right-hand side (`a.mul(2.0, into(y))`) and a unary
+op (`exp(a, into(y))`) as much as a tensor one — and for `allclose(a, b)`, which walks
+two operands of its own. The same holds across **signedness**: an unsigned-indexed
+tensor next to a flipped (negative-stride) signed-indexed one computes in a signed
+type, so the negative stride stays negative.
 
 Broadcasting example — per-channel scale/bias over a `(C,H,W)` image with
 `(C,1,1)` parameters:

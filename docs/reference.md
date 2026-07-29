@@ -359,7 +359,11 @@ argument to any producer above to write the result into `y` (one fused pass, no
 allocation) and return `y&`, instead of a fresh tensor — the kernel-friendly `out=`.
 `into(y)` is a distinct type, so it never collides with a scalar argument (which is
 what lets `add`/`sub` also take the fused `alpha`). `y` may alias an operand and may
-have a different dtype (the result is cast to it); its extents are checked.
+have a different dtype (the result is cast to it); its extents are checked. `y` may
+also carry a different offset **index type** from the operands' (a narrower one
+included) — the widening needed to walk both safely happens inside the engine, in
+width and in signedness alike, and `y` keeps its own type; see
+[Mixing widths](shapes-strides.md#mixing-widths-in-a-broadcast).
 
 | Call | Returns |
 |---|---|

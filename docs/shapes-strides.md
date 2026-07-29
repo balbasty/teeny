@@ -136,17 +136,26 @@ The two-operand reductions `dot(a, b)` and `sqdist(a, b)`/`dist(a, b)` follow th
 same rule: they produce a scalar rather than a tensor, but their offset math also
 runs in a type that covers both operands, so mixing an `int32`-indexed operand with
 an `int64`-indexed one is safe in either order — and, as below, so is mixing
-signedness.
+signedness. So does `allclose(a, b)`, which likewise walks both operands and hands
+back a plain `bool`.
 
 The **in-place** ops (`a.add_(b)`, `a.copy_(b)`, `a *= b`, …) and a caller-supplied
 `into(dest)` are the one place where the destination cannot simply take the wider
 type — `a` is *your* tensor, and its index width is part of its own type. There the
-offset math runs in the widest of the three types in play (the destination's and both
-operands'), while every tensor keeps its own: the widening is internal, so
+offset math runs in the widest of the types in play (the destination's and every
+operand's), while every tensor keeps its own: the widening is internal, so
 `a.add_(b)` still hands you back `a` with `a`'s index type unchanged. Mixing widths
 in place is safe in either direction — a narrow-indexed destination combined with a
 wide-indexed right-hand side does not truncate that operand's strides, and a
 wide-indexed destination with a narrow right-hand side was never at risk.
+
+That covers **every** producer that takes an `into(dest)`, not only the two-operand
+elementwise ones: a scalar right-hand side (`a.mul(2.0, into(y))`,
+`minimum(a, 1.0, into(y))`) and a unary op (`exp(a, into(y))`, `clamp(a, lo, hi,
+into(y))`) each walk a source *and* a destination, so they too run their offsets in a
+type covering both. Called **without** `into(dest)`, those producers allocate their
+result from the source's own shape type, so the widths already agree and there is
+nothing to widen.
 
 Mixing **signedness** is safe too. Width alone does not settle how those offsets are
 computed: `shape_as<Idx, ...>` accepts an unsigned index type, while a flipped or
