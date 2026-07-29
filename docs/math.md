@@ -167,7 +167,7 @@ result into `dest`:
 
 ```cpp
 sum(a, into(cell));           // cell : local<double, shape<>>{} — a rank-0 scalar
-dot(a, b, into(cell));        // full reductions: sum/prod/max/min/mean/sqnorm/norm/dot
+dot(a, b, into(cell));        // full reductions: sum/prod/max/min/mean/sqnorm/norm/dot/sqdist/dist
 sum<0>(m, into(colbuf));      // axis reduction -> a lower-rank dest
 mean(m, axis<1>{}, into(rowbuf));  // value form takes into as well
 ```
@@ -224,9 +224,10 @@ sum(a); prod(a); max(a); min(a); mean(a); dot(a, b);
 a.sum(); a.mean(); a.dot(b);            // the same reductions are also methods
 ```
 
-Every reduction (and `sqnorm`/`norm`) is available as a **method** too, with the
-same overload shapes — `a.sum()`, `a.sum<0>()`, `a.mean(axis<1>{})`, `a.norm()`,
-`a.dot(b)`, `a.sum(into(cell))`. The free `sum(a)` form stays as well.
+Every reduction (and `sqnorm`/`norm`/`sqdist`/`dist`) is available as a **method**
+too, with the same overload shapes — `a.sum()`, `a.sum<0>()`, `a.mean(axis<1>{})`,
+`a.norm()`, `a.dot(b)`, `a.sqdist(b)`, `a.sum(into(cell))`. The free `sum(a)` form
+stays as well.
 
 Over named axes → a lower-rank **tensor** (the named axes are removed; negatives
 wrap):
@@ -323,6 +324,11 @@ sqnorm<double>(a);    // leading TYPE = accumulator AND result (as with sum/dot)
 sqnorm<1>(a);  norm<0,2>(a);  norm(a, axis<-1>{});   // OVER NAMED AXES -> lower-rank tensor
 norm<double,1>(a);                                   // ...with a leading accumulator type (like sum)
 
+sqdist(a, b);         // Σ(aᵢ-bᵢ)² — same as sqnorm(a-b), one fused pass, no a-b intermediate
+dist(a, b);           // √Σ(aᵢ-bᵢ)² — same as norm(a-b). Binary only (no axis form, like dot)
+sqdist<double>(a, b); // leading TYPE = accumulator AND result (as with sqnorm/dot)
+sqdist(a, b, dtype<double>{}, into(cell));   // dtype/into compose, same trailing bag as dot
+
 a.normalize_();       // in place: a /= norm(a)   (floating element types)
 auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, dynamic->heap)
 a.normalize_<1>();  normalize<-1>(a);  normalize(a, axis<1>{});   // OVER NAMED AXES (keepdim broadcast)
@@ -335,7 +341,10 @@ slot.copy_(cross(a, b));    // write into a preallocated slot with no new vocabu
 `sqnorm`/`norm` are reductions: with no axes they reduce over everything (so `norm`
 of a matrix is the Frobenius norm); with `<Axes...>` (or the `axis<...>` value form,
 or a leading accumulator type) they reduce over just those axes into a lower-rank
-tensor — the same API as `sum`/`mean`. `normalize`/`normalize_` mirror it: with
+tensor — the same API as `sum`/`mean`. `sqdist`/`dist` are the two-operand siblings —
+binary only, no axis-list form, mirroring `dot`'s own convenience-wrapper status
+over a manual `sum(a*b)` (same `<Acc>`/`dtype<Acc>{}`/`into(dest)` composition).
+`normalize`/`normalize_` mirror `sqnorm`/`norm`: with
 `<Axes...>` each sub-vector is divided by its norm over those axes (the reduced axes
 are kept as size-1 so the norm broadcasts back). Axes must be distinct and ascending.
 `normalize` of a zero vector yields NaNs — this is exact math with no epsilon; add
