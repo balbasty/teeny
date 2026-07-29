@@ -970,9 +970,13 @@ public:
             "index_select: dest's axis Axis extent must equal idx's extent(0)");
         _TNY_CHECK(static_cast<index_type>(out.dest.extent(A)) == static_cast<index_type>(idx.extent(0)),
             "index_select: dest's axis Axis extent must equal idx.extent(0)");
+        // idx(j)'s VALUE (unlike the loop bound) can be negative -- must stay
+        // SIGNED so take_along's wrap (_wrap_idx) takes its negative-index branch
+        // rather than reinterpreting a negative value as a huge unsigned index
+        // when this tensor's own index_type happens to be unsigned (#326 review).
         const index_type n = static_cast<index_type>(idx.extent(0));
         for (index_type j = 0; j < n; ++j)
-            out.dest.template take_along<(long)A>(j).copy_(take_along<(long)A>(static_cast<index_type>(idx(j))));
+            out.dest.template take_along<(long)A>(j).copy_(take_along<(long)A>(static_cast<cs::make_signed_t<index_type>>(idx(j))));
         return out.dest;
     }
 

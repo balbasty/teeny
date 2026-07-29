@@ -142,9 +142,9 @@ x.index_select<Axis>(idx);       // gather along Axis by a rank-1 integer index 
                     //   static idx shape -> stack result, else heap (source must be
                     //   host-accessible). into(dest) form too: x.index_select<Axis>(idx,
                     //   into(dest)) (no alloc, device-safe; dest's axis-Axis extent must
-                    //   match idx's, checked; dest must not alias x). Value form leads
-                    //   with axis<...>{} (no .template on a dependent receiver), same as
-                    //   take_along: x.index_select(idx, axis<Axis>{})
+                    //   match idx's, checked; dest must not alias x). Value form takes a
+                    //   TRAILING axis<...>{} (no .template on a dependent receiver), same
+                    //   as take_along: x.index_select(idx, axis<Axis>{})
 x.uget(i, j, k);  x.uget(0, slice(1,4));  x.uget(1, ellipsis);  x.uat(i...);
                     // uget = unchecked twin of operator() (element/slice/ellipsis,
                     // one entry point); uat = unchecked at. Skip the negative-index

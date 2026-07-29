@@ -70,5 +70,18 @@ int main() {
     verts.index_select(idx, axis<0>{}, into(destv));
     for (long j=0;j<3;++j) if (destv(0,j) != verts(2,j)) return 18;
 
+    // negative idx values must still wrap when *this's own index_type is UNSIGNED
+    // (#332 review: a naive cast of idx(j) straight to index_type reinterprets a
+    // negative value as a huge unsigned one on such a tensor -- regression guard).
+    double ubuf[15]; for (long i=0;i<15;++i) ubuf[i] = i;
+    auto uverts = wrap(ubuf, cs::extents<unsigned,5,3>{});
+    auto idxun = local<long, shape<2>>(); idxun(0)=-1; idxun(1)=-5;
+    auto seluoop = uverts.index_select<0>(idxun);
+    if (seluoop(0,0) != uverts(4,0)) return 19;   // -1 -> last row (4)
+    if (seluoop(1,0) != uverts(0,0)) return 20;   // -5 -> row 0
+    auto destu = local<double, shape<2,3>>();
+    uverts.index_select<0>(idxun, into(destu));
+    if (destu(0,0) != uverts(4,0) || destu(1,0) != uverts(0,0)) return 21;
+
     return 0;
 }
