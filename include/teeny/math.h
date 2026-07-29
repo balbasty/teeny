@@ -77,6 +77,7 @@ struct add { template <class X, class Y> _TNY_API X operator()(X x, Y y) const {
 struct sub { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x - static_cast<X>(y); } };
 struct mul { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x * static_cast<X>(y); } };
 struct div { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { return x / static_cast<X>(y); } };
+struct zip_sqdiff { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { X d = x - static_cast<X>(y); return d * d; } };  // (x-y)² (combine for sqdist/dist's fused reduce)
 
 /* ---- fused scaled accumulate (axpy: out = x (+/-) coeff*y) -------- *
  * The coefficient rides in the functor; `bzip` runs the op in the      *
@@ -157,7 +158,6 @@ struct r_any { template <class X> _TNY_API bool operator()(bool a, X x) const { 
 /* ---- reduce ops (acc = op(acc, x)) ------------------------------- */
 struct r_add { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a + static_cast<A>(x); } };
 struct r_addsq { template <class A, class X> _TNY_API A operator()(A a, X x) const { A xx = static_cast<A>(x); return a + xx * xx; } };  // Σx² (for sqnorm/norm)
-struct zip_sqdiff { template <class X, class Y> _TNY_API X operator()(X x, Y y) const { X d = x - static_cast<X>(y); return d * d; } };  // (x-y)² (for sqdist/dist)
 struct r_mul { template <class A, class X> _TNY_API A operator()(A a, X x) const { return a * static_cast<A>(x); } };
 struct r_max { template <class A, class X> _TNY_API A operator()(A a, X x) const { A y = static_cast<A>(x); return y > a ? y : a; } };
 struct r_min { template <class A, class X> _TNY_API A operator()(A a, X x) const { A y = static_cast<A>(x); return y < a ? y : a; } };
@@ -1487,8 +1487,13 @@ _TNY_RED_TAGGED(norm)
 #undef _TNY_RED_TAGGED
 
 /** @brief Squared Euclidean distance `Σ(aᵢ-bᵢ)²` between two same-shape tensors —
- *         `sqdist(a,b) == sqnorm(a-b)`, but one fused pass, no `a-b` intermediate
- *         (mirrors `dot`'s convenience-wrapper status over a manual `sum(a*b)`).
+ *         mathematically `sqnorm(a-b)`, computed as one fused pass with no `a-b`
+ *         intermediate (mirrors `dot`'s convenience-wrapper status over a manual
+ *         `sum(a*b)`). Each difference is formed and squared directly in the
+ *         accumulator type, so the result can be MORE accurate than the un-fused
+ *         `sqnorm(a-b)` spelling for a narrow element type (`a-b` there rounds to
+ *         the operands' own type before `sqnorm` widens it) — not necessarily
+ *         bit-identical, only for `double` operands are the two guaranteed equal.
  *         Binary only (no axis-list form, like `dot`); `sqdist<Acc>(a,b)` makes
  *         `Acc` accumulator AND result. */
 template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
@@ -1501,9 +1506,10 @@ _TNY_API auto sqdist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & 
         _md::zipreduce_<R>(a, b, _md::zip_sqdiff{}, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
 }
 
-/** @brief Euclidean distance `√Σ(aᵢ-bᵢ)²` — `dist(a,b) == norm(a-b)`, one fused
- *         pass. Floating result (integer operands -> `double`, the `norm`/`mean`
- *         rule); `dist<Acc>(a,b)` makes `Acc` accumulator AND result. */
+/** @brief Euclidean distance `√Σ(aᵢ-bᵢ)²` — mathematically `norm(a-b)`, one fused
+ *         pass (see `sqdist`'s doc comment for the accuracy note). Floating result
+ *         (integer operands -> `double`, the `norm`/`mean` rule); `dist<Acc>(a,b)`
+ *         makes `Acc` accumulator AND result. */
 template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
 _TNY_API auto dist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
     using P   = promote_t<Ta,Tb>;

@@ -324,8 +324,9 @@ sqnorm<double>(a);    // leading TYPE = accumulator AND result (as with sum/dot)
 sqnorm<1>(a);  norm<0,2>(a);  norm(a, axis<-1>{});   // OVER NAMED AXES -> lower-rank tensor
 norm<double,1>(a);                                   // ...with a leading accumulator type (like sum)
 
-sqdist(a, b);         // Σ(aᵢ-bᵢ)² — same as sqnorm(a-b), one fused pass, no a-b intermediate
-dist(a, b);           // √Σ(aᵢ-bᵢ)² — same as norm(a-b). Binary only (no axis form, like dot)
+sqdist(a, b);         // Σ(aᵢ-bᵢ)² — mathematically sqnorm(a-b), one fused pass, no a-b
+                      //   intermediate (not necessarily bit-identical; see prose below)
+dist(a, b);           // √Σ(aᵢ-bᵢ)² — mathematically norm(a-b). Binary only (no axis form, like dot)
 sqdist<double>(a, b); // leading TYPE = accumulator AND result (as with sqnorm/dot)
 sqdist(a, b, dtype<double>{}, into(cell));   // dtype/into compose, same trailing bag as dot
 
@@ -344,6 +345,10 @@ or a leading accumulator type) they reduce over just those axes into a lower-ran
 tensor — the same API as `sum`/`mean`. `sqdist`/`dist` are the two-operand siblings —
 binary only, no axis-list form, mirroring `dot`'s own convenience-wrapper status
 over a manual `sum(a*b)` (same `<Acc>`/`dtype<Acc>{}`/`into(dest)` composition).
+Each difference is formed and squared directly in the accumulator type, so for a
+narrow element type `sqdist(a,b)` can be *more* accurate than the un-fused
+`sqnorm(a-b)` spelling (which rounds `a-b` to the operands' own type first) —
+the two are only guaranteed bit-identical for `double` operands.
 `normalize`/`normalize_` mirror `sqnorm`/`norm`: with
 `<Axes...>` each sub-vector is divided by its norm over those axes (the reduced axes
 are kept as size-1 so the norm broadcasts back). Axes must be distinct and ascending.

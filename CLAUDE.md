@@ -368,10 +368,12 @@ sqnorm(a);  norm(a);                   // Σaᵢ² / √Σaᵢ² over ALL axes. 
                       //   (int->double, mean rule). sqnorm<Acc>/norm<Acc> = leading TYPE = acc+result.
 sqnorm<1>(a); norm<0,2>(a); norm(a,axis<-1>{});  // ...over NAMED AXES -> lower-rank tensor (reduction
                       //   API, like sum; sqnorm<Acc,Axes...>/norm<Acc,Axes...> too).
-sqdist(a,b);  dist(a,b);               // Σ(aᵢ-bᵢ)² / √Σ(aᵢ-bᵢ)² -- == sqnorm(a-b)/norm(a-b), one
-                      //   fused pass, no a-b intermediate. Binary only (no axis form, like dot);
-                      //   sqdist<Acc>/dist<Acc> = leading TYPE = acc+result; dtype<Acc>{}/into(dest)
-                      //   compose same as dot. Also methods: a.sqdist(b), a.dist(b).
+sqdist(a,b);  dist(a,b);               // Σ(aᵢ-bᵢ)² / √Σ(aᵢ-bᵢ)² -- mathematically sqnorm(a-b)/
+                      //   norm(a-b), one fused pass, no a-b intermediate (more accurate than the
+                      //   un-fused spelling for narrow types; bit-exact only for double). Binary
+                      //   only (no axis form, like dot); sqdist<Acc>/dist<Acc> = leading TYPE =
+                      //   acc+result; dtype<Acc>{}/into(dest) compose same as dot. Also methods:
+                      //   a.sqdist(b), a.dist(b).
 a.normalize_();  auto u = normalize(a);// in place a/=norm(a) (floating) / out-of-place unit vector.
                       //   normalize static->stack, dynamic->heap; zero vector -> NaN (no epsilon)
 a.normalize_<1>(); normalize<-1>(a);   // ...over NAMED AXES (keepdim broadcast); axes distinct & ascending
