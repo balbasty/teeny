@@ -672,6 +672,122 @@ template <long... Axes, class Ta,class Ea,class La,storage Oa, class Tb,class Eb
 _TNY_API auto peel_zip(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, const tensor<Tc,Ec,Lc,Oc> & c, axis<Axes...>)
 { return peel_zip<Axes...>(a, b, c); }
 
+/* ================================================================== *
+ *  scan_: in-place sequential fold along ONE axis, batched (peeled)   *
+ *  over every other axis (#254). The recurrence itself is inherently  *
+ *  sequential; the batching over every other axis reuses `peel`'s own *
+ *  incremental cursor, so it stays O(1)/step there.                   *
+ * ================================================================== */
+
+namespace _md {
+
+// axes 0..Rank-1 EXCLUDING Axis, ascending -- the peel list that batches
+// every axis except the one `scan_` walks sequentially.
+template <cs::size_t Rank, cs::size_t Axis>
+_TNY_API constexpr cs::array<long, Rank - 1> scan_complement() {
+    cs::array<long, Rank - 1> out{}; cs::size_t k = 0;
+    for (cs::size_t i = 0; i < Rank; ++i) if (i != Axis) out[k++] = static_cast<long>(i);
+    return out;
+}
+template <cs::size_t Rank, cs::size_t Axis> struct scan_complement_t
+{ static constexpr cs::array<long, Rank - 1> value = scan_complement<Rank, Axis>(); };
+
+// Walk every peeled line (one per batch cell), threading `carry` through
+// `f` in increasing order along the kept axis: `carry = f(carry, line(i))`,
+// `line(i) = carry` (the new carry doubles as the new element -- a running
+// fold in place, e.g. `carry = min(carry + w, line(i))` is exactly a 1-D
+// Felzenszwalb L1 sweep, see examples/distance_transform.cpp's hand-written
+// twin). A reverse sweep is just `scan_<Axis>(t.flip<Axis>(), init, f)`.
+template <cs::size_t A, class Tn, class Carry, class F, cs::size_t... I>
+_TNY_API void scan_lines(Tn & t, Carry init, F f, cs::index_sequence<I...>) {
+    using Idx = typename Tn::index_type;
+    for (auto line : peel<scan_complement_t<Tn::rank(), A>::value[I]...>(t)) {
+        Carry carry = init;
+        const Idx n = static_cast<Idx>(line.shape(0));
+        for (Idx i = 0; i < n; ++i) {
+            carry = f(carry, line(i));
+            line(i) = static_cast<typename Tn::element_type>(carry);
+        }
+    }
+}
+
+} // namespace _md
+
+/** @brief In-place sequential fold ("scan") along axis `Axis`, batched over
+ *         every other axis: `carry = init`, then for each element along
+ *         `Axis` (in increasing order) `carry = f(carry, x)`, `x = carry` --
+ *         the new carry doubles as the new element. `f` is a device-safe
+ *         functor (lambda-free engines, like `map_`/`zip_with_`): `Carry
+ *         operator()(Carry carry, T x) const`. A reverse sweep composes with
+ *         the existing negative-stride view, no separate "direction" flag:
+ *         `scan_<Axis>(t.flip<Axis>(), init, f)` (an rvalue view binds fine --
+ *         `scan_` has both lvalue and rvalue overloads, unlike `peel` this
+ *         doesn't need a named temporary first).
+ *         `scan_<Axis>(t, init, f)` == `scan_(t, axis<Axis>{}, init, f)`. */
+template <long Axis, class T, class E, class L, storage O, class Carry, class F>
+_TNY_API void scan_(tensor<T,E,L,O> & t, Carry init, F f) {
+    static_assert(tensor<T,E,L,O>::rank() >= 1, "scan_: needs rank >= 1");
+    static_assert(_axis_in_range(Axis, tensor<T,E,L,O>::rank()), "scan_: axis out of range");
+    constexpr cs::size_t A = _norm_axis(Axis, tensor<T,E,L,O>::rank());
+    _md::scan_lines<A>(t, init, f, cs::make_index_sequence<tensor<T,E,L,O>::rank() - 1>{});
+}
+// rvalue overload: a temporary VIEW (e.g. `t.flip<Axis>()`) mutates the same
+// underlying storage as any named view would -- only the view OBJECT is a
+// temporary, the data it points at is not. Forwards to the lvalue overload.
+template <long Axis, class T, class E, class L, storage O, class Carry, class F>
+_TNY_API void scan_(tensor<T,E,L,O> && t, Carry init, F f) { scan_<Axis>(t, init, f); }
+template <long Axis, class T, class E, class L, storage O, class Carry, class F>
+_TNY_API void scan_(tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) { scan_<Axis>(t, init, f); }
+template <long Axis, class T, class E, class L, storage O, class Carry, class F>
+_TNY_API void scan_(tensor<T,E,L,O> && t, axis<Axis>, Carry init, F f) { scan_<Axis>(t, init, f); }
+
+/** @brief Out-of-place twin of `scan_`: a fresh dense copy of `t`, scanned.
+ *         Static shape -> stack (host+device); dynamic -> heap (host only,
+ *         like `clone()`, which this is built on). */
+template <long Axis, class T, class E, class L, storage O, class Carry, class F,
+          cs::enable_if_t<tensor<T,E,L,O>::is_static, int> = 0>
+_TNY_API auto scan(const tensor<T,E,L,O> & t, Carry init, F f) {
+    auto out = t.clone();
+    scan_<Axis>(out, init, f);
+    return out;
+}
+template <long Axis, class T, class E, class L, storage O, class Carry, class F,
+          cs::enable_if_t<!tensor<T,E,L,O>::is_static, int> = 0>
+_TNY_HOST auto scan(const tensor<T,E,L,O> & t, Carry init, F f) {
+    auto out = t.clone();
+    scan_<Axis>(out, init, f);
+    return out;
+}
+template <long Axis, class T, class E, class L, storage O, class Carry, class F>
+_TNY_API auto scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) { return scan<Axis>(t, init, f); }
+
+/** @brief `into(dest)` form: write the scanned result into a preallocated
+ *         `dest` (a shape matching `t`'s EXACTLY, checked -- a `static_assert`
+ *         when both are static, `_TNY_CHECK` otherwise; unlike `copy_`'s own
+ *         numpy-style broadcast, `dest` must match rather than merely receive
+ *         a broadcast copy, since `scan_` then walks `dest`'s own axis
+ *         numbering) -- one copy, no fresh allocation beyond that; device-safe.
+ *         `copy_` casts INTO `dest`'s element type FIRST, so if `dest`'s dtype
+ *         differs from `t`'s the whole recurrence then runs in `dest`'s own
+ *         precision (unlike `index_select`/the reductions' own `into(dest)`,
+ *         which only cast the FINAL result). Returns `dest&`. */
+template <long Axis, class T, class E, class L, storage O, class Carry, class F, class D>
+_TNY_API auto & scan(const tensor<T,E,L,O> & t, Carry init, F f, into_t<D> out) {
+    using DstE = typename D::extents_type;
+    static_assert(tensor<T,E,L,O>::rank() == D::rank(), "scan into(dest): rank mismatch");
+    static_assert(_md::ext_static_eq<E, DstE>(cs::make_index_sequence<E::rank()>{}),
+                  "scan into(dest): dest's shape must match the source exactly");
+    for (cs::size_t d = 0; d < tensor<T,E,L,O>::rank(); ++d)
+        _TNY_CHECK(static_cast<long>(out.dest.extent(d)) == static_cast<long>(t.extent(d)),
+                   "scan into(dest): dest's shape must match the source exactly");
+    out.dest.copy_(t);
+    scan_<Axis>(out.dest, init, f);
+    return out.dest;
+}
+template <long Axis, class T, class E, class L, storage O, class Carry, class F, class D>
+_TNY_API auto & scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f, into_t<D> out)
+{ return scan<Axis>(t, init, f, out); }
+
 _TNY_NAMESPACE_END(tny)
 
 #endif // TNY_MD_ITERATE

@@ -231,6 +231,19 @@ peel_zip(x, y, axis<Axes...>{});                 // value form: axis<...> TRAILI
                                                  //   positional tensor -- unlike take_along/peel_at's
                                                  //   leading tag)
 peel_zip<Axes...>(x,y).enumerate();  peel_zip<Axes...>(x,y).subrange(lo,hi);  // same shape as peel's
+
+scan_<Axis>(x, init, f);            // sequential fold along Axis, batched (peeled) over the
+                                    //   rest: carry=init, then carry=f(carry,elem); elem=carry
+                                    //   for each element (increasing order). f is a device-safe
+                                    //   functor (like map_'s convention). Value form: scan_(x,
+                                    //   axis<Axis>{}, init, f) -- single-axis tag right after x.
+                                    //   Reverse sweep: scan_<Axis>(x.flip<Axis>(), init, f) -- a
+                                    //   temporary view binds fine (lvalue + rvalue overloads).
+auto y = scan<Axis>(x, init, f);    // out-of-place: fresh dense copy, scanned (static->stack,
+                                    //   dynamic->heap host-only, built on clone()); x untouched.
+scan<Axis>(x, init, f, into(dest)); // no fresh allocation beyond the copy into dest; returns dest&.
+                                    //   dest must match x's shape EXACTLY (checked -- unlike
+                                    //   copy_'s own broadcast, since scan_ walks dest's own axes)
 ```
 
 See [Views & structure](structure.md#nd-peel-iterate-a-subset-of-axes).

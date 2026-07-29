@@ -74,6 +74,7 @@ TESTS = \
 	$(BUILDDIR)/test_takealong \
 	$(BUILDDIR)/test_subsample \
 	$(BUILDDIR)/test_unfold \
+	$(BUILDDIR)/test_scan \
 	$(BUILDDIR)/test_index_select \
 	$(BUILDDIR)/test_peel_zip \
 	$(BUILDDIR)/test_alias \
