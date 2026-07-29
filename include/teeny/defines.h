@@ -1,6 +1,27 @@
 #ifndef TNY__CORE_DEFINES
 #define TNY__CORE_DEFINES
 
+// MSVC + <Windows.h> (without NOMINMAX): min/max become preprocessor macros,
+// which mangles ANY min/max token followed by '(' regardless of its role --
+// including teeny's own reduction free functions/methods (sum/prod/max/min/
+// mean) and even a parenthesized numeric_limits<T>::min()/max() call in a
+// context where the macro's own body gets substituted in. A downstream TU
+// that dragged in Windows.h before teeny (directly, or transitively via a
+// standard-library header on some toolchain/SDK combination) breaks teeny's
+// own headers, not just its own code. Since NOMINMAX is Microsoft's own
+// documented recommendation and teeny cannot require every consumer defines
+// it first, just undefine both here (once, first thing every teeny header
+// does via this include) rather than push_macro/pop_macro-restoring them at
+// the end -- teeny never needs the ability to interleave a real 2-arg
+// Windows min/max macro invocation between its own header content in the
+// same translation unit.
+#if defined(min)
+#   undef min
+#endif
+#if defined(max)
+#   undef max
+#endif
+
 #ifdef __CUDACC__
 #   define _TNY_HOST         __host__
 #   define _TNY_DEVICE       __device__

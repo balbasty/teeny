@@ -1268,7 +1268,7 @@ public:
     }
 
 private:
-    static constexpr long _ax_all = cs::numeric_limits<long>::min();   // squeeze() sentinel: "all singletons"
+    static constexpr long _ax_all = (cs::numeric_limits<long>::min)();   // squeeze() sentinel: "all singletons"
     // gather arg for axis D when squeezing all singletons: drop a STATIC size-1
     // axis (index 0), keep the rest. (A dynamic axis that is 1 only at run time
     // can't be dropped — the rank must stay static.)

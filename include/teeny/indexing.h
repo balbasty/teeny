@@ -210,7 +210,7 @@ template <class S> struct _is_full_slice<_slice_spec<none_t,none_t,S>> : cs::int
 // compile-time stride when derivable: (source static stride) × (static step).
 // Per source axis we emit `_sdrop` (integer arg -> no output axis), that folded
 // value, or `dynamic_stride` (runtime). `_str_compact` drops the `_sdrop`s.
-inline constexpr cs::int64_t _sdrop = cs::numeric_limits<cs::int64_t>::min() + 1;  // != dynamic_stride
+inline constexpr cs::int64_t _sdrop = (cs::numeric_limits<cs::int64_t>::min)() + 1;  // != dynamic_stride
 template <cs::int64_t V, class S> struct _str_prepend;
 template <cs::int64_t V, cs::int64_t... S> struct _str_prepend<V, strides<S...>> { using type = strides<V, S...>; };
 template <cs::int64_t... V> struct _str_compact { using type = strides<>; };

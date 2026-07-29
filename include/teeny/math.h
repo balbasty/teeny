@@ -1058,7 +1058,7 @@ template <class R> _TNY_API R _reduce_seed_highest() {
     if constexpr (cs::is_same<R, half>::value || cs::is_same<R, bfloat16>::value)
         return static_cast<R>(cs::numeric_limits<float>::infinity());
     else
-        return cs::numeric_limits<R>::max();
+        return (cs::numeric_limits<R>::max)();
 }
 
 // Reductions ACCUMULATE in the accumulator type (`double` by default for small
