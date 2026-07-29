@@ -6,6 +6,10 @@
 using namespace tny;
 namespace cs = cuda::std;
 
+// A buffer big enough for a stride that overflows a 16-bit index (#342, below);
+// at file scope so the 320 KB never lands on the stack.
+static double wide_buf[40002];
+
 static bool close(double a, double b) { return std::fabs(a - b) < 1e-9; }
 static bool closeh(double a, double b) { return std::fabs(a - b) < 5e-3; }   // half precision
 
@@ -214,6 +218,42 @@ int main() {
         ca(i,j,k) = av; cb(i,j,k) = bv; expect += av*bv;
     }
     if (dot(ca, cb) != expect)                       return 57;
+
+    // ---- dot/sqdist across MIXED index widths (#342) ----------------------
+    // The two operands may carry different offset index types (an int32-indexed
+    // `shape32`/`reindex` view dotted with an int64-indexed one). The general
+    // decode engine runs its offset math in the WIDER of the two — the same rule
+    // a mixed-width broadcast follows (#167) — so neither operand's extents or
+    // strides are narrowed into the other's width.
+    double mbuf[8]  = {1,2,3,4,5,6,7,8};
+    double mbuf2[8] = {2,4,6,8,10,12,14,16};
+    auto m64 = wrap(mbuf,  shape<2,4>{});
+    auto n64 = wrap(mbuf2, shape<2,4>{});
+    auto m32 = m64.reindex<cs::int32_t>();                 // int32-indexed twin
+    // both static + C-contiguous -> the #255 unroll (no index math at all)
+    if (dot(m32, n64) != 2.0+8.0+18.0+32.0+50.0+72.0+98.0+128.0)   return 58;
+    // sliced -> NOT ccontiguous -> the general decode path, where the widths meet
+    auto m32s = m32(all, slice(0,2));                      // (2,2), stride (4,1)
+    auto n64s = n64(all, slice(0,2));
+    if (dot(m32s, n64s) != 1*2.0+2*4.0+5*10.0+6*12.0)      return 59;
+    if (sqdist(m32s, n64s) != 1.0+4.0+25.0+36.0)           return 60;
+    if (dot(n64s, m32s) != dot(m32s, n64s))                return 61;   // order-independent
+    // dynamic shape (also decode): int32-indexed vs int64-indexed
+    auto d32 = wrap(mbuf,  shape_as<cs::int32_t,-1,-1>{2,4});
+    auto d64 = wrap(mbuf2, shape<-1,-1>{2,4});
+    if (dot(d32, d64) != 2.0+8.0+18.0+32.0+50.0+72.0+98.0+128.0)   return 62;
+
+    // ...and the WIDE operand's strides survive: a stride that does not fit the
+    // NARROW operand's index type must not be truncated. Shown with an int16 x
+    // int64 pair, which needs only a 40k-element buffer — the int32 x int64
+    // analogue would need a >2^31-element one to exhibit the same truncation.
+    for (long i = 0; i < 40002; ++i) wide_buf[i] = 0.0;
+    wide_buf[0] = 1; wide_buf[1] = 2; wide_buf[40000] = 3; wide_buf[40001] = 4;   // b's four elements
+    double small4[4] = {10, 20, 30, 40};
+    auto a16 = wrap(small4, shape_as<cs::int16_t,2,2>{});          // int16-indexed, contiguous
+    auto bw  = wrap(wide_buf, shape<2,2>{}, {40000, 1});               // int64-indexed, stride > int16
+    if (dot(a16, bw) != 10*1.0 + 20*2.0 + 30*3.0 + 40*4.0)         return 63;
+    if (sqdist(a16, bw) != 81.0+324.0+729.0+1296.0)                return 64;
 
     return 0;
 }

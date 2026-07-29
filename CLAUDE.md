@@ -659,7 +659,11 @@ is generic.
   shape" `static_assert`). The result's offset **index type** is the WIDER of the two
   operands' (`_wider_index_t`, by `sizeof`; tie → first operand), so a mixed-width
   broadcast (int32 view + int64 view) yields an int64 result — lossless, and it stops
-  the engine truncating the wide operand's strides to a narrow result width.
+  the engine truncating the wide operand's strides to a narrow result width. The
+  two-operand REDUCTION engine (`zipreduce_decode_`, behind `dot`/`sqdist`) uses the
+  same `_wider_index_t` for its offset math (#342) even though it yields a scalar,
+  not a tensor — taking the first operand's index type alone narrowed the second's
+  extents/strides (a hard clang error, a silently wrong offset under g++).
   **Contiguous linear fast path (#161, #175):** contiguous elementwise ops replace the
   per-element mixed-radix decode with a flat `for(i) cp[i]=…` loop that auto-vectorizes.
   Two flavours by whether a second array is in play:

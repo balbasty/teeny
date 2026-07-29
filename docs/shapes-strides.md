@@ -131,3 +131,8 @@ type) and avoids silently truncating the wide operand's strides to the narrow wi
 Two equal-width operands are unchanged; note that broadening cannot rescue two `int32`
 operands whose broadcast *span* overflows `int32` (an outer-product stretch) — that
 stays the caller's concern, guarded by `index_fits`/`dispatch_index` at the boundary.
+
+The two-operand reductions `dot(a, b)` and `sqdist(a, b)`/`dist(a, b)` follow the
+same rule: they produce a scalar rather than a tensor, but their offset math also
+runs in the wider of the two index types, so mixing an `int32`-indexed operand with
+an `int64`-indexed one is safe in either order.
