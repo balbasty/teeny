@@ -314,9 +314,11 @@ than erroring). The allocating form copies on the **host**, so the source must
 be host-accessible — gather a `gpu`/`gpu_view` tensor into a preallocated
 device `into(dest)` instead.
 
-Like `take_along`, `index_select` has a value form leading with an `axis<...>{}`
-selector — the one to reach for on a type-dependent receiver (inside a kernel
-template), since it needs no `.template` disambiguator:
+Unlike `take_along`'s leading tag, `index_select` has a value form TRAILING
+with an `axis<...>{}` selector — its only other argument, `idx`, is a single
+fixed-arity positional (not an open pack), so a trailing tag is unambiguous
+and deducible. It's the one to reach for on a type-dependent receiver (inside
+a kernel template), since it needs no `.template` disambiguator:
 
 ```cpp
 verts.index_select(idx, axis<0>{});               // == verts.index_select<0>(idx)
