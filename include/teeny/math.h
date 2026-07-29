@@ -585,10 +585,17 @@ template <class Op, class Out, class A, class B> _TNY_API void oop_to (Out & o, 
 template <class Op, class Out, class A, class S>  _TNY_API void oops_to(Out & o, const A & a, S s, Op op) { scalo<false>(o, a, s, op); }
 template <class Uop, class Out, class A>          _TNY_API void uop_to (Out & o, const A & a, Uop f) { unaryo<false>(o, a, f); }
 
+// static element count of a fully-static extents type (moved ahead of
+// zipreduce_/axreduce, #255: both static fast paths need it).
+template <class E, cs::size_t... D>
+constexpr cs::size_t _static_numel_(cs::index_sequence<D...>) { return (cs::size_t(1) * ... * E::static_extent(D)); }
+template <class E>
+constexpr cs::size_t _static_numel() { return _static_numel_<E>(cs::make_index_sequence<E::rank()>{}); }
+
 /* ---- reduce op(a, b) elementwise into a scalar (dot: op=mul; sqdist: op=zip_sqdiff) --- *
  * One fused pass, NO intermediate tensor materialised. */
 template <class R, class A, class B, class Op, cs::size_t... D>
-_TNY_API R zipreduce_(const A & a, const B & b, Op op, cs::index_sequence<D...>) {
+_TNY_API R zipreduce_decode_(const A & a, const B & b, Op op, cs::index_sequence<D...>) {
     using I = typename A::index_type;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1]  = { a.extent(D)... };
@@ -608,6 +615,38 @@ _TNY_API R zipreduce_(const A & a, const B & b, Op op, cs::index_sequence<D...>)
         acc += op(static_cast<R>(a.data()[oa]), static_cast<R>(b.data()[ob]));
     }
     return acc;
+}
+
+// STATIC fast path (#255): when BOTH operands are static-shaped (their extents
+// already match exactly at compile time -- dot/sqdist each `static_assert` that
+// before ever calling zipreduce_) AND both C-contiguous, linear index `Lin`
+// addresses the SAME logical element in both operands directly -- no per-step
+// decode. Unrolling over the (static, shared) element count then emits
+// straight-line code with no loop back-edge and no runtime %/div, mirroring
+// axreduce's own #218 static fast path (small fixed-rank dot/sqdist -- a
+// posdef cross-channel dot, a stencil tap accumulation -- pay pure loop
+// overhead otherwise).
+template <cs::size_t Lin, class R, class A, class B, class Op>
+_TNY_API R zipreduce_one_(const A & a, const B & b, Op op) {
+    return op(static_cast<R>(a.data()[Lin]), static_cast<R>(b.data()[Lin]));
+}
+template <class R, class A, class B, class Op, cs::size_t... Lin>
+_TNY_API R zipreduce_static_(const A & a, const B & b, Op op, cs::index_sequence<Lin...>) {
+    R acc = R(0);
+    ( (acc = static_cast<R>(acc + zipreduce_one_<Lin, R>(a, b, op))), ... );
+    return acc;
+}
+
+template <class R, class A, class B, class Op, cs::size_t... D>
+_TNY_API R zipreduce_(const A & a, const B & b, Op op, cs::index_sequence<D...> seq) {
+    using EA = typename A::extents_type; using LA = typename A::layout_type;
+    using EB = typename B::extents_type;
+    if constexpr (EA::rank_dynamic() == 0 && EB::rank_dynamic() == 0
+                  && cs::is_same<LA, ccontiguous>::value && cs::is_same<typename B::layout_type, ccontiguous>::value) {
+        return zipreduce_static_<R>(a, b, op, cs::make_index_sequence<_static_numel<EA>()>{});
+    } else {
+        return zipreduce_decode_<R>(a, b, op, seq);
+    }
 }
 
 /* ---- fold a into a scalar with `op`, starting from `init` --------- */
@@ -686,10 +725,8 @@ _TNY_API constexpr typename E::index_type _red_oo(typename E::index_type lin) no
     for (int d = N - 1; d >= 0; --d) { const I ext = static_cast<I>(E::static_extent(d)); const I k = rem % ext; rem /= ext; oo += k * so[d]; }
     return oo;
 }
-template <class E, cs::size_t... D>
-constexpr cs::size_t _static_numel_(cs::index_sequence<D...>) { return (cs::size_t(1) * ... * E::static_extent(D)); }
-template <class E>
-constexpr cs::size_t _static_numel() { return _static_numel_<E>(cs::make_index_sequence<E::rank()>{}); }
+// `_static_numel_`/`_static_numel` moved ahead of `zipreduce_` (#255) -- both
+// static fast paths need it, and zipreduce_ comes first in the file.
 
 // one unrolled step for input linear index `Lin` (a TEMPLATE arg, so the output
 // offset `oo` is bound as a `constexpr` — computed once, at compile time; clang would

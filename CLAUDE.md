@@ -658,6 +658,17 @@ is generic.
   The ONLY case left on the decode is an in-place op with a TENSOR rhs (`add_(b)`/
   `copy_`): `b` may overlap the destination, so it can't vectorize (restrict = UB, a
   plain loop = assumed-overlap). Those stay byte-for-byte unchanged.
+  **Static unroll (#218, #255):** a DIFFERENT mechanism from the contiguous linear
+  fast path above — when the operand SHAPE(S) are fully static (not just
+  contiguous), the per-element decode folds to a compile-time function of the
+  linear index, so the whole loop unrolls via an `index_sequence` fold instead of
+  a runtime loop at all (no back-edge, no runtime `%`/`/`). `axreduce`'s
+  `reduce_axes_static_` (#218, axis reductions: `sum<0>`/`mean<1>`/…) and
+  `zipreduce_static_` (#255, `dot`/`sqdist` — the two-operand case, gated on BOTH
+  operands static AND C-contiguous so the same linear index addresses matching
+  elements in each) both do this; each falls straight back to the runtime-decode
+  engine the moment its own gate fails (any dynamic extent, or — for `zipreduce_`
+  — a non-C-contiguous or mismatched-layout operand).
 - **The gather** (`tensor.h` `_slice_range`, `iterate.h` `gather_peel`): ALL
   view-making ops — `operator()` slicing, `take_along`, `peel` — route through
   one hand-built gather (NO `cs::submdspan`). Per axis: an integer drops it (into
