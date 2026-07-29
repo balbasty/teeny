@@ -1,5 +1,9 @@
 // Vector algebra & geometry helpers (#225): sqnorm / norm, normalize_ / normalize,
 // fused axpy add_(b,alpha)/sub_(b,alpha), and the 3D cross product.
+//
+// Checks 58-64 cover mixed index WIDTHS across dot/sqdist's two operands (#342);
+// checks 65+ cover mixed SIGNEDNESS on the same engine (#355) — a flipped
+// (negative-stride) signed-indexed operand next to an unsigned-indexed one.
 #include <teeny/teeny.h>
 #include <cuda/std/type_traits>
 #include <cmath>
@@ -254,6 +258,69 @@ int main() {
     auto bw  = wrap(wide_buf, shape<2,2>{}, {40000, 1});               // int64-indexed, stride > int16
     if (dot(a16, bw) != 10*1.0 + 20*2.0 + 30*3.0 + 40*4.0)         return 63;
     if (sqdist(a16, bw) != 81.0+324.0+729.0+1296.0)                return 64;
+
+    // ---- dot/sqdist/dist across mixed SIGNEDNESS (#355) -------------------
+    // Width alone does not settle the engine's offset type. When the WIDER operand
+    // is UNSIGNED and the narrower one is SIGNED with a NEGATIVE stride (any
+    // flipped/reversed view), casting that -1 stride into the unsigned type makes it
+    // 4294967295, which zero-extends into the pointer offset instead of stepping
+    // backwards — `dot(flipped_int16_view, uint32_view)` read far off the front of
+    // the buffer and crashed. So a MIXED-signedness pair decodes in a signed type
+    // wide enough for both sides; all-signed and all-unsigned pairs keep the plain
+    // width pick (checks 71-72 below pin that they did not move).
+    // Every expectation is hand-computed, so a "no longer crashes but reads the
+    // wrong element" fix fails these just as loudly as the crash did.
+    double sv[4] = {1, 2, 3, 4};
+    double bvv[4] = {10, 20, 30, 40};
+
+    // (65) the reported repro: flipped int16-indexed operand x uint32-indexed one.
+    {
+        auto fa = wrap(sv + 3, shape_as<cs::int16_t,4>{}, strides<-1>{});   // 4,3,2,1
+        auto ub = wrap(bvv, shape_as<unsigned int,4>{});                    // 10,20,30,40
+        static_assert(cs::is_same<typename decltype(fa)::index_type, cs::int16_t>::value, "flipped operand is int16-indexed");
+        static_assert(cs::is_same<typename decltype(ub)::index_type, unsigned int>::value, "other operand is uint32-indexed");
+        if (dot(fa, ub) != 4*10.0 + 3*20.0 + 2*30.0 + 1*40.0)          return 65;   // 200
+        if (dot(ub, fa) != 200.0)                                      return 66;   // the mirror order
+        if (sqdist(fa, ub) != 36.0 + 289.0 + 784.0 + 1521.0)           return 67;   // 2630
+        if (sqdist(ub, fa) != 2630.0)                                  return 68;
+        if (!close(dist(fa, ub), std::sqrt(2630.0)))                   return 69;
+    }
+
+    // (70) EQUAL width, disagreeing signedness (int32 vs uint32) — the case a
+    //      width-only pick cannot express at all: it must step up to a signed 64-bit
+    //      decode. Note the old tie rule kept the FIRST operand's type, so only the
+    //      unsigned-first order actually crashed; both are pinned here.
+    {
+        auto f32 = wrap(sv + 3, shape32<4>{}, strides<-1>{});               // 4,3,2,1
+        auto u32 = wrap(bvv, shape_as<unsigned int,4>{});
+        if (dot(f32, u32) != 200.0)                                    return 70;
+        if (dot(u32, f32) != 200.0)                                    return 71;
+    }
+
+    // (72) rank-2, flipped along axis 0, against an unsigned-indexed operand.
+    {
+        double pv[4] = {1, 2, 3, 4}, qv[4] = {10, 20, 30, 40};
+        auto fd = wrap(pv + 2, shape_as<cs::int16_t,2,2>{}, strides<-2,1>{});  // (3,4),(1,2)
+        auto uq = wrap(qv, shape_as<unsigned int,2,2>{});
+        if (dot(fd, uq) != 3*10.0 + 4*20.0 + 1*30.0 + 2*40.0)          return 72;   // 220
+        if (dot(uq, fd) != 220.0)                                      return 73;
+    }
+
+    // (74) controls that must NOT move — the two same-signedness families, which
+    //      keep the identical width pick they had before. An all-UNSIGNED pair
+    //      cannot carry a negative stride at all (teeny's flipped views require a
+    //      signed index type), and an all-SIGNED flipped pair was never at risk.
+    {
+        auto us = wrap(sv,  shape_as<unsigned short,4>{});
+        auto ui = wrap(bvv, shape_as<unsigned int,4>{});
+        if (dot(us, ui) != 1*10.0 + 2*20.0 + 3*30.0 + 4*40.0)          return 74;   // 300
+        if (dot(ui, us) != 300.0)                                      return 75;
+        auto fs  = wrap(sv + 3, shape<4>{}, strides<-1>{});             // int64, 4,3,2,1
+        auto p32 = wrap(bvv, shape32<4>{});                             // int32-indexed
+        if (dot(fs, p32) != 200.0)                                     return 76;
+        if (dot(p32, fs) != 200.0)                                     return 77;
+        if (sqdist(fs, p32) != 2630.0)                                 return 78;
+    }
 
     return 0;
 }

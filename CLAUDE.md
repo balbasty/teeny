@@ -659,11 +659,7 @@ is generic.
   shape" `static_assert`). The result's offset **index type** is the WIDER of the two
   operands' (`_wider_index_t`, by `sizeof`; tie → first operand), so a mixed-width
   broadcast (int32 view + int64 view) yields an int64 result — lossless, and it stops
-  the engine truncating the wide operand's strides to a narrow result width. The
-  two-operand REDUCTION engine (`zipreduce_decode_`, behind `dot`/`sqdist`) uses the
-  same `_wider_index_t` for its offset math (#342) even though it yields a scalar,
-  not a tensor — taking the first operand's index type alone narrowed the second's
-  extents/strides (a hard clang error, a silently wrong offset under g++).
+  the engine truncating the wide operand's strides to a narrow result width.
   `bzip_` itself decodes its offsets in `_offset_int_t<C::index_type, Ia, Ib>` — a type
   that holds every extent/stride value ALL THREE participants can produce (#346).
   Out-of-place the result already carries the wider of the two operands (no-op), but
@@ -686,6 +682,22 @@ is generic.
   (`index_fits`). `_wider_int_t`/`_wider_index_t` stay the pure WIDTH pick: they name
   the index type a fresh broadcast RESULT carries (non-negative extents, positive
   strides), not the type an engine may decode offsets in.
+  The two-operand REDUCTION engine (`zipreduce_decode_`, behind `dot`/`sqdist`/`dist`)
+  decodes in that SAME `_offset_int_t`, just over TWO participants instead of three
+  (`_offset_int_t<Ia, Ib>` — it writes no tensor, only a scalar accumulator in the
+  caller's reduce type, so there is no destination index type in play). It first took
+  the first operand's index type alone (truncating the second's: a hard clang error, a
+  silently wrong offset under g++, #342), then the width-only `_wider_index_t` (#342's
+  fix) — which still zero-extended a flipped operand's negative stride whenever the
+  OTHER operand was unsigned and wider, i.e. `dot(flipped_int16_view, uint32_view)`
+  segfaulted (#355). For an all-signed or all-unsigned pair `_offset_int_t<Ia,Ib>` IS
+  `_wider_index_t` (`_widest_int` of two left-folds to exactly `_wider_int_t`, same tie
+  rule), so every non-mixed instantiation is byte-identical. `zipreduce_static_` (the
+  #255 static unroll) is exempt by construction, not by luck: it is gated on BOTH
+  operands being fully static AND `ccontiguous`, it addresses `data()[Lin]` with a
+  compile-time `cs::size_t` linear index, and it never touches an `index_type` at all —
+  and a `ccontiguous` mapping's strides are products of extents, so a negative stride
+  (which needs teeny's `strides<...>` layout anyway) cannot reach it.
   **Contiguous linear fast path (#161, #175):** contiguous elementwise ops replace the
   per-element mixed-radix decode with a flat `for(i) cp[i]=…` loop that auto-vectorizes.
   Two flavours by whether a second array is in play:
