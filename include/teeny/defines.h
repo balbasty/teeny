@@ -1,26 +1,32 @@
-#ifndef TNY__CORE_DEFINES
-#define TNY__CORE_DEFINES
-
-// MSVC + <Windows.h> (without NOMINMAX): min/max become preprocessor macros,
-// which mangles ANY min/max token followed by '(' regardless of its role --
-// including teeny's own reduction free functions/methods (sum/prod/max/min/
-// mean) and even a parenthesized numeric_limits<T>::min()/max() call in a
-// context where the macro's own body gets substituted in. A downstream TU
-// that dragged in Windows.h before teeny (directly, or transitively via a
-// standard-library header on some toolchain/SDK combination) breaks teeny's
-// own headers, not just its own code. Since NOMINMAX is Microsoft's own
-// documented recommendation and teeny cannot require every consumer defines
-// it first, just undefine both here (once, first thing every teeny header
-// does via this include) rather than push_macro/pop_macro-restoring them at
-// the end -- teeny never needs the ability to interleave a real 2-arg
-// Windows min/max macro invocation between its own header content in the
-// same translation unit.
+// MSVC + <Windows.h> (without NOMINMAX): min/max/interface become preprocessor
+// macros (min/max -> 2-arg expressions, interface -> struct), which mangles
+// any of those tokens followed by '(' or used as an identifier -- including
+// teeny's own reduction free functions/methods (sum/prod/max/min/mean, both
+// teeny's own public identifiers) and a parenthesized numeric_limits<T>::
+// min()/max() call. CCCL's own headers (diagnostic.h's _CCCL_PUSH_MACROS/
+// _CCCL_POP_MACROS) push_macro/pop_macro these three around their own content,
+// which means each RESTORES the Windows definitions at the end of every
+// <cuda/std/...> header -- and every teeny header includes its own <cuda/std/
+// ...> headers before (re-)including this one. Since NOMINMAX is Microsoft's
+// own documented recommendation and teeny cannot require every consumer
+// defines it first, just undefine all three here every time -- deliberately
+// OUTSIDE this file's own include guard, so it reruns on every one of teeny's
+// ~13 `#include <teeny/defines.h>` sites, right after that header's own CCCL
+// includes may have just restored them. No push_macro/pop_macro restore of
+// our own -- teeny never needs to interleave a real Windows min/max/interface
+// use between its own header content in the same translation unit.
 #if defined(min)
 #   undef min
 #endif
 #if defined(max)
 #   undef max
 #endif
+#if defined(interface)
+#   undef interface
+#endif
+
+#ifndef TNY__CORE_DEFINES
+#define TNY__CORE_DEFINES
 
 #ifdef __CUDACC__
 #   define _TNY_HOST         __host__

@@ -1224,15 +1224,6 @@ _TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {        
     return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(_md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})), tags...); }
 _TNY_RED_AXIS_CORE(sum,    R(0),                 r_add)
 _TNY_RED_AXIS_CORE(prod,   R(1),                 r_mul)
-// Defensive redo of defines.h's min/max undef, immediately before NAME is passed
-// a bare `max`/`min` below -- see tensor.h's matching comment for why this is
-// needed a second time despite defines.h's own (once-per-TU) undef.
-#ifdef min
-#   undef min
-#endif
-#ifdef max
-#   undef max
-#endif
 _TNY_RED_AXIS_CORE(max,    _reduce_seed_lowest<R>(),  r_max)
 _TNY_RED_AXIS_CORE(min,    _reduce_seed_highest<R>(), r_min)
 _TNY_RED_AXIS_CORE(sqnorm, R(0),                 r_addsq)   // Σaᵢ² over the named axes (result type = T, like sum)
@@ -1320,13 +1311,6 @@ _TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
         else                   return _md::_##NAME##_axed<RAcc, AxisTag>::call(a);                       \
     }                                                                                                      \
 }
-// (same defensive redo as above: max/min pass through this macro too)
-#ifdef min
-#   undef min
-#endif
-#ifdef max
-#   undef max
-#endif
 _TNY_RED_TAGGED(sum) _TNY_RED_TAGGED(prod) _TNY_RED_TAGGED(max) _TNY_RED_TAGGED(min) _TNY_RED_TAGGED(sqnorm)
 // _TNY_RED_TAGGED(mean)/(norm) are invoked after their own axis-core definitions
 // below (same shape, so the macro applies unchanged); #undef after norm's.
