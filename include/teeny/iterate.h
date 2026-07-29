@@ -485,14 +485,21 @@ struct peel_zip_range {
     // operand's cell) -- built once per step from all operands together. Needs
     // exactly `OE::rank()` values (one per KEPT axis; peeled axes are already
     // dropped from OE's own type), so this walks ALL R axes but only records the
-    // kept ones (mirrors `gather_peel`'s own k-counting).
+    // kept ones (mirrors `gather_peel`'s own k-counting). UN-floored, matching
+    // `gather_peel` (iterate.h): when every axis is peeled (a rank-0 cell), `OE`
+    // is `cs::extents<Idx>` (rank 0), whose constructor only accepts an array of
+    // size EXACTLY 0 -- a floored `cs::array<Idx,1>` has no viable constructor
+    // there. The `ea[k]` write below is inside `if constexpr (... < 0)`, which is
+    // discarded for every axis in the all-peeled case, so a size-0 array is never
+    // indexed (found + fixed via review: peel_zip<Axes...> spanning every axis
+    // failed to compile before this fix, #327).
     template <cs::size_t A>
-    _TNY_API void _oe_axis(cs::array<Idx, OE::rank() ? OE::rank() : 1> & ea, cs::size_t & k) const {
+    _TNY_API void _oe_axis(cs::array<Idx, OE::rank()> & ea, cs::size_t & k) const {
         if constexpr (peel_pos<A, Seq>::value < 0) { ea[k] = zip_bc_ext<R, Idx>(A, srcs, Ks{}); ++k; }
     }
     template <cs::size_t... A>
     _TNY_API OE _oe(cs::index_sequence<A...>) const {
-        cs::array<Idx, OE::rank() ? OE::rank() : 1> ea{}; cs::size_t k = 0;
+        cs::array<Idx, OE::rank()> ea{}; cs::size_t k = 0;
         ( _oe_axis<A>(ea, k), ... );
         return OE(ea);
     }

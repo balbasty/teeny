@@ -93,5 +93,13 @@ int main() {
     for (auto [x, y] : peel_zip<-2>(a, b)) { (void)x; (void)y; ++n; }   // axis -2 == axis 0 (rank 2)
     if (n != 3) return 19;
 
+    // ---- peeling EVERY axis -> rank-0 cells (pure element-wise lock-step) ---
+    n = 0;
+    double sum = 0;
+    for (auto [x, y] : peel_zip<0,1>(a, b)) { sum += static_cast<double>(x) + static_cast<double>(y); ++n; }
+    if (n != 12) return 20;
+    double expect = 0; for (long i=0;i<3;++i) for (long j=0;j<4;++j) expect += a(i,j) + b(i,j);
+    if (sum != expect) return 21;
+
     return 0;
 }

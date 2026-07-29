@@ -279,3 +279,9 @@ for (auto [va,vb,vc] : peel_zip(a, b, c, axis<0>{})) { ... }       // == peel_zi
 for (auto [m, cell] : peel_zip<0>(a, b).enumerate()) { ... }       // m[d] = coord of peeled axis d
 for (auto cell : peel_zip<0>(a, b).subrange(lo, hi)) { ... }       // a [lo,hi) chunk
 ```
+
+Every operand must be **all-mutable or all-const** — there's no mixed-mutability
+overload. Passing one non-const and one const tensor silently resolves to the
+all-const overload (so writing through the "mutable" one is a compile error at
+the write site, not a runtime surprise, but it's easy to miss why); write into a
+separate destination, or make every operand `const`, if you don't need to mutate.
