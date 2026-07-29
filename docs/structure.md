@@ -268,11 +268,12 @@ auto w     = local<double, shape<4,1>>();   // one scalar weight per triangle
 for (auto [v, wt] : peel_zip<0>(verts, w)) { ... }   // wt's extent-1 axis broadcasts against v's 3 coords
 ```
 
-Composes with `axis<...>{}` (trailing, after every positional tensor — a
-`peel_zip`-specific placement, unlike `take_along`/`peel_at`'s leading tag, since
-`peel_zip`'s tensor arguments are each a single fixed-arity positional rather than
-an open pack), `.enumerate()` (yields `(multi_index, tuple)`, same shape as the
-single-tensor form), and `.subrange(lo,hi)` for chunked/threaded sweeps:
+Composes with `axis<...>{}` (trailing, after every positional tensor — like
+`peel_at`'s own tag, and unlike `take_along`'s leading one, since `peel_zip`'s
+and `peel_at`'s only other arguments are each fixed-arity — `peel_at`'s a
+single index, `peel_zip`'s a fixed run of tensors — rather than `take_along`'s
+open per-axis pack), `.enumerate()` (yields `(multi_index, tuple)`, same shape
+as the single-tensor form), and `.subrange(lo,hi)` for chunked/threaded sweeps:
 
 ```cpp
 for (auto [va,vb,vc] : peel_zip(a, b, c, axis<0>{})) { ... }       // == peel_zip<0>(a,b,c)
