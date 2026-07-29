@@ -73,7 +73,10 @@ namespace _md {
 // `red_ext<D,E,Axes...>()...` inside `_compact<...>`'s argument list silently
 // fails to specialize on real MSVC (part of #296's investigation). A class
 // template's `::value` is an ordinary non-type template argument, which every
-// compiler folds the same way.
+// compiler folds the same way. (A SIBLING defect, not this one: the "type
+// pack + deduced pack" trap documented in CLAUDE.md, #334 -- both converge on
+// the same class-template-::value fix shape, which is why they're easy to
+// conflate.)
 template <cs::size_t D, class E, long... Axes>
 struct _red_ext_v {
     static constexpr cs::size_t value =

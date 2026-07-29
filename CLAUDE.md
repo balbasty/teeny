@@ -719,6 +719,30 @@ is generic.
   MSVC for the contiguous layouts. This is CCCL's own upstream tradeoff, not a
   teeny bug — `test_tensor.cpp`'s `sizeof` assertions are `#if`'d out on MSVC
   for exactly this reason; don't try to "fix" that guard.
+- **The "type pack + deduced pack" MSVC trap (#334):** confirmed once so far,
+  at `peel_zip`'s `zip_oe_` (`iterate.h`). A function template that is only
+  ever DECLARED — never defined, used purely for `decltype()` extraction —
+  fails on real MSVC with `error C2672` when its template parameter list mixes
+  a TYPE parameter pack with a FURTHER deduced pack, e.g.
+  `template <class... Es, cs::size_t... A> ... f(cs::index_sequence<A...>);`
+  — even though GCC and Clang accept the identical code. Fix: bundle the
+  offending pack into a single tag type (`es_list<Es...>` in `iterate.h`) and
+  extract it via a class-template PARTIAL SPECIALIZATION's `::value`, so the
+  declared-only template itself only ever has ONE genuine pack (the deduced
+  one). This is a SIBLING of, not the same as, the NTTP-pack-call quirk
+  documented at `_red_ext_v` in `tensor.h` (a function CALL can't be used
+  inline as a non-type template argument pack element on MSVC either) — both
+  converge on the same "route through a class-template `::value`" fix shape,
+  which is why it's easy to conflate them, but they are two distinct defects.
+  `_red_ext_v`/`reduced_ext_` and `index_select`'s `_repl_ext_v` use that same
+  `::value` shape for the OTHER (NTTP-pack-call) defect, not this one —
+  `reduced_ext_` in fact still ships an UNBUNDLED leading non-type pack
+  (`long... Axes`) alongside its deduced `cs::size_t... D` pack and compiles
+  fine on MSVC, which is exactly the evidence this trap is specific to a TYPE
+  pack, not any two-pack combination. Write any new helper of this shape (a
+  pack-of-packs decltype-extraction template mixing a TYPE pack specifically)
+  through the tag-bundling pattern from the start, rather than
+  discovering the failure on a real-MSVC CI round-trip.
 
 ## Adding a feature — checklist
 
