@@ -386,12 +386,27 @@ template <cs::size_t D, cs::size_t R, class L, class E> constexpr cs::int64_t bc
 // shared (broadcast) kept-axis extents type: ONE static extents type reused by
 // EVERY operand's view at a zip step (peeled axes drop via `_drop_axis`, same
 // sentinel `gather_peel` uses).
+//
+// `zip_oe_` needs the Es... pack (one extents type per operand) AND its own
+// deduced A... pack (one entry per broadcast axis) at once. A function template
+// declared (never defined, used only via decltype) with a TYPE pack followed by
+// a further DEDUCED pack in the same parameter list hits real-MSVC C2672 ("no
+// matching overloaded function found") even though GCC/Clang accept it fine
+// (confirmed on Windows CI, #327) -- `es_list<Es...>` bundles the operand-extents
+// pack into ONE type first, so `zip_oe_` itself keeps only the single deduced
+// pack, mirroring the already-MSVC-proven shape of `reduced_ext_`/`_red_ext_v`
+// (math.h/tensor.h) -- a class template's `::value`, not a function call fed a
+// pack directly, is the pattern real MSVC tolerates here.
+template <class... Es> struct es_list {};
+template <cs::size_t A, class Seq, cs::size_t R, class EsList> struct peel_zip_ext_v;
 template <cs::size_t A, class Seq, cs::size_t R, class... Es>
-constexpr cs::size_t peel_zip_ext() { return peel_pos<A, Seq>::value >= 0 ? _drop_axis : bcn_sext<A, R, Es...>(); }
-template <class Idx, class Seq, cs::size_t R, class... Es, cs::size_t... A>
-typename _compact<Idx, peel_zip_ext<A, Seq, R, Es...>()...>::type zip_oe_(cs::index_sequence<A...>);
+struct peel_zip_ext_v<A, Seq, R, es_list<Es...>> {
+    static constexpr cs::size_t value = peel_pos<A, Seq>::value >= 0 ? _drop_axis : bcn_sext<A, R, Es...>();
+};
+template <class Idx, class Seq, cs::size_t R, class EsList, cs::size_t... A>
+typename _compact<Idx, peel_zip_ext_v<A, Seq, R, EsList>::value...>::type zip_oe_(cs::index_sequence<A...>);
 template <class Idx, class Seq, cs::size_t R, class... Es>
-using zip_oe_t = decltype(zip_oe_<Idx, Seq, R, Es...>(cs::make_index_sequence<R>{}));
+using zip_oe_t = decltype(zip_oe_<Idx, Seq, R, es_list<Es...>>(cs::make_index_sequence<R>{}));
 
 // per (broadcast) axis, per operand: PEELED -> accumulate this operand's offset
 // contribution from the shared decoded coordinate; KEPT -> record this operand's
