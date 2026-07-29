@@ -1500,6 +1500,17 @@ public:
 #define _TNY_RED_TAGGED_IF(E, CMP)                                                                          \
     class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                                       \
     cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value CMP 0, int> = 0
+// Defensive redo of defines.h's min/max undef, immediately before the ONLY place
+// in this file where NAME is passed a bare `max`/`min` (below): whatever caused
+// them to still be live macros on Windows CI despite defines.h's own undef (a
+// later <cuda/std/...> re-include reinstating them?) can't have happened between
+// THIS line and the macro invocations right after it.
+#ifdef min
+#   undef min
+#endif
+#ifdef max
+#   undef max
+#endif
 #define _TNY_RED_METHOD_DECL(NAME)                                                                          \
     template <class Acc = void> _TNY_API auto NAME() const;                                                 \
     template <long... Ax, class... Tags, _TNY_RED_AXIS_IF(Shape, ==)> _TNY_API  decltype(auto) NAME(Tags... tags) const; \
