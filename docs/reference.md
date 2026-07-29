@@ -377,6 +377,12 @@ a.mul(2.0, into(y));   // compile error: dest's shape must match the source's
 exp(a, into(y));       // same
 ```
 
+**`y` must not self-overlap** either — no `extent > 1` axis with stride 0 (only a
+hand-written `wrap(ptr, e, strides-with-a-0)` makes such a view). It would take many
+results into one element and keep just the last, so a debug-time check rejects it,
+for every `into(dest)` producer alike — the same guard that rejects an in-place write
+into one (see [Math & broadcasting](math.md#in-place-ops-mutate-this)).
+
 `y` may
 also carry a different offset **index type** from the operands' (a narrower one
 included) — the widening needed to walk both safely happens inside the engine, in

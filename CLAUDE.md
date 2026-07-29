@@ -377,6 +377,10 @@ auto c = a.add(b,alpha); a.sub(b,alpha);  // FUSED out-of-place axpy: a +/- alph
 //   operands broadcast, never the dest), the broadcast shape for a tensor rhs. Scalar-rhs/
 //   unary: compile error when both shapes are static, debug-time _TNY_CHECK otherwise
 //   (#357); tensor rhs: the _TNY_CHECK (its static gate compares the two OPERANDS, not y).
+//   y must also NOT SELF-OVERLAP (no extent>1 axis with stride 0): it would take many
+//   results into one element and keep the last. Debug-checked for EVERY producer since
+//   #364 (before that only the tensor-rhs one — check_dest_no_overlap was missing from
+//   scalo_/unaryo_, so a.mul(2.0,into(y))/exp(a,into(y)) were silently wrong).
 a.add(b, into(y)); a.mul(2.0, into(y)); a.add(b, alpha, into(y));  // elementwise / scalar / fused
 exp(a, into(y)); sqrt(a, into(y)); minimum(a,b,into(y)); clamp(a,lo,hi,into(y));
 normalize(a, into(y)); cross(a, b, into(N.at(i)));   // cross into a slot (the "crossto")
@@ -762,6 +766,20 @@ is generic.
   still vectorizes. `iota_` is order-DEPENDENT so it keeps the exact-C-order
   `is_contiguous()` gate. `scal_`'s is also gated to `w_set` so atomic scalars keep the
   decode; `unary` runs `check_dest_no_overlap` (like `scal_`/`iota_`).
+  **`check_dest_no_overlap` covers every writing engine (#364).** A destination axis
+  with extent>1 AND stride 0 aliases: many indices name one element. `bzip`, `scal_`,
+  `iota_` and the in-place `unary` have checked for it all along; `scalo_`/`unaryo_`
+  did not, and their one un-guarded reachable caller is a user-supplied `into(dest)`
+  (their allocating producers `oops`/`uop_out` build a fresh dense destination, and
+  the in-place `unary` checks before delegating). So the SAME mistake aborted with a
+  diagnostic through `a.add(a, into(y))` and passed silently through
+  `a.mul(2.0, into(y))` / `exp(a, into(y))`, writing 8 results into 2 slots. Both
+  engines now call it next to #357's extent guard. NOT an OOB class (every write is
+  inside the destination's own buffer) — a silently-wrong-result one, and the message
+  now names both symptoms, since a read-modify-write DOUBLE-COUNTS while these two
+  do a plain store and so DISCARD all but the last writer. Destination only, so a
+  broadcasting RHS and an overlapping SOURCE read by `into(dest)` stay legal; the
+  check is `_TNY_CHECK`, so under `-DNDEBUG` the object code is byte-identical.
   The ONLY case left on the decode is an in-place op with a TENSOR rhs (`add_(b)`/
   `copy_`): `b` may overlap the destination, so it can't vectorize (restrict = UB, a
   plain loop = assumed-overlap). Those stay byte-for-byte unchanged.

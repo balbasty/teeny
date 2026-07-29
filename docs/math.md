@@ -28,14 +28,23 @@ a.minimum_(b);  a.maximum_(2.0);        // running min/max update (#325): *this 
                                         //   nearest-distance idiom: best.minimum_(candidate)
 ```
 
-!!! warning "Don't write in place through a self-overlapping view"
+!!! warning "Don't write through a self-overlapping view"
     `wrap` trusts the strides you pass, so a **stride-0** axis (or a stride smaller
     than an inner extent) makes a view where several indices alias the same element.
-    *Reading* one is fine — that's how a broadcast RHS works — but an in-place
-    **write** into such a destination applies the update to the same element
-    repeatedly (`v.add_(b)` double-counts). A host-debug check rejects an in-place
-    write whose destination has an `extent > 1` axis with stride 0; `clone()` to a
-    dense tensor first if you need to write.
+    *Reading* one is fine — that's how a broadcast RHS works — but **writing** into
+    one is wrong either way round:
+
+    - an in-place write applies the update to that one element repeatedly
+      (`v.add_(b)` double-counts);
+    - an out-of-place [`into(dest)`](#writing-into-a-preallocated-destination-intodest)
+      write stores many results into the one slot, so all but the last are silently
+      discarded.
+
+    A host-debug check rejects **any** write whose destination has an `extent > 1`
+    axis with stride 0 — the in-place ops (`v.add_(b)`, `v.mul_(2.0)`, `v.exp_()`,
+    `v.iota_()`, …) *and* every `into(dest)` producer (`a.add(b, into(v))`,
+    `a.mul(2.0, into(v))`, `exp(a, into(v))`, `clamp(a, lo, hi, into(v))`, …).
+    `clone()` to a dense tensor first if you need to write.
 
 `atomic_add_`/`atomic_sub_` accumulate a delta **atomically**, on device
 (`atomicAdd`) and on the host (`cuda::std::atomic_ref`) alike — the
@@ -189,6 +198,11 @@ auto y = zeros(shape<2,2>{});
 a.mul(2.0, into(y));          // compile error: dest's shape must match the source's
 exp(a, into(y));              // same
 ```
+
+`y` must also not **self-overlap** — no `extent > 1` axis with stride 0. Such a `y`
+would take many results into one element and keep only the last; a debug-time check
+rejects it, for every `into(dest)` producer alike (see the warning
+[above](#in-place-ops-mutate-this)).
 
 Reductions take `into(dest)` too. A **full** reduction (all axes) writes its
 scalar into a **rank-0** destination; an **axis** reduction copies its lower-rank
