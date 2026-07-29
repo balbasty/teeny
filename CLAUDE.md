@@ -465,8 +465,12 @@ for (auto [a,b,c] : peel_zip<0>(x,y,z)) f(a,b,c);  // one cs::tuple<ViewX,ViewY,
                       //   return-type bifurcation on arity (mirrors python's own zip() being its
                       //   own name). Operands may differ in shape if BROADCAST-compatible (numpy
                       //   right-align, same rule a+b uses); Axes... name axes in the BROADCAST
-                      //   rank's numbering (max of the operands' own ranks). Decodes fresh each
-                      //   step (no incremental cursor yet — a perf follow-up, not #327's scope).
+                      //   rank's numbering (max of the operands' own ranks). Operands may also
+                      //   differ in INDEX TYPE: the cells carry `_offset_int_t` over the whole
+                      //   operand pack (#362) — wide enough, and on mixed signedness SIGNED
+                      //   enough, for every operand, so a flipped operand zipped with an
+                      //   unsigned-indexed one steps backwards instead of wrapping. Decodes fresh
+                      //   each step (no incremental cursor yet — a perf follow-up, not #327's scope).
 for (auto [a,b] : peel_zip(x, y, axis<0>{})) f(a,b);   // value form: axis<...> TRAILING (after
                       //   every positional tensor — unlike take_along/peel_at's LEADING tag,
                       //   which disambiguates a second variadic pack there; peel_zip's tensor
@@ -703,10 +707,23 @@ is generic.
   and a `ccontiguous` mapping's strides are products of extents, so a negative stride
   (which needs teeny's `strides<...>` layout anyway) cannot reach it.
   The SAME `_offset_int_t` is what the other multi-tensor engines decode in (#353) —
-  every engine that walks more than one tensor uses it, so there is one rule, not five:
+  every engine that walks more than one tensor uses it, so there is one rule, not six:
   `scalo_` (scalar rhs, `c(i)=op(a(i),s)`) and `unaryo_` (`c(i)=uop(a(i))`) over
-  `<C::index_type, A::index_type>`, and `allclose_` over `<A::index_type,
-  B::index_type>`. `scalo_`/`unaryo_` are only reachable narrow through a caller's
+  `<C::index_type, A::index_type>`, `allclose_` over `<A::index_type,
+  B::index_type>`, and — the one ITERATION engine in the family — `peel_zip_range`
+  (`iterate.h`) over its whole operand pack, `_offset_int_t` being variadic because
+  its rule is stated over a participant SET (#362; the 2- and 3-tensor `peel_zip`
+  forms need no separate spelling). `peel_zip` predates the chain by a day and so
+  was never audited into it: it picked `cs::common_type_t` instead, which applies
+  the usual arithmetic conversions, so at EQUAL width the UNSIGNED type wins
+  (`common_type_t<int32_t,uint32_t>` is `uint32_t`) — not even a width mistake, the
+  one shape `_wider_index_t` could not make. It is also the one site where the
+  decode type is the CELL's type as well, and that second half is a bug in its own
+  right: a `peel_zip` cell is a VIEW of its operand, not a fresh allocation, so
+  unlike a broadcast RESULT (the case `_wider_index_t`'s pure width pick is written
+  for) its kept-axis strides can legitimately be NEGATIVE, and an unsigned index
+  type cannot represent them even where the base pointer comes out right. One
+  substitution fixes both halves. `scalo_`/`unaryo_` are only reachable narrow through a caller's
   `into(dest)` (their allocating producers build `c` from `a`'s own extents type) and
   were not even silent — their initializers lacked the `static_cast<I>`s, so g++ warned
   and clang rejected them; `allclose_` casts, so it was silent like `bzip_`. `scalo_`/

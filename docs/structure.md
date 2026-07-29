@@ -268,6 +268,13 @@ auto w     = local<double, shape<4,1>>();   // one scalar weight per triangle
 for (auto [v, wt] : peel_zip<0>(verts, w)) { ... }   // wt's extent-1 axis broadcasts against v's 3 coords
 ```
 
+The operands need not share an **index type** either (the `Idx` in
+`shape_as<Idx, ...>`). The cells `peel_zip` hands you carry one index type wide
+enough — and, where the operands disagree on signedness, *signed* enough — to
+address every operand exactly, so a reversed view (from `flip`, or a negative
+step) zipped against an unsigned-indexed tensor still steps backwards rather
+than wrapping to a huge positive offset.
+
 Composes with `axis<...>{}` (trailing, after every positional tensor — like
 `peel_at`'s own tag, and unlike `take_along`'s leading one, since `peel_zip`'s
 and `peel_at`'s only other arguments are each fixed-arity — `peel_at`'s a
