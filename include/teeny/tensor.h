@@ -922,6 +922,55 @@ public:
     _TNY_API auto subsample(axis<Axes...>, K k, Starts... starts) const noexcept { return subsample<Axes...>(k, starts...); }
 
 private:
+    // whether a compile-time-known (size, step) pair is in range for axis A —
+    // only checkable when the axis extent AND both size/step are static; a
+    // dynamic participant defers entirely to unfold's runtime _TNY_CHECK.
+    template <cs::size_t A, class Sz, class St> static _TNY_API constexpr bool _unfold_static_ok() {
+        if constexpr (_shape_static_extent<Shape>(A) == cs::dynamic_extent || !_is_ic<Sz>::value || !_is_ic<St>::value) return true;
+        else return static_cast<long>(Sz::value) >= 1 && static_cast<long>(St::value) >= 1
+                  && static_cast<long>(Sz::value) <= static_cast<long>(_shape_static_extent<Shape>(A));
+    }
+public:
+    /**
+     * @brief Sliding/strided window along axis `Axis` (pytorch `Tensor.unfold`):
+     *        appends a NEW trailing axis of width `size`, stepped by `step`
+     *        along `Axis` -> a rank-(N+1) view. `Axis`'s own extent shrinks to
+     *        the window COUNT `(extent(Axis) - size) / step + 1`, e.g.
+     *        `t.unfold<0>(K, s)` == pytorch's `t.unfold(0, K, s)`. `size`/`step`
+     *        accept a runtime value OR a compile-time one (`Int<k>()`), folding
+     *        the output extent/stride to static where derivable (like `slice()`).
+     *        ND windows compose by chaining: `t.unfold<0>(K0,s0).unfold<1>(K1,s1)`
+     *        appends TWO window axes at the end (nitorch's nd-unfold pattern) —
+     *        no separate nd-unfold primitive is needed.
+     */
+    template <long Axis, class Sz, class St = cs::integral_constant<long,1>>
+    _TNY_API auto unfold(Sz size, St step = St{}) noexcept {
+        static_assert(_axis_in_range(Axis, rank()), "unfold: axis out of range");
+        constexpr cs::size_t A = _norm_axis(Axis, rank());
+        static_assert(_unfold_static_ok<A, Sz, St>(), "unfold: size must be in [1, extent(Axis)] and step >= 1");
+        _TNY_CHECK(static_cast<index_type>(size) >= index_type(1) && static_cast<index_type>(step) >= index_type(1)
+                   && static_cast<index_type>(size) <= extent(A), "unfold: size must be in [1, extent(Axis)] and step >= 1");
+        return as_tensor<storage_view_of(O)>(_detail::unfold_md<A>(mdspan(), size, step, cs::make_index_sequence<rank()>{}));
+    }
+    template <long Axis, class Sz, class St = cs::integral_constant<long,1>>
+    _TNY_API auto unfold(Sz size, St step = St{}) const noexcept {
+        static_assert(_axis_in_range(Axis, rank()), "unfold: axis out of range");
+        constexpr cs::size_t A = _norm_axis(Axis, rank());
+        static_assert(_unfold_static_ok<A, Sz, St>(), "unfold: size must be in [1, extent(Axis)] and step >= 1");
+        _TNY_CHECK(static_cast<index_type>(size) >= index_type(1) && static_cast<index_type>(step) >= index_type(1)
+                   && static_cast<index_type>(size) <= extent(A), "unfold: size must be in [1, extent(Axis)] and step >= 1");
+        return as_tensor<storage_view_of(O)>(_detail::unfold_md<A>(mdspan(), size, step, cs::make_index_sequence<rank()>{}));
+    }
+    /** @brief Value form: `t.unfold(Int<0>(), K, s)` == `t.unfold<0>(K, s)` —
+     *         a single-axis selector (like `flip`/`squeeze`/`unsqueeze`'s own
+     *         `Int<k>()` twin), so no `.template` is needed on a dependent
+     *         receiver. */
+    template <class I, class Sz, class St = cs::integral_constant<long,1>, cs::enable_if_t<_is_ic<I>::value, int> = 0>
+    _TNY_API auto unfold(I, Sz size, St step = St{})       noexcept { return unfold<static_cast<long>(I::value)>(size, step); }
+    template <class I, class Sz, class St = cs::integral_constant<long,1>, cs::enable_if_t<_is_ic<I>::value, int> = 0>
+    _TNY_API auto unfold(I, Sz size, St step = St{}) const noexcept { return unfold<static_cast<long>(I::value)>(size, step); }
+
+private:
     // Build the runtime index_select output extents: axis `Axis`'s extent is
     // `newExt` (the gather index tensor's own numel), every other axis copies
     // this tensor's own extent.

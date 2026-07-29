@@ -141,6 +141,13 @@ x.subsample<Axes...>(k, starts...);  // coloured/strided sub-lattice: take_along
                     //   none,k) per named axis, one shared step k, per-axis start; k/starts
                     //   accept runtime or Int<> (folds static). Value form: x.subsample(
                     //   axis<Axes...>{}, k, starts...) -- same LEADING placement as take_along's
+x.unfold<Axis>(size, step);  x.unfold<Axis>(size);  // pytorch Tensor.unfold: appends a NEW
+                    //   trailing axis of width `size` stepped by `step` along Axis (step
+                    //   defaults to 1); Axis's own extent shrinks to the window COUNT
+                    //   (extent(Axis)-size)/step+1. size/step accept runtime or Int<> (folds
+                    //   static). ND windows compose by chaining: x.unfold<0>(k0,s0).unfold<1>(k1,s1).
+                    //   Value form: x.unfold(Int<Axis>(), size, step) -- single-axis Int<k>()
+                    //   selector (like flip/squeeze), not an axis<...> list (only ONE axis binds).
 x.index_select<Axis>(idx);       // gather along Axis by a rank-1 integer index TENSOR
                     //   (runtime data, unlike take_along); idx values wrap negative;
                     //   static idx shape -> stack result, else heap (source must be

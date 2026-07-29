@@ -229,6 +229,51 @@ no `.template` is needed on a type-dependent receiver:
 t.subsample(axis<0,1>{}, k, s0, s1);   // == t.subsample<0,1>(k, s0, s1)
 ```
 
+## `unfold<Axis>` — a sliding/strided window (pytorch `Tensor.unfold`)
+
+Modelled directly on pytorch's `Tensor.unfold(dimension, size, step)`:
+`unfold<Axis>` appends a **new trailing axis** of width `size`, stepped by
+`step` along `Axis` — the "every stencil tap needs the `K`-wide window
+starting at a per-call offset" pattern, spelled out today via
+`t(..., slice(off, off+K), ...)`:
+
+=== "value form"
+
+    ```cpp
+    t.unfold(Int<0>(), 3, 1);   // axis 0: width-3 windows, step 1
+    t.unfold(Int<0>(), 3, 2);   // step 2 -> windows start 0, 2, 4, ...
+    ```
+
+=== "template form"
+
+    ```cpp
+    t.unfold<0>(3, 1);
+    t.unfold<0>(3, 2);
+    t.unfold<0>(3);     // step defaults to 1
+    ```
+
+`Axis`'s own extent shrinks to the window **count**,
+`(extent(Axis) - size) / step + 1`; the new trailing axis holds one window's
+`size` elements. `size`/`step` each accept a runtime value or a compile-time
+one (`Int<k>()`), folding the output extent to static where derivable (same
+convention as `slice()`):
+
+```cpp
+t.unfold<0>(Int<3>(), Int<2>());   // size/step both compile-time -> static result
+```
+
+`unfold` is pure sugar over the existing gather (no new addressing power) and
+returns a **view** — write-through, and windows **alias** when `step < size`
+(as in pytorch: writing one tap of an overlapping window mutates the element
+every neighbouring window also sees). ND windows compose by chaining one
+`unfold` per axis — each call appends its window axis after the previous
+one's, matching how `nitorch.core.utils.unfold`'s nd-unfold is itself built
+on the single-axis primitive:
+
+```cpp
+t.unfold<0>(2,1).unfold<1>(2,1);   // (H,W) -> (H-1,W-1,2,2): a 2x2 window per cell
+```
+
 ## `index_select<Axis>` — gather by a runtime index tensor
 
 `take_along`'s bind arguments are known at the call site (a literal, a variable
