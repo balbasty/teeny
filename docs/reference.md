@@ -395,7 +395,7 @@ numpy reader both use it).
 | Call | Returns | Notes |
 |---|---|---|
 | `sum(a)` `prod(a)` `max(a)` `min(a)` `mean(a)` | `T` (accumulated wide) | over all axes |
-| `dot(a, b)` | `promote(Ta,Tb)` (accumulated wide) | inner product; extents must match **exactly** (no broadcast) |
+| `dot(a, b)` | `promote(Ta,Tb)` (accumulated wide) | inner product; extents must match **exactly** (no broadcast). The two operands may differ in offset index type — see [Mixing widths](shapes-strides.md#mixing-widths-in-a-broadcast); `sqdist`/`dist` likewise |
 | `sum<Acc>(a)`, `mean<Acc>(a)`, `dot<Acc>(a,b)` | `Acc` | force the accumulator/return type |
 | `sum(a, dtype<Acc>{})`, `dot(a, b, dtype<Acc>{})` | `Acc` | value-tag form of the above — deduces `Acc` from the tag (numpy's `dtype=`); composes freely with an axis list, `keepdims`, and `into(dest)`, in any subset/order (see below) |
 | `allclose(a, b, rtol=1e-5, atol=1e-8)` | `bool` | `\|a−b\| ≤ atol+rtol·\|b\|` everywhere (broadcasts) |

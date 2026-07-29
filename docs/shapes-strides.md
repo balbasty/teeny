@@ -134,8 +134,9 @@ stays the caller's concern, guarded by `index_fits`/`dispatch_index` at the boun
 
 The two-operand reductions `dot(a, b)` and `sqdist(a, b)`/`dist(a, b)` follow the
 same rule: they produce a scalar rather than a tensor, but their offset math also
-runs in the wider of the two index types, so mixing an `int32`-indexed operand with
-an `int64`-indexed one is safe in either order.
+runs in a type that covers both operands, so mixing an `int32`-indexed operand with
+an `int64`-indexed one is safe in either order — and, as below, so is mixing
+signedness.
 
 The **in-place** ops (`a.add_(b)`, `a.copy_(b)`, `a *= b`, …) and a caller-supplied
 `into(dest)` are the one place where the destination cannot simply take the wider
@@ -155,3 +156,7 @@ shared offset math runs in a signed type wide enough for both sides, so a stride
 `-1` stays `-1` instead of turning into a huge positive offset. As above this is
 internal — every tensor keeps its own index type — and the ordinary case, where every
 tensor in the expression shares one signedness, computes exactly as it did before.
+
+This holds everywhere two or more tensors share one pass: the elementwise broadcast
+ops above, and equally `dot`/`sqdist`/`dist`, where a flipped (reversed) signed-indexed
+operand next to an unsigned-indexed one is safe in either operand order.
