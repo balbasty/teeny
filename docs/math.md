@@ -21,6 +21,11 @@ a += b;  a -= 2.0;  a *= b;  a /= 2.0;  // compound-assign (scalar or tensor rhs
 ++a; --a;                               // prefix: add/sub 1 in place
 auto old = a++;                         // postfix: pre-value as a stack copy
                                         //   (STATIC shape only)
+
+a.minimum_(b);  a.maximum_(2.0);        // running min/max update (#325): *this =
+                                        //   min/max(*this, b); tensor rhs broadcasts,
+                                        //   scalar rhs applies to all — the running-
+                                        //   nearest-distance idiom: best.minimum_(candidate)
 ```
 
 !!! warning "Don't write in place through a self-overlapping view"

@@ -284,6 +284,9 @@ y.add_(x, alpha); y.sub_(x, alpha);           // FUSED axpy: y += alpha*x / y -=
 a += b; a -= 2.0; a *= b; a /= 2.0;           // compound-assign sugar (scalar or tensor)
 a.atomic_add_(b); a.atomic_sub_(2.0);         // ATOMIC accumulate, host and device (scatter/push);
                                               //   underlying form: add_<Atomic>/sub_<Atomic>
+a.minimum_(b); a.maximum_(2.0);               // running min/max update (#325): *this =
+                                              //   min/max(*this, b); tensor rhs BROADCASTS, scalar
+                                              //   rhs applies to all; e.g. best.minimum_(candidate)
 a.neg_(); a.abs_(); a.exp_(); a.log_();       // unary in-place
 a.sin_(); a.cos_(); a.sqrt_(); a.tanh_(); a.pow_(3.0);
 a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_(); a.clamp_(lo,hi);

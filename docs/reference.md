@@ -308,6 +308,7 @@ scalar rhs applies to every element.
 | Call | Notes |
 |---|---|
 | `a.add_(x)` `a.sub_(x)` `a.mul_(x)` `a.div_(x)` | `x` = tensor (broadcasts) or scalar |
+| `a.minimum_(x)` `a.maximum_(x)` | running min/max update (#325): `*this = min/max(*this, x)`, `x` = tensor (broadcasts) or scalar — the running-nearest-distance idiom `best.minimum_(candidate)` |
 | `y.add_(x, alpha)` `y.sub_(x, alpha)` | fused scaled accumulate (BLAS axpy): `y ± alpha*x`, `x` broadcasts; scaled copy `y = alpha*x` is `y.zero_().add_(x, alpha)` |
 | `a.atomic_add_(x)` `a.atomic_sub_(x)` | atomic accumulate, host and device (`x` = tensor or scalar); underlying form is `add_<Atomic>`/`sub_<Atomic>` |
 | `a += x` `a -= x` `a *= x` `a /= x` | compound-assign sugar |

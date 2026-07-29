@@ -828,6 +828,13 @@ _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::sub_(T s) {
 }
 template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::mul_(T s) { _md::scal(*this,s,_md::mul{}); return *this; }
 template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::div_(T s) { _md::scal(*this,s,_md::div{}); return *this; }
+// in-place running min/max (#325): *this = min/max(*this, b), tensor rhs broadcasts.
+template <class T,class E,class L,storage O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::minimum_(const B & b) { _md::bzip(*this,*this,b,_md::b_min{}); return *this; }
+template <class T,class E,class L,storage O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
+_TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::maximum_(const B & b) { _md::bzip(*this,*this,b,_md::b_max{}); return *this; }
+template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::minimum_(T s) { _md::scal(*this,s,_md::b_min{}); return *this; }
+template <class T,class E,class L,storage O> _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::maximum_(T s) { _md::scal(*this,s,_md::b_max{}); return *this; }
 // fused scaled accumulate (BLAS axpy): *this += alpha*b / *this -= alpha*b (b broadcasts).
 template <class T,class E,class L,storage O> template <class B, cs::enable_if_t<!cs::is_arithmetic<B>::value,int>>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::add_(const B & b, T alpha) { _md::bzip(*this,*this,b,_md::fma_add<T>{alpha}); return *this; }
