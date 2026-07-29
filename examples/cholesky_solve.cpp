@@ -46,7 +46,12 @@ int main() {
 
     auto A = wrap(pad, shape<3,3>{}, strides<4,1>{});
     auto L = local<double, shape<3,3>>();
+    // Same CCCL layout_right EBO gap as test_posdef.cpp's L (#295): the
+    // sizeof-exact guarantee doesn't hold on real MSVC (extents stored as a
+    // member there, not an empty base), so this check is MSVC-guarded too.
+#if !defined(_MSC_VER) || defined(__clang__)
     static_assert(sizeof(L) == 9*sizeof(double), "stack matrix is exactly its data");
+#endif
     cholesky(A, L);
 
     auto b = local<double, shape<3>>();

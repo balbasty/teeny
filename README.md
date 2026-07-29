@@ -50,7 +50,9 @@ target_link_libraries(my_app PRIVATE teeny::teeny)
 
 If CCCL is installed it is found automatically; otherwise the vendored submodule
 is used for in-tree builds. Run the test suite with `-DTEENY_BUILD_TESTS=ON` then
-`ctest`. (The [`Makefile`](Makefile) remains the reference build for the tests.)
+`ctest`; `-DTEENY_BUILD_EXAMPLES=ON` builds each [`examples/`](examples) program as
+`ex_<name>`, matching the Makefile's binary names. (The [`Makefile`](Makefile)
+remains the reference build for the tests.)
 
 **Plain compiler flags** — `-std=c++17 -I include -I external/cccl/libcudacxx/include`.
 
