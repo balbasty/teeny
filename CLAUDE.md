@@ -64,7 +64,7 @@ include/teeny/
   indexing.h       free indexing/slicing vocabulary: slice()/none, _norm_axis,
                    _wrap_idx, slice_spec + traits, _compact output-extents
   tensor.h         the tensor class + view/local/owned aliases + as_tensor
-                   + indexing/slicing, take_along, permute, unsqueeze/squeeze
+                   + indexing/slicing, take_along, index_select, permute, unsqueeze/squeeze
   math.h           in-place & out-of-place elementwise (broadcasting) + unary math
                    + reductions (sum/prod/max/min/dot). Members declared in
                    tensor.h, DEFINED here.
@@ -234,6 +234,17 @@ t(0, slice<1,4>()); t(0, slice<0,8,2>());  // compile-time slice (bounds fold li
                       //   stride where derivable); a COMPILE-TIME range folds its extent
                       //   too (source static + static bounds), a runtime range's is dynamic.
 t.take_along<0,2>(i, slice(1,4));  // bind named axes only; keep every other axis
+t.index_select<Axis>(idx);         // gather along Axis by a rank-1 integer index
+                      //   TENSOR (#326) — runtime DATA, unlike take_along's compile-time
+                      //   indices. idx values wrap negative (built on take_along); static
+                      //   idx shape -> stack result, else heap (source must be host-
+                      //   accessible; a gpu tensor: gather into a device into(dest)
+                      //   instead). Always a COPY (an arbitrary data-dependent gather
+                      //   isn't an affine mdspan view). into(dest) form too:
+                      //   t.index_select<Axis>(idx, into(dest)) (no alloc, device-safe;
+                      //   dest's axis-Axis extent must equal idx's, checked; dest must not
+                      //   alias t). Value form: t.index_select(idx, axis<Axis>{}) (no
+                      //   .template on a dependent receiver, like take_along's own axis<> form)
 t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1) -> view
 t.flip<1>();          // reverse an axis (negative-stride view; needs signed index)
 t.unsqueeze<2>();     // insert size-1 axis at pos 2 (numpy newaxis) -> rank+1 view

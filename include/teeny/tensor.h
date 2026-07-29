@@ -85,6 +85,22 @@ auto reduced_ext_(cs::index_sequence<D...>)
 template <class E, long... Axes>
 using reduced_extents = decltype(reduced_ext_<E, Axes...>(cs::make_index_sequence<E::rank()>{}));
 
+/* --- index_select's output extents (#326): the input extents with axis `Axis`'s
+ * static extent REPLACED by `NewExt` (the gather index tensor's own static
+ * extent(0) — a numeric value when the index tensor has a static shape, else
+ * `dynamic_extent`), every other axis unchanged. Same class-template `::value`
+ * shape as `_red_ext_v` above (not a function call in place), for the same
+ * MSVC non-type-template-argument-pack quirk noted there. ---------------- */
+template <cs::size_t D, class E, cs::size_t Axis, cs::size_t NewExt>
+struct _repl_ext_v {
+    static constexpr cs::size_t value = (D == Axis) ? NewExt : E::static_extent(D);
+};
+template <class E, cs::size_t Axis, cs::size_t NewExt, cs::size_t... D>
+auto index_select_ext_(cs::index_sequence<D...>)
+    -> cs::extents<typename E::index_type, _repl_ext_v<D, E, Axis, NewExt>::value...>;
+template <class E, cs::size_t Axis, cs::size_t NewExt>
+using index_select_extents = decltype(index_select_ext_<E, Axis, NewExt>(cs::make_index_sequence<E::rank()>{}));
+
 /* --- shared by the generic "trailing keyword bag" reduction entry points
  * (math.h): whether reducing over the axes named by an `axis<...>` TAG (rather
  * than an explicit `Axes...` template pack) would leave a dynamic result — the
@@ -870,6 +886,99 @@ public:
     _TNY_API auto take_along(axis<Axes...>, Args... args) noexcept       { return take_along<Axes...>(args...); }
     template <long... Axes, class... Args>
     _TNY_API auto take_along(axis<Axes...>, Args... args) const noexcept { return take_along<Axes...>(args...); }
+
+private:
+    // Build the runtime index_select output extents: axis `Axis`'s extent is
+    // `newExt` (the gather index tensor's own numel), every other axis copies
+    // this tensor's own extent.
+    template <cs::size_t Axis, class OutE, cs::size_t... D>
+    _TNY_API OutE _idxsel_shape(cs::index_sequence<D...>, index_type newExt) const {
+        return OutE(static_cast<index_type>(D == Axis ? newExt : extent(D))...);
+    }
+public:
+    /**
+     * @brief Gather along axis `Axis` using a rank-1 integer index TENSOR `idx`
+     *        (numpy/pytorch `index_select`/`take`): `out(...,j,...) = a(...,idx(j),...)`
+     *        for `j` in `[0, idx.numel())` — axis `Axis`'s extent becomes `idx`'s
+     *        (static when `idx`'s own shape is static). `idx`'s values wrap negative
+     *        like any other teeny index (it's built on `take_along`, which already
+     *        wraps). Distinct from `take_along` (compile-time indices/ranges): `idx`'s
+     *        VALUES are runtime DATA, so this always materialises a copy — an
+     *        arbitrary data-dependent gather isn't expressible as an affine mdspan
+     *        view. Prefer the `into(dest)` form (`_TNY_API`, no allocation, device-safe)
+     *        in a kernel; this allocating form is `_TNY_HOST` convenience and copies
+     *        on the HOST, so `*this` must be host-accessible (a `gpu`/`gpu_view`
+     *        source: gather into a preallocated device `into(dest)` instead).
+     */
+    template <long Axis, class Ti,class Ei,class Li,storage Oi,
+              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>::rank_dynamic() == 0, int> = 0>
+    _TNY_API auto index_select(const tensor<Ti,Ei,Li,Oi> & idx) const {
+        static_assert(cs::is_integral<Ti>::value, "index_select: idx must have an integer element type");
+        static_assert(Ei::rank() == 1, "index_select: idx must be rank-1");
+        static_assert(_axis_in_range(Axis, rank()), "index_select: axis out of range");
+        static_assert(storage_is_host_accessible(O),
+            "index_select()'s allocating form copies on the host and cannot dereference device "
+            "memory; for a gpu/gpu_view source, gather into a preallocated device into(dest) instead.");
+        using OutE = _md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>;
+        tensor<T, OutE, ccontiguous, storage::stack> out{};
+        index_select<Axis>(idx, into(out));
+        return out;
+    }
+    template <long Axis, class Ti,class Ei,class Li,storage Oi,
+              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>::rank_dynamic() != 0, int> = 0>
+    _TNY_HOST auto index_select(const tensor<Ti,Ei,Li,Oi> & idx) const {
+        static_assert(cs::is_integral<Ti>::value, "index_select: idx must have an integer element type");
+        static_assert(Ei::rank() == 1, "index_select: idx must be rank-1");
+        static_assert(_axis_in_range(Axis, rank()), "index_select: axis out of range");
+        static_assert(storage_is_host_accessible(O),
+            "index_select()'s allocating form copies on the host and cannot dereference device "
+            "memory; for a gpu/gpu_view source, gather into a preallocated device into(dest) instead.");
+        constexpr cs::size_t A = _norm_axis(Axis, rank());
+        using OutE = _md::index_select_extents<Shape, A, Ei::static_extent(0)>;
+        OutE oe = _idxsel_shape<A, OutE>(cs::make_index_sequence<rank()>{}, static_cast<index_type>(idx.extent(0)));
+        tensor<T, OutE, ccontiguous, storage::heap> out(oe);
+        index_select<Axis>(idx, into(out));
+        return out;
+    }
+    /** @brief Value form: `t.index_select(idx, axis<Axis>{})` == `t.index_select<Axis>(idx)`.
+     *         Deduces `Axis` from the tag, so no `.template` disambiguator is needed
+     *         on a type-dependent receiver (the primary reason this form exists —
+     *         the mesh-distance kernels this feature targets call it from templates). */
+    template <class Ti,class Ei,class Li,storage Oi, long Axis>
+    _TNY_API auto index_select(const tensor<Ti,Ei,Li,Oi> & idx, axis<Axis>) const { return index_select<Axis>(idx); }
+    template <class Ti,class Ei,class Li,storage Oi, long Axis, class D>
+    _TNY_API auto & index_select(const tensor<Ti,Ei,Li,Oi> & idx, axis<Axis>, into_t<D> out) const { return index_select<Axis>(idx, out); }
+
+    /** @brief `into(dest)` form: writes the gather straight into `dest` — one pass,
+     *         no allocation, `_TNY_API` (device-safe). Returns `dest&`. `dest`'s
+     *         extents must match (axis `Axis` == `idx.numel()`, checked; every other
+     *         axis == this tensor's own, checked by the underlying `copy_`). `dest`
+     *         must not ALIAS this tensor's storage — an aliased in-place gather is
+     *         unsupported (each `j` overwrites a slot of `dest` that a LATER `j` may
+     *         still need to read from `*this`) and silently reorders instead of
+     *         erroring. */
+    template <long Axis, class Ti,class Ei,class Li,storage Oi, class D>
+    _TNY_API auto & index_select(const tensor<Ti,Ei,Li,Oi> & idx, into_t<D> out) const {
+        static_assert(cs::is_integral<Ti>::value, "index_select: idx must have an integer element type");
+        static_assert(Ei::rank() == 1, "index_select: idx must be rank-1");
+        static_assert(_axis_in_range(Axis, rank()), "index_select: axis out of range");
+        constexpr cs::size_t A = _norm_axis(Axis, rank());
+        using DstE = typename D::extents_type;
+        constexpr cs::size_t dstA = DstE::static_extent(A);
+        constexpr cs::size_t idxA = Ei::static_extent(0);
+        static_assert(dstA == cs::dynamic_extent || idxA == cs::dynamic_extent || dstA == idxA,
+            "index_select: dest's axis Axis extent must equal idx's extent(0)");
+        _TNY_CHECK(static_cast<index_type>(out.dest.extent(A)) == static_cast<index_type>(idx.extent(0)),
+            "index_select: dest's axis Axis extent must equal idx.extent(0)");
+        // idx(j)'s VALUE (unlike the loop bound) can be negative -- must stay
+        // SIGNED so take_along's wrap (_wrap_idx) takes its negative-index branch
+        // rather than reinterpreting a negative value as a huge unsigned index
+        // when this tensor's own index_type happens to be unsigned (#326 review).
+        const index_type n = static_cast<index_type>(idx.extent(0));
+        for (index_type j = 0; j < n; ++j)
+            out.dest.template take_along<(long)A>(j).copy_(take_along<(long)A>(static_cast<cs::make_signed_t<index_type>>(idx(j))));
+        return out.dest;
+    }
 
     /** @brief Reorder the axes (a permutation of 0..N-1; negatives wrap) -> a rank-N view. */
     template <long... Perm>

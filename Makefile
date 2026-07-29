@@ -72,6 +72,7 @@ TESTS = \
 	$(BUILDDIR)/test_reshape \
 	$(BUILDDIR)/test_subperm \
 	$(BUILDDIR)/test_takealong \
+	$(BUILDDIR)/test_index_select \
 	$(BUILDDIR)/test_alias \
 	$(BUILDDIR)/test_axis_sort \
 	$(BUILDDIR)/test_kwargs \
