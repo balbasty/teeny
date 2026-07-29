@@ -1874,7 +1874,10 @@ _TNY_API auto cross(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b
     return c;
 }
 /** @brief `cross(a, b, into(y))` — the cross product into a caller buffer `y`
- *         (rank-1, length 3); `y` may alias `a` or `b`. This is ff's "crossto". */
+ *         (rank-1, length 3); `y` may alias `a` or `b`. This is ff's "crossto".
+ *         `y` may be a SLICE of a bigger output, written with no named
+ *         intermediate: `cross(a, b, into(N(i, all)))` fills row `i` of a matrix
+ *         of 3-vectors (`into()` binds such a temporary view — tensor.h). */
 template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, class D>
 _TNY_API auto & cross(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) {
     _cross3(out.dest, a, b);

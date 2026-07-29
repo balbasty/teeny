@@ -223,11 +223,72 @@ int main() {
     // commented out because neither a static_assert nor an assert() failure can
     // be exercised from the runtime suite (no compile-fail harness exists here —
     // same convention as test_math.cpp's dot note); both were verified manually:
-    //   zeros<double>(shape<8,8>{}).mul(2.0, into(zeros<double>(shape<2,2>{})));  // static: compile error
-    //   exp(zeros<double>(shape<8,8>{}), into(zeros<double>(shape<2,2>{})));      // static: compile error
-    //   auto a8 = zeros<double>(shape<-1,-1>{8,8}); auto y2 = zeros<double>(shape<-1,-1>{2,2});
-    //   a8.mul(2.0, into(y2));   // dynamic: _TNY_CHECK fires (was a 64-element write into a 4-element buffer)
-    //   exp(a8, into(y2));       // dynamic: same
+    //   auto a8 = zeros<double>(shape<8,8>{}); auto y8 = zeros<double>(shape<2,2>{});
+    //   a8.mul(2.0, into(y8));   // static: compile error
+    //   exp(a8, into(y8));       // static: compile error
+    //   auto ad = zeros<double>(shape<-1,-1>{8,8}); auto y2 = zeros<double>(shape<-1,-1>{2,2});
+    //   ad.mul(2.0, into(y2));   // dynamic: _TNY_CHECK fires (was a 64-element write into a 4-element buffer)
+    //   exp(ad, into(y2));       // dynamic: same
+
+    // ========== into() on a TEMPORARY VIEW destination (#380) ============
+    // Every view-producing op returns its view BY VALUE, so a slot of a bigger
+    // output is a temporary — `into()` takes it directly, no named intermediate.
+    // The write goes through to the storage the temporary view aliases.
+    static_assert(cs::is_same<decltype(into(local<double,shape<2,3>>{}(0, all))),
+                             into_t<view<double, shape<3>, strides<1>>>>::value,
+                  "into() binds a temporary VIEW (rvalue), same into_t as an lvalue");
+
+    // ---- the documented "crossto": cross straight into row i of a matrix ---
+    auto Nrows = local<double, shape<2,3>>();
+    cross(p, q, into(Nrows(0, all)));                 // p x q = {-3,6,-3}
+    if (!close(Nrows(0,0),-3) || !close(Nrows(0,1),6) || !close(Nrows(0,2),-3)) return 76;
+    if (Nrows(1,0)!=0 || Nrows(1,2)!=0)      return 77;   // the other row untouched
+    p.cross(q, into(Nrows(1, all)));                  // method form, same slot spelling
+    if (!close(Nrows(1,1), 6.0))             return 78;
+
+    // ---- a temporary COLUMN view (a strided slot, stride 2) ----------------
+    auto Ncols = local<double, shape<3,2>>();
+    cross(q, p, into(Ncols(all, 1)));                 // q x p = {3,-6,3} down column 1
+    if (Ncols(0,1)!=3 || Ncols(1,1)!=-6 || Ncols(2,1)!=3) return 79;
+    if (Ncols(0,0)!=0 || Ncols(2,0)!=0)      return 92;   // column 0 untouched
+
+    // ---- elementwise / unary / scalar into a temporary view ----------------
+    auto Mt = local<double, shape<2,3>>(); Mt.zero_();
+    a.add(b, into(Mt(0, all)));              if (Mt(0,0)!=11 || Mt(0,2)!=33) return 80;
+    a.mul(2.0, into(Mt(1, all)));            if (Mt(1,0)!=2  || Mt(1,2)!=6)  return 81;
+    exp(local<double,shape<3>>{}.zero_(), into(Mt(1, all)));
+    if (!close(Mt(1,0), 1.0) || !close(Mt(1,2), 1.0)) return 82;
+    // a temporary PERMUTED view is a destination too (same storage, transposed)
+    auto Tt = local<double, shape<3,2>>(); Tt.zero_();
+    a.add(b, into(Tt.permute<1,0>()(0, all)));
+    if (Tt(0,0)!=11 || Tt(1,0)!=22 || Tt(2,0)!=33) return 83;
+
+    // ---- reductions into a temporary rank-0 CELL and a temporary slot ------
+    auto cells = local<double, shape<2,2>>(); cells.zero_();
+    sum(a, into(cells.at(0,0)));             if (!close(cells(0,0), 6.0))  return 84;
+    dot(a, b, into(cells.at(0,1)));          if (!close(cells(0,1), 140.0)) return 85;
+    norm(vg, into(cells.at(1,0)));           if (!close(cells(1,0), 5.0))  return 86;
+    sum<double>(a, into(cells.at(1,1)));     if (!close(cells(1,1), 6.0))  return 87;
+    // axis reduction -> a temporary lower-rank slot of a bigger buffer
+    auto rows = local<double, shape<2,3>>(); rows.zero_();
+    sum<0>(m, into(rows(0, all)));            // m is (2,3) -> length-3
+    if (rows(0,0)!=5 || rows(0,2)!=9)        return 88;
+    mean(m, axis<0>{}, into(rows(1, all)));   // value form + a temporary dest
+    if (!close(rows(1,0), 2.5) || !close(rows(1,2), 4.5)) return 89;
+
+    // ---- gather / scan into a temporary view -------------------------------
+    auto isrc = local<double, shape<4>>(); isrc.iota_(1.0, 1.0);   // 1,2,3,4
+    auto iidx = local<int, shape<3>>(); iidx(0)=3; iidx(1)=0; iidx(2)=2;
+    auto gdst = local<double, shape<2,3>>(); gdst.zero_();
+    isrc.index_select<0>(iidx, into(gdst(1, all)));
+    if (gdst(1,0)!=4 || gdst(1,1)!=1 || gdst(1,2)!=3) return 90;
+    if (gdst(0,0)!=0)                        return 91;   // the other row untouched
+
+    // A temporary OWNING destination stays a compile error (its storage dies with
+    // the expression, so the result would be discarded) — same commented-out
+    // convention as the shape checks above; verified manually:
+    //   sum(a, into(local<double, shape<>>{}));         // static_assert: temporary must be a VIEW
+    //   a.add(b, into(zeros<double>(shape<-1>{3})));    // same, for a heap owner
 
     return 0;
 }

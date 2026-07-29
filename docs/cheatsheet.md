@@ -285,7 +285,14 @@ auto c = a.add(b, alpha);  a.sub(b, alpha);  // fused out-of-place axpy: a +/- a
 //   check otherwise; tensor rhs: the debug-time check. y's dtype may differ (result cast).
 a.add(b, into(y));  a.mul(b, into(y));  a.add(2.0, into(y));  a.add(b, alpha, into(y));
 exp(a, into(y)); sqrt(a, into(y)); minimum(a, b, into(y)); clamp(a, lo, hi, into(y));
-normalize(a, into(y));  cross(a, b, into(N.at(i)));   // cross into a slot ("crossto")
+normalize(a, into(y));  cross(a, b, into(N(i, all)));  // cross into row i of a matrix ("crossto")
+                      //   The dest may be a TEMPORARY VIEW: every view-producing op (slicing,
+                      //   at, permute, take_along, ...) returns by value, and into() takes one
+                      //   directly -- no named intermediate for "a slot of a bigger output".
+                      //   sum(a, into(cells.at(k))); sum(m, axis<0>{}, into(rows(j, all)));
+                      //   Use the call for its EFFECT; the returned dest& dangles past the
+                      //   statement. A temporary OWNING tensor (into(zeros<T>(sh))) is a
+                      //   compile error -- its storage would die with the statement.
 
 // reductions -> scalar (all axes). ACCUMULATE in the "reduce type" (double for
 //   small floats float/double/half, item type for ints), then CAST the result to
@@ -321,7 +328,7 @@ sqdist(a,b); dist(a,b);// Σ(aᵢ-bᵢ)² / √Σ(aᵢ-bᵢ)² (one fused pass, 
 a.normalize_();       // in place a /= norm(a) (floating types); zero vector -> NaN
 auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, dyn->heap)
 auto c = cross(a, b);  a.cross_(b);          // 3D cross (rank-1 length-3): new / in place (a = a×b)
-                                             //   into a slot: slot.copy_(cross(a, b))
+                                             //   into a slot: cross(a, b, into(N(i, all)))
 ```
 
 Promotion: C++ rules but lower-width float wins (`-DTNY_STD_PROMOTION` opts out).
