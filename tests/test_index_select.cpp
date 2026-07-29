@@ -41,12 +41,34 @@ int main() {
     // into(dest): no allocation, writes straight into a preallocated buffer.
     auto dest = local<double, shape<3,3>>();
     verts.index_select<0>(idx, into(dest));
-    for (long j=0;j<3;++j) if (dest(1,j) != verts(0,j)) return 10;
+    for (long j=0;j<3;++j) {
+        if (dest(0,j) != verts(2,j)) return 10;
+        if (dest(1,j) != verts(0,j)) return 11;
+        if (dest(2,j) != verts(4,j)) return 12;
+    }
 
     // repeated index (gather, not a permutation) is allowed.
     auto idxr = local<long, shape<2>>(); idxr(0)=1; idxr(1)=1;
     auto selr = verts.index_select<0>(idxr);
-    if (selr(0,0) != selr(1,0) || selr(0,0) != verts(1,0)) return 11;
+    if (selr(0,0) != selr(1,0) || selr(0,0) != verts(1,0)) return 13;
+
+    // negative AXIS wraps too (the library-wide signed-axis convention).
+    auto selm1 = verts.index_select<-1>(idx1);   // axis -1 == axis 1
+    for (long i=0;i<5;++i) { if (selm1(i,0)!=verts(i,2)) return 14; if (selm1(i,1)!=verts(i,0)) return 15; }
+
+    // empty idx -> extent-0 result, no crash.
+    auto idxe = local<long, shape<0>>();
+    auto sele = verts.index_select<0>(idxe);
+    static_assert(decltype(sele)::extents_type::static_extent(0) == 0, "empty idx -> extent-0 result");
+    if (sele.numel() != 0) return 16;
+
+    // value form: t.index_select(idx, axis<Axis>{}) == t.index_select<Axis>(idx),
+    // and needs no `.template` disambiguator on a type-dependent receiver (#332 review).
+    auto selv = verts.index_select(idx, axis<0>{});
+    for (long j=0;j<3;++j) if (selv(0,j) != verts(2,j)) return 17;
+    auto destv = local<double, shape<3,3>>();
+    verts.index_select(idx, axis<0>{}, into(destv));
+    for (long j=0;j<3;++j) if (destv(0,j) != verts(2,j)) return 18;
 
     return 0;
 }

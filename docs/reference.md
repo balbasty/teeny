@@ -144,8 +144,9 @@ Negative integer indices wrap (count from the back).
 | `t(1, ellipsis, 2)` | → view or `T&` | `ellipsis` = `rank − #other args` copies of `all` (≤1 per call) |
 | `t.take_along<Axes...>(args...)` | → view | bind named axes only, keep the rest |
 | `t.take_along(axis<Axes...>{}, args...)` | → view | value form — `axis<...>` selector (numpy-like), no `.template` on a dependent receiver |
-| `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `take_along`); `idx` values wrap negative |
-| `t.index_select<Axis>(idx, into(dest))` | `dest&` | no-allocation, device-safe form |
+| `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `take_along`); `idx` values wrap negative; source must be host-accessible (allocating form copies on the host) |
+| `t.index_select<Axis>(idx, into(dest))` | `dest&` | no-allocation, device-safe form; `dest`'s axis-`Axis` extent must equal `idx`'s (checked) and must not alias `t` |
+| `t.index_select(idx, axis<Axis>{})` `t.index_select(idx, axis<Axis>{}, into(dest))` | same as above | value form — no `.template` on a dependent receiver |
 
 Slice specifiers:
 

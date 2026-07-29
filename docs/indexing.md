@@ -231,3 +231,19 @@ one pass, no allocation, the device-safe form to use inside a kernel:
 ```cpp
 verts.index_select<0>(idx, into(dest));     // dest must already have the right shape
 ```
+
+`dest`'s extent on axis `Axis` must equal `idx`'s (checked — a `static_assert`
+when both are static shapes, a debug-time check otherwise) and `dest` must not
+alias `verts`' own storage (an aliased in-place gather silently reorders rather
+than erroring). The allocating form copies on the **host**, so the source must
+be host-accessible — gather a `gpu`/`gpu_view` tensor into a preallocated
+device `into(dest)` instead.
+
+Like `take_along`, `index_select` has a value form leading with an `axis<...>{}`
+selector — the one to reach for on a type-dependent receiver (inside a kernel
+template), since it needs no `.template` disambiguator:
+
+```cpp
+verts.index_select(idx, axis<0>{});               // == verts.index_select<0>(idx)
+verts.index_select(idx, axis<0>{}, into(dest));    // == verts.index_select<0>(idx, into(dest))
+```

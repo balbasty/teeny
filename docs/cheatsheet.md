@@ -139,8 +139,12 @@ x(none, all, all);  x(0, newaxis, all);   // BARE none/newaxis arg -> insert a s
 x.take_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest
 x.index_select<Axis>(idx);       // gather along Axis by a rank-1 integer index TENSOR
                     //   (runtime data, unlike take_along); idx values wrap negative;
-                    //   static idx shape -> stack result, else heap. into(dest) form
-                    //   too: x.index_select<Axis>(idx, into(dest)) (no alloc, device-safe)
+                    //   static idx shape -> stack result, else heap (source must be
+                    //   host-accessible). into(dest) form too: x.index_select<Axis>(idx,
+                    //   into(dest)) (no alloc, device-safe; dest's axis-Axis extent must
+                    //   match idx's, checked; dest must not alias x). Value form leads
+                    //   with axis<...>{} (no .template on a dependent receiver), same as
+                    //   take_along: x.index_select(idx, axis<Axis>{})
 x.uget(i, j, k);  x.uget(0, slice(1,4));  x.uget(1, ellipsis);  x.uat(i...);
                     // uget = unchecked twin of operator() (element/slice/ellipsis,
                     // one entry point); uat = unchecked at. Skip the negative-index

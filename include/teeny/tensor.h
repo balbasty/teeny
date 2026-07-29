@@ -906,7 +906,9 @@ public:
      *        VALUES are runtime DATA, so this always materialises a copy — an
      *        arbitrary data-dependent gather isn't expressible as an affine mdspan
      *        view. Prefer the `into(dest)` form (`_TNY_API`, no allocation, device-safe)
-     *        in a kernel; this allocating form is `_TNY_HOST` convenience.
+     *        in a kernel; this allocating form is `_TNY_HOST` convenience and copies
+     *        on the HOST, so `*this` must be host-accessible (a `gpu`/`gpu_view`
+     *        source: gather into a preallocated device `into(dest)` instead).
      */
     template <long Axis, class Ti,class Ei,class Li,storage Oi,
               cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>::rank_dynamic() == 0, int> = 0>
@@ -914,6 +916,9 @@ public:
         static_assert(cs::is_integral<Ti>::value, "index_select: idx must have an integer element type");
         static_assert(Ei::rank() == 1, "index_select: idx must be rank-1");
         static_assert(_axis_in_range(Axis, rank()), "index_select: axis out of range");
+        static_assert(storage_is_host_accessible(O),
+            "index_select()'s allocating form copies on the host and cannot dereference device "
+            "memory; for a gpu/gpu_view source, gather into a preallocated device into(dest) instead.");
         using OutE = _md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>;
         tensor<T, OutE, ccontiguous, storage::stack> out{};
         index_select<Axis>(idx, into(out));
@@ -925,6 +930,9 @@ public:
         static_assert(cs::is_integral<Ti>::value, "index_select: idx must have an integer element type");
         static_assert(Ei::rank() == 1, "index_select: idx must be rank-1");
         static_assert(_axis_in_range(Axis, rank()), "index_select: axis out of range");
+        static_assert(storage_is_host_accessible(O),
+            "index_select()'s allocating form copies on the host and cannot dereference device "
+            "memory; for a gpu/gpu_view source, gather into a preallocated device into(dest) instead.");
         constexpr cs::size_t A = _norm_axis(Axis, rank());
         using OutE = _md::index_select_extents<Shape, A, Ei::static_extent(0)>;
         OutE oe = _idxsel_shape<A, OutE>(cs::make_index_sequence<rank()>{}, static_cast<index_type>(idx.extent(0)));
@@ -932,19 +940,39 @@ public:
         index_select<Axis>(idx, into(out));
         return out;
     }
+    /** @brief Value form: `t.index_select(idx, axis<Axis>{})` == `t.index_select<Axis>(idx)`.
+     *         Deduces `Axis` from the tag, so no `.template` disambiguator is needed
+     *         on a type-dependent receiver (the primary reason this form exists —
+     *         the mesh-distance kernels this feature targets call it from templates). */
+    template <class Ti,class Ei,class Li,storage Oi, long Axis>
+    _TNY_API auto index_select(const tensor<Ti,Ei,Li,Oi> & idx, axis<Axis>) const { return index_select<Axis>(idx); }
+    template <class Ti,class Ei,class Li,storage Oi, long Axis, class D>
+    _TNY_API auto & index_select(const tensor<Ti,Ei,Li,Oi> & idx, axis<Axis>, into_t<D> out) const { return index_select<Axis>(idx, out); }
+
     /** @brief `into(dest)` form: writes the gather straight into `dest` — one pass,
      *         no allocation, `_TNY_API` (device-safe). Returns `dest&`. `dest`'s
-     *         extents must match (axis `Axis` == `idx.numel()`, every other axis ==
-     *         this tensor's own). */
+     *         extents must match (axis `Axis` == `idx.numel()`, checked; every other
+     *         axis == this tensor's own, checked by the underlying `copy_`). `dest`
+     *         must not ALIAS this tensor's storage — an aliased in-place gather is
+     *         unsupported (each `j` overwrites a slot of `dest` that a LATER `j` may
+     *         still need to read from `*this`) and silently reorders instead of
+     *         erroring. */
     template <long Axis, class Ti,class Ei,class Li,storage Oi, class D>
     _TNY_API auto & index_select(const tensor<Ti,Ei,Li,Oi> & idx, into_t<D> out) const {
         static_assert(cs::is_integral<Ti>::value, "index_select: idx must have an integer element type");
         static_assert(Ei::rank() == 1, "index_select: idx must be rank-1");
         static_assert(_axis_in_range(Axis, rank()), "index_select: axis out of range");
-        constexpr long A = static_cast<long>(_norm_axis(Axis, rank()));
-        const long n = static_cast<long>(idx.extent(0));
-        for (long j = 0; j < n; ++j)
-            out.dest.template take_along<A>(j).copy_(take_along<A>(static_cast<long>(idx(j))));
+        constexpr cs::size_t A = _norm_axis(Axis, rank());
+        using DstE = typename D::extents_type;
+        constexpr cs::size_t dstA = DstE::static_extent(A);
+        constexpr cs::size_t idxA = Ei::static_extent(0);
+        static_assert(dstA == cs::dynamic_extent || idxA == cs::dynamic_extent || dstA == idxA,
+            "index_select: dest's axis Axis extent must equal idx's extent(0)");
+        _TNY_CHECK(static_cast<index_type>(out.dest.extent(A)) == static_cast<index_type>(idx.extent(0)),
+            "index_select: dest's axis Axis extent must equal idx.extent(0)");
+        const index_type n = static_cast<index_type>(idx.extent(0));
+        for (index_type j = 0; j < n; ++j)
+            out.dest.template take_along<(long)A>(j).copy_(take_along<(long)A>(static_cast<index_type>(idx(j))));
         return out.dest;
     }
 
