@@ -1486,6 +1486,62 @@ _TNY_HOST decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
 _TNY_RED_TAGGED(norm)
 #undef _TNY_RED_TAGGED
 
+/** @brief Squared Euclidean distance `Σ(aᵢ-bᵢ)²` between two same-shape tensors —
+ *         `sqdist(a,b) == sqnorm(a-b)`, but one fused pass, no `a-b` intermediate
+ *         (mirrors `dot`'s convenience-wrapper status over a manual `sum(a*b)`).
+ *         Binary only (no axis-list form, like `dot`); `sqdist<Acc>(a,b)` makes
+ *         `Acc` accumulator AND result. */
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto sqdist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
+    static_assert(tensor<Ta,Ea,La,Oa>::rank() == tensor<Tb,Eb,Lb,Ob>::rank(), "sqdist: rank mismatch");
+    static_assert(_md::ext_static_eq<Ea, Eb>(cs::make_index_sequence<Ea::rank()>{}),
+                  "sqdist: operand extents must match exactly (no broadcast)");   // both-static, unequal -> compile error
+    using R = _acc_t<Acc, promote_t<Ta,Tb>>;
+    return static_cast<_reduce_result_t<Acc, promote_t<Ta,Tb>>>(
+        _md::zipreduce_<R>(a, b, _md::zip_sqdiff{}, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
+}
+
+/** @brief Euclidean distance `√Σ(aᵢ-bᵢ)²` — `dist(a,b) == norm(a-b)`, one fused
+ *         pass. Floating result (integer operands -> `double`, the `norm`/`mean`
+ *         rule); `dist<Acc>(a,b)` makes `Acc` accumulator AND result. */
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto dist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
+    using P   = promote_t<Ta,Tb>;
+    using Res = _reduce_result_t<Acc, _mean_result_t<P>>;   // floating result (double for integer P)
+    using R   = _acc_t<Acc, P>;                             // accumulate the squares in the reduce type
+    using D   = cs::conditional_t<cs::is_floating_point<R>::value, R,
+                cs::conditional_t<cs::is_floating_point<Res>::value, Res, double>>;   // take the root in a float type
+    return static_cast<Res>(cs::sqrt(static_cast<D>(sqdist<R>(a, b))));
+}
+
+// dtype/into trailing-bag form (dot's shape: binary, no axis, so no _TNY_RED_TAGGED).
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
+          class Tag0, class... Tags>
+_TNY_API decltype(auto) sqdist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) {
+    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), "sqdist: unrecognized keyword argument");
+    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), "sqdist: a keyword was given more than once");
+    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;
+    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
+    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {
+        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, "sqdist into(dest): dest must be rank-0 (a scalar cell)");
+        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(sqdist<RAcc>(a, b)));
+        return out.dest;
+    } else return sqdist<RAcc>(a, b);
+}
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
+          class Tag0, class... Tags>
+_TNY_API decltype(auto) dist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) {
+    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), "dist: unrecognized keyword argument");
+    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), "dist: a keyword was given more than once");
+    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;
+    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
+    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {
+        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, "dist into(dest): dest must be rank-0 (a scalar cell)");
+        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(dist<RAcc>(a, b)));
+        return out.dest;
+    } else return dist<RAcc>(a, b);
+}
+
 /** @brief Out-of-place unit vector `a / norm(a)` -> a NEW dense tensor (static
  *         shape -> stack, dynamic -> heap). The result element type is floating
  *         (integer input -> `double`, like `norm`). A zero vector yields NaNs
@@ -1720,6 +1776,15 @@ template <class T,class E,class L,storage O> template <class Acc, class Tb,class
 _TNY_API auto tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::dot<Acc>(*this, b); }
 template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags>
 _TNY_API decltype(auto) tensor<T,E,L,O>::dot(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const { return tny::dot<Acc>(*this, b, tag0, tags...); }
+// sqdist/dist: same binary (no axis) shape as dot.
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto tensor<T,E,L,O>::sqdist(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::sqdist<Acc>(*this, b); }
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags>
+_TNY_API decltype(auto) tensor<T,E,L,O>::sqdist(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const { return tny::sqdist<Acc>(*this, b, tag0, tags...); }
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API auto tensor<T,E,L,O>::dist(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::dist<Acc>(*this, b); }
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags>
+_TNY_API decltype(auto) tensor<T,E,L,O>::dist(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const { return tny::dist<Acc>(*this, b, tag0, tags...); }
 
 /* ------------------------------------------------------------------ *
  *     Out-of-place producers AS METHODS (parity with a.add(b))       *
