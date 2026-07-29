@@ -307,8 +307,8 @@ sweep needs no separate flag — it composes with the existing negative-stride
 view:
 
 ```cpp
-auto rv = t.flip<0>();     // named lvalue: scan_/peel take a non-const lvalue ref
-scan_<0>(rv, 0.0, sum_op{});
+scan_<0>(t.flip<0>(), 0.0, sum_op{});   // a temporary flip() view binds fine (scan_
+                                        // has both lvalue and rvalue overloads)
 ```
 
 Value form leads with `axis<Axis>{}` (single-axis selector, right after the
@@ -317,7 +317,10 @@ filed with): `scan_(t, axis<0>{}, 0.0, sum_op{})` == `scan_<0>(t, 0.0, sum_op{})
 
 Out-of-place `scan<Axis>` is a fresh dense copy, scanned (static shape -> stack,
 dynamic -> heap, host-only, like `clone()` — which it's built on); `into(dest)`
-writes into a preallocated buffer instead (one copy, no fresh allocation):
+writes into a preallocated buffer instead (one copy, no fresh allocation).
+Unlike `copy_`'s own numpy-style broadcast, `dest` must match `t`'s shape
+EXACTLY (checked — a compile error when both are static, a debug-time check
+otherwise), since `scan_` then walks `dest`'s own axis numbering:
 
 ```cpp
 auto out = scan<0>(t, 0.0, sum_op{});             // fresh tensor; t itself untouched

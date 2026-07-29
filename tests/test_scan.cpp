@@ -45,17 +45,23 @@ int main() {
     scan_(m4, axis<1>{}, 0.0, sum_op{});
     for (long i=0;i<3;++i) for (long j=0;j<4;++j) if (m4(i,j) != m(i,j)) return 5;
 
-    // reverse sweep composes with flip: scan the reversed view (named lvalue --
-    // scan_/peel take a non-const lvalue ref, like peel<Axes...> itself, so a
-    // temporary view must be bound to a name first)
+    // reverse sweep composes with flip: scan the reversed view DIRECTLY --
+    // scan_ has both lvalue and rvalue overloads, so a temporary flip() view
+    // binds fine (mutates the same underlying storage as any named view would).
     auto r = local<double, shape<5>>();
     for (long i=0;i<5;++i) r(i) = static_cast<double>(i+1);   // 1,2,3,4,5
-    auto rf = r.flip<0>();
-    scan_<0>(rf, 0.0, sum_op{});
+    scan_<0>(r.flip<0>(), 0.0, sum_op{});
     // flip<0>() reverses -> scan sees 5,4,3,2,1 -> cumsum 5,9,12,14,15 -> written
     // back through the flipped view into r as 15,14,12,9,5
     double rref[5] = {15,14,12,9,5};
     for (long i=0;i<5;++i) if (r(i) != rref[i]) return 6;
+
+    // a NAMED lvalue view works identically (both spellings are equivalent)
+    auto r2 = local<double, shape<5>>();
+    for (long i=0;i<5;++i) r2(i) = static_cast<double>(i+1);
+    auto rf2 = r2.flip<0>();
+    scan_<0>(rf2, 0.0, sum_op{});
+    for (long i=0;i<5;++i) if (r2(i) != rref[i]) return 14;
 
     // real distance-transform recurrence: min_plus forward sweep matches the
     // hand-written l1_line forward half (examples/distance_transform.cpp).
@@ -91,6 +97,18 @@ int main() {
     for (long i=0;i<4;++i) dyn(i) = static_cast<double>(i+1);
     auto dyno = scan<0>(dyn, 0.0, sum_op{});
     for (long i=0;i<4;++i) if (dyno(i) != sref[i]) return 13;
+
+    // rvalue + value form together: scan_(rvalue_view, axis<Axis>{}, init, f)
+    auto r3 = local<double, shape<5>>();
+    for (long i=0;i<5;++i) r3(i) = static_cast<double>(i+1);
+    scan_(r3.flip<0>(), axis<0>{}, 0.0, sum_op{});
+    for (long i=0;i<5;++i) if (r3(i) != rref[i]) return 15;
+
+    // into(dest) with a DIFFERENT element type: casts on write, like the rest
+    // of the library's into(dest) forms (index_select, reductions).
+    auto fdest = local<float, shape<4>>(); fdest.zero_();
+    scan<0>(s, 0.0, sum_op{}, into(fdest));
+    for (long i=0;i<4;++i) if (fdest(i) != static_cast<float>(sref[i])) return 16;
 
     return 0;
 }

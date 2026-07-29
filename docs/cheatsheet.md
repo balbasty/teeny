@@ -229,11 +229,13 @@ scan_<Axis>(x, init, f);            // sequential fold along Axis, batched (peel
                                     //   for each element (increasing order). f is a device-safe
                                     //   functor (like map_'s convention). Value form: scan_(x,
                                     //   axis<Axis>{}, init, f) -- single-axis tag right after x.
-                                    //   Reverse sweep: scan_<Axis>(rv, init, f) on a named rv =
-                                    //   x.flip<Axis>() (scan_/peel take a non-const lvalue ref).
+                                    //   Reverse sweep: scan_<Axis>(x.flip<Axis>(), init, f) -- a
+                                    //   temporary view binds fine (lvalue + rvalue overloads).
 auto y = scan<Axis>(x, init, f);    // out-of-place: fresh dense copy, scanned (static->stack,
                                     //   dynamic->heap host-only, built on clone()); x untouched.
-scan<Axis>(x, init, f, into(dest)); // no fresh allocation beyond the copy into dest; returns dest&
+scan<Axis>(x, init, f, into(dest)); // no fresh allocation beyond the copy into dest; returns dest&.
+                                    //   dest must match x's shape EXACTLY (checked -- unlike
+                                    //   copy_'s own broadcast, since scan_ walks dest's own axes)
 ```
 
 See [Views & structure](structure.md#nd-peel-iterate-a-subset-of-axes).

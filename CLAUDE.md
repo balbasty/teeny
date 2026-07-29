@@ -464,14 +464,17 @@ scan_<0>(t, 0.0, sum_op{});           // carry=init, then carry=f(carry,x); x=ca
                       //   element -- a 1-D Felzenszwalb min-plus sweep (carry=min(carry+w,x))
                       //   is exactly this shape (examples/distance_transform.cpp's hand-written
                       //   twin). Reverse sweep composes with flip, no separate direction flag:
-                      //   auto rv = t.flip<0>(); scan_<0>(rv, init, f); (named lvalue — scan_/
-                      //   peel take a non-const lvalue ref, can't bind a temporary view).
+                      //   scan_<0>(t.flip<0>(), init, f); (scan_ has both lvalue and rvalue
+                      //   overloads, so a temporary flip() view binds fine -- it mutates the
+                      //   same underlying storage as a named view would).
                       //   Value form: scan_(t, axis<0>{}, init, f) — single-axis tag right
                       //   after t (matches the issue's own free-function sketch), not trailing
                       //   like peel_zip's (scan_'s only other args, init/f, are fixed-arity).
 auto y = scan<0>(x, 0.0, sum_op{});   // out-of-place: fresh dense copy, scanned (static->stack,
                       //   dynamic->heap host-only, built on clone()); x itself untouched.
-scan<0>(x, 0.0, sum_op{}, into(dest)); // into(dest): no fresh allocation beyond the copy; dest&
+scan<0>(x, 0.0, sum_op{}, into(dest)); // into(dest): no fresh allocation beyond the copy; dest&.
+                      //   dest must match x's shape EXACTLY (checked -- unlike copy_'s own
+                      //   broadcast rule, since scan_ then walks dest's own axis numbering).
 
 // --- nd-peel: peel the FIRST N axes (arbitrary batch rank) ---
 for (auto v : peel_front<N>(t)) f(v);      // v is (*spatial, C); N = #batch dims. Incremental (as above);

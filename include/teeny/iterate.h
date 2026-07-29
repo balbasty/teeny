@@ -697,9 +697,9 @@ template <cs::size_t Rank, cs::size_t Axis> struct scan_complement_t
 // `line(i) = carry` (the new carry doubles as the new element -- a running
 // fold in place, e.g. `carry = min(carry + w, line(i))` is exactly a 1-D
 // Felzenszwalb L1 sweep, see examples/distance_transform.cpp's hand-written
-// twin). A reverse sweep is just `scan_<Axis>(t.flip<Axis>(), init, f)`.
+// twin). A reverse sweep is just `auto rv = t.flip<Axis>(); scan_<Axis>(rv, init, f);`.
 template <cs::size_t A, class Tn, class Carry, class F, cs::size_t... I>
-_TNY_API void scan_lines(Tn & t, Carry init, F f, cs::index_sequence<I...>) noexcept {
+_TNY_API void scan_lines(Tn & t, Carry init, F f, cs::index_sequence<I...>) {
     using Idx = typename Tn::index_type;
     for (auto line : peel<scan_complement_t<Tn::rank(), A>::value[I]...>(t)) {
         Carry carry = init;
@@ -718,26 +718,35 @@ _TNY_API void scan_lines(Tn & t, Carry init, F f, cs::index_sequence<I...>) noex
  *         `Axis` (in increasing order) `carry = f(carry, x)`, `x = carry` --
  *         the new carry doubles as the new element. `f` is a device-safe
  *         functor (lambda-free engines, like `map_`/`zip_with_`): `Carry
- *         operator()(Carry carry, T x) const`. A reverse sweep is
- *         `scan_<Axis>(t.flip<Axis>(), init, f)` (composes with the
- *         existing negative-stride view, no separate "direction" flag).
+ *         operator()(Carry carry, T x) const`. A reverse sweep composes with
+ *         the existing negative-stride view, no separate "direction" flag:
+ *         `scan_<Axis>(t.flip<Axis>(), init, f)` (an rvalue view binds fine --
+ *         `scan_` has both lvalue and rvalue overloads, unlike `peel` this
+ *         doesn't need a named temporary first).
  *         `scan_<Axis>(t, init, f)` == `scan_(t, axis<Axis>{}, init, f)`. */
 template <long Axis, class T, class E, class L, storage O, class Carry, class F>
-_TNY_API void scan_(tensor<T,E,L,O> & t, Carry init, F f) noexcept {
+_TNY_API void scan_(tensor<T,E,L,O> & t, Carry init, F f) {
     static_assert(tensor<T,E,L,O>::rank() >= 1, "scan_: needs rank >= 1");
     static_assert(_axis_in_range(Axis, tensor<T,E,L,O>::rank()), "scan_: axis out of range");
     constexpr cs::size_t A = _norm_axis(Axis, tensor<T,E,L,O>::rank());
     _md::scan_lines<A>(t, init, f, cs::make_index_sequence<tensor<T,E,L,O>::rank() - 1>{});
 }
+// rvalue overload: a temporary VIEW (e.g. `t.flip<Axis>()`) mutates the same
+// underlying storage as any named view would -- only the view OBJECT is a
+// temporary, the data it points at is not. Forwards to the lvalue overload.
 template <long Axis, class T, class E, class L, storage O, class Carry, class F>
-_TNY_API void scan_(tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) noexcept { scan_<Axis>(t, init, f); }
+_TNY_API void scan_(tensor<T,E,L,O> && t, Carry init, F f) { scan_<Axis>(t, init, f); }
+template <long Axis, class T, class E, class L, storage O, class Carry, class F>
+_TNY_API void scan_(tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) { scan_<Axis>(t, init, f); }
+template <long Axis, class T, class E, class L, storage O, class Carry, class F>
+_TNY_API void scan_(tensor<T,E,L,O> && t, axis<Axis>, Carry init, F f) { scan_<Axis>(t, init, f); }
 
 /** @brief Out-of-place twin of `scan_`: a fresh dense copy of `t`, scanned.
  *         Static shape -> stack (host+device); dynamic -> heap (host only,
  *         like `clone()`, which this is built on). */
 template <long Axis, class T, class E, class L, storage O, class Carry, class F,
           cs::enable_if_t<tensor<T,E,L,O>::is_static, int> = 0>
-_TNY_API auto scan(const tensor<T,E,L,O> & t, Carry init, F f) noexcept {
+_TNY_API auto scan(const tensor<T,E,L,O> & t, Carry init, F f) {
     auto out = t.clone();
     scan_<Axis>(out, init, f);
     return out;
@@ -750,19 +759,30 @@ _TNY_HOST auto scan(const tensor<T,E,L,O> & t, Carry init, F f) {
     return out;
 }
 template <long Axis, class T, class E, class L, storage O, class Carry, class F>
-_TNY_API auto scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) noexcept { return scan<Axis>(t, init, f); }
+_TNY_API auto scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) { return scan<Axis>(t, init, f); }
 
 /** @brief `into(dest)` form: write the scanned result into a preallocated
- *         `dest` (any shape matching `t`'s) -- one copy, no fresh
- *         allocation beyond that copy; device-safe. Returns `dest&`. */
+ *         `dest` (a shape matching `t`'s EXACTLY, checked -- a `static_assert`
+ *         when both are static, `_TNY_CHECK` otherwise; unlike `copy_`'s own
+ *         numpy-style broadcast, `dest` must match rather than merely receive
+ *         a broadcast copy, since `scan_` then walks `dest`'s own axis
+ *         numbering) -- one copy, no fresh allocation beyond that; device-safe.
+ *         Returns `dest&`. */
 template <long Axis, class T, class E, class L, storage O, class Carry, class F, class D>
-_TNY_API auto & scan(const tensor<T,E,L,O> & t, Carry init, F f, into_t<D> out) noexcept {
+_TNY_API auto & scan(const tensor<T,E,L,O> & t, Carry init, F f, into_t<D> out) {
+    using DstE = typename D::extents_type;
+    static_assert(tensor<T,E,L,O>::rank() == D::rank(), "scan into(dest): rank mismatch");
+    static_assert(_md::ext_static_eq<E, DstE>(cs::make_index_sequence<E::rank()>{}),
+                  "scan into(dest): dest's shape must match the source exactly");
+    for (cs::size_t d = 0; d < tensor<T,E,L,O>::rank(); ++d)
+        _TNY_CHECK(static_cast<long>(out.dest.extent(d)) == static_cast<long>(t.extent(d)),
+                   "scan into(dest): dest's shape must match the source exactly");
     out.dest.copy_(t);
     scan_<Axis>(out.dest, init, f);
     return out.dest;
 }
 template <long Axis, class T, class E, class L, storage O, class Carry, class F, class D>
-_TNY_API auto & scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f, into_t<D> out) noexcept
+_TNY_API auto & scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f, into_t<D> out)
 { return scan<Axis>(t, init, f, out); }
 
 _TNY_NAMESPACE_END(tny)
