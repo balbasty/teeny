@@ -53,8 +53,11 @@ jobs:
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git submodule update --init --recursive
 
+      # Examples are ON here too: they carry the same portability assertions the
+      # tests do (#368 — examples/cholesky_solve.cpp's sizeof check missed the
+      # #295 MSVC EBO guard precisely because nothing compiled it on MSVC).
       - name: Configure
-        run: cmake -S . -B build -DTEENY_BUILD_TESTS=ON
+        run: cmake -S . -B build -DTEENY_BUILD_TESTS=ON -DTEENY_BUILD_EXAMPLES=ON
 
       - name: Build
         run: cmake --build build --config Release --parallel 4

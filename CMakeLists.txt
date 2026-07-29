@@ -95,14 +95,22 @@ if (TEENY_BUILD_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------
-# Examples
+# Examples (each examples/*.cpp is a standalone executable, built as ex_<name>
+# to match the Makefile's own binary naming. The glob is deliberately
+# NON-recursive: examples/fastfields/ is headers-only reference numerics.)
 # ---------------------------------------------------------------------------
 if (TEENY_BUILD_EXAMPLES)
-    file(GLOB _teeny_examples CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/examples/ex_*.cpp")
+    file(GLOB _teeny_examples CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/examples/*.cpp")
     foreach (_src IN LISTS _teeny_examples)
         get_filename_component(_name "${_src}" NAME_WE)
-        add_executable(${_name} "${_src}")
-        target_link_libraries(${_name} PRIVATE teeny::teeny)
+        add_executable(ex_${_name} "${_src}")
+        target_link_libraries(ex_${_name} PRIVATE teeny::teeny)
+        # batched_inverse splits the batch across std::threads (the Makefile
+        # passes -pthread for exactly this one example).
+        if (_name STREQUAL "batched_inverse")
+            find_package(Threads REQUIRED)
+            target_link_libraries(ex_${_name} PRIVATE Threads::Threads)
+        endif()
     endforeach()
 endif()
 
