@@ -211,17 +211,20 @@ _TNY_API constexpr bool bc_static_ok_r(cs::index_sequence<D...>) {
 template <class Idx, class Ea, class Eb, cs::size_t R, cs::size_t... D>
 cs::extents<Idx, bc1(bc_sext<Ea, R>(D), bc_sext<Eb, R>(D))...>
 bcast_ext_(cs::index_sequence<D...>);
-// The broadcast RESULT carries the WIDER of the two operands' offset index types
-// (by `sizeof`; a tie keeps the first operand's, so same-width mixes are unchanged).
-// The engine `bzip_` casts both operands' extents/strides to the result index type,
-// so broadening is lossless AND fixes the truncation that a narrow result would cause
-// to a wide operand's strides. (It does not — and cannot from the types alone — widen
-// two equal-narrow operands whose broadcast SPAN overflows: that stays the caller's
-// responsibility, guarded by index_fits/dispatch_index at the boundary.)
+// The WIDER of two offset index TYPES (by `sizeof`; a tie keeps the first, so a
+// same-width pair — the overwhelmingly common case — is unchanged). Every value an
+// engine loads fits its OWN tensor's index type by construction, so the wider of the
+// participating types holds all of them and every `static_cast` into it is lossless.
+// (It does not — and cannot from the types alone — widen two equal-narrow operands
+// whose combined SPAN overflows: that stays the caller's responsibility, guarded by
+// index_fits/dispatch_index at the boundary. Nor can it repair an equal-SIZE pair
+// that disagrees in SIGNEDNESS — no type holds both a negative stride and one past
+// its own signed reach; teeny's reach contract is signed throughout, see `index_fits`.)
+template <class Ia, class Ib>
+using _wider_int_t = cs::conditional_t<(sizeof(Ib) > sizeof(Ia)), Ib, Ia>;
+// The broadcast RESULT carries the wider of the two OPERANDS' index types.
 template <class Ea, class Eb>
-using _wider_index_t = cs::conditional_t<
-    (sizeof(typename Eb::index_type) > sizeof(typename Ea::index_type)),
-    typename Eb::index_type, typename Ea::index_type>;
+using _wider_index_t = _wider_int_t<typename Ea::index_type, typename Eb::index_type>;
 template <class Ea, class Eb>
 using bcast_extents = decltype(bcast_ext_<_wider_index_t<Ea, Eb>, Ea, Eb,
     bc_rank(Ea::rank(), Eb::rank())>(cs::make_index_sequence<bc_rank(Ea::rank(), Eb::rank())>{}));
@@ -264,11 +267,31 @@ _TNY_HOST RE bcast_runtime_(const A & a, const B & b, cs::index_sequence<D...>) 
 // per-element mixed-radix decode is skipped. Any mismatch falls back unchanged.
 template <class W, bool Restrict, class Cv, class C, class A, class B, class Op, cs::size_t... D>
 _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D...>) {
-    using I = typename C::index_type;
+    // Offsets are computed in the WIDEST of the THREE participating index types —
+    // the destination's and both operands' (#346). Taking the DESTINATION's alone
+    // truncated a wider-indexed operand's extents/strides: silently, since the
+    // `static_cast<I>`s below suppress the narrowing diagnostic that caught the
+    // sibling `zipreduce_decode_` bug (#342). An OUT-OF-PLACE `c` already carries
+    // `_wider_index_t` of the two operands (#167), so it is the widest and this is a
+    // no-op there; it is the IN-PLACE ops (`c` IS `a`: `a.add_(b)`, `a.copy_(b)`, …)
+    // and a caller-supplied `into(dest)` that can hand us a NARROW destination next
+    // to a wide operand, and there `a.stride()` of 40000 folded to an int16 -25536
+    // and read off the front of the buffer.
+    //
+    // Widening is not a promise about `c`'s own type: `c`'s own offsets are computed
+    // from `c`'s own extents/strides, so they fit `c`'s index type by construction
+    // (widening only carries them in a larger register, same values), and nothing
+    // here is stored back into a tensor's type — `data()[off]` takes any integer.
+    // Symmetrically, each operand's offsets stay inside its own tensor: the loop
+    // counter `k` is bounded by `ce[d]`, and the extent checks just below pin
+    // `ae[d]`/`be[d]` to `ce[d]` (or 1 -> stride 0), so no operand is ever indexed
+    // past its own extent in any axis.
+    using I = _wider_int_t<typename C::index_type,
+                           _wider_index_t<typename A::extents_type, typename B::extents_type>>;
     constexpr cs::size_t R = C::rank();   // c has the result (largest) rank; a,b right-align into it
     // Array size floored to 1 (rank-0 c -> empty D..., see scal_'s comment above).
-    const I ce[sizeof...(D) ? sizeof...(D) : 1] = { c.extent(D)... },
-            sc[sizeof...(D) ? sizeof...(D) : 1] = { c.stride(D)... };
+    const I ce[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(c.extent(D))... },
+            sc[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(c.stride(D))... };
     const I ae[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(bc_ext<R>(a, D))... },
             sa[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(bc_str<R>(a, D))... };
     const I be[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(bc_ext<R>(b, D))... },

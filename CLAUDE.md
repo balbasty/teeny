@@ -664,6 +664,15 @@ is generic.
   same `_wider_index_t` for its offset math (#342) even though it yields a scalar,
   not a tensor — taking the first operand's index type alone narrowed the second's
   extents/strides (a hard clang error, a silently wrong offset under g++).
+  `bzip_` itself runs its offset math in the WIDEST of the THREE participating index
+  types — `_wider_int_t<C::index_type, _wider_index_t<Ea,Eb>>` (#346). Out-of-place
+  that IS the result's type (no-op), but IN-PLACE (`c` is `a`) and `into(dest)` hand it
+  a destination whose index type is fixed by the caller's own tensor and may be
+  NARROWER than an operand's; taking the destination's alone truncated a wide rhs's
+  strides — silently, since `bzip_`'s `static_cast<I>`s suppress even the narrowing
+  diagnostic that caught #342. Widening is internal only: no tensor's own type changes,
+  each tensor's offsets fit its own index type by construction, and `data()[off]` takes
+  any integer, so nothing is narrowed back.
   **Contiguous linear fast path (#161, #175):** contiguous elementwise ops replace the
   per-element mixed-radix decode with a flat `for(i) cp[i]=…` loop that auto-vectorizes.
   Two flavours by whether a second array is in play:
