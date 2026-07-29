@@ -39,6 +39,38 @@ int main() {
     auto s = wrap(buf, shape<3>{}, strides<2>{});   // stride 2: picks 3,0,4
     if (!close(norm(s), 5.0))       return 8;
 
+    // ---- sqdist / dist : fused point-to-point distance (#324) ------------
+    auto pa1 = local<double, shape<3>>(); pa1(0)=1; pa1(1)=2; pa1(2)=3;
+    auto pb1 = local<double, shape<3>>(); pb1(0)=4; pb1(1)=6; pb1(2)=8;   // deltas 3,4,5
+    if (sqdist(pa1, pb1) != 9.0+16.0+25.0)          return 38;
+    if (!close(dist(pa1, pb1), std::sqrt(50.0)))    return 39;
+    // matches the un-fused sqnorm(a-b)/norm(a-b) spelling exactly
+    if (sqdist(pa1, pb1) != sqnorm(pa1 - pb1))       return 40;
+    if (!close(dist(pa1, pb1), norm(pa1 - pb1)))     return 41;
+    // symmetry: sqdist(a,b) == sqdist(b,a)
+    if (sqdist(pa1, pb1) != sqdist(pb1, pa1))        return 42;
+    // method forms
+    if (pa1.sqdist(pb1) != sqdist(pa1, pb1))         return 43;
+    if (!close(pa1.dist(pb1), dist(pa1, pb1)))        return 44;
+    // integer input: sqdist stays int (sum rule), dist -> double (mean rule)
+    auto ia1 = local<int, shape<2>>(); ia1(0)=1; ia1(1)=2;
+    auto ib1 = local<int, shape<2>>(); ib1(0)=4; ib1(1)=6;   // deltas 3,4 -> sq=25
+    if (sqdist(ia1, ib1) != 25)                      return 45;
+    static_assert(cs::is_same<decltype(sqdist(ia1, ib1)), int>::value,    "sqdist(int)->int");
+    static_assert(cs::is_same<decltype(dist(ia1, ib1)),   double>::value, "dist(int)->double (mean rule)");
+    if (!close(dist(ia1, ib1), 5.0))                 return 46;
+    // explicit accumulator: sqdist<Acc>/dist<Acc> makes Acc BOTH accumulator and result
+    static_assert(cs::is_same<decltype(sqdist<double>(ia1, ib1)), double>::value, "sqdist<double> result");
+    if (!close(sqdist<double>(ia1, ib1), 25.0))      return 47;
+    // dtype<T>{} value-tag form == the <Acc> template form
+    if (sqdist(ia1, ib1, dtype<double>{}) != sqdist<double>(ia1, ib1)) return 48;
+    // into(dest): full reduction writes its scalar into a rank-0 dest
+    auto cell = local<double, shape<>>{};
+    sqdist(pa1, pb1, into(cell));
+    if (cell.item() != 50.0)                         return 49;
+    dist(pa1, pb1, into(cell));
+    if (!close(cell.item(), std::sqrt(50.0)))        return 50;
+
     // ---- normalize (out-of-place) ---------------------------------------
     auto u = normalize(v);
     if (!close(u(0), 0.6) || !close(u(1), 0.0) || !close(u(2), 0.8)) return 9;
