@@ -289,10 +289,10 @@ path). Reducing over every axis is the scalar form above.
 
 ### `keepdims` — keep the reduced axes as size-1
 
-Pass `keepdims` as the last argument (before a trailing `into(dest)`, if any) to
-keep the named axes as size-1 instead of removing them — numpy/pytorch's
-`keepdims=True` — so the result **broadcasts back** against the input without an
-extra `unsqueeze`:
+Pass `keepdims` (any subset, any order, alongside `dtype<Acc>{}`/`axis<...>{}`/
+`into(dest)`) to keep the named axes as size-1 instead of removing them —
+numpy/pytorch's `keepdims=True` — so the result **broadcasts back** against the
+input without an extra `unsqueeze`:
 
 ```cpp
 sum<0>(a, keepdims);              // (H,W) -> (1,W), instead of (W,)

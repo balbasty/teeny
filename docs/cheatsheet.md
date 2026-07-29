@@ -176,8 +176,9 @@ x.permute<Perm...>();                 // reorder axes
 x.flip<Ax>();                         // reverse an axis (negative-stride view)
 x.unsqueeze<Ax>();  x.squeeze<Ax>();  // insert / drop a size-1 axis
 x.unsqueeze<Ax0,Ax1,...>();  x.squeeze<Ax0,Ax1,...>();  // insert/drop SEVERAL at once (arity picks this
-                                      //   overload); unsqueeze positions are relative to the FINAL rank
-                                      //   (smallest-first fold), squeeze to the SOURCE rank (largest-first)
+                                      //   overload); axes must be DISTINCT but may be listed in ANY order —
+                                      //   unsqueeze positions are relative to the FINAL rank, squeeze to the
+                                      //   SOURCE rank (the fold direction is an implementation detail)
 x.unsqueeze(axis<>{});  x.squeeze(axis<>{});  // an EMPTY axis LIST names no axis -> a NO-OP (numpy's
                                       //   axis=() rule): same shape/strides back. NOT the same as the
                                       //   no-argument x.squeeze() (drop EVERY static singleton) /
@@ -198,10 +199,13 @@ to<storage::gpu>(x);                      // memory-space move: to<Space,ET,Forc
 
 Axis template arguments are signed (negatives count from the back); each `<Ax>` op
 also has a **value form** — `t.permute(Int<2>(),Int<0>(),Int<1>())` == `t.permute<2,0,1>()`,
-`t.recast(shape<-1,3,3>{})` == `t.recast<shape<-1,3,3>>()`. The axis-**list** ops
-(`peel`/`peel_at`/`take_along`) take an `axis<...>{}` selector (a compile-time axis
-list, sibling of `shape<...>`, like numpy's `axis: int | list[int]`):
-`peel(t, axis<0,1>{})` == `peel<0,1>(t)`, `t.take_along(axis<0,2>{}, i, slice(1,4))`.
+`t.recast(shape<-1,3,3>{})` == `t.recast<shape<-1,3,3>>()`. The axis-**list** ops —
+`permute`/`squeeze`/`unsqueeze` **and** `peel`/`peel_at`/`take_along`/the reductions —
+take an `axis<...>{}` selector (a compile-time axis list, sibling of `shape<...>`,
+like numpy's `axis: int | list[int]`) — reach for this spelling first:
+`t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, `t.permute(axis<2,0,1>{})` ==
+`t.permute<2,0,1>()`, `peel(t, axis<0,1>{})` == `peel<0,1>(t)`,
+`t.take_along(axis<0,2>{}, i, slice(1,4))`.
 Value forms are deduced, so a type-dependent receiver needs no `.template`.
 **Every** view op —
 `operator()`/`take_along`/`peel` **and** `permute`/`flip`/`unsqueeze`/`squeeze` —
