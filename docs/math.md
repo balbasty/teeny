@@ -153,7 +153,7 @@ returning a fresh tensor. It returns `y&`. This is the kernel-friendly form (the
 numpy/pytorch `out=`), and the way to write into a strided slot of a larger array.
 
 ```cpp
-a.add(b, into(y));            // y = a + b   (one pass; y may be any compatible shape/dtype)
+a.add(b, into(y));            // y = a + b   (one pass; y holds the result's shape, any dtype)
 a.mul(b, into(y));  a.div(b, into(y));  a.pow(b, into(y));
 a.add(2.0, into(y));          // scalar rhs works too
 exp(a, into(y));  sqrt(a, into(y));  neg(a, into(y));   // every unary
@@ -171,9 +171,24 @@ auto c = a.add(b, alpha);     // -> new,  a + alpha*b
 a.add(b, alpha, into(y));     // -> y,    a + alpha*b   (sub likewise)
 ```
 
-`into(y)` writes in a single pass; `y` may share memory with an operand, and its
-shape is checked against the (broadcast) result. `y`'s dtype need not match —
-the result is cast to it.
+`into(y)` writes in a single pass; `y` may share memory with an operand, and `y`'s
+dtype need not match — the result is cast to it.
+
+**`y`'s shape is checked**, against the result the producer would otherwise have
+allocated: the source's own shape for a unary or scalar-rhs op, the broadcast shape
+for a tensor-rhs one. Only the *operands* broadcast — the destination never
+stretches, so a `y` that is smaller in any axis is an error, not a repeated write.
+For a unary or scalar-rhs op it is caught at **compile time** when both shapes are
+fully static, and by a debug-time check (an `assert`, compiled out under
+`-DNDEBUG`) when either is dynamic; the broadcasting tensor-rhs form uses the
+debug-time check in both cases:
+
+```cpp
+auto a = zeros(shape<8,8>{});
+auto y = zeros(shape<2,2>{});
+a.mul(2.0, into(y));          // compile error: dest's shape must match the source's
+exp(a, into(y));              // same
+```
 
 Reductions take `into(dest)` too. A **full** reduction (all axes) writes its
 scalar into a **rank-0** destination; an **axis** reduction copies its lower-rank

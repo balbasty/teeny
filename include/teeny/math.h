@@ -420,6 +420,29 @@ _TNY_API void check_dest_no_overlap(const C & c, cs::index_sequence<D...>) {
         "the update aliases and is applied multiple times to the same element — clone() to a "
         "dense tensor first, or write into a non-overlapping destination."), ... );
 }
+// EXACT per-axis extent check between a destination and the single source it is
+// written from — the runtime half of the guard the SINGLE-SOURCE engines
+// (`scalo_`/`unaryo_`) need, and the twin of the compile-time `ext_static_eq`
+// above. Those engines take their loop BOUNDS from the source and their strides
+// from the destination, so a destination shorter in any axis is written past its
+// end (#357): `a.mul(2.0, into(y))` with an 8x8 `a` and a 2x2 `y` stored 64
+// elements through a 4-element buffer. Their allocating producers (`oops`/
+// `uop_out`) build the destination from the source's own extents type, so the only
+// way to reach them mis-shaped is a caller-supplied `into(dest)`.
+//
+// EXACT equality, unlike `bzip_`'s `ae[r] == ce[r] || ae[r] == 1`: that engine
+// BROADCASTS (an extent-1 operand axis gets stride 0 and is stretched), these two
+// do not — they index the source with the same counter they index the destination
+// with, so an extent 1 against an extent n is a plain mismatch, not a stretch.
+// Extents are non-negative by construction, so comparing them as `cs::size_t`
+// (mdspan's own `static_extent` type) is lossless and sidesteps a signed/unsigned
+// mismatch between two differently-indexed tensors.
+template <class C, class A, cs::size_t... D>
+_TNY_API void check_same_extents(const C & c, const A & a, cs::index_sequence<D...>) {
+    ( _TNY_CHECK(static_cast<cs::size_t>(c.extent(D)) == static_cast<cs::size_t>(a.extent(D)),
+        "into(dest): dest's shape must match the source's exactly (no broadcast here — a "
+        "scalar-rhs or unary op has nothing to stretch); a shorter dest is written past its end."), ... );
+}
 // `Restrict` defaults to false so every IN-PLACE caller (add_/sub_/.../copy_,
 // where `c` IS the destination and may alias the rhs) takes the safe decode path
 // byte-for-byte unchanged; the out-of-place `oop` passes true.
@@ -523,6 +546,23 @@ _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
     // initializers below lacked the `static_cast<I>`s, so g++ warned (`-Wnarrowing`) and
     // clang rejected the instantiation outright.
     // `Cv` = the op's compute type (arithmetic: dest compute type; compare: Rc).
+    //
+    // Shape guard (#357): the bounds below come from `a` and the stores go through
+    // `c`'s strides, so the two must agree in EVERY axis or the write runs off the
+    // end of `c`. Checked HERE, in the engine, rather than in the `scalo` wrapper
+    // the way `bzip` places its own static gate — `scmp` (comparisons) calls
+    // `scalo_` directly, and one guard at the single point that does the indexing
+    // cannot be bypassed by a future caller. Both halves, as `dot`/`scan`'s
+    // `into(dest)` do it: a `static_assert` when both shapes are fully static (the
+    // documented repro is a COMPILE error, not a debug-only trip) and a per-axis
+    // `_TNY_CHECK` for anything dynamic. No-ops for every non-`into` caller, whose
+    // destination is built from `a`'s own extents type (`oops`/`oops_cmp`) or IS
+    // `a` (`unary`).
+    static_assert(A::rank() == C::rank(), "into(dest): dest rank must match the source's");
+    static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
+                      cs::make_index_sequence<C::rank()>{}),
+                  "into(dest): dest's shape must match the source's exactly (no broadcast)");
+    check_same_extents(c, a, cs::index_sequence<D...>{});
     using I = _offset_int_t<typename C::index_type,
                             typename A::extents_type::index_type>;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
@@ -557,6 +597,18 @@ _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     // `into(dest)` narrower than the source no longer truncates the source's strides
     // (#353). The allocating producer (`uop_out`) builds `c` from `a`'s extents type,
     // so that path is unchanged.
+    //
+    // ...and the same shape guard as `scalo_` (#357), for the same reason: bounds
+    // from `a`, strides from `c`, so a mis-shaped `into(dest)` — the only way a
+    // destination of the caller's own choosing gets here — writes past its end.
+    // `static_assert` when both shapes are static, per-axis `_TNY_CHECK` otherwise;
+    // a no-op for `uop_out` (dest built from `a`'s extents) and for the in-place
+    // `unary`, which passes `c` as both arguments.
+    static_assert(A::rank() == C::rank(), "into(dest): dest rank must match the source's");
+    static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
+                      cs::make_index_sequence<C::rank()>{}),
+                  "into(dest): dest's shape must match the source's exactly (no broadcast)");
+    check_same_extents(c, a, cs::index_sequence<D...>{});
     using I = _offset_int_t<typename C::index_type,
                             typename A::extents_type::index_type>;
     using Cv = compute_type_t<typename C::element_type>;
@@ -691,8 +743,21 @@ _TNY_HOST auto uop_out(const A & a, Uop f) {
 
 /* ---- into(dest): run a producer's engine into a CALLER-provided dest ------ *
  * One fused pass, NO allocation. `Restrict=false` because a user dest may alias
- * an operand; the engine validates dest's extents against the (broadcast) result
- * and casts to dest's element type. The producer hands `into_t::dest` back. */
+ * an operand; the engine validates dest's extents against the result the producer
+ * would have allocated and casts to dest's element type. The producer hands
+ * `into_t::dest` back.
+ *
+ * The dest is the ONLY shape here the caller picks freely, so it is the only one
+ * that can disagree: `oop_to`'s `bzip_` checks it against the BROADCAST result
+ * (an operand extent of 1 stretches, the dest's does not), while `oops_to`/
+ * `uop_to`'s `scalo_`/`unaryo_` require EXACT equality with the source — a
+ * scalar-rhs or unary op has no stretch semantics at all (#357).
+ *
+ * Those two ALSO gate it at compile time (`ext_static_eq`) when both shapes are
+ * fully static; `bzip_`'s is a `_TNY_CHECK` only, since `bzip`'s own static gate
+ * (`bc_static_ok_r`) compares the two OPERANDS with each other, never either one
+ * against `c`. Not a silent write either way — just a debug-time trip rather than
+ * a compile error for a static mis-shaped tensor-rhs dest. */
 template <class Op, class Out, class A, class B> _TNY_API void oop_to (Out & o, const A & a, const B & b, Op op) { bzip<w_set, false>(o, a, b, op); }
 template <class Op, class Out, class A, class S>  _TNY_API void oops_to(Out & o, const A & a, S s, Op op) { scalo<false>(o, a, s, op); }
 template <class Uop, class Out, class A>          _TNY_API void uop_to (Out & o, const A & a, Uop f) { unaryo<false>(o, a, f); }
