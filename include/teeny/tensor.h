@@ -887,6 +887,40 @@ public:
     template <long... Axes, class... Args>
     _TNY_API auto take_along(axis<Axes...>, Args... args) const noexcept { return take_along<Axes...>(args...); }
 
+    /**
+     * @brief Subsample a coloured/strided sub-lattice: bind named axes to a
+     *        `slice(start,none,k)` each, sharing one STEP `k` across all of
+     *        them but taking a separate START per axis — sugar for
+     *        `take_along` (#258), for the "every `k`-th voxel, offset per
+     *        axis" pattern coloured Gauss-Seidel relaxation needs
+     *        (`loc[d] % k == digit_d(n)`). Pure sugar, no new addressing
+     *        power: `t.subsample<0,1>(k, s0, s1)` ==
+     *        `t.take_along<0,1>(slice(s0,none,k), slice(s1,none,k))`.
+     *        `k` and each `start` accept a runtime value OR a compile-time
+     *        one (`Int<k>()`) — folds through `slice()`'s own static-range
+     *        machinery, so a fully-static `(start,k)` pair keeps a folded
+     *        static output extent/stride, same as a hand-written `slice()`.
+     */
+    template <long... Axes, class K, class... Starts>
+    _TNY_API auto subsample(K k, Starts... starts) noexcept {
+        static_assert(sizeof...(Axes) == sizeof...(Starts), "subsample: one start per named axis");
+        return take_along<Axes...>(slice(starts, none, k)...);
+    }
+    template <long... Axes, class K, class... Starts>
+    _TNY_API auto subsample(K k, Starts... starts) const noexcept {
+        static_assert(sizeof...(Axes) == sizeof...(Starts), "subsample: one start per named axis");
+        return take_along<Axes...>(slice(starts, none, k)...);
+    }
+    /** @brief Value form: `t.subsample(axis<0,1>{}, k, s0, s1)` ==
+     *         `t.subsample<0,1>(k, s0, s1)` — leading `axis<...>` selector,
+     *         same placement as `take_along`'s own value form (a second
+     *         variadic pack, the starts, needs the disambiguating tag up
+     *         front rather than trailing). */
+    template <long... Axes, class K, class... Starts>
+    _TNY_API auto subsample(axis<Axes...>, K k, Starts... starts) noexcept       { return subsample<Axes...>(k, starts...); }
+    template <long... Axes, class K, class... Starts>
+    _TNY_API auto subsample(axis<Axes...>, K k, Starts... starts) const noexcept { return subsample<Axes...>(k, starts...); }
+
 private:
     // Build the runtime index_select output extents: axis `Axis`'s extent is
     // `newExt` (the gather index tensor's own numel), every other axis copies
