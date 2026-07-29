@@ -13,6 +13,27 @@ struct min_plus {
 };
 struct sum_op { _TNY_API double operator()(double carry, double x) const { return carry + x; } };
 
+namespace tny_test {
+// #375 regression guard: `scan`'s axis<> value form is SPLIT into an _TNY_API
+// (static shape -> stack result) and a _TNY_HOST (dynamic shape -> heap result)
+// forwarder, matching the `<Axis>` pair it forwards to, so nvcc's device pass
+// never sees a __host__ __device__ forwarder call a __host__ allocator. The whole
+// POINT of the value form is that it deduces `Axis` and so needs no `.template`
+// on a type-dependent receiver -- the property a naive two-overload split is most
+// likely to break. `Tn`/`F` are template parameters, so both calls below are
+// genuinely dependent.
+template <class Tn, class F>
+bool dependent_scan(const Tn & t, F f) {
+    auto got = scan(t, axis<0>{}, 0.0, f);   // value form, deduced -- no `.template`
+    auto exp = scan<0>(t, 0.0, f);           // the <Axis> twin (a free fn: no `.template` either)
+    static_assert(cs::is_same<decltype(got), decltype(exp)>::value,
+                  "#375: value form and <Axis> form must agree on the result type");
+    const long n = (long) t.shape(0);
+    for (long i = 0; i < n; ++i) if (got(i) != exp(i)) return false;
+    return true;
+}
+} // namespace tny_test
+
 int main() {
     // rank-1: cumulative sum via scan_
     auto t = local<double, shape<5>>();
@@ -111,6 +132,28 @@ int main() {
     auto fdest = local<float, shape<4>>(); fdest.zero_();
     scan<0>(s, 0.0, sum_op{}, into(fdest));
     for (long i=0;i<4;++i) if (fdest(i) != static_cast<float>(sref[i])) return 16;
+
+    // #375: the axis<> value form is SPLIT into an _TNY_API (static -> stack) and
+    // a _TNY_HOST (dynamic -> heap) forwarder so nvcc's device pass never sees a
+    // __host__ __device__ forwarder call a __host__ allocator. Host-side the split
+    // must be INVISIBLE: each arm picks the same underlying overload -- same
+    // ownership, same values -- as the equivalent <Axis> template-form spelling.
+    // (a) static shape -> _TNY_API arm -> stack result (== scan<0>(s, ...)).
+    static_assert(decltype(so2)::ownership == storage::stack, "#375: static value form -> stack (_TNY_API arm)");
+    static_assert(cs::is_same<decltype(so2), decltype(scan<0>(s, 0.0, sum_op{}))>::value,
+                  "#375: static value form must yield the <Axis> form's exact type");
+    // (b) dynamic shape -> _TNY_HOST arm -> heap result (== scan<0>(dyn, ...)).
+    auto dynv = scan(dyn, axis<0>{}, 0.0, sum_op{});
+    static_assert(decltype(dynv)::ownership == storage::heap, "#375: dynamic value form -> heap (_TNY_HOST arm)");
+    static_assert(cs::is_same<decltype(dynv), decltype(scan<0>(dyn, 0.0, sum_op{}))>::value,
+                  "#375: dynamic value form must yield the <Axis> form's exact type");
+    for (long i=0;i<4;++i) { if (dynv(i) != sref[i]) return 17; if (dynv(i) != dyno(i)) return 18; }
+    // (c) the source is still untouched by the out-of-place value form.
+    for (long i=0;i<4;++i) if (dyn(i) != static_cast<double>(i+1)) return 19;
+    // (d) both arms must still deduce with NO `.template` on a type-dependent
+    // receiver -- exercised for real inside a template, once per arm.
+    if (!tny_test::dependent_scan(s,   sum_op{})) return 20;   // static  -> _TNY_API arm
+    if (!tny_test::dependent_scan(dyn, sum_op{})) return 21;   // dynamic -> _TNY_HOST arm
 
     return 0;
 }

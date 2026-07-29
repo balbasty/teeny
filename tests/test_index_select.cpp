@@ -5,6 +5,32 @@
 using namespace tny;
 namespace cs = cuda::std;
 
+namespace tny_test {
+// #375 regression guard for the whole POINT of the axis<> value form: on a
+// TYPE-DEPENDENT receiver it must deduce `Axis` from the tag and so need NO
+// `.template` disambiguator. Splitting the forwarder in two (an _TNY_API static
+// arm + a _TNY_HOST dynamic arm) must not change that -- both arms are still
+// found by ordinary argument-dependent overload resolution, with nothing for the
+// caller to spell differently. `Src`/`Idx`/`Ref` are all template parameters, so
+// every call below is genuinely dependent: if the split broke deduction this
+// function would not compile at all.
+template <class Src, class Idx, class Ref>
+bool dependent_index_select(const Src & src, const Idx & idx, const Ref & ref) {
+    auto got = src.index_select(idx, axis<0>{});          // NO `.template` -- deduced
+    auto exp = src.template index_select<0>(idx);         // the <Axis> twin DOES need it
+    static_assert(cs::is_same<decltype(got), decltype(exp)>::value,
+                  "#375: value form and <Axis> form must agree on the result type");
+    if (got.rank() != ref.rank()) return false;
+    for (long d = 0; d < (long) got.rank(); ++d)
+        if ((long) got.shape(d) != (long) ref.shape(d)) return false;
+    const long n = (long) ref.shape(0), m = (long) ref.shape(1);
+    for (long i = 0; i < n; ++i)
+        for (long j = 0; j < m; ++j)
+            if (got(i,j) != ref(i,j) || exp(i,j) != ref(i,j)) return false;
+    return true;
+}
+} // namespace tny_test
+
 int main() {
     // a small "vertex buffer": 5 vertices, 3 coords each.
     auto verts = local<double, shape<5,3>>();
@@ -82,6 +108,33 @@ int main() {
     auto destu = local<double, shape<2,3>>();
     uverts.index_select<0>(idxun, into(destu));
     if (destu(0,0) != uverts(4,0) || destu(1,0) != uverts(0,0)) return 21;
+
+    // #375: the axis<> value form is SPLIT into an _TNY_API (static result ->
+    // stack) and a _TNY_HOST (dynamic result -> heap) forwarder, so nvcc's
+    // device pass never sees a __host__ __device__ forwarder call a __host__
+    // allocator. Host-side, the split must be INVISIBLE: each arm has to pick
+    // the same underlying overload -- and hence the same ownership and the same
+    // values -- as the equivalent <Axis> template-form spelling.
+    // (a) static idx -> _TNY_API arm -> stack result, == index_select<0>(idx).
+    auto vs = verts.index_select(idx, axis<0>{});
+    static_assert(decltype(vs)::ownership == storage::stack, "#375: static value form -> stack (_TNY_API arm)");
+    static_assert(cs::is_same<decltype(vs), decltype(verts.index_select<0>(idx))>::value,
+                  "#375: static value form must yield the <Axis> form's exact type");
+    for (long i=0;i<3;++i) for (long j=0;j<3;++j) if (vs(i,j) != sel(i,j)) return 22;
+    // (b) dynamic idx -> _TNY_HOST arm -> heap result, == index_select<0>(idxd).
+    auto vd = verts.index_select(idxd, axis<0>{});
+    static_assert(decltype(vd)::ownership == storage::heap, "#375: dynamic value form -> heap (_TNY_HOST arm)");
+    static_assert(cs::is_same<decltype(vd), decltype(verts.index_select<0>(idxd))>::value,
+                  "#375: dynamic value form must yield the <Axis> form's exact type");
+    for (long j=0;j<3;++j) { if (vd(0,j) != seld(0,j)) return 23; if (vd(1,j) != seld(1,j)) return 24; }
+    // (c) a negative axis still resolves through the split forwarders.
+    auto vn = verts.index_select(idx1, axis<-1>{});
+    for (long i=0;i<5;++i) { if (vn(i,0) != sel1(i,0)) return 25; if (vn(i,1) != sel1(i,1)) return 26; }
+    // (d) THE POINT of the value form: it must still deduce with NO `.template`
+    // on a TYPE-DEPENDENT receiver -- the property a naive two-overload split is
+    // most likely to break. Exercised for real inside a template, on both arms.
+    if (!tny_test::dependent_index_select(verts, idx,  sel))  return 27;   // static  -> _TNY_API arm
+    if (!tny_test::dependent_index_select(verts, idxd, seld)) return 28;   // dynamic -> _TNY_HOST arm
 
     return 0;
 }
