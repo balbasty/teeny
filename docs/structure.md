@@ -285,3 +285,41 @@ overload. Passing one non-const and one const tensor silently resolves to the
 all-const overload (so writing through the "mutable" one is a compile error at
 the write site, not a runtime surprise, but it's easy to miss why); write into a
 separate destination, or make every operand `const`, if you don't need to mutate.
+
+### `scan_` / `scan` — sequential fold along one axis, batched over the rest
+
+A per-axis recurrence — `carry = f(carry, x)`, `x = carry` — is inherently
+**sequential** along the axis it walks, but every OTHER axis is just batched,
+exactly what `peel` already collapses for other ops. `scan_<Axis>` peels every
+axis except `Axis`, walks `Axis` in increasing order within each batch cell,
+and threads `carry` through a device-safe functor:
+
+```cpp
+scan_<0>(t, 0.0, sum_op{});   // t := running cumulative sum along axis 0, batched over the rest
+```
+
+`f` is a plain callable struct (lambda-free engines, like `map_`/`zip_with_`'s
+own functor convention): `Carry operator()(Carry carry, T x) const`. The
+returned value doubles as both the new carry AND the new element — a 1-D
+Felzenszwalb-style min-plus sweep (`carry = min(carry + w, x)`) is exactly this
+shape (see `examples/distance_transform.cpp`'s hand-written twin). A **reverse**
+sweep needs no separate flag — it composes with the existing negative-stride
+view:
+
+```cpp
+auto rv = t.flip<0>();     // named lvalue: scan_/peel take a non-const lvalue ref
+scan_<0>(rv, 0.0, sum_op{});
+```
+
+Value form leads with `axis<Axis>{}` (single-axis selector, right after the
+tensor argument, matching the shape of the free-function sketch this issue was
+filed with): `scan_(t, axis<0>{}, 0.0, sum_op{})` == `scan_<0>(t, 0.0, sum_op{})`.
+
+Out-of-place `scan<Axis>` is a fresh dense copy, scanned (static shape -> stack,
+dynamic -> heap, host-only, like `clone()` — which it's built on); `into(dest)`
+writes into a preallocated buffer instead (one copy, no fresh allocation):
+
+```cpp
+auto out = scan<0>(t, 0.0, sum_op{});             // fresh tensor; t itself untouched
+scan<0>(t, 0.0, sum_op{}, into(dest));            // writes into dest, returns dest&
+```

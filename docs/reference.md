@@ -291,6 +291,10 @@ free **`to<Space>(t)`** (`cuda.h`) above, which is device-aware.
 | `peel_zip(a, b[, c], axis<Axes...>{})` | same | value form — axis tag **trailing** (after every positional tensor), unlike `take_along`/`peel_at`'s leading tag |
 | `peel_zip<Axes...>(a, b[, c]).enumerate()` | a range of `{index, tuple}` | same shape as `peel(...).enumerate()` |
 | `peel_zip<Axes...>(a, b[, c]).subrange(lo,hi)` | a `[lo,hi)` sub-range | same shape as `peel(...).subrange()` |
+| `scan_<Axis>(t, init, f)` | `void` (in-place) | sequential fold along `Axis` — `carry=init`, then `carry=f(carry,x); x=carry` for each element (increasing order), batched (peeled) over every other axis; `f` is a device-safe functor (like `map_`'s own convention). Reverse sweep: `scan_<Axis>(t.flip<Axis>(), init, f)` (named lvalue — `scan_`/`peel` take a non-const lvalue ref) |
+| `scan_(t, axis<Axis>{}, init, f)` | same | value form — `axis<Axis>{}` right after `t`, single-axis selector |
+| `scan<Axis>(t, init, f)` | → new tensor | out-of-place: fresh dense copy, scanned (static→stack, dynamic→heap host-only, built on `clone()`); `t` itself untouched |
+| `scan<Axis>(t, init, f, into(dest))` | `dest&` | no fresh allocation beyond the copy into `dest` |
 
 **Input → output type — peel cell.** Each yielded cell is a **view**
 (`storage_view_of(O)` — `gpu`/`gpu_view` source → `gpu_view`), element type `T`

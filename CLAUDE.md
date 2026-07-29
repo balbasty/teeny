@@ -68,7 +68,7 @@ include/teeny/
   math.h           in-place & out-of-place elementwise (broadcasting) + unary math
                    + reductions (sum/prod/max/min/dot). Members declared in
                    tensor.h, DEFINED here.
-  iterate.h        nd-peel: peel / peel_at / peel_front / peel_front_at / peel_zip
+  iterate.h        nd-peel: peel / peel_at / peel_front / peel_front_at / peel_zip / scan_ / scan
   dynamic.h        anyrank (rank-erased carrier) + peel_front<-Sr> + dispatch_rank
   cuda.h           gpu/pinned/mapped memory. Self-guarded (__has_include /
                    __CUDACC__): a no-op unless the CUDA runtime is reachable, so
@@ -453,6 +453,25 @@ for (auto [a,b] : peel_zip(x, y, axis<0>{})) f(a,b);   // value form: axis<...> 
 for (auto [m, cell] : peel_zip<0>(x,y).enumerate()) g(m[0], cell);  // (multi_index, tuple) per
                       //   step, same shape as the single-tensor peel's enumerate
 for (auto cell : peel_zip<0>(x,y).subrange(lo,hi)) f(cell);   // a [lo,hi) chunk
+
+// --- scan_/scan: sequential fold along ONE axis, batched over the rest (#254) ---
+scan_<0>(t, 0.0, sum_op{});           // carry=init, then carry=f(carry,x); x=carry for each
+                      //   element along axis 0 (increasing order), batched (peeled) over
+                      //   every OTHER axis (reuses peel's own incremental cursor there — the
+                      //   sequential part is inherent, the batching isn't). f is a device-safe
+                      //   functor (lambda-free, like map_/zip_with_'s own convention): Carry
+                      //   operator()(Carry carry, T x) const. The new carry doubles as the new
+                      //   element -- a 1-D Felzenszwalb min-plus sweep (carry=min(carry+w,x))
+                      //   is exactly this shape (examples/distance_transform.cpp's hand-written
+                      //   twin). Reverse sweep composes with flip, no separate direction flag:
+                      //   auto rv = t.flip<0>(); scan_<0>(rv, init, f); (named lvalue — scan_/
+                      //   peel take a non-const lvalue ref, can't bind a temporary view).
+                      //   Value form: scan_(t, axis<0>{}, init, f) — single-axis tag right
+                      //   after t (matches the issue's own free-function sketch), not trailing
+                      //   like peel_zip's (scan_'s only other args, init/f, are fixed-arity).
+auto y = scan<0>(x, 0.0, sum_op{});   // out-of-place: fresh dense copy, scanned (static->stack,
+                      //   dynamic->heap host-only, built on clone()); x itself untouched.
+scan<0>(x, 0.0, sum_op{}, into(dest)); // into(dest): no fresh allocation beyond the copy; dest&
 
 // --- nd-peel: peel the FIRST N axes (arbitrary batch rank) ---
 for (auto v : peel_front<N>(t)) f(v);      // v is (*spatial, C); N = #batch dims. Incremental (as above);
