@@ -201,6 +201,34 @@ selector (a compile-time axis list, sibling of `shape<...>`, like numpy's
 on a type-dependent receiver, and it's the one spelling that disambiguates
 `take_along`'s two argument packs cleanly.
 
+## `subsample<Axes...>` — a coloured/strided sub-lattice
+
+Coloured Gauss-Seidel relaxation walks a sub-lattice selected by
+`loc[d] % k == digit_d(n)` per axis — already expressible with `take_along` and
+a `slice(start, none, k)` per named axis, just verbose to spell out when the
+step `k` is shared across every axis and only the per-axis `start` differs.
+`subsample` names that pattern:
+
+```cpp
+t.subsample<0,1>(k, s0, s1);   // == t.take_along<0,1>(slice(s0,none,k), slice(s1,none,k))
+```
+
+Pure sugar — no new addressing power, just a named shorthand for the multi-axis
+strided slice teeny already does. `k` and each `start` accept either a runtime
+value or a compile-time one (`Int<k>()`); a fully-static `(start, k)` pair folds
+a static output extent, same as a hand-written `slice()`:
+
+```cpp
+t.subsample<0,1>(Int<2>(), Int<0>(), Int<0>());   // step/starts all compile-time -> static result
+```
+
+Has the same value form as `take_along` — a leading `axis<...>{}` selector, so
+no `.template` is needed on a type-dependent receiver:
+
+```cpp
+t.subsample(axis<0,1>{}, k, s0, s1);   // == t.subsample<0,1>(k, s0, s1)
+```
+
 ## `index_select<Axis>` — gather by a runtime index tensor
 
 `take_along`'s bind arguments are known at the call site (a literal, a variable
