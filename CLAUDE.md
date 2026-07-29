@@ -243,6 +243,23 @@ t.subsample<Axes...>(k, starts...);  // coloured/strided sub-lattice (#258): tak
                       //   axis<Axes...>{}, k, starts...) -- LEADING tag, same placement as
                       //   take_along's own (a second variadic pack, the starts, needs the
                       //   disambiguating tag up front, not trailing).
+t.unfold<Axis>(size, step);  t.unfold<Axis>(size);  // pytorch Tensor.unfold (#256): appends
+                      //   a NEW trailing axis of width `size`, stepped by `step` along Axis
+                      //   (step defaults to 1). Axis's own extent shrinks to the window COUNT
+                      //   (shape(Axis)-size)/step+1; the new trailing axis holds one window's
+                      //   `size` elements, at stride = Axis's ORIGINAL (un-stepped) stride.
+                      //   size/step accept a runtime value or Int<k>() (folds static, like
+                      //   slice()); size in [1,shape(Axis)] and step>=1, checked (static_assert
+                      //   when both are static, debug-time _TNY_CHECK otherwise -- compared in
+                      //   a SIGNED type so a bogus negative runtime value can't wrap through an
+                      //   unsigned index_type and slip past the guard, #339 review).
+                      //   Pure sugar over the existing gather -- a VIEW, so windows
+                      //   ALIAS when step < size (write-through touches every neighbouring
+                      //   window, as in pytorch). ND windows compose by chaining one unfold
+                      //   per axis (matches nitorch's nd-unfold, itself built on the single-
+                      //   axis primitive): t.unfold<0>(k0,s0).unfold<1>(k1,s1). Value form:
+                      //   t.unfold(Int<Axis>(), size, step) -- single-axis Int<k>() selector
+                      //   (like flip/squeeze), not an axis<...> list (only one axis binds).
 t.index_select<Axis>(idx);         // gather along Axis by a rank-1 integer index
                       //   TENSOR (#326) — runtime DATA, unlike take_along's compile-time
                       //   indices. idx values wrap negative (built on take_along); static
@@ -663,6 +680,17 @@ is generic.
   The ONLY case left on the decode is an in-place op with a TENSOR rhs (`add_(b)`/
   `copy_`): `b` may overlap the destination, so it can't vectorize (restrict = UB, a
   plain loop = assumed-overlap). Those stay byte-for-byte unchanged.
+  **Static unroll (#218, #255):** a DIFFERENT mechanism from the contiguous linear
+  fast path above — when the operand SHAPE(S) are fully static (not just
+  contiguous), the per-element decode folds to a compile-time function of the
+  linear index, so the whole loop unrolls via an `index_sequence` fold instead of
+  a runtime loop at all (no back-edge, no runtime `%`/`/`). `axreduce`'s
+  `reduce_axes_static_` (#218, axis reductions: `sum<0>`/`mean<1>`/…) and
+  `zipreduce_static_` (#255, `dot`/`sqdist` — the two-operand case, gated on BOTH
+  operands static AND C-contiguous so the same linear index addresses matching
+  elements in each) both do this; each falls straight back to the runtime-decode
+  engine the moment its own gate fails (any dynamic extent, or — for `zipreduce_`
+  — a non-C-contiguous or mismatched-layout operand).
 - **The gather** (`tensor.h` `_slice_range`, `iterate.h` `gather_peel`): ALL
   view-making ops — `operator()` slicing, `take_along`, `peel` — route through
   one hand-built gather (NO `cs::submdspan`). Per axis: an integer drops it (into

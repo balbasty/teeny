@@ -182,5 +182,38 @@ int main() {
     auto uc = normalize<0>(M2);
     if (!close(norm<0>(uc)(0), 1.0))   return 37;
 
+    // ---- dot/sqdist STATIC fast path (#255): both static + C-contiguous
+    // operands unroll (no per-step decode); a non-contiguous static operand
+    // must still fall back to the general decode and agree exactly ----------
+    auto sa = local<double, shape<4>>(); sa(0)=1; sa(1)=2; sa(2)=3; sa(3)=4;
+    auto sb = local<double, shape<4>>(); sb(0)=5; sb(1)=6; sb(2)=7; sb(3)=8;
+    if (dot(sa, sb) != 1*5+2*6+3*7+4*8)             return 51;   // both contiguous -> fast path
+    // one operand STRIDED (not ccontiguous) -> falls back to the decode path,
+    // must still match the same value computed by hand
+    double sbuf[8] = {1,99,2,99,3,99,4,99};
+    auto sas = wrap(sbuf, shape<4>{}, strides<2>{});   // picks 1,2,3,4 at stride 2
+    if (dot(sas, sb) != 1*5+2*6+3*7+4*8)             return 52;
+    if (sqdist(sas, sb) != (1-5)*(1-5)+(2-6)*(2-6)+(3-7)*(3-7)+(4-8)*(4-8)) return 53;
+    // both operands non-contiguous (a permuted 2x2 view) -> also decode path
+    auto MA = local<double, shape<2,2>>(); MA(0,0)=1; MA(0,1)=2; MA(1,0)=3; MA(1,1)=4;
+    auto MB = local<double, shape<2,2>>(); MB(0,0)=5; MB(0,1)=6; MB(1,0)=7; MB(1,1)=8;
+    auto MAt = MA.permute<1,0>();   // {{1,3},{2,4}}
+    auto MBt = MB.permute<1,0>();   // {{5,7},{6,8}}
+    if (dot(MAt, MBt) != 1*5+3*7+2*6+4*8)           return 54;   // same as dot(MA,MB) (dot is order-free)
+    if (dot(MAt, MBt) != dot(MA, MB))                return 55;
+    // rank-0 (scalar) operands: unrolls to exactly one step
+    auto r0a = local<double, shape<>>{}; r0a() = 6.0;
+    auto r0b = local<double, shape<>>{}; r0b() = 7.0;
+    if (dot(r0a, r0b) != 42.0)                       return 56;
+    // rank-3 static-contiguous: exercises the unroll over more than one axis
+    auto ca = local<double, shape<2,3,2>>();
+    auto cb = local<double, shape<2,3,2>>();
+    double expect = 0.0;
+    for (long i=0;i<2;++i) for (long j=0;j<3;++j) for (long k=0;k<2;++k) {
+        double av = i*6.0+j*2.0+k+1, bv = 12.0-(i*6.0+j*2.0+k);
+        ca(i,j,k) = av; cb(i,j,k) = bv; expect += av*bv;
+    }
+    if (dot(ca, cb) != expect)                       return 57;
+
     return 0;
 }

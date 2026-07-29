@@ -12,6 +12,7 @@
 #include <cuda/std/type_traits>
 #include <teeny/defines.h>
 #include <teeny/layout.h>   // strides<...>, _src_sstride, dynamic_stride
+#include <teeny/indexing.h> // _is_ic
 
 _TNY_NAMESPACE_BEGIN(tny)
 
@@ -124,6 +125,66 @@ _TNY_API auto squeeze_md(const MD & v, cs::index_sequence<J...>) {
     OE oe(static_cast<Idx>(v.extent(J < AX ? J : J + 1))...);
     const Idx rstr[sizeof...(J) ? sizeof...(J) : 1] =
         { static_cast<Idx>(v.stride(J < AX ? J : J + 1))... };
+    return cs::mdspan<El, OE, SF>(v.data_handle(), fold_mapping<SF>(oe, rstr));
+}
+
+// unfold's three static folds, each gated by `if constexpr` on whether its
+// inputs are compile-time known — a plain `?:` would still require BOTH
+// branches to typecheck, and `Sz::value`/`St::value` don't exist for a
+// runtime (non-integral_constant) Sz/St.
+template <cs::size_t AxExtent, class Sz, class St>
+_TNY_API constexpr cs::size_t _unfold_win_count() {
+    if constexpr (AxExtent == cs::dynamic_extent || !_is_ic<Sz>::value || !_is_ic<St>::value) return cs::dynamic_extent;
+    else return static_cast<cs::size_t>((static_cast<long>(AxExtent) - static_cast<long>(Sz::value)) / static_cast<long>(St::value) + 1);
+}
+template <cs::int64_t AxStride, class St>
+_TNY_API constexpr cs::int64_t _unfold_count_stride() {
+    if constexpr (AxStride == dynamic_stride || !_is_ic<St>::value) return dynamic_stride;
+    else return AxStride * static_cast<cs::int64_t>(St::value);
+}
+template <class Sz>
+_TNY_API constexpr cs::size_t _unfold_win_size() {
+    if constexpr (!_is_ic<Sz>::value) return cs::dynamic_extent;
+    else return static_cast<cs::size_t>(Sz::value);
+}
+
+// unfold axis AX into a windowed view (pytorch `Tensor.unfold(dim,size,step)`):
+// appends a NEW trailing axis of width `size`, stepped by `step` along AX.
+// Output rank = N+1. J... = 0..N-1 are the SOURCE axes, at their SAME output
+// positions (unlike unsqueeze/squeeze, unfold never shifts an existing axis —
+// it only appends one at the end). Axis AX itself shrinks to the window COUNT
+// `(extent(AX) - size) / step + 1` and its stride becomes `stride(AX) * step`;
+// the new trailing axis (index N) gets extent `size` and stride = the
+// ORIGINAL, un-stepped `stride(AX)` (consecutive taps within one window are
+// `step`-many elements apart along axis AX's own stride unit). `size`/`step`
+// may each be a runtime value or a compile-time one (`integral_constant`),
+// folding the output extent/stride to static where derivable — same
+// convention as `slice()`.
+template <cs::size_t AX, class MD, class Sz, class St, cs::size_t... J>
+_TNY_API auto unfold_md(const MD & v, Sz size, St step, cs::index_sequence<J...>) {
+    using El = typename MD::element_type; using Idx = typename MD::index_type;
+    using E  = typename MD::extents_type; using L  = typename MD::layout_type;
+
+    constexpr cs::int64_t axStride = _src_sstride<AX, L, E>();
+    constexpr cs::size_t  axExtent = _shape_static_extent<E>(AX);
+
+    constexpr cs::size_t  winCount       = _unfold_win_count<axExtent, Sz, St>();
+    constexpr cs::int64_t winCountStride = _unfold_count_stride<axStride, St>();
+    constexpr cs::size_t  winSize        = _unfold_win_size<Sz>();
+
+    using OE = cs::extents<Idx, (J == AX ? winCount : _shape_static_extent<E>(J))..., winSize>;
+    using SF = strides< (J == AX ? winCountStride : _src_sstride<J, L, E>())..., axStride >;
+
+    const Idx sz = static_cast<Idx>(size);
+    const Idx st = static_cast<Idx>(step);
+    const Idx n  = static_cast<Idx>(v.extent(AX));
+    const Idx cnt = (n - sz) / st + Idx(1);
+
+    OE oe(static_cast<Idx>(J == AX ? cnt : v.extent(J))..., sz);
+    const Idx rstr[sizeof...(J) + 1] = {
+        static_cast<Idx>(J == AX ? (static_cast<Idx>(v.stride(AX)) * st) : v.stride(J))...,
+        static_cast<Idx>(v.stride(AX))
+    };
     return cs::mdspan<El, OE, SF>(v.data_handle(), fold_mapping<SF>(oe, rstr));
 }
 

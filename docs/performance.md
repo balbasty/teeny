@@ -135,6 +135,18 @@ loop, where they hoist for free.
   (the compiler assumes overlap) can safely vectorize it. Codegen proof (`-O3 -S`): the
   write loops that emitted scalar `addsd` on both g++ and clang++ now emit packed
   `addpd`; a broadcast or strided operand falls back to the unchanged decode.
+- **`dot`/`sqdist` static unroll (#255) — landed.** When BOTH operands are
+  static-shaped (their extents already match exactly at compile time — `dot`/`sqdist`
+  each `static_assert` that) **and** both C-contiguous, the shared linear index
+  addresses the same logical element in both directly — no per-step mixed-radix
+  decode. Unrolling over the (static) element count then emits straight-line code
+  with no loop back-edge, mirroring the axis-reduction static fast path (#218): a
+  small, fully-static dot (a posdef cross-channel dot, a fixed-size stencil tap
+  accumulation) no longer pays loop overhead it doesn't need. Falls back to the
+  unchanged decode the moment either operand is dynamic, non-C-contiguous (a
+  strided/permuted view, teeny's own `strides<...>` layout), or the two disagree
+  in layout — a strided-vs-contiguous pair still computes the correct result, just
+  without the unroll.
 
 !!! note "Measurement over intuition"
     The numbers here (`sizeof`, loop bodies, SIMD) are from `g++ -O2/-O3` on the host.
