@@ -274,7 +274,11 @@ auto c = floor(a); ceil(a); round(a); trunc(a); sign(a);
 auto c = minimum(a, b); maximum(a, s); clamp(a, lo, hi);
 auto c = a.add(b, alpha);  a.sub(b, alpha);  // fused out-of-place axpy: a +/- alpha*b (b broadcasts)
 
-// ...or write into a preallocated dest (one fused pass, no alloc) -> dest&: `into(y)` last
+// ...or write into a preallocated dest (one fused pass, no alloc) -> dest&: `into(y)` last.
+//   y's SHAPE is checked against the result -- the source's own shape for a scalar-rhs or
+//   unary op, the broadcast shape for a tensor rhs (only operands broadcast, never the
+//   dest). Scalar-rhs/unary: a compile error when both shapes are static, a debug-time
+//   check otherwise; tensor rhs: the debug-time check. y's dtype may differ (result cast).
 a.add(b, into(y));  a.mul(b, into(y));  a.add(2.0, into(y));  a.add(b, alpha, into(y));
 exp(a, into(y)); sqrt(a, into(y)); minimum(a, b, into(y)); clamp(a, lo, hi, into(y));
 normalize(a, into(y));  cross(a, b, into(N.at(i)));   // cross into a slot ("crossto")

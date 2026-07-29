@@ -172,5 +172,62 @@ int main() {
     if (!close(rowv(0), std::sqrt(14.0)) || !close(rowv(1), std::sqrt(77.0))) return 63;
     dot<double>(vg, vg, into(s0)); if (!close(s0.item(), 25.0)) return 64;  // dot<Acc> into
 
+    // ============ into(dest) SHAPE VALIDATION (#357) ====================
+    // A scalar-rhs or unary producer takes its loop bounds from the SOURCE and
+    // writes through the DEST's strides, so the two shapes must agree exactly —
+    // there is nothing to broadcast on either side. A mis-shaped dest used to be
+    // written past its end; it is now rejected (see the two commented-out repros
+    // at the end of this block). What must keep working is every CORRECTLY-shaped
+    // call, on the dynamic path as much as the static one.
+
+    // ---- scalar-rhs / unary into a matching DYNAMIC dest ----------------
+    auto dsrc = zeros<double>(shape<-1,-1>{2,3}); dsrc.iota_(1.0, 1.0);   // 1..6
+    auto ddst = zeros<double>(shape<-1,-1>{2,3});
+    dsrc.mul(2.0, into(ddst));                        // scalar rhs, dynamic shapes
+    if (ddst(0,0)!=2 || ddst(1,2)!=12)       return 65;
+    neg(dsrc, into(ddst));                            // unary, dynamic shapes
+    if (ddst(0,0)!=-1 || ddst(1,2)!=-6)      return 66;
+    if (dsrc(0,0)!=1 || dsrc(1,2)!=6)        return 67;   // source untouched
+
+    // ---- dest with a NARROWER index type than the source ----------------
+    // (the extent check compares across index types; #353 made the offsets
+    //  decode in a type that covers both)
+    auto own32 = zeros<double>(shape<-1,-1>{2,3});         // owner outlives the view
+    auto n32 = own32.reindex<int32_t>();
+    dsrc.mul(3.0, into(n32)); if (n32(0,0)!=3 || n32(1,2)!=18) return 68;
+    sqrt(dsrc, into(n32));    if (!close(n32(1,2), std::sqrt(6.0))) return 69;
+
+    // ---- a size-1 axis is a real extent here, NOT a stretch -------------
+    // (1,3) source -> (1,3) dest is fine; the contrast is that (1,3) into (2,3)
+    // is a mismatch for these producers, while the TENSOR-rhs producer below
+    // still broadcasts it — the two rules are deliberately different.
+    auto row = local<double, shape<1,3>>(); row(0,0)=1; row(0,1)=2; row(0,2)=3;
+    auto rowout = local<double, shape<1,3>>();
+    row.mul(10.0, into(rowout)); if (rowout(0,2)!=30) return 70;
+    exp(row, into(rowout)); if (!close(rowout(0,0), std::exp(1.0))) return 71;
+
+    // ---- the BROADCASTING (tensor-rhs) producer is unchanged ------------
+    auto B23 = local<double, shape<2,3>>(); B23.fill_(1.0);
+    auto O23 = local<double, shape<2,3>>();
+    B23.add(row, into(O23));                          // (1,3) rhs stretches over (2,3)
+    if (O23(0,0)!=2 || O23(1,2)!=4)          return 72;
+    a.add(b, into(y)); if (y(0)!=11 || y(2)!=33) return 73;   // and the plain same-shape case
+
+    // ---- unary/scalar into a dest of a DIFFERENT dtype ------------------
+    auto fi2 = local<float, shape<3>>();
+    a.mul(2.0, into(fi2));  if (!close(fi2(0), 2.0) || !close(fi2(2), 6.0)) return 74;
+    neg(a, into(fi2));      if (!close(fi2(2), -3.0))                       return 75;
+
+    // A MIS-SHAPED dest is now rejected: a compile error when both shapes are
+    // fully static (the issue's own repro), a debug-time check otherwise. Left
+    // commented out because neither a static_assert nor an assert() failure can
+    // be exercised from the runtime suite (no compile-fail harness exists here —
+    // same convention as test_math.cpp's dot note); both were verified manually:
+    //   zeros<double>(shape<8,8>{}).mul(2.0, into(zeros<double>(shape<2,2>{})));  // static: compile error
+    //   exp(zeros<double>(shape<8,8>{}), into(zeros<double>(shape<2,2>{})));      // static: compile error
+    //   auto a8 = zeros<double>(shape<-1,-1>{8,8}); auto y2 = zeros<double>(shape<-1,-1>{2,2});
+    //   a8.mul(2.0, into(y2));   // dynamic: _TNY_CHECK fires (was a 64-element write into a 4-element buffer)
+    //   exp(a8, into(y2));       // dynamic: same
+
     return 0;
 }

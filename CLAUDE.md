@@ -372,7 +372,11 @@ auto c = minimum(a,b); maximum(a,2.0); clamp(a,lo,hi);   // elementwise binary m
 auto c = a.add(b,alpha); a.sub(b,alpha);  // FUSED out-of-place axpy: a +/- alpha*b (twin of add_(b,alpha))
 // --- into(dest): write a producer's result into a preallocated buffer -> dest& ---
 //   one fused pass, NO alloc; `into(y)` LAST arg. A distinct type (never conflated with
-//   a scalar alpha). y may alias an operand / differ in dtype (result cast); extents checked.
+//   a scalar alpha). y may alias an operand / differ in dtype (result cast). y's SHAPE is
+//   CHECKED against the result — the source's own shape for a scalar-rhs/unary op (only
+//   operands broadcast, never the dest), the broadcast shape for a tensor rhs. Scalar-rhs/
+//   unary: compile error when both shapes are static, debug-time _TNY_CHECK otherwise
+//   (#357); tensor rhs: the _TNY_CHECK (its static gate compares the two OPERANDS, not y).
 a.add(b, into(y)); a.mul(2.0, into(y)); a.add(b, alpha, into(y));  // elementwise / scalar / fused
 exp(a, into(y)); sqrt(a, into(y)); minimum(a,b,into(y)); clamp(a,lo,hi,into(y));
 normalize(a, into(y)); cross(a, b, into(N.at(i)));   // cross into a slot (the "crossto")
@@ -706,9 +710,24 @@ is generic.
   `into(dest)` (their allocating producers build `c` from `a`'s own extents type) and
   were not even silent — their initializers lacked the `static_cast<I>`s, so g++ warned
   and clang rejected them; `allclose_` casts, so it was silent like `bzip_`. `scalo_`/
-  `unaryo_` also still take their loop BOUNDS from `a` and their strides from `c`
-  without checking the two agree, unlike `bzip_`'s `_TNY_CHECK` — a mis-shaped
-  `into(dest)` writes out of bounds unguarded (**#357**).
+  `unaryo_` also took their loop BOUNDS from `a` and their strides from `c` without
+  checking the two agree, unlike `bzip_`'s `_TNY_CHECK` — a mis-shaped `into(dest)`
+  wrote out of bounds unguarded (#357: `a.mul(2.0, into(y))` with an 8x8 `a` and a
+  2x2 `y` stored 64 elements through a 4-element buffer). They now carry the same
+  guard, in the ENGINE rather than the wrapper (`scmp` calls `scalo_` directly), in
+  both halves: a `static_assert` (`ext_static_eq`, the same one `dot`/`scan`'s
+  `into(dest)` use) when both shapes are fully static, and a per-axis `_TNY_CHECK`
+  (`check_same_extents`) otherwise. EXACT equality, NOT `bzip_`'s broadcast-tolerant
+  `== ce[r] || == 1`: those engines index source and destination with the SAME
+  counter and never substitute stride 0, so an extent 1 against an extent n is a
+  mismatch, not a stretch. Zero cost for every other caller — the allocating
+  producers build the destination from `a`'s own extents type, the in-place `unary`
+  passes `c` as both arguments, and under `-DNDEBUG` the object code is byte-
+  identical. NB `bzip_`'s own dest check stays runtime-only even for a fully-static
+  mis-shaped `into(dest)`: `bzip`'s static gate (`bc_static_ok_r`) compares the two
+  OPERANDS with each other, never either against `c`. Not a silent write (the
+  `_TNY_CHECK` fires), just a later diagnosis than the two single-source engines now
+  give — a candidate for a follow-up, out of #357's scope.
   **Contiguous linear fast path (#161, #175):** contiguous elementwise ops replace the
   per-element mixed-radix decode with a flat `for(i) cp[i]=…` loop that auto-vectorizes.
   Two flavours by whether a second array is in play:

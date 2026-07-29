@@ -359,7 +359,25 @@ argument to any producer above to write the result into `y` (one fused pass, no
 allocation) and return `y&`, instead of a fresh tensor — the kernel-friendly `out=`.
 `into(y)` is a distinct type, so it never collides with a scalar argument (which is
 what lets `add`/`sub` also take the fused `alpha`). `y` may alias an operand and may
-have a different dtype (the result is cast to it); its extents are checked. `y` may
+have a different dtype (the result is cast to it).
+
+**`y`'s shape is checked.** It must match the result the producer would have
+allocated — the source's own shape for a unary or scalar-rhs op, the broadcast
+shape for a tensor-rhs one. There is no stretching on the way *out*: only the
+operands broadcast, never the destination, so a `y` smaller in any axis is
+rejected, not written repeatedly. For a **unary or scalar-rhs** producer that is a
+**compile error** when both shapes are fully static, and a debug-time check
+(`assert`, off under `-DNDEBUG`) when either is dynamic; the broadcasting
+**tensor-rhs** producer catches it with the debug-time check either way.
+
+```cpp
+auto a = zeros(shape<8,8>{});
+auto y = zeros(shape<2,2>{});
+a.mul(2.0, into(y));   // compile error: dest's shape must match the source's
+exp(a, into(y));       // same
+```
+
+`y` may
 also carry a different offset **index type** from the operands' (a narrower one
 included) — the widening needed to walk both safely happens inside the engine, in
 width and in signedness alike, and `y` keeps its own type; see
