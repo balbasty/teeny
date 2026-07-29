@@ -719,6 +719,25 @@ is generic.
   MSVC for the contiguous layouts. This is CCCL's own upstream tradeoff, not a
   teeny bug — `test_tensor.cpp`'s `sizeof` assertions are `#if`'d out on MSVC
   for exactly this reason; don't try to "fix" that guard.
+- **The "type pack + deduced pack" MSVC trap (#334):** hit three times so far
+  (`reduced_extents`/tensor.h, `index_select`'s output extents/tensor.h,
+  `peel_zip`'s `zip_oe_`/iterate.h). A function template that is only ever
+  DECLARED — never defined, used purely for `decltype()` extraction — fails on
+  real MSVC with `error C2672` when its template parameter list mixes a TYPE
+  parameter pack with a FURTHER deduced pack, e.g.
+  `template <class... Es, cs::size_t... A> ... f(cs::index_sequence<A...>);`
+  — even though GCC and Clang accept the identical code. Fix: bundle the
+  offending pack into a single tag type (`es_list<Es...>` in `iterate.h`) and
+  extract it via a class-template PARTIAL SPECIALIZATION's `::value`, so the
+  declared-only template itself only ever has ONE genuine pack (the deduced
+  one). This is a SIBLING of, not the same as, the NTTP-pack-call quirk
+  documented at `_red_ext_v` below (a function CALL can't be used inline as a
+  non-type template argument pack element on MSVC either) — both happen to
+  converge on the same "route through a class-template `::value`" fix shape,
+  which is why it's easy to conflate them; they are two distinct defects.
+  Write any new helper of this shape (a pack-of-packs decltype-extraction
+  template) through the tag-bundling pattern from the start, rather than
+  discovering the failure on a real-MSVC CI round-trip.
 
 ## Adding a feature — checklist
 
