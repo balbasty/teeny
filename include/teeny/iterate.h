@@ -806,8 +806,15 @@ _TNY_HOST auto scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) { re
  *         numbering) -- one copy, no fresh allocation beyond that; device-safe.
  *         `copy_` casts INTO `dest`'s element type FIRST, so if `dest`'s dtype
  *         differs from `t`'s the whole recurrence then runs in `dest`'s own
- *         precision (unlike `index_select`/the reductions' own `into(dest)`,
- *         which only cast the FINAL result). Returns `dest&`. */
+ *         precision. `scan` is the ONE producer in the library that does this --
+ *         every other `into(dest)` (the elementwise/unary/scalar/axpy family,
+ *         `index_select`, the reductions) computes in the SOURCE's precision and
+ *         casts only the final result (#379 made that true of the elementwise
+ *         family, which used to take its compute type from `dest` too -- silently,
+ *         and wrongly). Here it is deliberate: `scan_`'s carry is sequential and
+ *         stateful, so the precision the recurrence runs in IS the precision of
+ *         every intermediate carry, and there is no single "final result" to cast
+ *         (see `docs/api-ux-review.md`'s F4-e). Returns `dest&`. */
 template <long Axis, class T, class E, class L, storage O, class Carry, class F, class D>
 _TNY_API auto & scan(const tensor<T,E,L,O> & t, Carry init, F f, into_t<D> out) {
     using DstE = typename D::extents_type;

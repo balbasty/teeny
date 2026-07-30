@@ -218,6 +218,100 @@ int main() {
     a.mul(2.0, into(fi2));  if (!close(fi2(0), 2.0) || !close(fi2(2), 6.0)) return 74;
     neg(a, into(fi2));      if (!close(fi2(2), -3.0))                       return 75;
 
+    // ========= dest's dtype casts the RESULT, not the arithmetic (#379) =========
+    // `into(dest)` is the one path where the caller picks the destination's element
+    // type, and what that type does is receive the CAST result: the computation
+    // itself runs in the operands' own precision, so every call below is numerically
+    // identical to `dest.copy_(a.op(b))` — the `into` form only skips the temporary.
+    // It used to take the compute type from the DEST, which re-ran the whole
+    // computation in that type: the operands, a scalar rhs and an axpy coefficient
+    // all truncated BEFORE the op. An `int` dest makes that visible in whole
+    // numbers (the buggy value is quoted on each line).
+    auto d3 = local<double, shape<3>>(); d3(0)=1.5; d3(1)=2.5; d3(2)=3.5;
+    auto o3 = local<double, shape<3>>(); o3.fill_(1.5);
+    auto yi = local<int, shape<3>>();
+
+    // scalar rhs: 1.5*0.5=0.75, 2.5*0.5=1.25, 3.5*0.5=1.75 -> {0,1,1}
+    yi.zero_(); d3.mul(0.5, into(yi));
+    if (yi(0)!=0 || yi(1)!=1 || yi(2)!=1)    return 76;   // was {0,0,0}: 0.5 became int(0.5)==0
+    // unary: exp(1.5)=4.4817, exp(2.5)=12.182, exp(3.5)=33.115 -> {4,12,33}
+    yi.zero_(); exp(d3, into(yi));
+    if (yi(0)!=4 || yi(1)!=12 || yi(2)!=33)  return 77;   // was {2,7,20}: exp of the TRUNCATED input
+    // tensor rhs: 1.5+1.5=3, 2.5+1.5=4, 3.5+1.5=5
+    yi.zero_(); d3.add(o3, into(yi));
+    if (yi(0)!=3 || yi(1)!=4 || yi(2)!=5)    return 78;   // was {2,3,4}: 1+1, 2+1, 3+1
+    // fused axpy: 1.5+0.5*1.5=2.25, 2.5+0.75=3.25, 3.5+0.75=4.25 -> {2,3,4}
+    yi.zero_(); d3.add(o3, 0.5, into(yi));
+    if (yi(0)!=2 || yi(1)!=3 || yi(2)!=4)    return 79;   // was {1,2,3}, i.e. d3 unchanged
+                                                          // (alpha became int(0.5)==0)
+    // ...and the same for the rest of the family, each against its allocating twin
+    // copied into the same dest (the invariant, checked rather than restated).
+    auto ri = local<int, shape<3>>();
+    yi.zero_(); d3.div(o3, into(yi));       ri.copy_(d3.div(o3));
+    if (yi(0)!=ri(0) || yi(1)!=ri(1) || yi(2)!=ri(2)) return 80;   // {1,1,2}
+    if (yi(0)!=1 || yi(1)!=1 || yi(2)!=2)   return 81;             // was {1,2,3}
+    yi.zero_(); d3.sub(o3, 0.5, into(yi));  ri.copy_(d3.sub(o3, 0.5));
+    if (yi(0)!=ri(0) || yi(2)!=ri(2))       return 82;             // 1.5-0.75=0.75 -> 0
+    if (yi(0)!=0 || yi(2)!=2)               return 83;             // 3.5-0.75=2.75 -> 2
+    yi.zero_(); minimum(d3, 2.2, into(yi)); ri.copy_(minimum(d3, 2.2));
+    if (yi(0)!=ri(0) || yi(1)!=ri(1))       return 84;             // {1,2,2}
+    if (yi(0)!=1 || yi(1)!=2 || yi(2)!=2)   return 85;
+    yi.zero_(); clamp(d3, 2.0, 3.0, into(yi)); ri.copy_(clamp(d3, 2.0, 3.0));
+    if (yi(0)!=ri(0) || yi(2)!=ri(2))       return 86;             // {2,2,3}
+    if (yi(0)!=2 || yi(1)!=2 || yi(2)!=3)   return 87;
+    yi.zero_(); sqrt(o3, into(yi));         ri.copy_(sqrt(o3));
+    if (yi(0)!=ri(0))                       return 88;             // √1.5=1.2247 -> 1
+    if (yi(0)!=1 || yi(2)!=1)               return 89;             // was 1 too (√1==1)
+
+    // The dest's STRIDES don't change the rule: a non-contiguous int dest takes the
+    // per-element decode path instead of the linear fast path, and must agree.
+    auto pad = local<int, shape<3,2>>(); pad.zero_();
+    auto icol = pad.take_along<1>(0);
+    d3.mul(0.5, into(icol));
+    if (pad(0,0)!=0 || pad(1,0)!=1 || pad(2,0)!=1) return 90;
+    if (pad(0,1)!=0 || pad(1,1)!=0 || pad(2,1)!=0) return 91;   // gaps untouched
+
+    // Not int-specific — a narrower FLOAT dest formed the value in its own precision
+    // too. Double sources, float dest, fused axpy: 1 + (1/3)*7 = 3.3333333333333335
+    // in double, whose nearest float is 3.33333325f; formed in float it is
+    // 3.33333349f (one ulp up). The reference is built in separate statements so no
+    // contraction can fuse it differently from the engine's own expression.
+    auto p1 = local<double, shape<1>>(); p1(0) = 1.0;
+    auto q1 = local<double, shape<1>>(); q1(0) = 7.0;
+    const double alpha3 = 1.0 / 3.0;
+    const double prod3  = alpha3 * 7.0;
+    const float  want3  = static_cast<float>(1.0 + prod3);
+    auto yf1 = local<float, shape<1>>();
+    yf1.zero_(); p1.add(q1, alpha3, into(yf1));
+    if (yf1(0) != want3)                    return 92;
+
+    // The compute type is the OPERANDS' promoted type — teeny's own `promote_t`, not
+    // "the widest type in sight". Two int sources divide as INTS even into a double
+    // dest, exactly as the allocating twin does (dest's dtype never promotes the op).
+    auto n7 = local<int, shape<2>>(); n7(0)=7; n7(1)=9;
+    auto n2 = local<int, shape<2>>(); n2.fill_(2);
+    auto rd2 = local<double, shape<2>>(); auto yd2 = local<double, shape<2>>();
+    yd2.zero_(); n7.div(n2, into(yd2)); rd2.copy_(n7.div(n2));
+    if (yd2(0)!=rd2(0) || yd2(1)!=rd2(1))   return 93;
+    if (yd2(0)!=3.0 || yd2(1)!=4.0)         return 94;   // 7/2=3, 9/2=4 (integer division)
+
+    // CONTROL: a dest whose dtype already matches the promoted operand type is
+    // unaffected — same values before and after the fix, on all four forms.
+    auto yd3 = local<double, shape<3>>();
+    yd3.zero_(); d3.mul(0.5, into(yd3));
+    if (!close(yd3(0),0.75) || !close(yd3(1),1.25) || !close(yd3(2),1.75)) return 95;
+    yd3.zero_(); exp(d3, into(yd3));
+    if (!close(yd3(0), std::exp(1.5)) || !close(yd3(2), std::exp(3.5)))   return 96;
+    yd3.zero_(); d3.add(o3, into(yd3));
+    if (!close(yd3(0),3.0) || !close(yd3(2),5.0))                         return 97;
+    yd3.zero_(); d3.add(o3, 0.5, into(yd3));
+    if (!close(yd3(0),2.25) || !close(yd3(2),4.25))                       return 98;
+    // ...and an int dest fed by int operands and an int scalar: nothing to cast at
+    // all, the whole computation was already in `int` both before and after.
+    auto ni = local<int, shape<3>>(); ni(0)=1; ni(1)=2; ni(2)=3;
+    yi.zero_(); ni.mul(3, into(yi));
+    if (yi(0)!=3 || yi(1)!=6 || yi(2)!=9)   return 99;
+
     // A MIS-SHAPED dest is now rejected: a compile error when both shapes are
     // fully static (the issue's own repro), a debug-time check otherwise. Left
     // commented out because neither a static_assert nor an assert() failure can
@@ -289,6 +383,114 @@ int main() {
     // convention as the shape checks above; verified manually:
     //   sum(a, into(local<double, shape<>>{}));         // static_assert: temporary must be a VIEW
     //   a.add(b, into(zeros<double>(shape<-1>{3})));    // same, for a heap owner
+
+    // ---- half/bfloat16 SOURCE into a wider dest (#379 follow-up) --------
+    // The engine computes in `compute_type_t<promote_t<Ta,Tb>>` (float, for a
+    // half/bfloat16 source), but the twin `y.copy_(a.op(b))` first materialises
+    // its result as a `promote_t<Ta,Tb>` tensor — a 16-bit float — which rounds
+    // the float value down to ~11 bits of mantissa BEFORE it is ever widened to
+    // `y`'s type. `into(dest)` must round through that same 16-bit stop, not
+    // straight from float to `y`'s type, or the two disagree (this exact repro
+    // was a real, reviewer-found gap in the original #379 fix): with
+    // `half a = 1.3`, `a.add(1.5, into(double_y))` must equal
+    // `double_y.copy_(a.add(1.5))` bit for bit, not the "one rounding, more
+    // precise" value a straight float->double cast would give.
+    auto ha = local<half, shape<1>>(); ha(0) = static_cast<half>(1.3);
+    auto hy_into = local<double, shape<1>>(), hy_twin = local<double, shape<1>>();
+    ha.add(1.5, into(hy_into));
+    hy_twin.copy_(ha.add(1.5));
+    if (hy_into(0) != hy_twin(0))            return 100;
+    if (hy_into(0) != 2.80078125)            return 101;   // pinned: NOT 2.7998046875
+
+    auto bfa = local<bfloat16, shape<1>>(); bfa(0) = static_cast<bfloat16>(1.3);
+    auto by_into = local<double, shape<1>>(), by_twin = local<double, shape<1>>();
+    bfa.mul(1.3, into(by_into));
+    by_twin.copy_(bfa.mul(1.3));
+    if (by_into(0) != by_twin(0))            return 102;
+    if (by_into(0) != 1.6875)                return 103;   // pinned: NOT 1.6859374046325684...
+
+    // Same rule for a tensor rhs and for `cross` (which rounds through its own
+    // internal `_cross3`, not one of the shared engines).
+    auto hb = local<half, shape<1>>(); hb(0) = static_cast<half>(2.7);
+    auto hz_into = local<double, shape<1>>(), hz_twin = local<double, shape<1>>();
+    ha.add(hb, into(hz_into));
+    hz_twin.copy_(ha.add(hb));
+    if (hz_into(0) != hz_twin(0))             return 104;
+
+    auto ha3 = local<half, shape<3>>();
+    ha3(0) = static_cast<half>(1.3); ha3(1) = static_cast<half>(2.7); ha3(2) = static_cast<half>(3.1);
+    auto hb3 = local<half, shape<3>>();
+    hb3(0) = static_cast<half>(0.4); hb3(1) = static_cast<half>(1.9); hb3(2) = static_cast<half>(2.2);
+    auto hc_into = local<double, shape<3>>(), hc_twin = local<double, shape<3>>();
+    cross(ha3, hb3, into(hc_into));
+    hc_twin.copy_(cross(ha3, hb3));
+    if (hc_into(0) != hc_twin(0) || hc_into(1) != hc_twin(1) || hc_into(2) != hc_twin(2)) return 105;
+
+    // ---- the two 16-bit floats INTO EACH OTHER (#379 follow-up, round 2) ----
+    // `half` and `bfloat16` convert only FROM arithmetic types and only TO `float`,
+    // so there is no direct `half` -> `bfloat16` conversion. The rounding stop above
+    // must therefore hand the engine back a value in the COMPUTE type (`float`) and
+    // let the store make the final cast — exactly the two steps the twin's `copy_`
+    // takes. Rounding to the 16-bit type and stopping there would make these four
+    // calls fail to COMPILE while their twins compile fine, which is how this was
+    // first shipped and caught. Least-travelled corner of the whole `into` family:
+    // pin both directions, on all three engines plus `cross`.
+    auto hh = local<half, shape<3>>();
+    hh(0) = static_cast<half>(1.3); hh(1) = static_cast<half>(2.7); hh(2) = static_cast<half>(3.1);
+    auto hh2 = local<half, shape<3>>();
+    hh2(0) = static_cast<half>(0.4); hh2(1) = static_cast<half>(1.9); hh2(2) = static_cast<half>(2.2);
+
+    auto hb_into = local<bfloat16, shape<3>>(), hb_twin = local<bfloat16, shape<3>>();
+    hh.add(hh2, into(hb_into));                 // bzip_ engine
+    hb_twin.copy_(hh.add(hh2));
+    for (long i = 0; i < 3; ++i) if (!(hb_into(i) == hb_twin(i))) return 106;
+
+    hh.mul(0.5, into(hb_into));                 // scalo_ engine
+    hb_twin.copy_(hh.mul(0.5));
+    for (long i = 0; i < 3; ++i) if (!(hb_into(i) == hb_twin(i))) return 107;
+
+    exp(hh, into(hb_into));                     // unaryo_ engine
+    hb_twin.copy_(exp(hh));
+    for (long i = 0; i < 3; ++i) if (!(hb_into(i) == hb_twin(i))) return 108;
+
+    cross(hh, hh2, into(hb_into));              // _cross3
+    hb_twin.copy_(cross(hh, hh2));
+    for (long i = 0; i < 3; ++i) if (!(hb_into(i) == hb_twin(i))) return 109;
+
+    // ...and the reverse direction: bfloat16 sources into a `half` dest.
+    auto bb = local<bfloat16, shape<3>>();
+    bb(0) = static_cast<bfloat16>(1.3); bb(1) = static_cast<bfloat16>(2.7); bb(2) = static_cast<bfloat16>(3.1);
+    auto bb2 = local<bfloat16, shape<3>>();
+    bb2(0) = static_cast<bfloat16>(0.4); bb2(1) = static_cast<bfloat16>(1.9); bb2(2) = static_cast<bfloat16>(2.2);
+
+    auto bh_into = local<half, shape<3>>(), bh_twin = local<half, shape<3>>();
+    bb.add(bb2, into(bh_into));
+    bh_twin.copy_(bb.add(bb2));
+    for (long i = 0; i < 3; ++i) if (!(bh_into(i) == bh_twin(i))) return 110;
+
+    bb.mul(0.5, into(bh_into));
+    bh_twin.copy_(bb.mul(0.5));
+    for (long i = 0; i < 3; ++i) if (!(bh_into(i) == bh_twin(i))) return 111;
+
+    exp(bb, into(bh_into));
+    bh_twin.copy_(exp(bb));
+    for (long i = 0; i < 3; ++i) if (!(bh_into(i) == bh_twin(i))) return 112;
+
+    cross(bb, bb2, into(bh_into));
+    bh_twin.copy_(cross(bb, bb2));
+    for (long i = 0; i < 3; ++i) if (!(bh_into(i) == bh_twin(i))) return 113;
+
+    // A MIXED half/bfloat16 operand pair, into each of the two (promote_t picks one
+    // of them, so one direction rounds through the OTHER 16-bit type on its way out).
+    auto mx_into = local<bfloat16, shape<3>>(), mx_twin = local<bfloat16, shape<3>>();
+    hh.add(bb, into(mx_into));
+    mx_twin.copy_(hh.add(bb));
+    for (long i = 0; i < 3; ++i) if (!(mx_into(i) == mx_twin(i))) return 114;
+
+    auto mh_into = local<half, shape<3>>(), mh_twin = local<half, shape<3>>();
+    bb.add(hh, into(mh_into));
+    mh_twin.copy_(bb.add(hh));
+    for (long i = 0; i < 3; ++i) if (!(mh_into(i) == mh_twin(i))) return 115;
 
     return 0;
 }

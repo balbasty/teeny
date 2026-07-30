@@ -1809,7 +1809,15 @@ public:
 /** @brief `into(y)` — the output-destination tag: pass it as the last argument to
  *         an out-of-place math producer (`a.add(b, into(y))`, `cross(a,b,into(y))`,
  *         `exp(a, into(y))`, …) to write the result into `y` (one fused pass, no
- *         allocation) and get `y&` back, instead of a freshly allocated result. */
+ *         allocation) and get `y&` back, instead of a freshly allocated result.
+ *         `y`'s dtype need not match: the arithmetic runs in the OPERANDS' own
+ *         precision (a scalar rhs and the fused `alpha` included) and only the
+ *         RESULT is cast to `y`, so `a.op(b, into(y))` gives exactly the numbers
+ *         `y.copy_(a.op(b))` would (#379) — including for a `half`/`bfloat16`
+ *         operand, where `into(y)` rounds through the twin's own `promote_t`
+ *         (a 16-bit float there) before casting to `y`, not straight from the
+ *         float compute value. `scan(t, init, f, into(y))` is the one
+ *         deliberate exception — see its own doc-comment in iterate.h. */
 template <class T, class E, class L, storage O>
 _TNY_API into_t<tensor<T,E,L,O>> into(tensor<T,E,L,O> & d) noexcept { return into_t<tensor<T,E,L,O>>{ d }; }
 
