@@ -305,6 +305,13 @@ template <class... I> struct _offset_int {
     using type = typename cs::conditional_t<_mixed, _sint_of_size<_bytes>, _ident<_wide>>::type;
 };
 template <class... I> using _offset_int_t = typename _offset_int<I...>::type;
+// Every call site names a participant's index type as `typename X::index_type`
+// (#363 normalised the spelling: several used to reach through
+// `X::extents_type::index_type`, sometimes both ways within one `using`). The two
+// are the same type for every participant these engines see — a tensor's
+// `index_type` is an alias of its shape's, and an mdspan's likewise — so the
+// difference was never load-bearing, only a hint to the next reader that it might
+// have been.
 
 // The index type a broadcast RESULT carries (#167) — the SAME rule, over the two
 // operands: a type that can represent every extent/stride value either operand's
@@ -451,8 +458,8 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
                   "into(dest): dest's shape must match the broadcast result's — each rhs axis must "
                   "equal dest's or be 1 (an operand stretches, a dest does not).");
     using I = _offset_int_t<typename C::index_type,
-                            typename A::extents_type::index_type,
-                            typename B::extents_type::index_type>;
+                            typename A::index_type,
+                            typename B::index_type>;
     constexpr cs::size_t R = C::rank();   // c has the result (largest) rank; a,b right-align into it
     // Array size floored to 1 (rank-0 c -> empty D..., see scal_'s comment above).
     const I ce[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(c.extent(D))... },
@@ -526,26 +533,45 @@ _TNY_API void check_dest_no_overlap(const C & c, cs::index_sequence<D...>) {
         "out-of-place store into it keeps only the last result — clone() to a dense tensor "
         "first, or write into a non-overlapping destination."), ... );
 }
-// EXACT per-axis extent check between a destination and the single source it is
-// written from — the runtime half of the guard the SINGLE-SOURCE engines
-// (`scalo_`/`unaryo_`) need, and the twin of the compile-time `ext_static_eq`
-// above. Those engines take their loop BOUNDS from the source and their strides
-// from the destination, so a destination shorter in any axis is written past its
-// end (#357): `a.mul(2.0, into(y))` with an 8x8 `a` and a 2x2 `y` stored 64
-// elements through a 4-element buffer. Their allocating producers (`oops`/
-// `uop_out`) build the destination from the source's own extents type, so the only
-// way to reach them mis-shaped is a caller-supplied `into(dest)`.
+// The type a RUNTIME extent comparison is made in. Extents are non-negative by
+// construction, so an unsigned type is lossless and sidesteps a signed/unsigned
+// mismatch between two differently-indexed participants; `unsigned long long` is
+// the one that never truncates, because it is at least 64 bits on EVERY platform.
+// The alternatives both have a host where they are 32-bit and teeny's default
+// `int64_t` index type does not fit them: `long` is 32-bit under Windows' LLP64
+// (this is what `scan`'s hand-rolled copy of the guard below used before #363),
+// and `cs::size_t` is 32-bit on a 32-bit host. Same "pick a type that covers every
+// participant" rule as `_offset_int_t`.
+using ext_cmp_t = unsigned long long;
+_TNY_API constexpr bool ext_eq(ext_cmp_t a, ext_cmp_t b) { return a == b; }
+
+// EXACT per-axis shape check between a destination and the SINGLE source it is
+// written from — the whole `into(dest)` guard for a single-source producer, in one
+// place: the rank `static_assert`, the compile-time `ext_static_eq` gate (fires
+// when both shapes are fully static, so the documented repro is a COMPILE error,
+// not a debug-only trip), and the per-axis runtime `_TNY_CHECK` for anything
+// dynamic. Used by `scalo_`, `unaryo_` and `scan`'s `into(dest)` form — the three
+// spellings #363 folded together.
+//
+// Those producers take their loop BOUNDS from the source and their strides from
+// the destination, so a destination shorter in any axis is written past its end
+// (#357): `a.mul(2.0, into(y))` with an 8x8 `a` and a 2x2 `y` stored 64 elements
+// through a 4-element buffer. Their allocating producers (`oops`/`uop_out`) build
+// the destination from the source's own extents type, so the only way to reach
+// them mis-shaped is a caller-supplied `into(dest)`.
 //
 // EXACT equality, unlike `bzip_`'s `ae[r] == ce[r] || ae[r] == 1`: that engine
-// BROADCASTS (an extent-1 operand axis gets stride 0 and is stretched), these two
-// do not — they index the source with the same counter they index the destination
+// BROADCASTS (an extent-1 operand axis gets stride 0 and is stretched), these do
+// not — they index the source with the same counter they index the destination
 // with, so an extent 1 against an extent n is a plain mismatch, not a stretch.
-// Extents are non-negative by construction, so comparing them as `cs::size_t`
-// (mdspan's own `static_extent` type) is lossless and sidesteps a signed/unsigned
-// mismatch between two differently-indexed tensors.
+// A broadcasting sibling of this helper belongs next to it, not inside it.
 template <class C, class A, cs::size_t... D>
-_TNY_API void check_same_extents(const C & c, const A & a, cs::index_sequence<D...>) {
-    ( _TNY_CHECK(static_cast<cs::size_t>(c.extent(D)) == static_cast<cs::size_t>(a.extent(D)),
+_TNY_API void check_into_same_shape(const C & c, const A & a, cs::index_sequence<D...>) {
+    static_assert(A::rank() == C::rank(), "into(dest): dest's rank must match the source's");
+    static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
+                      cs::index_sequence<D...>{}),
+                  "into(dest): dest's shape must match the source's exactly (no broadcast)");
+    ( _TNY_CHECK(ext_eq(c.extent(D), a.extent(D)),
         "into(dest): dest's shape must match the source's exactly (no broadcast here — a "
         "scalar-rhs or unary op has nothing to stretch); a shorter dest is written past its end."), ... );
 }
@@ -659,17 +685,15 @@ _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
     // #379; compare: `Rc`). It is NOT necessarily `C`'s own type, so the stores below
     // cast to `Ce` explicitly, exactly as `bzip_`'s `w_set`/fast path do.
     //
-    // Shape guard (#357): the bounds below come from `a` and the stores go through
-    // `c`'s strides, so the two must agree in EVERY axis or the write runs off the
-    // end of `c`. Checked HERE, in the engine, rather than in the `scalo` wrapper
-    // the way `bzip` places its own static gate — `scmp` (comparisons) calls
-    // `scalo_` directly, and one guard at the single point that does the indexing
-    // cannot be bypassed by a future caller. Both halves, as `dot`/`scan`'s
-    // `into(dest)` do it: a `static_assert` when both shapes are fully static (the
-    // documented repro is a COMPILE error, not a debug-only trip) and a per-axis
-    // `_TNY_CHECK` for anything dynamic. No-ops for every non-`into` caller, whose
-    // destination is built from `a`'s own extents type (`oops`/`oops_cmp`) or IS
-    // `a` (`unary`).
+    // Shape guard (#357), all three halves in `check_into_same_shape` (see there for
+    // the rule; #363 folded this site, `unaryo_`'s twin and `scan`'s into one helper):
+    // the bounds below come from `a` and the stores go through `c`'s strides, so the
+    // two must agree in EVERY axis or the write runs off the end of `c`. Checked
+    // HERE, in the engine, rather than in the `scalo` wrapper the way `bzip` places
+    // its own static gate — `scmp` (comparisons) calls `scalo_` directly, and one
+    // guard at the single point that does the indexing cannot be bypassed by a future
+    // caller. A no-op for every non-`into` caller, whose destination is built from
+    // `a`'s own extents type (`oops`/`oops_cmp`) or IS `a` (`unary`).
     //
     // ...and the SELF-OVERLAP guard (#364), for the same reachability: a stride-0
     // `into(dest)` axis makes many source elements store into one slot, so all but
@@ -681,14 +705,9 @@ _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
     // the full axis pack, host-debug), and a no-op for every non-`into` caller: the
     // allocating producers build a fresh dense `c`, and the in-place `unary` has
     // already run this exact check before delegating here.
-    static_assert(A::rank() == C::rank(), "into(dest): dest rank must match the source's");
-    static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
-                      cs::make_index_sequence<C::rank()>{}),
-                  "into(dest): dest's shape must match the source's exactly (no broadcast)");
-    check_same_extents(c, a, cs::index_sequence<D...>{});
+    check_into_same_shape(c, a, cs::index_sequence<D...>{});
     check_dest_no_overlap(c, cs::index_sequence<D...>{});
-    using I = _offset_int_t<typename C::index_type,
-                            typename A::extents_type::index_type>;
+    using I = _offset_int_t<typename C::index_type, typename A::index_type>;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.extent(D))... },
             sa[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.stride(D))... },
@@ -725,12 +744,12 @@ _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     // (#353). The allocating producer (`uop_out`) builds `c` from `a`'s extents type,
     // so that path is unchanged.
     //
-    // ...and the same shape guard as `scalo_` (#357), for the same reason: bounds
-    // from `a`, strides from `c`, so a mis-shaped `into(dest)` — the only way a
-    // destination of the caller's own choosing gets here — writes past its end.
-    // `static_assert` when both shapes are static, per-axis `_TNY_CHECK` otherwise;
-    // a no-op for `uop_out` (dest built from `a`'s extents) and for the in-place
-    // `unary`, which passes `c` as both arguments.
+    // ...and the same shape guard as `scalo_` (#357) — literally the same helper
+    // since #363 (`check_into_same_shape`) — for the same reason: bounds from `a`,
+    // strides from `c`, so a mis-shaped `into(dest)` — the only way a destination of
+    // the caller's own choosing gets here — writes past its end. A no-op for
+    // `uop_out` (dest built from `a`'s extents) and for the in-place `unary`, which
+    // passes `c` as both arguments.
     //
     // ...and the SELF-OVERLAP guard, exactly as `scalo_` above documents it (#364):
     // `exp(a, into(y))` into a stride-0 `y` used to drop every result but the last,
@@ -744,14 +763,9 @@ _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     // into(int_y))` exponentiated the TRUNCATED input (#379). It is the SOURCE's
     // compute type there, exactly what `uop_out`'s own destination would have
     // carried; the in-place `unary` still passes `void` (= `c`'s, which is `a`'s).
-    static_assert(A::rank() == C::rank(), "into(dest): dest rank must match the source's");
-    static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
-                      cs::make_index_sequence<C::rank()>{}),
-                  "into(dest): dest's shape must match the source's exactly (no broadcast)");
-    check_same_extents(c, a, cs::index_sequence<D...>{});
+    check_into_same_shape(c, a, cs::index_sequence<D...>{});
     check_dest_no_overlap(c, cs::index_sequence<D...>{});
-    using I = _offset_int_t<typename C::index_type,
-                            typename A::extents_type::index_type>;
+    using I = _offset_int_t<typename C::index_type, typename A::index_type>;
     using Ce = typename C::element_type;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.extent(D))... },
@@ -1019,8 +1033,7 @@ _TNY_API R zipreduce_decode_(const A & a, const B & b, Op op, cs::index_sequence
     // As in `bzip_`, the widening is internal only: neither operand's own type
     // changes, each operand's offsets fit its own index type by construction, and
     // `data()[off]` takes any integer, so nothing is narrowed back on the way out.
-    using I = _offset_int_t<typename A::extents_type::index_type,
-                            typename B::extents_type::index_type>;
+    using I = _offset_int_t<typename A::index_type, typename B::index_type>;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1]  = { static_cast<I>(a.extent(D))... };
     const I be[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(b.extent(D))... };
@@ -1222,6 +1235,35 @@ _TNY_HOST auto reduce_to(tensor<RE, OE, ccontiguous, storage::heap> && r) {
     if constexpr (cs::is_same<Ret, RE>::value) return static_cast<tensor<RE,OE,ccontiguous,storage::heap>&&>(r);
     else { tensor<Ret, OE, ccontiguous, storage::heap> o(r.extents()); o.copy_(r); return o; }
 }
+
+/** @brief Cast a FULL reduction's SCALAR result to an `into(dest)` cell's element
+ *  type — the scalar twin of `reduce_to` just above (which does the same job for
+ *  the tensor an AXIS reduction produces, by way of `copy_`).
+ *
+ *  It exists because the direct `static_cast<To>(v)` this replaces is ILL-FORMED
+ *  for the one pair `To`/`From` can be: the two 16-bit floats. `half`/`bfloat16`
+ *  convert only FROM arithmetic types (their converting constructor is
+ *  SFINAE-gated on `is_arithmetic`) and only TO `float`, so `half -> bfloat16`
+ *  needs two user-defined conversions and the language will not chain them —
+ *  `sum(half_a, into(bfloat16_cell))` did not compile at all (#406). Going through
+ *  `compute_type_t<From>` (`float` for either 16-bit float, `From` itself for
+ *  every other type) supplies exactly that missing stop.
+ *
+ *  Same rule and the same reason as `_round_to`/`_cross_round` on the elementwise
+ *  side (#379/#390), and it is likewise numerically inert everywhere else: for any
+ *  non-16-bit-float `From` the intermediate IS `From`, so the extra cast vanishes.
+ *  For a 16-bit-float `From` it is an EXACT widening of a value that the reduction
+ *  has already rounded to `From` (`_reduce_result_t` casts the accumulator down
+ *  before we ever see it) — so `dest` lands on the same bits the allocating
+ *  spelling `dest.fill_(sum(a))` would have written, which is the equivalence every
+ *  `into(dest)` call site promises. */
+template <class To, class From> _TNY_API To reduce_cast(From v) {
+    return static_cast<To>(static_cast<compute_type_t<From>>(v));
+}
+// The destination element type of an `into(dest)` tag's cell — spelled once here
+// rather than at each of the full-reduction call sites below (the unary keyword
+// bag `_TNY_RED_TAGGED` and its binary twin `_TNY_RED_BINARY_TAGGED`).
+template <class D> using _into_elem_t = typename cs::remove_reference_t<D>::element_type;
 
 /* ---- allclose: |a-b| <= atol + rtol*|b| for every (broadcast) element ---- */
 template <class R, class A, class B, cs::size_t... D>
@@ -1658,11 +1700,20 @@ namespace _md {
  *  (possibly keepdims-wrapped) tensor by value. The axes may be listed in ANY
  *  order (`_keepdims` -> `unsqueeze` sorts them, #371). Two overloads matching
  *  the SAME static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split as `axreduce`
- *  itself. */
+ *  itself.
+ *  The keepdims arm is gated on a NON-EMPTY axis pack: for the explicitly empty
+ *  list `NAME(a, axis<>{}, keepdims)` (#398) NO axis was reduced, so `r` already
+ *  has the source's shape and `keepdims` has nothing to re-insert — it is a
+ *  no-op, and `r` is used directly. Without that gate `_keepdims<>`'s empty-pack
+ *  branch (which takes a `const Tn &` and returns BY VALUE) would be handed `r`
+ *  itself rather than one of the copyable views its `unsqueeze` produces: on the
+ *  dynamic path that is a move-only `storage::heap` tensor, i.e. a hard "use of
+ *  deleted function" error, and on the static path a silent pair of redundant
+ *  whole-tensor copies. */
 template <long SrcRank, long... Axes, class R, class... Tags>
 _TNY_API decltype(auto) _red_finish_static(R && r, Tags... tags) {
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tags...);
-    if constexpr (_kw::has<_is_keepdims_tag, Tags...>()) {
+    if constexpr (sizeof...(Axes) > 0 && _kw::has<_is_keepdims_tag, Tags...>()) {
         auto kv = _keepdims<_norm_axis(Axes, SrcRank)...>(r);
         tensor<typename cs::remove_reference_t<R>::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::stack> c{};
         c.copy_(kv);
@@ -1676,7 +1727,7 @@ _TNY_API decltype(auto) _red_finish_static(R && r, Tags... tags) {
 template <long SrcRank, long... Axes, class R, class... Tags>
 _TNY_HOST decltype(auto) _red_finish_dynamic(R && r, Tags... tags) {
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tags...);
-    if constexpr (_kw::has<_is_keepdims_tag, Tags...>()) {
+    if constexpr (sizeof...(Axes) > 0 && _kw::has<_is_keepdims_tag, Tags...>()) {   // sizeof...(Axes) > 0: an empty axis list reduced nothing, so keepdims is a no-op (#398, see above)
         auto kv = _keepdims<_norm_axis(Axes, SrcRank)...>(r);
         tensor<typename cs::remove_reference_t<R>::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::heap> c(kv.extents());
         c.copy_(kv);
@@ -1764,12 +1815,42 @@ _TNY_RED_AXIS_ONE(NAME, ==, _TNY_API,  static,  reduce_type_t<T>, EXPR_DEFAULT, 
 _TNY_RED_AXIS_ONE(NAME, !=, _TNY_HOST, dynamic, reduce_type_t<T>, EXPR_DEFAULT, long... Axes)            \
 _TNY_RED_AXIS_ONE(NAME, ==, _TNY_API,  static,  Acc, EXPR_ACC, class Acc, long... Axes)                  \
 _TNY_RED_AXIS_ONE(NAME, !=, _TNY_HOST, dynamic, Acc, EXPR_ACC, class Acc, long... Axes)
+// ...and TWO more overloads per NAME, for the EXPLICITLY EMPTY axis list
+// `NAME(a, axis<>{})` (#398): reduce over NO axis, so every output cell
+// aggregates the single element at its own index and the result keeps the
+// SOURCE's shape (numpy's `np.sum(a, axis=())`). The engine already does exactly
+// that for an empty pack — nothing is marked reduced, `reduced_extents<E>` is
+// `E` — it is only the PUBLIC `NAME<Axes...>` overloads that must exclude the
+// empty pack (their `(sizeof...(Axes) > 0)` key above: an empty one would
+// otherwise collide with the full-reduction `NAME(a)`), which is why this
+// separate, `_md`-internal entry point exists at all. Same shape as
+// `_TNY_RED_AXIS_ONE` above — the static(stack,_TNY_API)/dynamic(heap,_TNY_HOST)
+// split and the `_red_finish_*` tail — but keyed on the SOURCE extents (the
+// result has them) and with ONE overload per half rather than two, since with no
+// axes to spell there is no `<Axes...>`-vs-`<Acc, Axes...>` ambiguity to resolve:
+// a single possibly-void `Acc` covers both forms through `_acc_t`/
+// `_reduce_result_t`. Only the tag dispatcher below calls these.
+//   RTYPE (the trailing variadic argument, so it may contain commas) is what the
+//   in-body `R` alias means — the accumulator type, in terms of `Acc` and `T`.
+#define _TNY_RED_NOAXIS_ONE(NAME, CMP, API, FIN, EXPR, /* RTYPE */...)                                   \
+template <class Acc, class T,class E,class L,storage O, class... Tags,                                  \
+          cs::enable_if_t<E::rank_dynamic() CMP 0, int> = 0>                                            \
+API decltype(auto) _##NAME##_noaxis(const tensor<T,E,L,O> & a, Tags... tags) {                          \
+    using R [[maybe_unused]] = __VA_ARGS__;                                                             \
+    return _red_finish_##FIN<(long)E::rank()>(EXPR, tags...); }
+#define _TNY_RED_NOAXIS(NAME, EXPR, /* RTYPE */...)                                                      \
+namespace _md {                                                                                         \
+_TNY_RED_NOAXIS_ONE(NAME, ==, _TNY_API,  static,  EXPR, __VA_ARGS__)                                     \
+_TNY_RED_NOAXIS_ONE(NAME, !=, _TNY_HOST, dynamic, EXPR, __VA_ARGS__)                                     \
+}
 // The plain shape: accumulate over the named axes with (INIT, OP) — `INIT` is
 // written in terms of the accumulator alias `R` — then cast down to the public
-// result element type (`T` by default, the requested `Acc` when given).
+// result element type (`T` by default, the requested `Acc` when given). Emits the
+// empty-axis-list (`axis<>{}`) pair too, since (INIT, OP) is all it needs either.
 #define _TNY_RED_AXIS_CORE(NAME, INIT, OP)                                                              \
 _TNY_RED_AXIS_CUSTOM(NAME, (_md::reduce_to<T>  (_md::axreduce<Axes...>(a, INIT, _md::OP{}))),            \
-                           (_md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{}))))
+                           (_md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{}))))            \
+_TNY_RED_NOAXIS(NAME, (reduce_to<_reduce_result_t<Acc,T>>(axreduce<>(a, INIT, _md::OP{}))), _acc_t<Acc,T>)
 _TNY_RED_AXIS_CORE(sum,    R(0),                 r_add)
 _TNY_RED_AXIS_CORE(prod,   R(1),                 r_mul)
 _TNY_RED_AXIS_CORE(max,    _reduce_seed_lowest<R>(),  r_max)
@@ -1793,7 +1874,18 @@ _TNY_RED_AXIS_CORE(sqnorm, R(0),                 r_addsq)   // Σaᵢ² over the
  *  (`_NAME_axed`) that pattern-matches the discovered `axis<Axes...>` TAG back
  *  into a real non-type template-argument pack (the only way to turn a value tag
  *  into `Axes...` for an explicit-template call) — `_md::_red_dyn` (tensor.h)
- *  computes the same static/dynamic split from that same tag. */
+ *  computes the same static/dynamic split from that same tag.
+ *
+ *  THREE axis cases, and they are three different requests (#398):
+ *   - **no `axis` keyword at all** (`AxisTag` is `_kw::unset`) — the documented
+ *     default: reduce over EVERY axis, giving a scalar.
+ *   - **`axis<>{}`, an explicitly EMPTY list** — reduce over NO axis: each output
+ *     cell aggregates the one element at its own index, so the result keeps the
+ *     source's shape (numpy's `np.sum(a, axis=())`). Handed to `_NAME_noaxis`
+ *     (emitted next to each reduction's axis core). Before #398 the absence
+ *     sentinel WAS `axis<>`, so an explicitly empty list silently took the
+ *     full-reduction branch — the opposite extreme, with no diagnostic.
+ *   - **`axis<A0, Rest...>`, a real list** — reduce over exactly those axes. */
 // `_NAME_axed::call` forwards into `_TNY_RED_AXIS_CORE`'s explicit-`Axes...`
 // overloads, which only ever accept `keepdims_t`/`into_t<D>` (see the comment
 // above `_TNY_RED_AXIS_CORE`) -- so `call` is handed an ALREADY-CLEANED
@@ -1812,7 +1904,7 @@ template <class Acc, long A0, long... Rest> struct _##NAME##_axed<Acc, axis<A0, 
 };                                                                                                        \
 }                                                                                                         \
 template <class Acc = void, class T,class E,class L,storage O, class Tag0, class... Tags,                \
-          class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                              \
+          class AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>,                          \
           cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value==0, int> = 0>                                  \
 _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags) {                      \
     _TNY_KW_CHECK(#NAME, "dtype<Acc>{}, axis<...>{}, keepdims or into(dest)",                            \
@@ -1820,18 +1912,24 @@ _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
     using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     constexpr bool hasInto = !cs::is_same<decltype(out), _kw::unset>::value;                             \
-    if constexpr (AxisTag::rank == 0) {                                                                  \
-        static_assert(!_kw::has<_is_keepdims_tag, Tag0, Tags...>(),                                      \
+    constexpr bool hasKeep = _kw::has<_is_keepdims_tag, Tag0, Tags...>();                                \
+    if constexpr (cs::is_same<AxisTag, _kw::unset>::value) {         /* NO axis keyword -> ALL axes */   \
+        static_assert(!hasKeep,                                                                          \
                       #NAME ": keepdims requires naming axes (axis<...>{}) -- a full (all-axes) "        \
                       "reduction has no axis left to keep");                                             \
         if constexpr (hasInto) {                                                                         \
             static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0,                       \
                           #NAME ": full reduction into(dest): dest must be rank-0 (a scalar cell); "      \
                           "name the axes -- " #NAME "(a, axis<...>{}, into(dest)) -- for a lower-rank destination"); \
-            out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(NAME<RAcc>(a))); \
+            out.dest.fill_(_md::reduce_cast<_md::_into_elem_t<decltype(out.dest)>>(NAME<RAcc>(a))); \
             return out.dest;                                                                             \
         } else return NAME<RAcc>(a);                                                                     \
-    } else if constexpr (_kw::has<_is_keepdims_tag, Tag0, Tags...>()) {                                  \
+    } else if constexpr (_is_empty_axis<AxisTag>::value) {           /* axis<>{} -> NO axis at all */    \
+        if constexpr (hasKeep && hasInto) return _md::_##NAME##_noaxis<RAcc>(a, keepdims, out);          \
+        else if constexpr (hasKeep)       return _md::_##NAME##_noaxis<RAcc>(a, keepdims);               \
+        else if constexpr (hasInto)       return _md::_##NAME##_noaxis<RAcc>(a, out);                    \
+        else                              return _md::_##NAME##_noaxis<RAcc>(a);                         \
+    } else if constexpr (hasKeep) {                                                                      \
         if constexpr (hasInto) return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, keepdims, out);        \
         else                   return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, keepdims);             \
     } else {                                                                                              \
@@ -1840,7 +1938,7 @@ _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
     }                                                                                                      \
 }                                                                                                          \
 template <class Acc = void, class T,class E,class L,storage O, class Tag0, class... Tags,                \
-          class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                              \
+          class AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>,                          \
           cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value!=0, int> = 0>                                  \
 _TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags) {                      \
     _TNY_KW_CHECK(#NAME, "dtype<Acc>{}, axis<...>{}, keepdims or into(dest)",                            \
@@ -1848,7 +1946,13 @@ _TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
     using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     constexpr bool hasInto = !cs::is_same<decltype(out), _kw::unset>::value;                             \
-    if constexpr (_kw::has<_is_keepdims_tag, Tag0, Tags...>()) {                                         \
+    constexpr bool hasKeep = _kw::has<_is_keepdims_tag, Tag0, Tags...>();                                \
+    if constexpr (_is_empty_axis<AxisTag>::value) {                  /* axis<>{} -> NO axis at all */    \
+        if constexpr (hasKeep && hasInto) return _md::_##NAME##_noaxis<RAcc>(a, keepdims, out);          \
+        else if constexpr (hasKeep)       return _md::_##NAME##_noaxis<RAcc>(a, keepdims);               \
+        else if constexpr (hasInto)       return _md::_##NAME##_noaxis<RAcc>(a, out);                    \
+        else                              return _md::_##NAME##_noaxis<RAcc>(a);                         \
+    } else if constexpr (hasKeep) {                                                                      \
         if constexpr (hasInto) return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, keepdims, out);        \
         else                   return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, keepdims);             \
     } else {                                                                                              \
@@ -1878,6 +1982,14 @@ _TNY_RED_TAGGED(sum) _TNY_RED_TAGGED(prod) _TNY_RED_TAGGED(max) _TNY_RED_TAGGED(
 _TNY_RED_AXIS_CUSTOM(mean,
     (_md::reduce_to<_mean_result_t<T>>(_md::_red_mean_scale(_md::reduce_to<_mean_div_t<T>>(sum<R, Axes...>(a)), a.numel()))),
     (_md::_red_mean_scale(sum<Acc, Axes...>(a), a.numel())))
+// ...and mean over an EXPLICITLY EMPTY axis list — `mean(a, axis<>{})` (#398; see
+// the three axis cases documented on `_TNY_RED_TAGGED` above). No axis is
+// reduced, so each cell averages the single element at its own index: the count
+// is 1 and the division is the identity, leaving only mean's own result-type rule
+// (an INTEGER tensor still yields `double`, the numpy rule) and the copy into an
+// owned result.
+_TNY_RED_NOAXIS(mean, (reduce_to<_reduce_result_t<Acc, _mean_result_t<T>>>(axreduce<>(a, R(0), _md::r_add{}))),
+                _acc_t<Acc,T>)
 _TNY_RED_TAGGED(mean)
 
 /** @brief Inner product over matching extents. Accumulates in the reduce type of
@@ -1910,7 +2022,7 @@ _TNY_API decltype(auto) NAME(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,L
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {                                      \
         static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, #NAME " into(dest): dest must be rank-0 (a scalar cell)"); \
-        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(NAME<RAcc>(a, b))); \
+        out.dest.fill_(_md::reduce_cast<_md::_into_elem_t<decltype(out.dest)>>(NAME<RAcc>(a, b))); \
         return out.dest;                                                                                 \
     } else return NAME<RAcc>(a, b);                                                                      \
 }
@@ -1962,10 +2074,21 @@ _TNY_API auto norm(const tensor<T,E,L,O> & a) {
 _TNY_RED_AXIS_CUSTOM(norm,
     (_md::reduce_to<_mean_result_t<T>>(_md::_red_sqrt(sqnorm<_norm_root_t<T>, Axes...>(a)))),
     (_md::_red_sqrt(sqnorm<Acc, Axes...>(a))))
+// ...and norm over an EXPLICITLY EMPTY axis list — `norm(a, axis<>{})` (#398; see
+// the three axis cases documented on `_TNY_RED_TAGGED` above). `norm` is √(Σaᵢ²
+// over the named axes), so over NO axis each cell's sum of squares is its own
+// element squared and the result is the elementwise `|a|` (in norm's floating
+// result type) — the same limit `sqnorm(a, axis<>{})` gives as the elementwise
+// `a²`. `R` is where the squares are accumulated and the root taken, matching the
+// axis form above: `_norm_root_t<T>` by default, the requested `Acc` when given.
+_TNY_RED_NOAXIS(norm, (reduce_to<_reduce_result_t<Acc, _mean_result_t<T>>>(_red_sqrt(axreduce<>(a, R(0), _md::r_addsq{})))),
+                cs::conditional_t<cs::is_void<Acc>::value, _norm_root_t<T>, Acc>)
 _TNY_RED_TAGGED(norm)
 #undef _TNY_RED_TAGGED
 #undef _TNY_RED_AXIS_CUSTOM
 #undef _TNY_RED_AXIS_ONE
+#undef _TNY_RED_NOAXIS
+#undef _TNY_RED_NOAXIS_ONE
 
 /** @brief Squared Euclidean distance `Σ(aᵢ-bᵢ)²` between two same-shape tensors —
  *         mathematically `sqnorm(a-b)`, computed as one fused pass with no `a-b`

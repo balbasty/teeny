@@ -318,9 +318,10 @@ t.unfold<Axis>(size, step);  t.unfold<Axis>(size);  // pytorch Tensor.unfold (#2
 t.index_select<Axis>(idx);         // gather along Axis by a rank-1 integer index
                       //   TENSOR (#326) — runtime DATA, unlike slice_along's compile-time
                       //   indices. idx values wrap negative (built on slice_along); static
-                      //   idx shape -> stack result, else heap (source must be host-
-                      //   accessible; a gpu tensor: gather into a device into(dest)
-                      //   instead). Always a COPY (an arbitrary data-dependent gather
+                      //   idx shape -> stack result (host+device, works on a gpu/gpu_view
+                      //   source, same rule as clone()), else heap (host only: source must
+                      //   be host-accessible; a dynamic gpu gather: use a device
+                      //   into(dest)). Always a COPY (an arbitrary data-dependent gather
                       //   isn't an affine mdspan view). into(dest) form too:
                       //   t.index_select<Axis>(idx, into(dest)) (no alloc, device-safe;
                       //   dest's axis-Axis extent must equal idx's, checked; dest must not
@@ -532,6 +533,12 @@ sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf));  // ...and every traili
                       //   any subset/order (dtype/axis/keepdims/into) — see the `_TNY_RED_TAGGED`
                       //   generic entry point in math.h, next to `sum<Acc,Axes...>(a, keepdims,
                       //   into(buf))`'s explicit-template twin (`_TNY_RED_AXIS_CORE`).
+sum(a, axis<>{});     // an EMPTY axis list reduces over NO axis (numpy's axis=(), #398): each cell
+                      //   aggregates its OWN element alone -> a's shape back, as an OWNED copy.
+                      //   DIFFERENT from `sum(a)` — no axis argument at all is the full, EVERY-axis
+                      //   reduction (a scalar). sqnorm/norm are Σaᵢ²/√Σaᵢ² over the NAMED axes, so
+                      //   over none they are the elementwise a² / |a| (not a plain copy); the other
+                      //   keywords compose as usual (keepdims has no reduced axis to keep).
 
 // --- nd-peel: iterate a SUBSET of axes, each yielding a lower-rank view ---
 for (auto line : peel<0,1>(t)) f(line);   // peel axes 0,1; each `line` is a view. The range-for is
@@ -705,7 +712,13 @@ does). Three selector vocabularies:
   no-ARGUMENT `squeeze()`/`unsqueeze()` are a DIFFERENT thing and keep their own
   meanings — an empty template pack can't be told from a defaulted one in C++, so
   only the `axis<...>` spelling can carry "zero axes named". `permute` needs a full
-  permutation and so already rejected it above rank 0.
+  permutation and so already rejected it above rank 0. The REDUCTIONS follow the
+  same rule (#398): `sum(a, axis<>{})` reduces over no axis and gives `a`'s shape
+  back (numpy's `np.sum(a, axis=())`), while a call with NO axis keyword at all is
+  the full every-axis reduction. A call site whose axis keyword is OPTIONAL must
+  therefore spell "not supplied" as `_kw::unset`, never as `axis<>` — overloading
+  one type for both is what made `sum(a, axis<>{})` silently reduce everything;
+  `_is_empty_axis<X>` (alias.h) is the "explicitly empty" test.
 - **`dtype<T>`** — a value tag for an element/accumulator type `T` (`alias.h`,
   next to `axis`), numpy's `dtype=` namesake: `empty(shape<3,3>{}, dtype<double>{})`
   == `empty<double>(shape<3,3>{})`, likewise `zeros`/`ones`/`full`/`arange` and
@@ -746,8 +759,11 @@ reduction family (`math.h`) both build on the same primitive:
 trailing pack, the `_TNY_KW_CHECK(...)` macro is the ONE guard every call site
 opens with (over `accepts<Ps...>::known/unique`), and `_kw::resolve` is the ONE
 copy of the explicit-arg-beats-tag-beats-default rule each per-keyword reader
-(`dtype_arg_t`/`storage_arg`/`layout_arg_t`) is a one-line alias over. Where a
-selector still needs an EXPLICIT
+(`dtype_arg_t`/`storage_arg`/`layout_arg_t`) is a one-line alias over. **A
+keyword's "not supplied" sentinel must be `_kw::unset`, never a degenerate value
+of the keyword's own type** — `axis<>` doubling as both "no axis keyword" and "an
+explicitly empty axis list" is what made `sum(a, axis<>{})` silently reduce over
+everything (#398). Where a selector still needs an EXPLICIT
 `<...>` template argument (an axis list too big to spell as a value in a
 generic context, or the `<Acc, Axes...>` reduction split — C++17 has no
 universal template parameter to unify "leading type = accumulator" with
@@ -844,7 +860,10 @@ is generic.
   guard, in the ENGINE rather than the wrapper (`scmp` calls `scalo_` directly), in
   both halves: a `static_assert` (`ext_static_eq`, the same one `dot`/`scan`'s
   `into(dest)` use) when both shapes are fully static, and a per-axis `_TNY_CHECK`
-  (`check_same_extents`) otherwise. EXACT equality, NOT `bzip_`'s broadcast-tolerant
+  otherwise. Both halves live in ONE helper, `_md::check_into_same_shape` (#363
+  folded `scalo_`'s, `unaryo_`'s and `scan`'s three copies into it; it compares in
+  `_md::ext_cmp_t`, at least 64 bits on every platform, where `scan`'s copy used to
+  compare as `long` — 32-bit on LLP64). EXACT equality, NOT `bzip_`'s broadcast-tolerant
   `== ce[r] || == 1`: those engines index source and destination with the SAME
   counter and never substitute stride 0, so an extent 1 against an extent n is a
   mismatch, not a stretch. Zero cost for every other caller — the allocating
@@ -909,6 +928,21 @@ is generic.
   of being one rounding more precise. `_cross3`'s `Rt` defaults to `void` = NO rounding
   stop, so the allocating `cross` and the in-place `cross_` keep their single store cast —
   only the `into` overload names it.
+  **The same non-conversion, in the REDUCTIONS (#406).** A FULL reduction's `into(dest)`
+  (`_TNY_RED_TAGGED`'s rank-0 branch, and `_TNY_RED_BINARY_TAGGED`'s — the binary twin
+  `dot`/`sqdist`/`dist` share) writes
+  a SCALAR, so no engine and no `Cv` is involved — but it still had to get that scalar
+  into the cell's element type, and did it with one direct `static_cast`, which is
+  ill-formed for exactly the pair above: `sum(half_a, into(bfloat16_cell))` did not
+  compile at all. They now go through `_md::reduce_cast<To>` (math.h, next to
+  `reduce_to`, the tensor-valued twin an AXIS reduction uses), which casts via
+  `compute_type_t<From>` — `float` for either 16-bit float, `From` itself for everything
+  else, so the added stop is a no-op for every other pair. No rounding question here, in
+  contrast to `_round_to` above: the reduction has ALREADY cast its accumulator down to
+  the result element type (`_reduce_result_t`) before this cast sees it, so the widen to
+  `float` is exact and `dest` lands where it always did. The AXIS reductions never had
+  the bug — their `into` goes through `out.dest.copy_(r)`, and `copy_` widens to the
+  destination's compute type on the way in.
   **Contiguous linear fast path (#161, #175):** contiguous elementwise ops replace the
   per-element mixed-radix decode with a flat `for(i) cp[i]=…` loop that auto-vectorizes.
   Two flavours by whether a second array is in play:

@@ -295,7 +295,10 @@ a `static_assert`, so forgetting the `<axes>` fails to compile rather than silen
 splatting the grand total); an axis reduction's dest is **broadcast-compatible**
 with the reduced shape (it goes through `copy_`). As elsewhere, `dest`'s dtype need
 not match — the accumulation runs in the reduction's own accumulator type and only
-the final result is cast — and the destination is returned by reference.
+the final result is cast — and the destination is returned by reference. **Every**
+pair of dtypes works here, the two 16-bit floats included: `sum(half_a,
+into(bfloat16_cell))` accumulates as any other `half` reduction does and converts
+the scalar to `bfloat16` on the way out, exactly like a wider destination.
 
 ### Type promotion
 
@@ -374,6 +377,38 @@ type-dependent receiver; a leading TYPE arg still selects the accumulator
 A fully-static result is stack-owned (host and device); any dynamic extent makes
 it heap-owned (host only — it allocates, so it is not callable on the device
 path). Reducing over every axis is the scalar form above.
+
+### An empty axis list reduces over *no* axis
+
+`axis<>{}` names no axis, so `sum(a, axis<>{})` reduces over none of them: each
+output cell aggregates the single element at its own index, and the result keeps
+`a`'s shape. That is numpy's rule for an empty axis tuple (`np.sum(a, axis=())`
+hands `a` back unchanged), and the same "an empty axis list asks for nothing" the
+rest of teeny's axis-list ops follow (`t.squeeze(axis<>{})`, `peel(t, axis<>{})`).
+
+```cpp
+auto a = ...            // (2,3), values [[0,1,2],[3,4,5]]
+sum(a, axis<>{});       // (2,3) [[0,1,2],[3,4,5]] — a copy; nothing was summed
+sum(a);                 // 15 — NO axis argument still means EVERY axis
+```
+
+The second line is the contrast worth remembering: **an empty axis list and no
+axis argument at all are different requests.** Leaving the keyword out is the
+documented full reduction (every axis, giving a scalar); passing an empty list
+asks to reduce over zero axes. So generic code that *computes* an axis list stays
+correct when the computed list comes out empty, instead of silently collapsing the
+whole tensor to a single number.
+
+`sqnorm` and `norm` follow the same rule rather than coming out as plain copies,
+because they are Σaᵢ² and √Σaᵢ² *over the named axes*: with no axis named, each
+cell's sum runs over its own element alone, so `sqnorm(a, axis<>{})` is the
+elementwise `a²` and `norm(a, axis<>{})` the elementwise `|a|`.
+`sum`/`prod`/`max`/`min`/`mean` all come out as a copy of `a` in the result type.
+
+The result is an owned tensor, exactly like any other axis reduction, and the
+other keywords compose as usual — `dtype<Acc>{}` sets the result type, `into(dest)`
+writes into a destination with `a`'s shape, and `keepdims` has no reduced axis to
+keep, so it changes nothing.
 
 ### `keepdims` — keep the reduced axes as size-1
 
