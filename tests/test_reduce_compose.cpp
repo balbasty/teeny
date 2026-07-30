@@ -108,7 +108,7 @@ int main() {
     // `axis<>{}` names no axis, so each output cell aggregates the ONE element at
     // its own index and the result keeps the SOURCE's shape -- numpy's rule for
     // `np.sum(a, axis=())`, and the same "empty axis list = identity" the rest of
-    // the family already has (squeeze/unsqueeze/take_along/peel, #369).
+    // the family already has (squeeze/unsqueeze/slice_along/peel, #369).
     // It used to be indistinguishable, inside the keyword bag, from "no axis
     // keyword at all" (both landed on an `axis<>` sentinel), so it silently did
     // the OPPOSITE extreme: a full, all-axes reduction (sum -> 15, not [[0..5]]).

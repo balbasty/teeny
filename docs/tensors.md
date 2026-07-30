@@ -174,6 +174,21 @@ This is the same **keyword-argument design rule** used by [reductions](math.md#k
 trailing, order-free among themselves, and one of each kind per call —
 `tny::_kw` (`kwargs.h`) is the shared primitive behind both.
 
+You can also mix the two styles. Naming the **backend** as a leading explicit
+template argument leaves the whole keyword bag available behind it, in any
+subset and any order:
+
+```cpp
+auto p1 = zeros<storage::pinned>(shape<3,3>{});                             // no keyword at all
+auto p2 = zeros<storage::pinned>(shape<3,3>{}, fcontiguous{});              // a layout keyword
+auto p3 = zeros<storage::pinned>(shape<3,3>{}, dtype<double>{}, fcontiguous{});
+auto p4 = zeros<storage::pinned>(shape<3,3>{}, fcontiguous{}, dtype<double>{});   // same thing
+```
+
+The one keyword that spelling will not take is `storage_c<...>{}` — that *is*
+the backend, so naming it twice is a "pick one" error rather than a silent
+winner.
+
 ## Getting a view from an owning tensor
 
 Inside a kernel you want a view (trivially copyable). Every owning tensor hands

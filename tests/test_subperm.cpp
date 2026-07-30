@@ -12,12 +12,12 @@ int main()
     auto t = wrap(buf, shape<2,3,4>{});          // strides (12,4,1)
 
     // ---- sub<D>(i): bind an axis, drop it ------------------------------
-    auto s1 = t.take_along<1>(2);                              // fix axis 1 -> (2,4)
+    auto s1 = t.slice_along<1>(2);                              // fix axis 1 -> (2,4)
     static_assert(decltype(s1)::rank() == 2, "sub drops an axis");
     if (s1(1,3) != t(1,2,3)) return 1;
     if (s1(0,0) != t(0,2,0)) return 2;
 
-    auto s0 = t.take_along<0>(1);                              // fix axis 0 -> (3,4)
+    auto s0 = t.slice_along<0>(1);                              // fix axis 0 -> (3,4)
     if (s0(2,3) != t(1,2,3)) return 3;
 
     // sub is a mutable view: writing through it hits the original buffer
@@ -66,7 +66,7 @@ int main()
     if (sq2(1,2,3) != t(1,2,3)) return 14;
     auto pr = t.permute<-1,0,1>();                      // (2,3,4) -> (4,2,3)
     if (pr(3,1,2) != t(1,2,3)) return 15;
-    auto s2 = t.take_along<-2>(1);                      // bind axis 1 -> (2,4)
+    auto s2 = t.slice_along<-2>(1);                      // bind axis 1 -> (2,4)
     if (s2(1,3) != t(1,1,3)) return 16;
     long np = 0; for (auto line : peel<0,-2>(t)) { (void)line; ++np; }  // peel axes 0,1
     if (np != 6) return 17;

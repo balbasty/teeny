@@ -87,9 +87,9 @@ int main() {
                   "unsigned index + negative step -> not folded (stays dynamic)");
     if ((long)uneg.extent(0) != 0) return 34;   // runtime: unsigned step-cast -> empty
 
-    // slice also works through take_along (same resolution)
-    auto g = t.take_along<2>(slice(1, none));         // keep axes 0,1; axis2 [1,4)
-    static_assert(decltype(g)::rank() == 3, "take_along keeps unnamed axes");
+    // slice also works through slice_along (same resolution)
+    auto g = t.slice_along<2>(slice(1, none));         // keep axes 0,1; axis2 [1,4)
+    static_assert(decltype(g)::rank() == 3, "slice_along keeps unnamed axes");
     if (g.extent(2) != 3 || g(1,2,0) != t(1,2,1)) return 16;
 
     // negative indices/bounds must work even with an UNSIGNED index_type
