@@ -928,6 +928,18 @@ constexpr cs::size_t _static_numel_(cs::index_sequence<D...>) { return (cs::size
 template <class E>
 constexpr cs::size_t _static_numel() { return _static_numel_<E>(cs::make_index_sequence<E::rank()>{}); }
 
+// Gate shared by BOTH static-unroll fast paths (#343): fully static AND small
+// enough that unrolling one fold argument per element is still sane. Above
+// `TNY_MAX_STATIC_UNROLL` (defines.h — 256, clang's hard fold-argument limit) the
+// caller falls back to its runtime-decode engine, which handles any shape. The
+// `&&` short-circuits in the constant expression, so `_static_numel` is never
+// EVALUATED for a dynamic `E` (where `static_extent` is `dynamic_extent` and the
+// product would wrap).
+template <class E>
+constexpr bool _unrollable() {
+    return E::rank_dynamic() == 0 && _static_numel<E>() <= cs::size_t(TNY_MAX_STATIC_UNROLL);
+}
+
 /* ---- reduce op(a, b) elementwise into a scalar (dot: op=mul; sqdist: op=zip_sqdiff) --- *
  * One fused pass, NO intermediate tensor materialised. */
 template <class R, class A, class B, class Op, cs::size_t... D>
@@ -984,6 +996,9 @@ _TNY_API R zipreduce_decode_(const A & a, const B & b, Op op, cs::index_sequence
 // axreduce's own #218 static fast path (small fixed-rank dot/sqdist -- a
 // posdef cross-channel dot, a stencil tap accumulation -- pay pure loop
 // overhead otherwise).
+// CAPPED at TNY_MAX_STATIC_UNROLL elements (#343): the fold emits one argument
+// per element, which clang rejects outright past 256 and g++ compiles ever more
+// slowly -- a larger fully-static shape takes the decode path below instead.
 template <cs::size_t Lin, class R, class A, class B, class Op>
 _TNY_API R zipreduce_one_(const A & a, const B & b, Op op) {
     return op(static_cast<R>(a.data()[Lin]), static_cast<R>(b.data()[Lin]));
@@ -999,7 +1014,7 @@ template <class R, class A, class B, class Op, cs::size_t... D>
 _TNY_API R zipreduce_(const A & a, const B & b, Op op, cs::index_sequence<D...> seq) {
     using EA = typename A::extents_type; using LA = typename A::layout_type;
     using EB = typename B::extents_type;
-    if constexpr (EA::rank_dynamic() == 0 && EB::rank_dynamic() == 0
+    if constexpr (_unrollable<EA>() && EB::rank_dynamic() == 0
                   && cs::is_same<LA, ccontiguous>::value && cs::is_same<typename B::layout_type, ccontiguous>::value) {
         return zipreduce_static_<R>(a, b, op, cs::make_index_sequence<_static_numel<EA>()>{});
     } else {
@@ -1064,7 +1079,8 @@ _TNY_API void reduce_axes_(Out & out, const A & a, R init, Op op, const bool * r
 // function of it. Unrolling over the (static) element count then emits straight-line
 // FMA-style code with no loop back-edge and no runtime `%`/`/` — matching a
 // hand-written nested loop (the axis reduction was 3-7x slower otherwise, since the
-// runtime radix decode did not fold). `_red_oo` is the compile-time output offset for
+// runtime radix decode did not fold). CAPPED at TNY_MAX_STATIC_UNROLL elements
+// (#343) — see `_unrollable` above. `_red_oo` is the compile-time output offset for
 // input linear index `lin`: decode `lin` over the static input extents, weight each
 // kept axis by the (ccontiguous) output stride, drop the reduced axes.
 template <class E, class OE, long... Axes>
@@ -1113,8 +1129,9 @@ template <long... Axes, class R, class Op, class T,class E,class L,storage O,
 _TNY_API auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
     static_assert((_axis_in_range(Axes, E::rank()) && ...), "reduction axis out of range");
     tensor<R, OE, ccontiguous, storage::stack> out{};
-    if constexpr (E::rank_dynamic() == 0 && cs::is_same<L, ccontiguous>::value) {
-        // static + C-contiguous: unroll (input offset == linear index; output offset folds)
+    if constexpr (_unrollable<E>() && cs::is_same<L, ccontiguous>::value) {
+        // static + C-contiguous + small enough to unroll (#343): input offset == linear
+        // index, output offset folds. A bigger static shape takes the decode path below.
         reduce_axes_static_<Axes...>(out, a, init, op, cs::make_index_sequence<_static_numel<E>()>{});
     } else {
         bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );

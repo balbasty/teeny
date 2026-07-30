@@ -51,6 +51,7 @@ TESTS = \
 	$(BUILDDIR)/test_ops \
 	$(BUILDDIR)/test_fold \
 	$(BUILDDIR)/test_axred \
+	$(BUILDDIR)/test_static_unroll \
 	$(BUILDDIR)/test_valueform \
 	$(BUILDDIR)/test_compare \
 	$(BUILDDIR)/test_ellipsis \

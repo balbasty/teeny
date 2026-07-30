@@ -78,7 +78,10 @@ include/teeny/
                    compiled out under NDEBUG and always off on the device) / _TNY_BOUND
                    (opt-in TNY_HARDENED bounds check, itself assert-based), TNY_MAX_RANK
                    (anyrank's inline-store rank
-                   cap, default 32), namespace open/close; also the min/max/interface
+                   cap, default 32), TNY_MAX_STATIC_UNROLL (largest STATIC element count
+                   math.h's static-unroll fast paths still unroll, default 256 = clang's
+                   hard fold-argument limit; bigger static shapes decode — #343),
+                   namespace open/close; also the min/max/interface
                    Windows.h #undef block (outside the include guard, see MSVC traps below)
   alias.h          cs:: vocabulary into tny:: + Int<V>/... static ints + `all` + shape<...>
                    + axis<...>/dtype<...> value-carrier tags
@@ -931,6 +934,20 @@ is generic.
   elements in each) both do this; each falls straight back to the runtime-decode
   engine the moment its own gate fails (any dynamic extent, or — for `zipreduce_`
   — a non-C-contiguous or mismatched-layout operand).
+  **The unroll is for SMALL fixed shapes only, and is CAPPED (#343).** Both folds
+  emit ONE argument per element, so an uncapped large static shape is a compile-time
+  disaster: clang hard-errors past 256 fold arguments ("exceeded expression nesting
+  limit of 256", its default `-fbracket-depth` — so `dot` on two `shape<16,17>`
+  operands did not compile AT ALL), and g++ grows superlinearly (~1 min for a
+  `shape<64,64>` reduction, >8 min for `shape<128,128>`). Both gates now go through
+  `_md::_unrollable<E>()` (`math.h`, next to `_static_numel`) = fully static AND
+  `numel <= TNY_MAX_STATIC_UNROLL` (`defines.h`, **256** — exactly clang's limit,
+  and ~2 orders of magnitude above the 3-27-element shapes the unroll targets).
+  Above the cap a static shape simply takes the same decode path a dynamic one
+  does — identical results, so the cap is a pure compile-time/binary-size guard.
+  Lower it (`-DTNY_MAX_STATIC_UNROLL=64`) to buy compile time back; do NOT raise it
+  past 256 (clang breaks). `tests/test_static_unroll.cpp` pins the gate, both sides
+  of the boundary, and that the two engines agree numerically.
 - **The gather** (`tensor.h` `_slice_range`, `iterate.h` `gather_peel`): ALL
   view-making ops — `operator()` slicing, `slice_along`, `peel` — route through
   one hand-built gather (NO `cs::submdspan`). Per axis: an integer drops it (into
