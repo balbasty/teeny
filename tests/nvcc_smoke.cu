@@ -51,6 +51,9 @@ __global__ void strided_cell_kernel(AR at) {
     if (cell.extent(0) > 0 && cell.extent(1) > 0) cell(0, 0) += 1.f;
 }
 
+// A device-safe functor for `scan`/`scan_` (lambda-free, per teeny's convention).
+struct scan_sum { _TNY_API float operator()(float carry, float x) const { return carry + x; } };
+
 // Peel a device-passable (copy-carrier) anyrank ON THE DEVICE.
 template <class AR>
 __global__ void peel_kernel(AR at) {
@@ -100,6 +103,32 @@ void smoke() {
     // 1-dim tail into a rank-2 cell leaves the outer slot dynamic.
     auto tail_carrier = as_anyrank(hp, sh, st, 3, copy_meta, anyshape<etc,4>{}, ccontiguous{});
     strided_cell_kernel<<<1, 1>>>(tail_carrier);
+
+    // #375/#388/#399: the axis<> VALUE forms of index_select and scan each forward to
+    // a static/dynamic overload PAIR whose static arm is _TNY_API (stack result) and
+    // whose dynamic arm is _TNY_HOST (heap result, `new[]`). A single unsplit
+    // _TNY_API forwarder would be a __host__ __device__ function that resolves to a
+    // __host__ allocator on the dynamic path -- exactly what golden rule 4 forbids,
+    // and something ONLY the device pass can see (both macros expand to nothing
+    // without __CUDACC__, so the host-only suite is blind to it). These DYNAMIC-shaped
+    // calls are the ones that pick the _TNY_HOST arm; a static shape takes the
+    // _TNY_API arm and was always fine. Host code, but in a TU nvcc compiles for the
+    // device too -- so an unsplit forwarder fails here (#389 blocked this coverage
+    // until strided-view device support landed; see strided_kernel above).
+    long ibuf[2] = {0, 1};
+    auto isel_idx = wrap(ibuf, shape<-1>{2});
+    auto isel_src = wrap(hp, shape<-1,3>{5, 3});
+    auto isel = isel_src.index_select(isel_idx, axis<0>{});    // -> _TNY_HOST arm
+    (void) isel;
+    auto scanned = scan(isel_src, axis<1>{}, 0.f, scan_sum{}); // -> _TNY_HOST arm
+    (void) scanned;
+    // ...and the static-shaped spellings, which must stay on the _TNY_API arm.
+    auto isel_sidx = local<long, shape<2>>{};
+    auto isel_ssrc = local<float, shape<5,3>>{};
+    auto isel_s = isel_ssrc.index_select(isel_sidx, axis<0>{});    // -> _TNY_API arm
+    (void) isel_s;
+    auto scanned_s = scan(isel_ssrc, axis<1>{}, 0.f, scan_sum{});  // -> _TNY_API arm
+    (void) scanned_s;
 
     // int32 offset dispatch (#115): the narrowed (shape32) view must stay a POD,
     // device-passable view. dispatch_index instantiates the kernel for both widths;
