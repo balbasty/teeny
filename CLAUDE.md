@@ -32,6 +32,19 @@ that process guide.
    `Date.now`-style host-only calls in `_TNY_API` code. Engines are **lambda-free**
    (index-sequence folds + tiny functors) so they instantiate under `nvcc`
    *without* `--extended-lambda`. Keep them that way.
+   **No `static constexpr` array data member read at a RUNTIME index from
+   `_TNY_API` code** (#389): nvcc never places a host `static constexpr` array
+   into device memory, so a runtime index — which cannot constant-fold — has no
+   device-side object to reach and is a hard device-compile error ("identifier
+   `X` is undefined in device code"). Read a compile-time pack through a **fold**
+   instead (see `strides<...>::static_stride`/`slot`, `layout.h`); a
+   function-local array compiles but pessimises the hot path, since materialising
+   it on the stack defeats the constant folding the immediates were for. And note
+   nvcc is **eager**: it generates and checks the device version of every
+   `_TNY_API` template at instantiation, *even from a host-only call site* — so a
+   violation is a real compile error in any `.cu` TU, not a latent device-path
+   hazard. (clang's CUDA front end defers until the function is genuinely
+   device-reachable, so it will not show you this.)
 4. **`_TNY_API` = host+device, `_TNY_HOST` = host-only.** Anything that
    allocates (heap/CUDA storage, out-of-place ops on dynamic shapes) is
    `_TNY_HOST`. Element access, in-place math, views, static-shape out-of-place
@@ -861,7 +874,13 @@ is generic.
 - **layout_static_stride** (`layout.h`): the one thing mdspan lacks — strides
   baked into the type. It is now the OUTPUT layout of every slice/peel (folded),
   and a fully sliceable source. CCCL's `cs::submdspan` doesn't accept it, but
-  teeny never calls `cs::submdspan` anymore.
+  teeny never calls `cs::submdspan` anymore. The static stride pack is read
+  through **pack folds** — `static_stride(r)` (select by sum), `ndyn()`,
+  `slot(r)` — never through a `static constexpr` array member, so the pack is
+  device-visible (golden rule 3) and a compile-time `r` still collapses to an
+  immediate. Three call sites read it at a RUNTIME index and all three are on the
+  device path: `mapping::stride(rank_type)` (`layout.h`), the gather's
+  `fold_mapping` (`axis.h`), and `anyrank`'s `_build_cell` (`dynamic.h`).
 - **EBO**: `tensor : private Layout::mapping<Extents>`. `mapping()` returns
   `*this`. Do not add non-static data members besides `store_`. A class privately
   inheriting TWO OR MORE empty bases for this trick (e.g. `strides<S...>::mapping`,

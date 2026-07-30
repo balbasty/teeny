@@ -80,16 +80,60 @@ struct _dyn_strides<Index, 0> {
  */
 template <cs::int64_t... S>
 struct strides {
-    static constexpr cs::size_t  N = sizeof...(S);
-    static constexpr cs::int64_t S_[N ? N : 1] = { S... };
+    static constexpr cs::size_t N = sizeof...(S);
 
-    static constexpr cs::size_t ndyn() noexcept {
-        cs::size_t c = 0; for (cs::size_t i = 0; i < N; ++i) if (S_[i] == dynamic_stride) ++c; return c;
+    /* --- reading the static stride pack (#389) --------------------------- *
+     * The pack is read through pure pack FOLDS, never through a
+     * `static constexpr cs::int64_t S_[N]` array data member (which is what
+     * these accessors replaced). Two independent reasons, one hard and one soft:
+     *
+     *  - DEVICE-SAFETY (the bug). nvcc never places a host `static constexpr`
+     *    array into device memory, so indexing such a member with a RUNTIME rank
+     *    -- which `stride(rank_type)`, the gather's `fold_mapping`, and
+     *    `anyrank`'s cell builder all do -- is a hard device-compile error
+     *    ("identifier `S_` is undefined in device code"). That made EVERY
+     *    `strides<...>`-layout view (i.e. every slice / `take_along` / `peel` /
+     *    `index_select` / `scan` result) unusable from device code, `_TNY_API`
+     *    annotation notwithstanding.
+     *  - CODEGEN. The obvious fix -- a function-LOCAL array `{S...}` -- is
+     *    device-legal but pessimises the hot path: the array is materialised on
+     *    the stack, which defeats the constant folding of `operator()`'s
+     *    statically-bounded offset loop (g++ -O2 then leaves it rolled, reading
+     *    each stride back from the stack). A fold touches no memory at all, so a
+     *    compile-time `r` collapses to an immediate exactly as `S_[r]` did, and a
+     *    runtime `r` becomes a short branch-free select chain over N (== the
+     *    tensor rank, always tiny).
+     *
+     * `static_stride` selects by SUM rather than by short-circuit, and `slot`
+     * counts by sum, because `operator+`'s operands are unsequenced in C++17 --
+     * only a comma fold would be ordered, and neither needs ordering: exactly one
+     * `I == r` term is non-zero, and the rest contribute 0.
+     *
+     * Naming mirrors `cs::extents::static_extent(d)`, the extents analogue. */
+    template <cs::size_t... I>
+    _TNY_API static constexpr cs::int64_t _sstride(cs::size_t r, cs::index_sequence<I...>) noexcept {
+        return (((I == r) ? S : cs::int64_t(0)) + ... + cs::int64_t(0));
     }
-    static constexpr bool all_static() noexcept { return ndyn() == 0; }
+    template <cs::size_t... I>
+    _TNY_API static constexpr cs::size_t _ndyn_below(cs::size_t r, cs::index_sequence<I...>) noexcept {
+        return (((I < r && S == dynamic_stride) ? cs::size_t(1) : cs::size_t(0)) + ... + cs::size_t(0));
+    }
+
+    /** @brief The compile-time stride of dimension `r` -- `dynamic_stride` when that
+     *         dimension's stride is only known at run time. (`0` for a rank-0
+     *         `strides<>`, whose `r` is never a valid dimension.) */
+    _TNY_API static constexpr cs::int64_t static_stride(cs::size_t r) noexcept {
+        return _sstride(r, cs::make_index_sequence<N>{});
+    }
+
+    /** @brief How many dimensions carry a runtime stride (== the mapping's stored size). */
+    _TNY_API static constexpr cs::size_t ndyn() noexcept {
+        return ((S == dynamic_stride ? cs::size_t(1) : cs::size_t(0)) + ... + cs::size_t(0));
+    }
+    _TNY_API static constexpr bool all_static() noexcept { return ndyn() == 0; }
     // index of dimension r within the dynamic-stride array (undefined if r is static)
-    static constexpr cs::size_t slot(cs::size_t r) noexcept {
-        cs::size_t c = 0; for (cs::size_t i = 0; i < r; ++i) if (S_[i] == dynamic_stride) ++c; return c;
+    _TNY_API static constexpr cs::size_t slot(cs::size_t r) noexcept {
+        return _ndyn_below(r, cs::make_index_sequence<N>{});
     }
 
     // Shape is a private base (not a member) so the mapping is EMPTY (EBO)
@@ -132,7 +176,8 @@ struct strides {
 
         _TNY_API constexpr const Shape & extents() const noexcept { return *this; }
         _TNY_API constexpr index_type stride(rank_type r) const noexcept {
-            return S_[r] == dynamic_stride ? _dyn::at(strides::slot(r)) : static_cast<index_type>(S_[r]);
+            const cs::int64_t s = strides::static_stride(r);
+            return s == dynamic_stride ? _dyn::at(strides::slot(r)) : static_cast<index_type>(s);
         }
         template <class... I>
         _TNY_API constexpr index_type operator()(I... i) const noexcept {
@@ -223,7 +268,7 @@ using layout_arg_t = typename _layout_resolve<Expl, Dflt, Tags...>::type;
 // per-dim static stride from a strides<...> layout (signed; `dynamic_stride` if
 // runtime, or for any non-strides layout so callers fall through).
 template <cs::size_t D, class L> struct _static_stride_at { static constexpr cs::int64_t value = dynamic_stride; };
-template <cs::size_t D, cs::int64_t... S> struct _static_stride_at<D, strides<S...>> { static constexpr cs::int64_t value = strides<S...>::S_[D]; };
+template <cs::size_t D, cs::int64_t... S> struct _static_stride_at<D, strides<S...>> { static constexpr cs::int64_t value = strides<S...>::static_stride(D); };
 
 // Compile-time stride of SOURCE axis Ax under layout L over extents E, or
 // `dynamic_stride` if only known at run time. Feeds the slice/gather stride

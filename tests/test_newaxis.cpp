@@ -96,7 +96,7 @@ int main() {
         if (r0(0, i, j) != t(i, 1 + j)) return 14;
 
     // ---- the inserted axis' stride folds to a static 0 (strides<...> layout) ----
-    static_assert(decltype(a0)::layout_type::S_[0] == 0,
+    static_assert(decltype(a0)::layout_type::static_stride(0) == 0,
                   "inserted axis has a folded static stride 0");
 
     // ---- uget mirrors operator(): same result, unchecked path ----
