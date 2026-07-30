@@ -36,6 +36,13 @@ add_library(teeny::teeny ALIAS teeny)
 
 target_compile_features(teeny INTERFACE cxx_std_17)   # the floor CCCL enforces
 
+# MSVC only: opt into the standards-conformant two-phase-lookup parser instead
+# of the default "classic" one (issue #316). INTERFACE so it propagates to
+# every consumer (tests, examples, downstream projects), matching how the
+# C++17 requirement above is propagated.
+target_compile_options(teeny INTERFACE
+    $<$<CXX_COMPILER_ID:MSVC>:/permissive->)
+
 target_include_directories(teeny INTERFACE
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include>")

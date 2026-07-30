@@ -101,6 +101,7 @@ stack (host+device), dynamic shape → heap (host only):
 | `empty(shape, dtype<T>{})` (also `zeros`/`ones`/`full`/`arange`) | same as `<T>` | value-tag element-type form — deduces `T` from the tag instead of an explicit `<T>` template argument, so a type-dependent receiver needs no `.template`. A backend override stays a *leading* explicit template arg since `T` is now deduced: `empty<storage::gpu>(shape, dtype<T>{})` |
 | `empty(shape, dtype<T>{}, storage_c<S>{})` / `empty(shape, storage_c<S>{}, dtype<T>{})` (also `zeros`/`ones`/`full`/`arange`) | same as `<T,S>` | **both** value tags at once, either order — no explicit template argument needed at all |
 | `empty(shape, ccontiguous{}/fcontiguous{})`, composed with `dtype<T>{}`/`storage_c<S>{}` in ANY order/subset (also `zeros`/`ones`/`full`/`arange`, except `arange` has no layout) | same, layout as given | the generic keyword mechanism (#277-#281): a bare layout tag, alone or alongside `dtype`/`storage_c` in any order — `empty(shape, fcontiguous{}, dtype<double>{})`, `zeros(shape, storage_c<storage::heap>{}, fcontiguous{}, dtype<double>{})`, `arange(n, storage_c<storage::pinned>{}, dtype<double>{})`. `wrap` (#282) is on the same mechanism for its `storage_c` tag, but has no `dtype` keyword (`T` is deduced from the pointer) and keeps `Layout` as a distinct positional slot (a 3rd-argument value tag or template arg), not a composable keyword |
+| `empty<storage::S>(shape, …keywords…)` (also `zeros`/`ones`/`full`/`arange`) | owner in space `S` | the **leading backend** spelling takes that *same* keyword bag — any subset, any order (#373): `zeros<storage::pinned>(shape)`, `zeros<storage::pinned>(shape, fcontiguous{})`, `empty<storage::gpu>(shape, dtype<double>{}, fcontiguous{})`. The one keyword it rejects is `storage_c<…>{}` — that *is* the backend, so naming it twice is a "pick one" `static_assert` |
 
 ---
 
@@ -144,13 +145,13 @@ Negative integer indices wrap (count from the back).
 | `t.at(i, j, k)` (all integers) | rank-0 view | scalar-like: converts to/from `T`, `.item()`, has `atomic_add_` |
 | `t(0, all, slice(1,4))` (any slice arg) | → view | lower-/same-rank |
 | `t(1, ellipsis, 2)` | → view or `T&` | `ellipsis` = `rank − #other args` copies of `all` (≤1 per call) |
-| `t.take_along<Axes...>(args...)` | → view | bind named axes only, keep the rest |
-| `t.take_along(axis<Axes...>{}, args...)` | → view | value form — `axis<...>` selector (numpy-like), no `.template` on a dependent receiver |
-| `t.subsample<Axes...>(k, starts...)` | → view | coloured/strided sub-lattice — sugar for `take_along` + `slice(start,none,k)` per named axis, one shared step `k`; `k`/`starts` accept runtime or `Int<>` (folds static) |
-| `t.subsample(axis<Axes...>{}, k, starts...)` | → view | value form, same placement as `take_along`'s |
+| `t.slice_along<Axes...>(args...)` | → view | bind named axes only, keep the rest — pytorch `select`/`narrow` over several axes at once. NOT numpy's `take_along_axis`/pytorch's `take_along_dim` (an index-tensor gather; that's `index_select`) |
+| `t.slice_along(axis<Axes...>{}, args...)` | → view | value form — `axis<...>` selector (numpy-like), no `.template` on a dependent receiver |
+| `t.subsample<Axes...>(k, starts...)` | → view | coloured/strided sub-lattice — sugar for `slice_along` + `slice(start,none,k)` per named axis, one shared step `k`; `k`/`starts` accept runtime or `Int<>` (folds static) |
+| `t.subsample(axis<Axes...>{}, k, starts...)` | → view | value form, same placement as `slice_along`'s |
 | `t.unfold<Axis>(size, step=1)` | → view | pytorch `Tensor.unfold` — appends a new trailing axis of width `size`, stepped by `step` along `Axis`; `Axis`'s extent shrinks to `(shape(Axis)-size)/step+1`; `size`/`step` accept runtime or `Int<>` (folds static); ND windows compose by chaining one `unfold` per axis; `size`∈`[1,shape(Axis)]`/`step>=1` checked (`static_assert` or debug-time) |
 | `t.unfold(Int<Axis>(), size, step=1)` | → view | value form — single-axis `Int<k>()` selector (like `flip`/`squeeze`), no `.template` on a dependent receiver |
-| `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `take_along`); `idx` values wrap negative; source must be host-accessible (allocating form copies on the host) |
+| `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `slice_along`); `idx` values wrap negative; source must be host-accessible (allocating form copies on the host) |
 | `t.index_select<Axis>(idx, into(dest))` | `dest&` | no-allocation, device-safe form; `dest`'s axis-`Axis` extent must equal `idx`'s (checked) and must not alias `t` |
 | `t.index_select(idx, axis<Axis>{})` `t.index_select(idx, axis<Axis>{}, into(dest))` | same as above | value form — no `.template` on a dependent receiver |
 
@@ -201,11 +202,15 @@ a **value form** — pass `Int<Ax>()` in place of the template argument
 (`t.squeeze(Int<1>()) == t.squeeze<1>()`, likewise `permute`/`flip`/`unsqueeze`/
 `reshape`/`recast`); the value spelling is the preferred one. The axis-**list**
 ops — `permute`, `squeeze`, `unsqueeze` — additionally take an `axis<...>{}` tag
-(`t.squeeze(axis<0,2>{}) == t.squeeze<0,2>()`), the same one `peel`/`take_along`/
+(`t.squeeze(axis<0,2>{}) == t.squeeze<0,2>()`), the same one `peel`/`slice_along`/
 the reductions use. An **empty** list, `axis<>{}`, names no axis and is therefore a
 **no-op** for `squeeze`/`unsqueeze` (numpy's `axis=()` rule) — distinct from the
 no-argument `squeeze()`/`unsqueeze()`, which keep their own meanings; `permute`
-accepts it only at rank 0. See [Views & structure](structure.md).
+accepts it only at rank 0. The **reductions** read it the same way — `sum(a,
+axis<>{})` reduces over no axis and keeps `a`'s shape, where the plain `sum(a)`
+(no axis argument at all) reduces over every axis, see
+[Math & reductions](math.md#an-empty-axis-list-reduces-over-no-axis).
+See [Views & structure](structure.md).
 
 **Type inference — what the output *type* keeps.** A view op transforms the input
 type along four independent facets; staticity is preserved wherever it is
@@ -216,7 +221,7 @@ ops (no accidental fallback to runtime extents/strides):
 |---|---|
 | **extents** | each *kept* axis keeps its source extent — static stays static. Peeling the batch dims off `shape<-1,-1,M,N>` yields a `<M,N>` cell; a *static-bounds* slice/range keeps a static extent, a runtime range is dynamic; `unsqueeze` inserts a static `1` |
 | **strides** | folded to a compile-time `strides<...>` slot wherever `source_stride × step` is known at compile time — a static source keeps folded strides, and a partially-dynamic *contiguous* stride folds from the static extents it spans (`shape<-1,3,3>` → `stride0 = 9`); otherwise runtime |
-| **layout** | the view ops (`operator()`, `take_along`, `permute`, `flip`, `un/squeeze`, `peel`) output a folded `strides<...>`. `recast<keep_strides>` (the default) instead **preserves the source layout type** (`ccontiguous` stays `ccontiguous`, `strides<>` stays `strides<>`) |
+| **layout** | the view ops (`operator()`, `slice_along`, `permute`, `flip`, `un/squeeze`, `peel`) output a folded `strides<...>`. `recast<keep_strides>` (the default) instead **preserves the source layout type** (`ccontiguous` stays `ccontiguous`, `strides<>` stays `strides<>`) |
 | **space** | `storage_view_of(source)`: a `gpu`/`gpu_view` source → `gpu_view`, `pinned`/`mapped` → the matching `_view`, else `view` — a view never loses its memory space |
 
 Worked input→output shapes (`E` = source extents):
@@ -295,7 +300,7 @@ free **`to<Space>(t)`** (`cuda.h`) above, which is device-aware.
 | `peel_front_at<N>(t, i)` | → view | the `i`-th (random access / grid-stride) |
 | `size_front<N>(t)` | → index | # cells `peel_front<N>` yields (product of the peeled extents), no range built |
 | `peel_zip<Axes...>(a, b[, c])` | a range of `cs::tuple<ViewA,ViewB[,ViewC]>` | zip-peel 2 or 3 tensors' named axes in **lock-step** — a distinct name from `peel` (1 tensor → a view per step, 2+ → a tuple is a silent arity-driven return-type bifurcation, so it gets its own name, mirroring python's `zip()`). Operands may differ in shape if **broadcast-compatible** (numpy right-align, the rule `a+b` uses); `Axes...` are in the **broadcast rank's** numbering. Operands may also differ in **index type** — the cells carry one wide (and, on mixed signedness, signed) enough to address every operand exactly, so a reversed operand zipped against an unsigned-indexed one still steps backwards. Decodes fresh each step (no incremental cursor yet) |
-| `peel_zip(a, b[, c], axis<Axes...>{})` | same | value form — axis tag **trailing** (after every positional tensor), unlike `take_along`/`peel_at`'s leading tag |
+| `peel_zip(a, b[, c], axis<Axes...>{})` | same | value form — axis tag **trailing** (after every positional tensor), unlike `slice_along`/`peel_at`'s leading tag |
 | `peel_zip<Axes...>(a, b[, c]).enumerate()` | a range of `{index, tuple}` | same shape as `peel(...).enumerate()` |
 | `peel_zip<Axes...>(a, b[, c]).subrange(lo,hi)` | a `[lo,hi)` sub-range | same shape as `peel(...).subrange()` |
 | `scan_<Axis>(t, init, f)` | `void` (in-place) | sequential fold along `Axis` — `carry=init`, then `carry=f(carry,x); x=carry` for each element (increasing order), batched (peeled) over every other axis; `f` is a device-safe functor (like `map_`'s own convention). Reverse sweep: `scan_<Axis>(t.flip<Axis>(), init, f)` (a temporary view binds fine — `scan_` has lvalue and rvalue overloads) |
@@ -317,8 +322,10 @@ rank is source rank − #peeled axes.
 
 Element type of results follows `promote(A,B)` (C++ rules, but among floats the
 **lower** width wins — pytorch-style; `-DTNY_STD_PROMOTION` opts out). The result's
-offset **index type** is the *wider* of the two operands' (a mixed `int32`/`int64`
-broadcast → `int64`), independent of the element promotion.
+offset **index type** is one that covers both operands' — the *wider* of the two for
+the usual (all-signed) pair, so a mixed `int32`/`int64` broadcast → `int64`; a pair
+that disagrees in signedness steps up to a *signed* type wide enough for both ranges.
+Either way it is independent of the element promotion.
 
 ### In-place (mutates `*this`, returns `tensor&`)
 
@@ -385,16 +392,24 @@ the result would be discarded.
 allocated — the source's own shape for a unary or scalar-rhs op, the broadcast
 shape for a tensor-rhs one. There is no stretching on the way *out*: only the
 operands broadcast, never the destination, so a `y` smaller in any axis is
-rejected, not written repeatedly. For a **unary or scalar-rhs** producer that is a
-**compile error** when both shapes are fully static, and a debug-time check
-(`assert`, off under `-DNDEBUG`) when either is dynamic; the broadcasting
-**tensor-rhs** producer catches it with the debug-time check either way.
+rejected, not written repeatedly. Every producer catches it the same way: a
+**compile error** whenever the extents in play are static, and a debug-time check
+(`assert`, off under `-DNDEBUG`) when any of them is dynamic. A **unary or
+scalar-rhs** producer wants **exact** equality (it has nothing to stretch); a
+**tensor-rhs** one applies its broadcast rule to the *operands* only — each operand
+axis must equal `y`'s or be 1.
 
 ```cpp
 auto a = zeros(shape<8,8>{});
 auto y = zeros(shape<2,2>{});
 a.mul(2.0, into(y));   // compile error: dest's shape must match the source's
 exp(a, into(y));       // same
+a.add(a, into(y));     // same, for the broadcasting tensor-rhs form
+
+auto row = zeros(shape<1,3>{});
+auto out = zeros(shape<2,3>{});
+out.add(row, into(out));   // fine: the (1,3) OPERAND stretches over (2,3)
+out.add(out, into(row));   // compile error: a (1,3) DEST does not stretch
 ```
 
 **`y` must not self-overlap** either — no `extent > 1` axis with stride 0 (only a
@@ -456,6 +471,9 @@ is **also a method** — `a.sum()`, `a.mean()`, `a.dot(b)`, `a.sqdist(b)`,
 
 Axis reductions: a fully static result → stack (host+device); any dynamic result
 → heap (host only). `keepdims` applies to `sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`.
+Axis lists must be **distinct** but may be given in **any order** — with or without
+`keepdims` (`sum<2,0>(a, keepdims)` == `sum<0,2>(a, keepdims)`), like every other
+axis-list op.
 The explicit `<Acc, Axes...>` template split stays (C++17 has no universal template
 parameter to unify "leading type = accumulator" vs "leading int = axis"), but past
 that split every TRAILING keyword — `dtype<Acc>{}`, `axis<...>{}`, `keepdims`,
@@ -488,7 +506,7 @@ optimisation — those stay out of teeny).
 | `sqdist(a, b)` | `promote(Ta,Tb)` (accumulated wide) | Σ(aᵢ-bᵢ)²; mathematically `sqnorm(a-b)`, one fused pass (bit-exact only for `double` operands). Binary only (no axis form, like `dot`); `sqdist<Acc>` forces accumulator+result |
 | `dist(a, b)` | floating (`double` for integer operands) | √Σ(aᵢ-bᵢ)²; mathematically `norm(a-b)`, one fused pass (bit-exact only for `double` operands); `dist<Acc>` forces accumulator+result |
 | `a.normalize_()` | `tensor&` | in place `a /= norm(a)`; floating element types only; zero vector → NaN |
-| `a.normalize_<Axes...>()` | `tensor&` | in place, over the named axes (keepdim broadcast); axes distinct & ascending |
+| `a.normalize_<Axes...>()` | `tensor&` | in place, over the named axes (keepdim broadcast); axes distinct, any order |
 | `normalize(a)` | new tensor (floating; integer → `double`) | out-of-place unit vector; static → stack, dynamic → heap |
 | `normalize<Axes...>(a)` / `normalize(a, axis<...>{})` | new tensor (floating) | out-of-place, over the named axes (keepdim) |
 | `cross(a, b)` | new stack 3-vector `promote(Ta,Tb)` | 3D cross product; operands rank-1, length 3 |

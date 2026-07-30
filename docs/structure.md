@@ -5,7 +5,7 @@ Axis template arguments are signed — **negatives count from the back**.
 
 The axis-**list** ops — `permute`, `squeeze`, `unsqueeze` — take an `axis<...>{}`
 tag (a compile-time axis list, sibling of `shape<...>`, the same one
-`peel`/`take_along`/the reductions use): `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`,
+`peel`/`slice_along`/the reductions use): `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`,
 `t.permute(axis<2,0,1>{})` == `t.permute<2,0,1>()`. Being a single distinct-typed
 argument, it needs no `.template` on a dependent receiver — reach for this spelling
 first.
@@ -130,6 +130,11 @@ axis) and `unsqueeze()` (insert at axis 0) keep their own meanings; only the
 there only for a rank-0 tensor (the one permutation of no axes, a no-op) and is a
 compile error for any other rank — an under-specified permutation is a mistake,
 not a no-op.
+
+The **reductions** read an empty list the same way: `sum(a, axis<>{})` reduces over
+no axis and gives `a`'s shape back, while the plain `sum(a)` — no axis argument at
+all — is the full, every-axis reduction. Same contrast, same reason; see
+[Math & reductions](math.md#an-empty-axis-list-reduces-over-no-axis).
 
 `reshape`/`flatten` follow **numpy semantics**: they return a **view** whenever the
 new shape is reachable without a copy — not only from a C-contiguous tensor, but any
@@ -303,9 +308,9 @@ step) zipped against an unsigned-indexed tensor still steps backwards rather
 than wrapping to a huge positive offset.
 
 Composes with `axis<...>{}` (trailing, after every positional tensor — like
-`peel_at`'s own tag, and unlike `take_along`'s leading one, since `peel_zip`'s
+`peel_at`'s own tag, and unlike `slice_along`'s leading one, since `peel_zip`'s
 and `peel_at`'s only other arguments are each fixed-arity — `peel_at`'s a
-single index, `peel_zip`'s a fixed run of tensors — rather than `take_along`'s
+single index, `peel_zip`'s a fixed run of tensors — rather than `slice_along`'s
 open per-axis pack), `.enumerate()` (yields `(multi_index, tuple)`, same shape
 as the single-tensor form), and `.subrange(lo,hi)` for chunked/threaded sweeps:
 

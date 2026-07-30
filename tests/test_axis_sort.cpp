@@ -1,6 +1,9 @@
 // squeeze<Ax...>/unsqueeze<Ax...> used to require the axis pack to be listed
 // strictly ascending (a compile error otherwise). #275: sort the (distinct) axes
 // at compile time instead, so any order is accepted and folds to the same result.
+// #371 extends that to the two remaining ascending-only call sites, which both
+// re-insert axes through the very same `unsqueeze`: the reduction `keepdims`
+// keyword and `normalize<Axes...>` / `normalize_<Axes...>`.
 #include <teeny/teeny.h>
 #include <cuda/std/type_traits>
 using namespace tny;
@@ -141,6 +144,64 @@ int main() {
     auto p0 = s0.permute(axis<>{});
     static_assert(decltype(p0)::rank() == 0, "");
     if (p0.item()!=1) return 29;
+
+    // ---- #371: the SAME "any order" rule for the reduction `keepdims` fold and
+    // for `normalize<Axes...>` -- both re-insert the reduced axes through the very
+    // same `unsqueeze` (and hence `_sorted_axes`) as above. Before #371 they had
+    // their own ascending-only precondition, so `sum<2,0>(a)` compiled but
+    // `sum<2,0>(a, keepdims)` did not.
+    auto h = local<double, shape<2,3,4>>{};
+    h.iota_(1.0);
+
+    // sum(keepdims): descending / mixed-sign axis lists == the ascending spelling
+    auto kA = sum<0,2>(h, keepdims);                        // reference: (1,3,1)
+    static_assert(decltype(kA)::rank() == 3, "");
+    if (kA.shape(0)!=1 || kA.shape(1)!=3 || kA.shape(2)!=1) return 30;
+    auto kD = sum<2,0>(h, keepdims);                        // descending -- now accepted
+    static_assert(cs::is_same<decltype(kD), decltype(kA)>::value, "");
+    if (!allclose(kD, kA)) return 31;
+    auto kM = sum<-1,0>(h, keepdims);                       // mixed sign, scrambled (-1 -> 2)
+    static_assert(cs::is_same<decltype(kM), decltype(kA)>::value, "");
+    if (!allclose(kM, kA)) return 32;
+    auto kV = sum(h, axis<2,0>{}, keepdims);                // the axis<...> value form too
+    static_assert(cs::is_same<decltype(kV), decltype(kA)>::value, "");
+    if (!allclose(kV, kA)) return 33;
+
+    // the same for the other reductions carrying `keepdims`
+    if (!allclose(max<2,0>(h, keepdims),  max<0,2>(h, keepdims)))  return 34;
+    if (!allclose(mean<2,0>(h, keepdims), mean<0,2>(h, keepdims))) return 35;
+    if (!allclose(norm<2,0>(h, keepdims), norm<0,2>(h, keepdims))) return 36;
+
+    // 3-axis, scrambled, on a rank-4 source (not just the happy 2-axis path)
+    auto h4 = local<double, shape<2,3,4,5>>{};
+    h4.iota_(1.0);
+    auto k4A = sum<0,2,3>(h4, keepdims);                    // reference: (1,3,1,1)
+    static_assert(decltype(k4A)::rank() == 4, "");
+    if (k4A.shape(0)!=1 || k4A.shape(1)!=3 || k4A.shape(2)!=1 || k4A.shape(3)!=1) return 37;
+    auto k4S = sum<3,0,2>(h4, keepdims);                    // scrambled
+    static_assert(cs::is_same<decltype(k4S), decltype(k4A)>::value, "");
+    if (!allclose(k4S, k4A)) return 38;
+    auto k4N = sum<-1,-4,2>(h4, keepdims);                  // mixed sign, scrambled
+    static_assert(cs::is_same<decltype(k4N), decltype(k4A)>::value, "");
+    if (!allclose(k4N, k4A)) return 39;
+
+    // normalize<Axes...> / normalize_<Axes...>: same rule (they share `_keepdims`)
+    auto nA = normalize<0,2>(h);
+    auto nD = normalize<2,0>(h);
+    static_assert(cs::is_same<decltype(nD), decltype(nA)>::value, "");
+    if (!allclose(nD, nA)) return 40;
+    auto nM = normalize<-1,0>(h);
+    if (!allclose(nM, nA)) return 41;
+    auto nV = normalize(h, axis<2,0>{});
+    if (!allclose(nV, nA)) return 42;
+    auto hi = h.clone(); hi.normalize_<2,0>();              // in place, descending
+    if (!allclose(hi, nA)) return 43;
+
+    // a DYNAMIC shape takes the heap overload of the same fold -- check it too
+    auto hd = zeros<double>(shape<-1,-1,-1>{2,3,4});
+    hd.iota_(1.0);
+    if (!allclose(sum<2,0>(hd, keepdims), sum<0,2>(hd, keepdims)))   return 44;
+    if (!allclose(normalize<2,0>(hd), normalize<0,2>(hd)))           return 45;
 
     return 0;
 }

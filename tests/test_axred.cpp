@@ -116,5 +116,33 @@ int main() {
     static_assert(decltype(dk)::rank() == 2, "dynamic keepdims keeps rank");
     if (dk(0,0)!=3.0 || dk(0,2)!=7.0) return 26;
 
+    // ---- mean/norm result-type rules, by VALUE (the type side is asserted above) ----
+    // integer mean divides in double and RETURNS double (numpy) -- not truncated:
+    // im = [[1,2,3,4],[5,6,7,8]]  ->  mean<1> = [2.5, 6.5], mean<0> = [3,4,5,6]
+    static_assert(cs::is_same<decltype(mean<1>(im))::element_type, double>::value, "integer mean -> double");
+    if (mean<1>(im)(0) != 2.5 || mean<1>(im)(1) != 6.5) return 27;
+    if (mean<0>(im)(0) != 3.0 || mean<0>(im)(3) != 6.0) return 28;
+    if (mean<1>(im, keepdims)(0,0) != 2.5) return 29;
+    // an explicit integer accumulator opts back into integer division (truncating)
+    static_assert(cs::is_same<decltype(mean<int,1>(im))::element_type, int>::value, "mean<Acc> result is Acc");
+    if (mean<int,1>(im)(0) != 2) return 30;
+    // integer norm is floating too (the same rule), and folds the same as mean
+    static_assert(cs::is_same<decltype(norm<1>(im))::element_type, double>::value, "integer norm -> double");
+    auto i34 = local<int, shape<1,2>>(); i34(0,0)=3; i34(0,1)=4;
+    if (norm<1>(i34)(0) != 5.0) return 31;
+    if (sqnorm<1>(i34)(0) != 25) return 32;
+    // floating mean/norm keep the element type, accumulating wide
+    static_assert(cs::is_same<decltype(mean<1>(m))::element_type, double>::value, "double mean stays double");
+    auto fm = local<float, shape<2,2>>(); fm.iota_(1.0f, 1.0f);   // [[1,2],[3,4]]
+    static_assert(cs::is_same<decltype(mean<1>(fm))::element_type, float>::value, "float mean stays float");
+    if (mean<1>(fm)(0) != 1.5f || mean<1>(fm)(1) != 3.5f) return 33;
+    static_assert(cs::is_same<decltype(norm<0>(fm))::element_type, float>::value, "float norm stays float");
+    // dynamic (heap) source takes the same branches
+    auto di = owned<int, shape<-1,-1>>(shape<-1,-1>{2,3}); di.iota_(1, 1);   // [[1,2,3],[4,5,6]]
+    static_assert(cs::is_same<decltype(mean<1>(di))::element_type, double>::value, "dynamic integer mean -> double");
+    if (mean<1>(di)(0) != 2.0 || mean<1>(di)(1) != 5.0) return 34;
+    if (mean<0>(di)(0) != 2.5) return 35;
+    if (norm<0>(di)(0) != cs::sqrt(17.0)) return 36;   // sqrt(1+16)
+
     return 0;
 }

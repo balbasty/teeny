@@ -488,10 +488,11 @@ struct peel_zip_range {
     //   - the DECODE (`peel_zip_axis`'s `off += idx[p] * sd`, and `gather_peel_zip`'s
     //     `data_handle() + off`), exactly as in the four engines above; and
     //   - the CELL's own type. A `peel_zip` cell is a VIEW of its operand, not a
-    //     fresh allocation, so unlike a broadcast RESULT (`_wider_index_t`'s
-    //     documented rationale) its kept-axis strides can legitimately be NEGATIVE
-    //     — an unsigned index type cannot represent them even when the base
-    //     pointer happens to come out right.
+    //     fresh allocation, so unlike a broadcast RESULT its kept-axis strides can
+    //     legitimately be NEGATIVE — an unsigned index type cannot represent them
+    //     even when the base pointer happens to come out right. (The broadcast
+    //     result's own type is `_bcast_index_t`, which is this same
+    //     `_offset_int_t` over its two operands — one rule, #347.)
     // `_offset_int_t` is already variadic (its rule is stated over a participant
     // SET), so the 2- and 3-operand `peel_zip` forms both use it unchanged, and
     // for an all-signed or all-unsigned set it is the plain widest — the same
@@ -653,7 +654,7 @@ _TNY_API auto peel_zip(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> 
 }
 // value form: peel_zip(a, b, axis<0,1>{}) == peel_zip<0,1>(a, b) -- trailing
 // axis<...> selector (keywords AFTER positionals, per the design discussion on
-// #327), unlike take_along/peel_at's LEADING axis<...> (which disambiguates a
+// #327), unlike slice_along/peel_at's LEADING axis<...> (which disambiguates a
 // second variadic arg pack there; peel_zip's tensor arguments are each a single,
 // fixed-arity positional, so a trailing tag is unambiguous and deducible).
 template <long... Axes, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
