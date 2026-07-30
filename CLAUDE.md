@@ -986,7 +986,19 @@ is generic.
     to resolve an overload set partitioned by a fold expression written
     directly inside `enable_if_t<...>` (`operator()` overload resolution,
     #268/#297). Give the fold a name (`_all_index`/`_all_ic` exist for
-    exactly this) and gate on the named trait instead.
+    exactly this) and gate on the named trait instead. **The same rule covers
+    a constexpr CALL that expands a pack** (`storage_arg<O, Dflt, Tags...>()`),
+    and there it is worse than a bad diagnostic: `/permissive-` MSVC cannot
+    tell two parameter lists that differ ONLY in such an inline condition
+    apart, so it MERGES the two overloads into one template and rejects the
+    second as a redefinition (`C2995`) with duplicated default template
+    arguments (`C2572`) — which is how the whole `empty`/`full`/`zeros`/`ones`
+    family collapsed to `void` the moment #316 turned `/permissive-` on. Fix
+    (`_fac_storage`/`_fac_on_stack`/`_fac_allocates`, `tensor.h`): route the
+    call through a class template's `static constexpr ... value` and give each
+    HALF of the split its OWN trait name, so the two lists differ by a plain
+    template-id. A condition with no pack in it (the `dtype<T>` forwarders
+    right below them) is fine inline — the pack is the part MSVC chokes on.
   - **Floor a pack-derived array to size 1.** `x[sizeof...(D)]` is a
     zero-length array — a GCC/Clang extension MSVC rejects (`C2466`) — the
     moment a rank-0 operand makes the pack empty. Always
@@ -1014,6 +1026,24 @@ is generic.
     include-order-backwards silently breaks
     this. Also: always write `numeric_limits<T>::min()`/`max()` parenthesized,
     the standard workaround for the same macro collision.
+  - **A scoped-enum template argument can land in an integral NTTP slot on
+    `/permissive-` MSVC** (#316), where the standard says the candidate is
+    discarded. Two shapes, both real: (1) `from_dlpack<T, Space>(m)` written
+    with DEPENDENT arguments inside a template also matched the fixed-rank
+    `from_dlpack<T, cs::size_t R, storage Space>` (`Space` bound to `R`) and
+    went ambiguous — `dispatch_dlpack`/`dispatch_dlpack_dtype` therefore call
+    `_dl::import_anyrank<T, Space>` straight, one candidate on every compiler;
+    with non-dependent arguments MSVC gets it right, so the public
+    `from_dlpack<T, storage::gpu_view>(m)` spelling is fine. (2) `empty<T,
+    storage::O>(shape)` — the shape drags `cuda::std::empty(const T (&)[N])` in
+    by ADL, and with EXACTLY TWO explicit arguments the arity matches, so MSVC
+    hard-errors (C3411) binding the enum to `N`. Three or more explicit
+    arguments (teeny's own internal `empty<T, storage::gpu, Layout>` calls) miss
+    the arity and are unaffected. There is no library-side fix — ADL cannot be
+    turned off — so tests qualify `tny::empty<...>` and `docs/cuda-compat.md`
+    steers users to the keyword spelling `empty<T>(e, storage_c<O>{})`. Watch
+    for it whenever a new API takes a `storage`/enum non-type parameter in the
+    second template slot.
 
 ## Adding a feature — checklist
 
