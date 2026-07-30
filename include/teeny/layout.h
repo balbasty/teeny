@@ -69,7 +69,7 @@ struct _dyn_strides<Index, 0> {
  * still exactly `sizeof` its data. Only the *dynamic* strides are stored.
  *
  * Note: CCCL's `cs::submdspan` is only defined for the standard layouts, so it
- * does not apply here — but teeny's own slicing/`take_along`/`permute`/`flip`/
+ * does not apply here — but teeny's own slicing/`slice_along`/`permute`/`flip`/
  * `peel` build their views by hand (no submdspan), so they all work on a
  * strides<...> source and in fact fold their output strides the same way. And
  * `required_span_size` assumes non-negative strides — negative strides are for
@@ -92,7 +92,7 @@ struct strides {
      *    -- which `stride(rank_type)`, the gather's `fold_mapping`, and
      *    `anyrank`'s cell builder all do -- is a hard device-compile error
      *    ("identifier `S_` is undefined in device code"). That made EVERY
-     *    `strides<...>`-layout view (i.e. every slice / `take_along` / `peel` /
+     *    `strides<...>`-layout view (i.e. every slice / `slice_along` / `peel` /
      *    `index_select` / `scan` result) unusable from device code, `_TNY_API`
      *    annotation notwithstanding.
      *  - CODEGEN. The obvious fix -- a function-LOCAL array `{S...}` -- is
@@ -251,19 +251,14 @@ template <class L> using _is_layout_tag = _contiguous_layout<L>;
 /** @brief layout_arg_t<Expl, Dflt, Tags...>: the Layout a call site should use --
  *         an explicit template argument (Expl != void) wins, else a bare
  *         ccontiguous{}/fcontiguous{} tag found in Tags..., else the library
- *         default Dflt. Unlike dtype_arg_t, no unwrapping is needed: the tag
- *         itself IS the layout type, so find_t's result is the answer directly.
- *         static_assert if BOTH an explicit Expl and a tag were supplied. */
+ *         default Dflt; supplying BOTH an explicit Expl and a tag is a
+ *         static_assert. That precedence rule (and its wording) lives ONCE, in
+ *         `_kw::resolve` (kwargs.h) -- shared with `dtype_arg_t`/`storage_arg`.
+ *         Unlike dtype_arg_t, no unwrapping is needed here: the tag itself IS the
+ *         layout type, so the answer is the tag that was found (`keep_tag`, which
+ *         also supplies Dflt when there was none). */
 template <class Expl, class Dflt, class... Tags>
-struct _layout_resolve {
-    static_assert(cs::is_same<Expl, void>::value || !_kw::has<_is_layout_tag, Tags...>(),
-        "layout given both as an explicit template argument and as a layout tag "
-        "(ccontiguous{}/fcontiguous{}) -- pick one");
-    using type = cs::conditional_t<!cs::is_same<Expl, void>::value, Expl,
-        _kw::find_t<_is_layout_tag, Dflt, Tags...>>;
-};
-template <class Expl, class Dflt, class... Tags>
-using layout_arg_t = typename _layout_resolve<Expl, Dflt, Tags...>::type;
+using layout_arg_t = _kw::resolve_t<_kw::keep_tag, Expl, void, _is_layout_tag, Dflt, Tags...>;
 
 // per-dim static stride from a strides<...> layout (signed; `dynamic_stride` if
 // runtime, or for any non-strides layout so callers fall through).

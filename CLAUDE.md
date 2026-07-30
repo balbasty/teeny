@@ -78,27 +78,36 @@ include/teeny/
                    compiled out under NDEBUG and always off on the device) / _TNY_BOUND
                    (opt-in TNY_HARDENED bounds check, itself assert-based), TNY_MAX_RANK
                    (anyrank's inline-store rank
-                   cap, default 32), namespace open/close; also the min/max/interface
+                   cap, default 32), TNY_MAX_STATIC_UNROLL (largest STATIC element count
+                   math.h's static-unroll fast paths still unroll, default 256 = clang's
+                   hard fold-argument limit; bigger static shapes decode — #343),
+                   namespace open/close; also the min/max/interface
                    Windows.h #undef block (outside the include guard, see MSVC traps below)
   alias.h          cs:: vocabulary into tny:: + Int<V>/... static ints + `all` + shape<...>
                    + axis<...>/dtype<...> value-carrier tags
   half.h           `half` (IEEE binary16) + `bfloat16` element types + compute_type
   kwargs.h         `tny::_kw` — generic keyword-argument primitive (find/get/has/count/
-                   accepts/is_keyword) for the trailing value-carrier tags (dtype/storage/
-                   layout/axis/into/keepdims). Backs every migrated call site (#277's
+                   accepts/resolve/is_keyword) for the trailing value-carrier tags (dtype/
+                   storage/layout/axis/into/keepdims). Backs every migrated call site (#277's
                    umbrella: empty/zeros/ones/full/arange/wrap/make_*, and the reduction
-                   family sum/prod/max/min/mean/sqnorm/norm/dot). The
-                   per-keyword READERS live next to each tag's own definition instead of
-                   here: `dtype_arg_t` (alias.h), `storage_arg` (storage.h), `layout_arg_t`
-                   (layout.h) — each resolves explicit-template-arg > matching value tag >
-                   library default, `static_assert`ing if both an explicit arg and a tag
-                   are given for the same keyword.
+                   family sum/prod/max/min/mean/sqnorm/norm/dot). Two shared entry points,
+                   so neither the guard nor the precedence rule is transcribed again (#376):
+                   **`_TNY_KW_CHECK(SITE, EXPECTED, (PREDS...), Tags...)`** is the one-line
+                   guard every call site opens with (it expands to the unrecognised-keyword
+                   + duplicated-keyword `static_assert` pair; `accepts<Ps...>::known/unique/
+                   check` are the predicates under it), and **`_kw::resolve`** is the one
+                   copy of "explicit-template-arg > matching value tag > library default,
+                   both given = `static_assert`". The per-keyword READERS stay next to each
+                   tag's own definition, each a one-line alias over `resolve` supplying only
+                   its own tag->answer step: `dtype_arg_t` (alias.h, unwraps `dtype<T>` ->
+                   `T`), `storage_arg` (storage.h, travels in a `storage_c<O>` carrier since
+                   its answer is a VALUE), `layout_arg_t` (layout.h, the tag IS the layout).
   storage.h        `storage` enum + storage policies (owning_storage<T,Alloc>, cpp_alloc)
   layout.h         strides<S...> — per-dim static/dynamic strides (extents for strides)
   indexing.h       free indexing/slicing vocabulary: slice()/none, _norm_axis,
                    _wrap_idx, slice_spec + traits, _compact output-extents
   tensor.h         the tensor class + view/local/owned aliases + as_tensor
-                   + indexing/slicing, take_along, index_select, permute, unsqueeze/squeeze
+                   + indexing/slicing, slice_along, index_select, permute, unsqueeze/squeeze
   math.h           in-place & out-of-place elementwise (broadcasting) + unary math
                    + reductions (sum/prod/max/min/dot). Members declared in
                    tensor.h, DEFINED here.
@@ -229,7 +238,7 @@ all static): `tensor<float, shape<3,4>, strides<4,1>>(ptr)`. Strides are SIGNED,
 so `-1` means a real stride of −1 (reversed view), NOT dynamic — a runtime
 stride is spelled `dynamic_stride` (`strides<dynamic_stride,1>`, constructed with
 the runtime strides). NB CCCL's `submdspan` does not apply to it, but teeny's own
-slicing/take_along/permute/flip/peel DO (they build views by hand and fold the
+slicing/slice_along/permute/flip/peel DO (they build views by hand and fold the
 output strides), so a strides<...> tensor is fully sliceable.
 
 ## API cheat-sheet
@@ -277,15 +286,17 @@ t(0, slice<1,4>()); t(0, slice<0,8,2>());  // compile-time slice (bounds fold li
                       //   NB a range outputs teeny's strides<...> layout (folding the
                       //   stride where derivable); a COMPILE-TIME range folds its extent
                       //   too (source static + static bounds), a runtime range's is dynamic.
-t.take_along<0,2>(i, slice(1,4));  // bind named axes only; keep every other axis
-t.subsample<Axes...>(k, starts...);  // coloured/strided sub-lattice (#258): take_along +
+t.slice_along<0,2>(i, slice(1,4));  // bind named axes only; keep every other axis (#423: NOT
+                      //   numpy take_along_axis / torch take_along_dim — those are index-TENSOR
+                      //   gathers, i.e. index_select. This is torch select/narrow over N axes.)
+t.subsample<Axes...>(k, starts...);  // coloured/strided sub-lattice (#258): slice_along +
                       //   slice(start,none,k) per named axis, one shared step k, per-axis
                       //   start. Pure sugar, no new addressing power. k/starts accept a
                       //   runtime value or Int<k>() (folds through slice()'s own static-range
                       //   machinery -> a fully-static (start,k) pair keeps a folded static
                       //   result, same as a hand-written slice()). Value form: t.subsample(
                       //   axis<Axes...>{}, k, starts...) -- LEADING tag, same placement as
-                      //   take_along's own (a second variadic pack, the starts, needs the
+                      //   slice_along's own (a second variadic pack, the starts, needs the
                       //   disambiguating tag up front, not trailing).
 t.unfold<Axis>(size, step);  t.unfold<Axis>(size);  // pytorch Tensor.unfold (#256): appends
                       //   a NEW trailing axis of width `size`, stepped by `step` along Axis
@@ -305,8 +316,8 @@ t.unfold<Axis>(size, step);  t.unfold<Axis>(size);  // pytorch Tensor.unfold (#2
                       //   t.unfold(Int<Axis>(), size, step) -- single-axis Int<k>() selector
                       //   (like flip/squeeze), not an axis<...> list (only one axis binds).
 t.index_select<Axis>(idx);         // gather along Axis by a rank-1 integer index
-                      //   TENSOR (#326) — runtime DATA, unlike take_along's compile-time
-                      //   indices. idx values wrap negative (built on take_along); static
+                      //   TENSOR (#326) — runtime DATA, unlike slice_along's compile-time
+                      //   indices. idx values wrap negative (built on slice_along); static
                       //   idx shape -> stack result, else heap (source must be host-
                       //   accessible; a gpu tensor: gather into a device into(dest)
                       //   instead). Always a COPY (an arbitrary data-dependent gather
@@ -314,7 +325,7 @@ t.index_select<Axis>(idx);         // gather along Axis by a rank-1 integer inde
                       //   t.index_select<Axis>(idx, into(dest)) (no alloc, device-safe;
                       //   dest's axis-Axis extent must equal idx's, checked; dest must not
                       //   alias t). Value form: t.index_select(idx, axis<Axis>{}) (TRAILING
-                      //   tag here -- unlike take_along/subsample's leading one, since
+                      //   tag here -- unlike slice_along/subsample's leading one, since
                       //   index_select's only other arg, idx, is a single fixed positional,
                       //   not an open pack, so a trailing tag is unambiguous and deducible)
 t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1) -> view
@@ -329,7 +340,7 @@ t.squeeze(axis<0,2>{});  t.unsqueeze(axis<1,3>{});  t.permute(axis<2,0,1>{});  /
                       //   value form (== the <...> template form) for these axis-LIST ops
 t.squeeze(axis<>{});  t.unsqueeze(axis<>{});  // an EMPTY axis LIST names no axis -> a NO-OP:
                       //   same shape+strides back, as a view (numpy's axis=() rule, #369; the
-                      //   same identity take_along(axis<>{}) / peel(t,axis<>{}) already have).
+                      //   same identity slice_along(axis<>{}) / peel(t,axis<>{}) already have).
                       //   NOT the no-ARGUMENT forms: t.squeeze() still drops EVERY static
                       //   singleton and t.unsqueeze() still inserts at axis 0 -- an empty
                       //   LIST and no argument at all are different things. permute needs a
@@ -365,7 +376,7 @@ to<storage::gpu>(t);                // MEMORY-SPACE move (cuda.h free fn): to<Sp
 t(all, slice(none,none,-1));    // reverse a range (negative step; a[::-1])
 // AXIS template args are signed: negatives count from the back (numpy). e.g.
 //   t.extent(Int<-1>()), t.unsqueeze<-1>() (append), t.permute<-1,0,1>(),
-//   t.take_along<-2>(i), peel<0,-1>(t).
+//   t.slice_along<-2>(i), peel<0,-1>(t).
 
 // --- math (in-place: any tensor/view; mutates *this) ---
 a.add_(b); a.sub_(b); a.mul_(b); a.div_(b);   // tensor rhs BROADCASTS numpy-style
@@ -400,6 +411,11 @@ auto z = zeros<T>(shape); ones<T>(sh); full(sh,v); arange<T>(n);  // creation. z
 zeros(sh, dtype<T>{}); full(sh,v,dtype<T>{}); arange(n, dtype<T>{});  // value-tag T (deduced,
                       //   no .template); a LEADING explicit template arg still names the backend
                       //   — zeros<storage::pinned>(sh, dtype<T>{}). Same for empty().
+zeros<storage::pinned>(sh, dtype<T>{}, fcontiguous{});  // ...and that leading backend arg takes the
+                      //   SAME trailing keyword bag, ANY subset/ANY order (#373) — dtype and/or a
+                      //   layout tag, or none at all (zeros<storage::pinned>(sh)). It used to accept
+                      //   exactly ONE dtype{} tag and nothing else. A storage_c<...>{} tag on top of
+                      //   it is the one rejection ("pick one" — that IS the backend keyword).
 zeros(sh, dtype<T>{}, storage_c<storage::pinned>{});  // ...or compose BOTH value tags, either
                       //   order (zeros(sh, storage_c<...>{}, dtype<T>{}) too) — no explicit
                       //   template argument at all. Same for empty/ones/full/arange.
@@ -440,7 +456,7 @@ a.add(b, into(y)); a.mul(2.0, into(y)); a.add(b, alpha, into(y));  // elementwis
 exp(a, into(y)); sqrt(a, into(y)); minimum(a,b,into(y)); clamp(a,lo,hi,into(y));
 normalize(a, into(y)); normalize(a, axis<1>{}, into(y)); a.map(f, into(y));
 cross(a, b, into(N(i, all)));                          // cross into row i of a matrix (the "crossto")
-// y may be a TEMPORARY VIEW (#380): every view-producing op (slicing/at/permute/take_along/
+// y may be a TEMPORARY VIEW (#380): every view-producing op (slicing/at/permute/slice_along/
 //   peel_at) returns its view BY VALUE, and into() binds an RVALUE view, so "a slot of a
 //   bigger output" needs no named intermediate -- cross(a,b,into(N(i,all))),
 //   sum(a,into(cells.at(i,j))), sum(m,axis<0>{},into(rows(j,all))). Gated to the non-owning
@@ -491,7 +507,7 @@ sqdist(a,b);  dist(a,b);               // Σ(aᵢ-bᵢ)² / √Σ(aᵢ-bᵢ)² -
                       //   a.sqdist(b), a.dist(b).
 a.normalize_();  auto u = normalize(a);// in place a/=norm(a) (floating) / out-of-place unit vector.
                       //   normalize static->stack, dynamic->heap; zero vector -> NaN (no epsilon)
-a.normalize_<1>(); normalize<-1>(a);   // ...over NAMED AXES (keepdim broadcast); axes distinct & ascending
+a.normalize_<1>(); normalize<-1>(a);   // ...over NAMED AXES (keepdim broadcast); axes distinct, ANY order
 a.normalize(axis<1>{}); a.normalize<1>();  // ...as a METHOD too (either spelling), and every
                       //   spelling takes into(y): normalize(a,axis<1>{},into(y)); a.normalize<1>(into(y))
 auto c = cross(a,b);  a.cross_(b);     // 3D cross product (rank-1, length 3): new / in place (a=a×b).
@@ -510,6 +526,8 @@ sum<0>(a, into(buf)); mean(a, axis<1>{}, into(buf));  // into(dest) too -> copie
                       //   result into buf (any spelling: <Axes>, <Acc,Axes>, or the axis<...> value form)
 sum<0>(a, keepdims); sum(a, axis<0>{}, keepdims);  // keepdims: reduced axis kept as size-1 (numpy
                       //   keepdims=True), broadcasts back over a. sum/prod/max/min/mean/sqnorm/norm.
+                      //   Axes distinct, in ANY order (sorted internally, #275/#371) — with or
+                      //   without keepdims: sum<2,0>(a, keepdims) == sum<0,2>(a, keepdims).
 sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf));  // ...and every trailing keyword composes,
                       //   any subset/order (dtype/axis/keepdims/into) — see the `_TNY_RED_TAGGED`
                       //   generic entry point in math.h, next to `sum<Acc,Axes...>(a, keepdims,
@@ -544,7 +562,7 @@ for (auto [a,b,c] : peel_zip<0>(x,y,z)) f(a,b,c);  // one cs::tuple<ViewX,ViewY,
                       //   unsigned-indexed one steps backwards instead of wrapping. Decodes fresh
                       //   each step (no incremental cursor yet — a perf follow-up, not #327's scope).
 for (auto [a,b] : peel_zip(x, y, axis<0>{})) f(a,b);   // value form: axis<...> TRAILING (after
-                      //   every positional tensor — unlike take_along/peel_at's LEADING tag,
+                      //   every positional tensor — unlike slice_along/peel_at's LEADING tag,
                       //   which disambiguates a second variadic pack there; peel_zip's tensor
                       //   args are each fixed-arity, so a trailing tag is unambiguous)
 for (auto [m, cell] : peel_zip<0>(x,y).enumerate()) g(m[0], cell);  // (multi_index, tuple) per
@@ -676,14 +694,14 @@ does). Three selector vocabularies:
 - **`axis<...>`** — the numpy-like axis selector (`axis: int | list[int]`), a
   value tag sibling to `shape<...>` (in `alias.h`). For the axis-LIST ops:
   `peel(t, axis<0,1>{})` == `peel<0,1>(t)`, `peel_at(t, i, axis<0,1>{})`,
-  `t.take_along(axis<0,2>{}, i, slice(1,4))` == `t.take_along<0,2>(...)`,
+  `t.slice_along(axis<0,2>{}, i, slice(1,4))` == `t.slice_along<0,2>(...)`,
   `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise `unsqueeze`/`permute`.
-  Being a single distinct-typed arg it also disambiguates `take_along`'s two packs.
+  Being a single distinct-typed arg it also disambiguates `slice_along`'s two packs.
   An EMPTY list `axis<>{}` names no axis, so every axis-list op treats it as the
   IDENTITY (numpy's `axis=()`): `squeeze`/`unsqueeze` return the same shape as a
   view (#369 — they used to fall through to the DEFAULTED single-axis form and
   silently drop every singleton / insert at axis 0), matching what
-  `take_along(axis<>{})`, `peel(t, axis<>{})` and `_keepdims<>` already did. The
+  `slice_along(axis<>{})`, `peel(t, axis<>{})` and `_keepdims<>` already did. The
   no-ARGUMENT `squeeze()`/`unsqueeze()` are a DIFFERENT thing and keep their own
   meanings — an empty template pack can't be told from a defaulted one in C++, so
   only the `axis<...>` spelling can carry "zero axes named". `permute` needs a full
@@ -725,8 +743,11 @@ into(buf))` all compose their keywords in **any subset, any order** — the
 factory/`wrap`/`make_*` family (`storage.h`/`layout.h`/`tensor.h`) and the
 reduction family (`math.h`) both build on the same primitive:
 `tny::_kw` (`kwargs.h`) — `find_t`/`has`/`count`/`get` ask questions of the
-trailing pack, `accepts<Ps...>::known/unique` is the guard every call site
-puts in a `static_assert` up front. Where a selector still needs an EXPLICIT
+trailing pack, the `_TNY_KW_CHECK(...)` macro is the ONE guard every call site
+opens with (over `accepts<Ps...>::known/unique`), and `_kw::resolve` is the ONE
+copy of the explicit-arg-beats-tag-beats-default rule each per-keyword reader
+(`dtype_arg_t`/`storage_arg`/`layout_arg_t`) is a one-line alias over. Where a
+selector still needs an EXPLICIT
 `<...>` template argument (an axis list too big to spell as a value in a
 generic context, or the `<Acc, Axes...>` reduction split — C++17 has no
 universal template parameter to unify "leading type = accumulator" with
@@ -745,10 +766,19 @@ is generic.
   Out-of-place: a fully static result → `storage::stack` (host+device); any dynamic →
   `storage::heap` (host only). The SFINAE keys on `bcast_extents<...>::rank_dynamic()`,
   **not** on instantiating a stack tensor (that would fire the "stack needs static
-  shape" `static_assert`). The result's offset **index type** is the WIDER of the two
-  operands' (`_wider_index_t`, by `sizeof`; tie → first operand), so a mixed-width
-  broadcast (int32 view + int64 view) yields an int64 result — lossless, and it stops
-  the engine truncating the wide operand's strides to a narrow result width.
+  shape" `static_assert`). The result's offset **index type** is `_bcast_index_t` of the
+  two operands' — the SAME `_offset_int_t` rule the engines decode in, over those two:
+  the WIDER for a same-signedness pair (so a mixed-width broadcast, int32 view + int64
+  view, yields an int64 result — lossless, and it stops the engine truncating the wide
+  operand's strides to a narrow result width), a SIGNED type wide enough for both ranges
+  for a mixed-signedness one. It was a `sizeof`-only pick (`_wider_int_t`), which is not
+  "holds every value either operand can name" once signedness disagrees (#347): a
+  signed-narrow + unsigned-WIDER pair (int16+uint32) resolved UNSIGNED — handing back a
+  result that breaks teeny's signed-index contract (`flip`/a negative slice step both
+  `static_assert` signed; `index_fits` is a signed reach) — and at EQUAL width the tie
+  kept the FIRST, so int32+uint32 resolved to int32, which cannot hold the uint32
+  operand's upper half. Only mixed-signedness pairs move (unreachable through teeny's own
+  vocabulary — every teeny shape is signed), so this is a latent-hazard fix.
   `bzip_` itself decodes its offsets in `_offset_int_t<C::index_type, Ia, Ib>` — a type
   that holds every extent/stride value ALL THREE participants can produce (#346).
   Out-of-place the result already carries the wider of the two operands (no-op), but
@@ -768,19 +798,18 @@ is generic.
   `data()[off]` takes any integer, so nothing is narrowed back. The 64-bit cap is the
   one contract-backed step (no signed type holds all of `uint64_t`) — a reachable
   offset must fit `ptrdiff_t` anyway, and teeny's reach contract is signed throughout
-  (`index_fits`). `_wider_int_t`/`_wider_index_t` stay the pure WIDTH pick: they name
-  the index type a fresh broadcast RESULT carries (non-negative extents, positive
-  strides), not the type an engine may decode offsets in.
+  (`index_fits`). `_wider_int_t` stays the pure WIDTH pick, but it is now ONLY the width
+  half `_offset_int_t` is built from — nothing else should reach for it (#347).
   The two-operand REDUCTION engine (`zipreduce_decode_`, behind `dot`/`sqdist`/`dist`)
   decodes in that SAME `_offset_int_t`, just over TWO participants instead of three
   (`_offset_int_t<Ia, Ib>` — it writes no tensor, only a scalar accumulator in the
   caller's reduce type, so there is no destination index type in play). It first took
   the first operand's index type alone (truncating the second's: a hard clang error, a
-  silently wrong offset under g++, #342), then the width-only `_wider_index_t` (#342's
+  silently wrong offset under g++, #342), then a width-only pick (#342's
   fix) — which still zero-extended a flipped operand's negative stride whenever the
   OTHER operand was unsigned and wider, i.e. `dot(flipped_int16_view, uint32_view)`
   segfaulted (#355). For an all-signed or all-unsigned pair `_offset_int_t<Ia,Ib>` IS
-  `_wider_index_t` (`_widest_int` of two left-folds to exactly `_wider_int_t`, same tie
+  the plain widest (`_widest_int` of two left-folds to exactly `_wider_int_t`, same tie
   rule), so every non-mixed instantiation is byte-identical. `zipreduce_static_` (the
   #255 static unroll) is exempt by construction, not by luck: it is gated on BOTH
   operands being fully static AND `ccontiguous`, it addresses `data()[Lin]` with a
@@ -798,12 +827,12 @@ is generic.
   was never audited into it: it picked `cs::common_type_t` instead, which applies
   the usual arithmetic conversions, so at EQUAL width the UNSIGNED type wins
   (`common_type_t<int32_t,uint32_t>` is `uint32_t`) — not even a width mistake, the
-  one shape `_wider_index_t` could not make. It is also the one site where the
+  one shape a `sizeof` pick could not make. It is also the one site where the
   decode type is the CELL's type as well, and that second half is a bug in its own
   right: a `peel_zip` cell is a VIEW of its operand, not a fresh allocation, so
-  unlike a broadcast RESULT (the case `_wider_index_t`'s pure width pick is written
-  for) its kept-axis strides can legitimately be NEGATIVE, and an unsigned index
-  type cannot represent them even where the base pointer comes out right. One
+  unlike a broadcast RESULT its kept-axis strides can legitimately be NEGATIVE, and
+  an unsigned index type cannot represent them even where the base pointer comes
+  out right. One
   substitution fixes both halves. `scalo_`/`unaryo_` are only reachable narrow through a caller's
   `into(dest)` (their allocating producers build `c` from `a`'s own extents type) and
   were not even silent — their initializers lacked the `static_cast<I>`s, so g++ warned
@@ -925,8 +954,22 @@ is generic.
   elements in each) both do this; each falls straight back to the runtime-decode
   engine the moment its own gate fails (any dynamic extent, or — for `zipreduce_`
   — a non-C-contiguous or mismatched-layout operand).
+  **The unroll is for SMALL fixed shapes only, and is CAPPED (#343).** Both folds
+  emit ONE argument per element, so an uncapped large static shape is a compile-time
+  disaster: clang hard-errors past 256 fold arguments ("exceeded expression nesting
+  limit of 256", its default `-fbracket-depth` — so `dot` on two `shape<16,17>`
+  operands did not compile AT ALL), and g++ grows superlinearly (~1 min for a
+  `shape<64,64>` reduction, >8 min for `shape<128,128>`). Both gates now go through
+  `_md::_unrollable<E>()` (`math.h`, next to `_static_numel`) = fully static AND
+  `numel <= TNY_MAX_STATIC_UNROLL` (`defines.h`, **256** — exactly clang's limit,
+  and ~2 orders of magnitude above the 3-27-element shapes the unroll targets).
+  Above the cap a static shape simply takes the same decode path a dynamic one
+  does — identical results, so the cap is a pure compile-time/binary-size guard.
+  Lower it (`-DTNY_MAX_STATIC_UNROLL=64`) to buy compile time back; do NOT raise it
+  past 256 (clang breaks). `tests/test_static_unroll.cpp` pins the gate, both sides
+  of the boundary, and that the two engines agree numerically.
 - **The gather** (`tensor.h` `_slice_range`, `iterate.h` `gather_peel`): ALL
-  view-making ops — `operator()` slicing, `take_along`, `peel` — route through
+  view-making ops — `operator()` slicing, `slice_along`, `peel` — route through
   one hand-built gather (NO `cs::submdspan`). Per axis: an integer drops it (into
   the base offset), `all` keeps it, a range keeps a strided window. The output
   layout is teeny's `strides<Sfold...>`, folding each kept stride to a
@@ -990,7 +1033,23 @@ is generic.
     to resolve an overload set partitioned by a fold expression written
     directly inside `enable_if_t<...>` (`operator()` overload resolution,
     #268/#297). Give the fold a name (`_all_index`/`_all_ic` exist for
-    exactly this) and gate on the named trait instead.
+    exactly this) and gate on the named trait instead. **The same rule covers
+    a constexpr CALL that expands a pack** (`storage_arg<O, Dflt, Tags...>()`),
+    and there it is worse than a bad diagnostic: `/permissive-` MSVC cannot
+    tell two parameter lists that differ ONLY in such an inline condition
+    apart, so it MERGES the two overloads into one template and rejects the
+    second as a redefinition (`C2995`) with duplicated default template
+    arguments (`C2572`) — which is how the whole `empty`/`full`/`zeros`/`ones`
+    family collapsed to `void` the moment #316 turned `/permissive-` on. Fix
+    (`_fac_storage`/`_fac_on_stack`/`_fac_allocates`, `tensor.h`): route the
+    call through a class template's `static constexpr ... value` and give each
+    HALF of the split its OWN trait name, so the two lists differ by a plain
+    template-id. A condition with no pack in it is fine inline — the pack is
+    the part MSVC chokes on. NB each factory splits TWICE: once on the `T`-led
+    entry point, once on the BACKEND-led one right below it (#373), and BOTH
+    halves of both pairs must gate on the named traits. #373 reproduced the
+    bug verbatim in its new overloads because that branch predated this fix —
+    which is exactly why this is an authoring rule and not a one-off patch.
   - **Floor a pack-derived array to size 1.** `x[sizeof...(D)]` is a
     zero-length array — a GCC/Clang extension MSVC rejects (`C2466`) — the
     moment a rank-0 operand makes the pack empty. Always
@@ -1018,6 +1077,24 @@ is generic.
     include-order-backwards silently breaks
     this. Also: always write `numeric_limits<T>::min()`/`max()` parenthesized,
     the standard workaround for the same macro collision.
+  - **A scoped-enum template argument can land in an integral NTTP slot on
+    `/permissive-` MSVC** (#316), where the standard says the candidate is
+    discarded. Two shapes, both real: (1) `from_dlpack<T, Space>(m)` written
+    with DEPENDENT arguments inside a template also matched the fixed-rank
+    `from_dlpack<T, cs::size_t R, storage Space>` (`Space` bound to `R`) and
+    went ambiguous — `dispatch_dlpack`/`dispatch_dlpack_dtype` therefore call
+    `_dl::import_anyrank<T, Space>` straight, one candidate on every compiler;
+    with non-dependent arguments MSVC gets it right, so the public
+    `from_dlpack<T, storage::gpu_view>(m)` spelling is fine. (2) `empty<T,
+    storage::O>(shape)` — the shape drags `cuda::std::empty(const T (&)[N])` in
+    by ADL, and with EXACTLY TWO explicit arguments the arity matches, so MSVC
+    hard-errors (C3411) binding the enum to `N`. Three or more explicit
+    arguments (teeny's own internal `empty<T, storage::gpu, Layout>` calls) miss
+    the arity and are unaffected. There is no library-side fix — ADL cannot be
+    turned off — so tests qualify `tny::empty<...>` and `docs/cuda-compat.md`
+    steers users to the keyword spelling `empty<T>(e, storage_c<O>{})`. Watch
+    for it whenever a new API takes a `storage`/enum non-type parameter in the
+    second template slot.
 
 ## Adding a feature — checklist
 

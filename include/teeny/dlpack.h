@@ -330,7 +330,13 @@ template <storage Space = storage::view, class Carrier, class F>
 _TNY_HOST bool dispatch_dlpack(const Carrier * m, F && f) {
     return _dl::dispatch_dtype(_dl::as_dltensor(*m).dtype, [&](auto tag) -> bool {
         using T = decltype(tag);
-        return dispatch_rank(from_dlpack<T, Space>(m), f);   // dtype x total rank -> static view
+        // Call the importer straight, NOT `from_dlpack<T, Space>(m)`: with exactly two
+        // explicit arguments that spelling also matches the fixed-rank overload
+        // `from_dlpack<T, R, Space>` on `/permissive-` MSVC (#316), which wrongly lets
+        // the scoped-enum `Space` bind to the `cs::size_t R` slot and then reports the
+        // call ambiguous (C2668). GCC/Clang reject that binding, as the standard
+        // requires. Same result, one candidate, every compiler.
+        return dispatch_rank(_dl::import_anyrank<T, Space>(_dl::as_dltensor(*m)), f);  // dtype x total rank -> static view
     });
 }
 
@@ -346,7 +352,8 @@ template <storage Space = storage::view, class Carrier, class F>
 _TNY_HOST bool dispatch_dlpack_dtype(const Carrier * m, F && f) {
     return _dl::dispatch_dtype(_dl::as_dltensor(*m).dtype, [&](auto tag) -> bool {
         using T = decltype(tag);
-        f(from_dlpack<T, Space>(m));   // typed anyrank; caller does peel_front<-Sr>
+        f(_dl::import_anyrank<T, Space>(_dl::as_dltensor(*m)));   // typed anyrank; caller does peel_front<-Sr>
+                                       // (importer called straight — see dispatch_dlpack above for why)
         return true;
     });
 }

@@ -90,6 +90,8 @@ grow the destination.) A size-1 axis stretches over its partner as usual;
 If the two operands have different offset [index widths](shapes-strides.md#mixing-widths-in-a-broadcast)
 (e.g. an `int32`-indexed view and an `int64`-indexed one), the result takes the
 **wider** of the two — lossless, and it never truncates the wide operand's strides.
+(Should the two also disagree in *signedness*, the result steps up to a signed type
+wide enough for both ranges, for the same reason the in-place offset math below does.)
 In place (`a.add_(b)`) and into a caller-supplied `into(dest)` there is no new
 result to widen, so the offset math itself runs in a type that covers every tensor in
 play while each keeps its own: a narrow-indexed destination never truncates a
@@ -175,7 +177,7 @@ cross(a, b, into(N(i, all)));  // 3D cross straight into row i of a matrix ("cro
 ```
 
 **The destination may be a slice, written in place.** Every view-producing op —
-slicing, `at`, `permute`, `unsqueeze`, `take_along`, … — hands back its view *by
+slicing, `at`, `permute`, `unsqueeze`, `slice_along`, … — hands back its view *by
 value*, and `into()` takes one of those directly, so a slot of a bigger output
 needs no named intermediate. The write goes through to the storage the slice
 refers to:
@@ -246,16 +248,28 @@ n.div(d, into(f));            // f = {3, 4}  — integer division, == f.copy_(n.
 allocated: the source's own shape for a unary or scalar-rhs op, the broadcast shape
 for a tensor-rhs one. Only the *operands* broadcast — the destination never
 stretches, so a `y` that is smaller in any axis is an error, not a repeated write.
-For a unary or scalar-rhs op it is caught at **compile time** when both shapes are
-fully static, and by a debug-time check (an `assert`, compiled out under
-`-DNDEBUG`) when either is dynamic; the broadcasting tensor-rhs form uses the
-debug-time check in both cases:
+It is caught at **compile time** whenever the extents in play are static, and by a
+debug-time check (an `assert`, compiled out under `-DNDEBUG`) when any of them is
+dynamic — for every producer alike, broadcasting or not:
 
 ```cpp
 auto a = zeros(shape<8,8>{});
 auto y = zeros(shape<2,2>{});
 a.mul(2.0, into(y));          // compile error: dest's shape must match the source's
 exp(a, into(y));              // same
+a.add(a, into(y));            // same, for the broadcasting tensor-rhs form
+```
+
+The two rules differ only in what counts as a match. A unary or scalar-rhs op wants
+**exact** equality — it has nothing to stretch. A tensor-rhs op broadcasts, so each
+*operand* axis must either equal `y`'s or be 1 (an extent-1 operand axis stretches
+over `y`). `y`'s own axes never stretch in either case:
+
+```cpp
+auto row = zeros(shape<1,3>{});
+auto out = zeros(shape<2,3>{});
+out.add(row, into(out));      // fine: the (1,3) operand stretches over (2,3)
+out.add(out, into(row));      // compile error: a (1,3) DEST does not stretch
 ```
 
 `y` must also not **self-overlap** — no `extent > 1` axis with stride 0. Such a `y`
@@ -377,7 +391,9 @@ sum<0>(a, keepdims, into(dest));  // and with into(dest) — dest matches the ke
 
 Applies to every axis reduction (`sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`).
 `keepdims` is a distinct empty-tag value (like `all`/`none`), so it never collides
-with another argument.
+with another argument. The axes must be **distinct**, but — as everywhere else in
+teeny — you may list them in **any order**: `sum<2,0>(a, keepdims)` ==
+`sum<0,2>(a, keepdims)`, kept axes and all.
 
 ### Accumulator type vs result type
 
@@ -456,7 +472,8 @@ narrow element type `sqdist(a,b)` can be *more* accurate than the un-fused
 the two are only guaranteed bit-identical for `double` operands.
 `normalize`/`normalize_` mirror `sqnorm`/`norm`: with
 `<Axes...>` each sub-vector is divided by its norm over those axes (the reduced axes
-are kept as size-1 so the norm broadcasts back). Axes must be distinct and ascending.
+are kept as size-1 so the norm broadcasts back). Axes must be distinct, but may be
+listed in any order (`normalize<2,0>(a)` == `normalize<0,2>(a)`).
 `normalize` of a zero vector yields NaNs — this is exact math with no epsilon; add
 one at the call site if you need it. `cross` is defined only for rank-1, length-3
 operands (a `static_assert` catches a wrong static length; a runtime length is

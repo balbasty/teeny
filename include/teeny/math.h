@@ -208,25 +208,41 @@ _TNY_API constexpr bool bc_static_ok_r(cs::index_sequence<D...>) {
     ( (ok = ok && bc_axis_ok(bc_sext<Ea, R>(D), bc_sext<Eb, R>(D))), ... );
     return ok;
 }
+// ...and the same question asked of ONE OPERAND against the DESTINATION (#361).
+// `bc_static_ok_r` above compares the two operands with EACH OTHER, which says
+// nothing about the tensor actually written: the destination's shape is the
+// producer's own business for every allocating path, but `into(dest)` lets the
+// caller pick it, and there a static, provably-wrong dest used to compile.
+//
+// ASYMMETRIC, unlike `bc_axis_ok`: the OPERAND may be extent 1 (it stretches to
+// the destination's extent, stride 0), the DESTINATION may not — `bzip_` takes
+// its loop bounds from `c`, so a dest extent of n against an operand extent of
+// 1 < m < n indexes the operand past its own end. Exactly the runtime rule
+// `ae[r] == ce[r] || ae[r] == 1` the engine already checks, hoisted to compile
+// time; either extent dynamic -> unknowable here, left to that check.
+_TNY_API constexpr bool bc_dest_axis_ok(cs::size_t a, cs::size_t c) {
+    return a == cs::dynamic_extent || c == cs::dynamic_extent || a == c || a == 1;
+}
+// `Ec` IS the result extents (rank R), so its axes are read directly; `Ea`
+// right-aligns into R the same way the engine's `bc_ext` does at run time.
+template <class Ea, class Ec, cs::size_t R, cs::size_t... D>
+_TNY_API constexpr bool bc_static_ok_dest(cs::index_sequence<D...>) {
+    bool ok = true;
+    ( (ok = ok && bc_dest_axis_ok(bc_sext<Ea, R>(D), Ec::static_extent(D))), ... );
+    return ok;
+}
 template <class Idx, class Ea, class Eb, cs::size_t R, cs::size_t... D>
 cs::extents<Idx, bc1(bc_sext<Ea, R>(D), bc_sext<Eb, R>(D))...>
 bcast_ext_(cs::index_sequence<D...>);
-// The WIDER of two offset index TYPES (by `sizeof`; a tie keeps the first, so a
-// same-width pair — the overwhelmingly common case — is unchanged). This is a pure
-// WIDTH pick, used for the index type a broadcast RESULT carries: the result is a
-// fresh, C-contiguous allocation, so its own extents/strides are non-negative and
-// the wider of the two operands' widths holds all of them.
-// (It does not — and cannot from the types alone — widen two equal-narrow operands
-// whose combined SPAN overflows: that stays the caller's responsibility, guarded by
-// index_fits/dispatch_index at the boundary.)
-// NB it is NOT the type an engine may decode OFFSETS in — see `_offset_int_t` below,
-// which is signedness-aware; a pure width pick can select an unsigned type over a
-// signed participant's negative stride and turn it into a huge positive offset.
+// The WIDER of two integer types (by `sizeof`; a tie keeps the FIRST). A pure WIDTH
+// pick, and nothing more: it is the width HALF that `_offset_int_t` below is built
+// from, NOT an answer to "which type holds every value both sides can name" — that
+// question is signedness-sensitive, and a width-only pick can land on an unsigned
+// type next to a signed participant's negative stride (turning it into a huge
+// positive offset) or, at equal width, on the FIRST type even when the second's
+// range is the larger one. Nothing outside `_offset_int_t` should use this directly.
 template <class Ia, class Ib>
 using _wider_int_t = cs::conditional_t<(sizeof(Ib) > sizeof(Ia)), Ib, Ia>;
-// The broadcast RESULT carries the wider of the two OPERANDS' index types.
-template <class Ea, class Eb>
-using _wider_index_t = _wider_int_t<typename Ea::index_type, typename Eb::index_type>;
 
 /* ---- the type an ENGINE decodes its offsets in ---------------------------- *
  * It must represent EVERY extent and stride value that ANY participant (the
@@ -290,6 +306,30 @@ template <class... I> struct _offset_int {
 };
 template <class... I> using _offset_int_t = typename _offset_int<I...>::type;
 
+// The index type a broadcast RESULT carries (#167) — the SAME rule, over the two
+// operands: a type that can represent every extent/stride value either operand's
+// index type can name (widest for an all-signed or all-unsigned pair; a SIGNED type
+// wide enough for both ranges for a mixed one).
+//
+// This was a `sizeof`-only pick (`_wider_int_t` of the two), which is not that rule
+// whenever the operands disagree in signedness (#347), in both directions:
+//   - a signed-narrow + UNSIGNED-WIDER pair (`int16` + `uint32`) resolved to the
+//     UNSIGNED type, handing back a result tensor that breaks teeny's index contract
+//     — signed throughout, which is what `flip()`/a negative slice step (both
+//     `static_assert` a signed index) and `index_fits`'s signed reach are stated
+//     against. A signed pair of operands would silently produce a result no longer
+//     flippable, for no reason the caller can see;
+//   - at EQUAL width the tie kept the FIRST, so an `int32` + `uint32` pair resolved
+//     to `int32` — which cannot represent the `uint32` operand's upper half, i.e.
+//     exactly the truncation the widening exists to prevent.
+// Only the mixed-signedness pairs move (`_offset_int_t` of a same-signedness pair IS
+// `_wider_int_t` of it, same tie rule), and none of those is reachable through
+// teeny's own vocabulary today — `shape`/`shape32`/`rank` are signed by construction
+// — so this is a latent-hazard fix: it keeps the rule true by construction rather
+// than by nothing currently exercising it.
+template <class Ea, class Eb>
+using _bcast_index_t = _offset_int_t<typename Ea::index_type, typename Eb::index_type>;
+
 /* ---- the type an ENGINE runs its OP in (`Cv`) ------------------------------ *
  * Distinct from `_offset_int_t` above (that one is about ADDRESSING): `Cv` is the
  * arithmetic type each element is widened to before the op and cast back from
@@ -315,7 +355,7 @@ template <class C> struct _cv_or_dest<void, C> { using type = compute_type_t<typ
 template <class Cv, class C> using _cv_or_dest_t = typename _cv_or_dest<Cv, C>::type;
 
 template <class Ea, class Eb>
-using bcast_extents = decltype(bcast_ext_<_wider_index_t<Ea, Eb>, Ea, Eb,
+using bcast_extents = decltype(bcast_ext_<_bcast_index_t<Ea, Eb>, Ea, Eb,
     bc_rank(Ea::rank(), Eb::rank())>(cs::make_index_sequence<bc_rank(Ea::rank(), Eb::rank())>{}));
 
 // RUNTIME extent/stride of operand `x` for RESULT axis `d` in result rank `R`,
@@ -364,14 +404,14 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
     // wider-indexed operand's extents/strides: silently, since the `static_cast<I>`s
     // below suppress the narrowing diagnostic that caught the sibling
     // `zipreduce_decode_` bug (#342). An OUT-OF-PLACE `c` already carries
-    // `_wider_index_t` of the two operands (#167), so it is the widest and the WIDTH
-    // half of this is a no-op there; it is the IN-PLACE ops (`c` IS `a`: `a.add_(b)`,
-    // `a.copy_(b)`, …) and a caller-supplied `into(dest)` that can hand us a NARROW
-    // destination next to a wide operand, and there `a.stride()` of 40000 folded to an
-    // int16 -25536 and read off the front of the buffer. The SIGNEDNESS half applies
-    // to both: a mixed-signedness trio (an unsigned-indexed operand next to a flipped,
-    // signed-indexed one) decodes in a signed type, so a stride of -1 stays -1 instead
-    // of becoming 4294967295.
+    // `_bcast_index_t` of the two operands (#167/#347) — this very rule over those
+    // two — so out-of-place this is a no-op; it is the IN-PLACE ops (`c` IS `a`:
+    // `a.add_(b)`, `a.copy_(b)`, …) and a caller-supplied `into(dest)` that can hand
+    // us a NARROW destination next to a wide operand, and there `a.stride()` of 40000
+    // folded to an int16 -25536 and read off the front of the buffer. The SIGNEDNESS
+    // half applies to both: a mixed-signedness trio (an unsigned-indexed operand next
+    // to a flipped, signed-indexed one) decodes in a signed type, so a stride of -1
+    // stays -1 instead of becoming 4294967295.
     //
     // This is not a promise about `c`'s own type: `c`'s own offsets are computed from
     // `c`'s own extents/strides, so they fit `c`'s index type by construction (a wider
@@ -381,6 +421,35 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
     // counter `k` is bounded by `ce[d]`, and the extent checks just below pin
     // `ae[d]`/`be[d]` to `ce[d]` (or 1 -> stride 0), so no operand is ever indexed
     // past its own extent in any axis.
+    //
+    // Shape guard against the DESTINATION (#361), the compile-time half of the
+    // per-axis `_TNY_CHECK` a few lines below. `bzip`'s wrapper gate
+    // (`bc_static_ok_r`) only asks whether the two OPERANDS broadcast together —
+    // never whether either one fits `c` — so a fully-static, provably-mismatched
+    // `a.add(a, into(y))` (8x8 into a 2x2) compiled and reached the runtime check.
+    // That check is `assert`-based, so `-DNDEBUG` compiles it OUT, and a
+    // destination LARGER than an operand then reads that operand past its own end
+    // (the bounds come from `c`, the operand offsets from its own strides) — the
+    // same silent-OOB class as #346/#353/#357, just reachable only through
+    // `into(dest)`. Static when every extent in play is static, the existing
+    // `_TNY_CHECK` otherwise; a no-op for every other caller, whose `c` is either
+    // the lhs operand itself (in-place) or built from `bcast_extents` (`oop`,
+    // `oop_cmp`), and so matches by construction.
+    //
+    // Placed HERE, in the engine, for the reachability reason `scalo_` spells out
+    // (#357): `bcmp` calls `bzip_` directly, bypassing the `bzip` wrapper, and one
+    // guard at the single point that does the indexing cannot be bypassed by a
+    // future caller either.
+    static_assert(A::rank() <= C::rank() && B::rank() <= C::rank(),
+                  "broadcast: operand rank exceeds result");   // bc_sext's precondition
+    static_assert(bc_static_ok_dest<typename A::extents_type, typename C::extents_type, C::rank()>(
+                      cs::index_sequence<D...>{}),
+                  "into(dest): dest's shape must match the broadcast result's — each lhs axis must "
+                  "equal dest's or be 1 (an operand stretches, a dest does not).");
+    static_assert(bc_static_ok_dest<typename B::extents_type, typename C::extents_type, C::rank()>(
+                      cs::index_sequence<D...>{}),
+                  "into(dest): dest's shape must match the broadcast result's — each rhs axis must "
+                  "equal dest's or be 1 (an operand stretches, a dest does not).");
     using I = _offset_int_t<typename C::index_type,
                             typename A::extents_type::index_type,
                             typename B::extents_type::index_type>;
@@ -394,6 +463,7 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
             sb[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(bc_str<R>(b, D))... };
     // runtime shape check: each operand extent must equal c's or be 1 (a larger
     // rhs would silently truncate — the worst failure mode in a numerics lib).
+    // The dynamic half of the guard the `static_assert`s above cover statically.
     for (cs::size_t r = 0; r < sizeof...(D); ++r) {
         _TNY_CHECK(ae[r] == ce[r] || ae[r] == 1, "broadcast: lhs extent mismatch");
         _TNY_CHECK(be[r] == ce[r] || be[r] == 1, "broadcast: rhs extent mismatch");
@@ -825,11 +895,12 @@ _TNY_HOST auto uop_out(const A & a, Uop f) {
  * `uop_to`'s `scalo_`/`unaryo_` require EXACT equality with the source — a
  * scalar-rhs or unary op has no stretch semantics at all (#357).
  *
- * Those two ALSO gate it at compile time (`ext_static_eq`) when both shapes are
- * fully static; `bzip_`'s is a `_TNY_CHECK` only, since `bzip`'s own static gate
- * (`bc_static_ok_r`) compares the two OPERANDS with each other, never either one
- * against `c`. Not a silent write either way — just a debug-time trip rather than
- * a compile error for a static mis-shaped tensor-rhs dest.
+ * All three gate it at compile time when the extents in play are static and fall
+ * back to a per-axis `_TNY_CHECK` otherwise — `ext_static_eq` for the exact-match
+ * pair, `bc_static_ok_dest` for `bzip_`'s broadcast rule (#361). `bzip`'s older
+ * wrapper gate (`bc_static_ok_r`) is a different question and stays: it compares
+ * the two OPERANDS with each other, never either one against `c`, so on its own it
+ * let a static mis-shaped tensor-rhs dest through to a check `-DNDEBUG` removes.
  *
  * The dest's ELEMENT TYPE is likewise the caller's alone, and it is the RESULT that
  * is cast to it — the arithmetic itself runs in the OPERANDS' compute type, so each
@@ -911,6 +982,18 @@ constexpr cs::size_t _static_numel_(cs::index_sequence<D...>) { return (cs::size
 template <class E>
 constexpr cs::size_t _static_numel() { return _static_numel_<E>(cs::make_index_sequence<E::rank()>{}); }
 
+// Gate shared by BOTH static-unroll fast paths (#343): fully static AND small
+// enough that unrolling one fold argument per element is still sane. Above
+// `TNY_MAX_STATIC_UNROLL` (defines.h — 256, clang's hard fold-argument limit) the
+// caller falls back to its runtime-decode engine, which handles any shape. The
+// `&&` short-circuits in the constant expression, so `_static_numel` is never
+// EVALUATED for a dynamic `E` (where `static_extent` is `dynamic_extent` and the
+// product would wrap).
+template <class E>
+constexpr bool _unrollable() {
+    return E::rank_dynamic() == 0 && _static_numel<E>() <= cs::size_t(TNY_MAX_STATIC_UNROLL);
+}
+
 /* ---- reduce op(a, b) elementwise into a scalar (dot: op=mul; sqdist: op=zip_sqdiff) --- *
  * One fused pass, NO intermediate tensor materialised. */
 template <class R, class A, class B, class Op, cs::size_t... D>
@@ -929,7 +1012,7 @@ _TNY_API R zipreduce_decode_(const A & a, const B & b, Op op, cs::index_sequence
     // offset instead of stepping backwards, and `a.data()[oa]` reads far off the front
     // of the buffer (#355 — the same defect class `bzip_` carried in #346). So the
     // pick is signedness-aware. For an all-signed or all-unsigned pair — every call
-    // site that is not this mixed case — `_offset_int_t` IS `_wider_index_t`
+    // site that is not this mixed case — `_offset_int_t` is the plain widest
     // (`_widest_int` of two left-folds to exactly `_wider_int_t`, same tie rule), so
     // those instantiations are byte-identical to before.
     //
@@ -967,6 +1050,9 @@ _TNY_API R zipreduce_decode_(const A & a, const B & b, Op op, cs::index_sequence
 // axreduce's own #218 static fast path (small fixed-rank dot/sqdist -- a
 // posdef cross-channel dot, a stencil tap accumulation -- pay pure loop
 // overhead otherwise).
+// CAPPED at TNY_MAX_STATIC_UNROLL elements (#343): the fold emits one argument
+// per element, which clang rejects outright past 256 and g++ compiles ever more
+// slowly -- a larger fully-static shape takes the decode path below instead.
 template <cs::size_t Lin, class R, class A, class B, class Op>
 _TNY_API R zipreduce_one_(const A & a, const B & b, Op op) {
     return op(static_cast<R>(a.data()[Lin]), static_cast<R>(b.data()[Lin]));
@@ -982,7 +1068,7 @@ template <class R, class A, class B, class Op, cs::size_t... D>
 _TNY_API R zipreduce_(const A & a, const B & b, Op op, cs::index_sequence<D...> seq) {
     using EA = typename A::extents_type; using LA = typename A::layout_type;
     using EB = typename B::extents_type;
-    if constexpr (EA::rank_dynamic() == 0 && EB::rank_dynamic() == 0
+    if constexpr (_unrollable<EA>() && EB::rank_dynamic() == 0
                   && cs::is_same<LA, ccontiguous>::value && cs::is_same<typename B::layout_type, ccontiguous>::value) {
         return zipreduce_static_<R>(a, b, op, cs::make_index_sequence<_static_numel<EA>()>{});
     } else {
@@ -1047,7 +1133,8 @@ _TNY_API void reduce_axes_(Out & out, const A & a, R init, Op op, const bool * r
 // function of it. Unrolling over the (static) element count then emits straight-line
 // FMA-style code with no loop back-edge and no runtime `%`/`/` — matching a
 // hand-written nested loop (the axis reduction was 3-7x slower otherwise, since the
-// runtime radix decode did not fold). `_red_oo` is the compile-time output offset for
+// runtime radix decode did not fold). CAPPED at TNY_MAX_STATIC_UNROLL elements
+// (#343) — see `_unrollable` above. `_red_oo` is the compile-time output offset for
 // input linear index `lin`: decode `lin` over the static input extents, weight each
 // kept axis by the (ccontiguous) output stride, drop the reduced axes.
 template <class E, class OE, long... Axes>
@@ -1096,8 +1183,9 @@ template <long... Axes, class R, class Op, class T,class E,class L,storage O,
 _TNY_API auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
     static_assert((_axis_in_range(Axes, E::rank()) && ...), "reduction axis out of range");
     tensor<R, OE, ccontiguous, storage::stack> out{};
-    if constexpr (E::rank_dynamic() == 0 && cs::is_same<L, ccontiguous>::value) {
-        // static + C-contiguous: unroll (input offset == linear index; output offset folds)
+    if constexpr (_unrollable<E>() && cs::is_same<L, ccontiguous>::value) {
+        // static + C-contiguous + small enough to unroll (#343): input offset == linear
+        // index, output offset folds. A bigger static shape takes the decode path below.
         reduce_axes_static_<Axes...>(out, a, init, op, cs::make_index_sequence<_static_numel<E>()>{});
     } else {
         bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
@@ -1138,10 +1226,9 @@ _TNY_HOST auto reduce_to(tensor<RE, OE, ccontiguous, storage::heap> && r) {
 /* ---- allclose: |a-b| <= atol + rtol*|b| for every (broadcast) element ---- */
 template <class R, class A, class B, cs::size_t... D>
 _TNY_API bool allclose_(const A & a, const B & b, R rtol, R atol, cs::index_sequence<D...>) {
-    // Two read-only operands, so this is the `zipreduce_decode_` situation (#342) — but
-    // the pick is the signedness-aware `_offset_int_t`, not the pure width
-    // `_wider_index_t`: it is an OFFSET decode type, not the index type of a fresh
-    // result (see `_offset_int_t`'s note above). Taking the FIRST operand's index type
+    // Two read-only operands, so this is the `zipreduce_decode_` situation (#342) — the
+    // pick is the signedness-aware `_offset_int_t`, never a pure `sizeof` widening
+    // (see `_offset_int_t`'s note above). Taking the FIRST operand's index type
     // alone truncated a wider-indexed `b`'s extents/strides, silently — the
     // `static_cast<I>`s below suppress the narrowing diagnostic that caught #342 — and
     // a 40000 stride folded to an int16 -25536 reads off the front of the buffer (#353).
@@ -1441,6 +1528,19 @@ using _reduce_result_t = cs::conditional_t<cs::is_same<Acc, void>::value, T, Acc
 // accumulator (`mean<float>(a)`) overrides this and is honoured by `_reduce_result_t`.
 template <class T>
 using _mean_result_t = cs::conditional_t<cs::is_integral<T>::value, double, T>;
+// `mean`'s DIVIDE type (default accumulator form): an integer `T` is converted to
+// `double` BEFORE dividing (so the division is exact, not truncating — the numpy
+// rule above); a floating `T` divides in its own reduce type and is cast down to
+// `T` afterwards. Named so `mean`'s axis form can express both branches as one
+// convert -> divide -> convert chain instead of an `if constexpr` on `T`.
+template <class T>
+using _mean_div_t = cs::conditional_t<cs::is_integral<T>::value, double, reduce_type_t<T>>;
+// `norm`'s ROOT type (default accumulator form): accumulate the squares — and take
+// the square root — in the reduce type when that is floating, else in `double` (an
+// integer tensor's norm is floating, the `mean` rule).
+template <class T>
+using _norm_root_t = cs::conditional_t<cs::is_floating_point<reduce_type_t<T>>::value,
+                                       reduce_type_t<T>, double>;
 
 // Seeds for max/min reductions. `cs::numeric_limits` is NOT specialized for
 // teeny's software half/bfloat16, so `numeric_limits<half>::lowest()` returns the
@@ -1528,13 +1628,22 @@ template <class T,class E,class L,storage O> _TNY_API bool tensor<T,E,L,O>::any(
 // type (`double`) is the accumulator. Each splits static (stack, host+device) /
 // dynamic (heap, host-only) to match `axreduce`; the result is accumulated in `R`
 // then cast to the public element type by `reduce_to`.
-// keepdim view fold: insert a size-1 axis at each (ascending, already-normalised)
-// position — used by both the generic "finish" step below and axis `normalize`.
-// `_axes_ascending(...)` lives in indexing.h (next to `_norm_axis`) — tensor.h's
-// multi-axis `unsqueeze<Ax...>`/`squeeze<Ax...>` folds need it too, and tensor.h
-// cannot include math.h.
-template <class Tn> _TNY_API auto _keepdims(const Tn & t) { return t; }
-template <long A0, long... Rest, class Tn> _TNY_API auto _keepdims(const Tn & t) { return _keepdims<Rest...>(t.template unsqueeze<A0>()); }
+// keepdim view fold: insert a size-1 axis at each (already-normalised) position —
+// used by both the generic "finish" step below and axis `normalize`. This is
+// exactly `unsqueeze<Axes...>` (tensor.h): the reduced tensor's rank plus the
+// number of reinserted axes IS the source rank, so positions normalised against
+// the source rank are already the "relative to the FINAL rank" positions
+// `unsqueeze` wants. Going through `unsqueeze` means the axes are sorted by
+// `_sorted_axes` (indexing.h, #275) like every other axis-list op, so they may be
+// listed in ANY order (#371) — only distinctness matters, asserted here so the
+// message names the keyword the caller actually wrote.
+// NB the EMPTY pack is NOT `unsqueeze<>()` (that would insert an axis at 0, see
+// #369): an empty keepdim list is a no-op, hence its own branch.
+template <long... Axes, class Tn> _TNY_API auto _keepdims(const Tn & t) {
+    static_assert(_all_distinct<static_cast<cs::size_t>(Axes)...>(), "keepdim fold: axes must be distinct (keepdims / normalize<Axes...>)");
+    if constexpr (sizeof...(Axes) == 0) return t;
+    else                                return t.template unsqueeze<Axes...>();
+}
 
 namespace _md {
 /** @brief Shared "finish" step for every axis reduction's generic trailing
@@ -1542,17 +1651,18 @@ namespace _md {
  *  tensor `r`, apply `keepdims_t` if present in `Tags...` — re-`unsqueeze` the
  *  named axes (normalised against `SrcRank`, the SOURCE tensor's rank) back in
  *  and materialise into a freshly-owned tensor, exactly as the old hand-written
- *  `_TNY_RED_KEEPDIMS` macro did (the view from `_keepdims`'s recursive
- *  `unsqueeze` fold bakes in a `const` element type via its CONST overload, so
+ *  `_TNY_RED_KEEPDIMS` macro did (the view from `_keepdims`'s `unsqueeze` bakes
+ *  in a `const` element type via its CONST overload, so
  *  `.clone()` can't be reused — the target is built explicitly with `r`'s own
  *  element type) — then write into `into_t<D>` if present, else return the
- *  (possibly keepdims-wrapped) tensor by value. Two overloads matching the SAME
- *  static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split as `axreduce` itself. */
+ *  (possibly keepdims-wrapped) tensor by value. The axes may be listed in ANY
+ *  order (`_keepdims` -> `unsqueeze` sorts them, #371). Two overloads matching
+ *  the SAME static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split as `axreduce`
+ *  itself. */
 template <long SrcRank, long... Axes, class R, class... Tags>
 _TNY_API decltype(auto) _red_finish_static(R && r, Tags... tags) {
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tags...);
     if constexpr (_kw::has<_is_keepdims_tag, Tags...>()) {
-        static_assert(_axes_ascending(_norm_axis(Axes, SrcRank)...), "keepdims: axes must be distinct and ascending");
         auto kv = _keepdims<_norm_axis(Axes, SrcRank)...>(r);
         tensor<typename cs::remove_reference_t<R>::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::stack> c{};
         c.copy_(kv);
@@ -1567,7 +1677,6 @@ template <long SrcRank, long... Axes, class R, class... Tags>
 _TNY_HOST decltype(auto) _red_finish_dynamic(R && r, Tags... tags) {
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tags...);
     if constexpr (_kw::has<_is_keepdims_tag, Tags...>()) {
-        static_assert(_axes_ascending(_norm_axis(Axes, SrcRank)...), "keepdims: axes must be distinct and ascending");
         auto kv = _keepdims<_norm_axis(Axes, SrcRank)...>(r);
         tensor<typename cs::remove_reference_t<R>::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::heap> c(kv.extents());
         c.copy_(kv);
@@ -1577,6 +1686,28 @@ _TNY_HOST decltype(auto) _red_finish_dynamic(R && r, Tags... tags) {
         if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) { out.dest.copy_(r); return out.dest; }
         else return static_cast<cs::remove_reference_t<R>>(static_cast<R&&>(r));  // force a prvalue (remove_reference_t defends against R ever deducing as a reference -- e.g. if a future caller passed an lvalue): decltype(auto) would otherwise deduce R&& from the xvalue cast and dangle once r's temporary is destroyed
     }
+}
+/** @brief Scale an already-computed axis-reduction result in place: divide every
+ *  element of the reduced tensor `r` by the number of source elements each of its
+ *  cells covers (`total / r.numel()`, `total` being the SOURCE tensor's `numel`),
+ *  in `r`'s own element type. `mean`'s "divide" step, factored out so `mean` can
+ *  be a single expression and reuse the shared axis-reduction shape. Allocates
+ *  nothing (in place + move out), so ONE `_TNY_API` overload serves both the
+ *  stack and the heap result. */
+template <class R, class I>
+_TNY_API auto _red_mean_scale(R && r, I total) {
+    using Rt = cs::remove_reference_t<R>;
+    r.div_(static_cast<typename Rt::element_type>(total / r.numel()));
+    return static_cast<Rt&&>(r);
+}
+/** @brief Square-root an already-computed axis-reduction result in place and move
+ *  it out — `norm`'s tail over `sqnorm`, factored out for the same reason (and
+ *  likewise allocation-free, hence a single `_TNY_API` overload). */
+template <class R>
+_TNY_API auto _red_sqrt(R && r) {
+    using Rt = cs::remove_reference_t<R>;
+    r.sqrt_();
+    return static_cast<Rt&&>(r);
 }
 } // namespace _md
 
@@ -1598,37 +1729,54 @@ _TNY_HOST decltype(auto) _red_finish_dynamic(R && r, Tags... tags) {
 // original tag pack -- so a stray `dtype<...>`/`axis<...>` (or anything else)
 // reaching HERE is always a caller mistake, not legitimate passthrough, and the
 // `accepts` guard below can safely reject it instead of silently ignoring it.
+// ONE axis-reduction overload — the single place the shape lives: the
+// `(sizeof...(Axes) > 0)` + static/dynamic SFINAE key, the `_TNY_API`/`_TNY_HOST`
+// split, the keyword guards, and the `_red_finish_*` tail. What varies per
+// reduction is only `EXPR`: an expression, in terms of the source tensor `a` and
+// the local accumulator alias `R`, producing the REDUCED tensor that the finish
+// step then applies `keepdims`/`into` to. Argument notes:
+//   CMP   `==` (static result -> stack, `_TNY_API`) or `!=` (dynamic -> heap, `_TNY_HOST`)
+//   FIN   `static` / `dynamic` — the `_red_finish_*` half matching CMP
+//   RTYPE what the in-body `R` alias means for this form (`reduce_type_t<T>` for
+//         the default form, `Acc` for the explicit-accumulator one) — a local
+//         `using` rather than a defaulted template parameter so that the LEADING
+//         template parameters can be the trailing variadic macro argument (their
+//         `class Acc, long... Axes` comma is then harmless)
+//   EXPR  parenthesised by the caller, so it too may contain commas
+#define _TNY_RED_AXIS_ONE(NAME, CMP, API, FIN, RTYPE, EXPR, /* leading tparams */...)                    \
+template <__VA_ARGS__, class T,class E,class L,storage O, class... Tags,                                \
+          cs::enable_if_t<(sizeof...(Axes) > 0) &&                                                      \
+                          _md::reduced_extents<E,Axes...>::rank_dynamic() CMP 0, int> = 0>              \
+API decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                      \
+    _TNY_KW_CHECK(#NAME, "keepdims or into(dest)", (_is_into_tag, _is_keepdims_tag), Tags...);           \
+    using R [[maybe_unused]] = RTYPE;                                                                   \
+    return _md::_red_finish_##FIN<(long)E::rank(), Axes...>(EXPR, tags...); }
+// The four-overload axis-reduction shape (`<Axes...>` × static/dynamic,
+// `<Acc, Axes...>` × static/dynamic) for a reduction whose reduced tensor is an
+// arbitrary EXPRESSION — one per form, since the default form deduces its own
+// result rule from `T` while the `Acc` form is told. `_TNY_RED_AXIS_CORE` below
+// is the common (INIT, OP) special case; `mean` and `norm` — whose result-type
+// rules differ from every other reduction's (integer -> `double`, and floating
+// always, respectively) — are the reason this hook exists rather than being
+// hand-written transcriptions of the shape.
+#define _TNY_RED_AXIS_CUSTOM(NAME, EXPR_DEFAULT, EXPR_ACC)                                              \
+_TNY_RED_AXIS_ONE(NAME, ==, _TNY_API,  static,  reduce_type_t<T>, EXPR_DEFAULT, long... Axes)            \
+_TNY_RED_AXIS_ONE(NAME, !=, _TNY_HOST, dynamic, reduce_type_t<T>, EXPR_DEFAULT, long... Axes)            \
+_TNY_RED_AXIS_ONE(NAME, ==, _TNY_API,  static,  Acc, EXPR_ACC, class Acc, long... Axes)                  \
+_TNY_RED_AXIS_ONE(NAME, !=, _TNY_HOST, dynamic, Acc, EXPR_ACC, class Acc, long... Axes)
+// The plain shape: accumulate over the named axes with (INIT, OP) — `INIT` is
+// written in terms of the accumulator alias `R` — then cast down to the public
+// result element type (`T` by default, the requested `Acc` when given).
 #define _TNY_RED_AXIS_CORE(NAME, INIT, OP)                                                              \
-template <long... Axes, class T,class E,class L,storage O, class... Tags, class R = reduce_type_t<T>,   \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), #NAME ": unrecognized keyword argument"); \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), #NAME ": a keyword was given more than once"); \
-    return _md::_red_finish_static<(long)E::rank(), Axes...>(_md::reduce_to<T>(_md::axreduce<Axes...>(a, INIT, _md::OP{})), tags...); } \
-template <long... Axes, class T,class E,class L,storage O, class... Tags, class R = reduce_type_t<T>,   \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), #NAME ": unrecognized keyword argument"); \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), #NAME ": a keyword was given more than once"); \
-    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(_md::reduce_to<T>(_md::axreduce<Axes...>(a, INIT, _md::OP{})), tags...); } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags, class R = Acc,     \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), #NAME ": unrecognized keyword argument"); \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), #NAME ": a keyword was given more than once"); \
-    return _md::_red_finish_static<(long)E::rank(), Axes...>(_md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})), tags...); } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags, class R = Acc,     \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), #NAME ": unrecognized keyword argument"); \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), #NAME ": a keyword was given more than once"); \
-    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(_md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})), tags...); }
+_TNY_RED_AXIS_CUSTOM(NAME, (_md::reduce_to<T>  (_md::axreduce<Axes...>(a, INIT, _md::OP{}))),            \
+                           (_md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{}))))
 _TNY_RED_AXIS_CORE(sum,    R(0),                 r_add)
 _TNY_RED_AXIS_CORE(prod,   R(1),                 r_mul)
 _TNY_RED_AXIS_CORE(max,    _reduce_seed_lowest<R>(),  r_max)
 _TNY_RED_AXIS_CORE(min,    _reduce_seed_highest<R>(), r_min)
 _TNY_RED_AXIS_CORE(sqnorm, R(0),                 r_addsq)   // Σaᵢ² over the named axes (result type = T, like sum)
 #undef _TNY_RED_AXIS_CORE
+// _TNY_RED_AXIS_ONE/_TNY_RED_AXIS_CUSTOM stay defined for mean/norm below; #undef after norm's.
 
 /** @brief Generic trailing keyword-bag entry point, shared by every reduction
  *  with this axis shape (`sum`/`prod`/`max`/`min`/`sqnorm`/`mean`/`norm`; `dot`
@@ -1667,10 +1815,8 @@ template <class Acc = void, class T,class E,class L,storage O, class Tag0, class
           class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                              \
           cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value==0, int> = 0>                                  \
 _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags) {                      \
-    static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template known<Tag0,Tags...>(), \
-                  #NAME ": unrecognized keyword argument");                                              \
-    static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template unique<Tag0,Tags...>(), \
-                  #NAME ": a keyword was given more than once");                                         \
+    _TNY_KW_CHECK(#NAME, "dtype<Acc>{}, axis<...>{}, keepdims or into(dest)",                            \
+                  (_is_dtype, _is_axis_tag, _is_into_tag, _is_keepdims_tag), Tag0, Tags...);             \
     using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     constexpr bool hasInto = !cs::is_same<decltype(out), _kw::unset>::value;                             \
@@ -1697,10 +1843,8 @@ template <class Acc = void, class T,class E,class L,storage O, class Tag0, class
           class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                              \
           cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value!=0, int> = 0>                                  \
 _TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags) {                      \
-    static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template known<Tag0,Tags...>(), \
-                  #NAME ": unrecognized keyword argument");                                              \
-    static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template unique<Tag0,Tags...>(), \
-                  #NAME ": a keyword was given more than once");                                         \
+    _TNY_KW_CHECK(#NAME, "dtype<Acc>{}, axis<...>{}, keepdims or into(dest)",                            \
+                  (_is_dtype, _is_axis_tag, _is_into_tag, _is_keepdims_tag), Tag0, Tags...);             \
     using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     constexpr bool hasInto = !cs::is_same<decltype(out), _kw::unset>::value;                             \
@@ -1721,59 +1865,19 @@ _TNY_RED_TAGGED(sum) _TNY_RED_TAGGED(prod) _TNY_RED_TAGGED(max) _TNY_RED_TAGGED(
  *         to `T`. For an INTEGER `T` the result element type is `double` (numpy:
  *         integer mean is float64; divides in `double`, not truncating). `mean<Acc,
  *         Axes...>(a)` makes `Acc` both the accumulator and result type. */
-// `Tags...` (keepdims/into, any subset/order) via the shared `_red_finish_*`
-// helpers, exactly like `_TNY_RED_AXIS_CORE`; mean's own int-vs-float branching
-// stays hand-written since it isn't shared by any other reduction.
-template <long... Axes, class T,class E,class L,storage O, class... Tags, class R = reduce_type_t<T>,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  decltype(auto) mean(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "mean: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "mean: a keyword was given more than once");
-    auto s = sum<R, Axes...>(a);                                          // sum in the (wide) reduce type
-    const auto cnt = a.numel() / s.numel();
-    if constexpr (cs::is_integral<T>::value) {                           // integer -> divide in double, return double
-        auto o = _md::reduce_to<double>(static_cast<decltype(s)&&>(s));
-        o.div_(static_cast<double>(cnt));
-        return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(o)&&>(o), tags...);
-    } else {
-        s.div_(static_cast<R>(cnt));
-        auto o = _md::reduce_to<T>(static_cast<decltype(s)&&>(s));
-        return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(o)&&>(o), tags...);
-    }
-}
-template <long... Axes, class T,class E,class L,storage O, class... Tags, class R = reduce_type_t<T>,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST decltype(auto) mean(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "mean: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "mean: a keyword was given more than once");
-    auto s = sum<R, Axes...>(a);                                          // sum in the (wide) reduce type
-    const auto cnt = a.numel() / s.numel();
-    if constexpr (cs::is_integral<T>::value) {                           // integer -> divide in double, return double
-        auto o = _md::reduce_to<double>(static_cast<decltype(s)&&>(s));
-        o.div_(static_cast<double>(cnt));
-        return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(o)&&>(o), tags...);
-    } else {
-        s.div_(static_cast<R>(cnt));
-        auto o = _md::reduce_to<T>(static_cast<decltype(s)&&>(s));
-        return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(o)&&>(o), tags...);
-    }
-}
-template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  decltype(auto) mean(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "mean: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "mean: a keyword was given more than once");
-    auto s = sum<Acc, Axes...>(a); s.div_(static_cast<Acc>(a.numel() / s.numel()));
-    return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
-}
-template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST decltype(auto) mean(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "mean: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "mean: a keyword was given more than once");
-    auto s = sum<Acc, Axes...>(a); s.div_(static_cast<Acc>(a.numel() / s.numel()));
-    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
-}
+// The four overloads (`<Axes...>` / `<Acc, Axes...>`, each × static/dynamic), the
+// keyword guards and the `Tags...` (keepdims/into, any subset/order) tail come
+// from the shared `_TNY_RED_AXIS_CUSTOM` shape; only the reduced-tensor
+// expression is mean's own. Default form: sum in the (wide) reduce type `R`,
+// convert to the divide type (`_mean_div_t`: `double` for an integer `T`, so the
+// division is exact rather than truncating; `R` itself for a floating one),
+// divide by the reduced count, then cast to the public result type
+// (`_mean_result_t`: `double` for integer, `T` for floating) — the two branches
+// of mean's int-vs-float rule expressed as one convert -> divide -> convert
+// chain. Accumulator form: sum in `Acc` and divide there (`Acc` IS the result).
+_TNY_RED_AXIS_CUSTOM(mean,
+    (_md::reduce_to<_mean_result_t<T>>(_md::_red_mean_scale(_md::reduce_to<_mean_div_t<T>>(sum<R, Axes...>(a)), a.numel()))),
+    (_md::_red_mean_scale(sum<Acc, Axes...>(a), a.numel())))
 _TNY_RED_TAGGED(mean)
 
 /** @brief Inner product over matching extents. Accumulates in the reduce type of
@@ -1788,25 +1892,31 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) 
     return static_cast<_reduce_result_t<Acc, promote_t<Ta,Tb>>>(
         _md::zipreduce_<R>(a, b, _md::mul{}, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
 }
-/** @brief Generic trailing keyword bag for `dot` (no axis concept, being binary):
- *  `dot(a, b, dtype<Acc>{})`, `dot(a, b, into(d))`, or both composed in either
- *  order — `dot`'s own small twin of `_TNY_RED_TAGGED` above (skips the
- *  axis-tag/`_red_dyn` machinery entirely, since dot always reduces every
- *  matching axis). Requires at least one trailing tag so it never competes with
- *  the plain `dot<Acc=void>(a, b)` above. */
-template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
-          class Tag0, class... Tags>
-_TNY_API decltype(auto) dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) {
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), "dot: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), "dot: a keyword was given more than once");
-    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;
-    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
-    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {
-        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, "dot into(dest): dest must be rank-0 (a scalar cell)");
-        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(dot<RAcc>(a, b)));
-        return out.dest;
-    } else return dot<RAcc>(a, b);
+/** @brief Generic trailing keyword bag for the BINARY, axis-less reductions
+ *  (`dot`/`sqdist`/`dist`): `NAME(a, b, dtype<Acc>{})`, `NAME(a, b, into(d))`, or
+ *  both composed in either order — the small twin of `_TNY_RED_TAGGED` above for
+ *  reductions that have no axis concept (so it skips the axis-tag/`_red_dyn`
+ *  machinery entirely: these always reduce every matching axis, and the scalar
+ *  result never allocates, hence a single `_TNY_API` overload rather than a
+ *  static/dynamic pair). Requires at least one trailing tag so it never competes
+ *  with the plain `NAME<Acc=void>(a, b)` each of them defines. Invoked once per
+ *  name, right after that name's own definition. */
+#define _TNY_RED_BINARY_TAGGED(NAME)                                                                     \
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, \
+          class Tag0, class... Tags>                                                                     \
+_TNY_API decltype(auto) NAME(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) { \
+    _TNY_KW_CHECK(#NAME, "dtype<Acc>{} or into(dest)", (_is_dtype, _is_into_tag), Tag0, Tags...);         \
+    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
+    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
+    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {                                      \
+        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, #NAME " into(dest): dest must be rank-0 (a scalar cell)"); \
+        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(NAME<RAcc>(a, b))); \
+        return out.dest;                                                                                 \
+    } else return NAME<RAcc>(a, b);                                                                      \
 }
+_TNY_RED_BINARY_TAGGED(dot)
+// _TNY_RED_BINARY_TAGGED(sqdist)/(dist) are invoked after their own definitions
+// further below (same shape, so the macro applies unchanged); #undef after dist's.
 
 /* ------------------------------------------------------------------ *
  *     Vector algebra & geometry (contained exact math)               *
@@ -1838,52 +1948,24 @@ _TNY_API auto norm(const tensor<T,E,L,O> & a) {
 /* --- axis norm: √(Σaᵢ² over the named axes) -> a lower-rank tensor. Floating result
  *     (integer -> double, mean rule); norm<Acc,Axes...> makes Acc accumulator+result.
  *     Accumulates the squares in a floating type and takes the root there.
- *     `Tags...` (keepdims/into, any subset/order) via `_red_finish_*`, exactly
- *     like `_TNY_RED_AXIS_CORE` — hand-written since norm's deduced Res/R/D
- *     differ from every other reduction's. Reducing (sqrt, cast to Res) BEFORE
- *     applying `_red_finish_*` rather than after is equivalent: `unsqueeze` only
- *     reshapes (no data change), so it commutes with the elementwise sqrt/cast
- *     that follow it either way. --------- */
-template <long... Axes, class T,class E,class L,storage O, class... Tags,
-          class Res = _mean_result_t<T>, class R = reduce_type_t<T>,
-          class D   = cs::conditional_t<cs::is_floating_point<R>::value, R, double>,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "norm: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "norm: a keyword was given more than once");
-    auto s = sqnorm<D, Axes...>(a); s.sqrt_();
-    auto r = _md::reduce_to<Res>(static_cast<decltype(s)&&>(s));
-    return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(r)&&>(r), tags...);
-}
-template <long... Axes, class T,class E,class L,storage O, class... Tags,
-          class Res = _mean_result_t<T>, class R = reduce_type_t<T>,
-          class D   = cs::conditional_t<cs::is_floating_point<R>::value, R, double>,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "norm: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "norm: a keyword was given more than once");
-    auto s = sqnorm<D, Axes...>(a); s.sqrt_();
-    auto r = _md::reduce_to<Res>(static_cast<decltype(s)&&>(s));
-    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(r)&&>(r), tags...);
-}
-template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "norm: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "norm: a keyword was given more than once");
-    auto s = sqnorm<Acc, Axes...>(a); s.sqrt_();
-    return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
-}
-template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "norm: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "norm: a keyword was given more than once");
-    auto s = sqnorm<Acc, Axes...>(a); s.sqrt_();
-    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
-}
+ *     `Tags...` (keepdims/into, any subset/order) via `_red_finish_*`: the four
+ *     overloads and their guards come from the shared `_TNY_RED_AXIS_CUSTOM`
+ *     shape, only the reduced-tensor expression is norm's own (its result rule —
+ *     floating always — is what kept it off `_TNY_RED_AXIS_CORE`). Reducing
+ *     (sqrt, cast to the result type) BEFORE applying `_red_finish_*` rather than
+ *     after is equivalent: `unsqueeze` only reshapes (no data change), so it
+ *     commutes with the elementwise sqrt/cast that follow it either way. --------- */
+// Default form: accumulate the squares in `_norm_root_t<T>` (the reduce type when
+// floating, else `double`) and take the root there, then cast to `_mean_result_t<T>`
+// (integer -> double, the mean rule). Accumulator form: squares, root and result
+// all in `Acc`.
+_TNY_RED_AXIS_CUSTOM(norm,
+    (_md::reduce_to<_mean_result_t<T>>(_md::_red_sqrt(sqnorm<_norm_root_t<T>, Axes...>(a)))),
+    (_md::_red_sqrt(sqnorm<Acc, Axes...>(a))))
 _TNY_RED_TAGGED(norm)
 #undef _TNY_RED_TAGGED
+#undef _TNY_RED_AXIS_CUSTOM
+#undef _TNY_RED_AXIS_ONE
 
 /** @brief Squared Euclidean distance `Σ(aᵢ-bᵢ)²` between two same-shape tensors —
  *         mathematically `sqnorm(a-b)`, computed as one fused pass with no `a-b`
@@ -1920,32 +2002,9 @@ _TNY_API auto dist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b)
 }
 
 // dtype/into trailing-bag form (dot's shape: binary, no axis, so no _TNY_RED_TAGGED).
-template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
-          class Tag0, class... Tags>
-_TNY_API decltype(auto) sqdist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) {
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), "sqdist: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), "sqdist: a keyword was given more than once");
-    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;
-    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
-    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {
-        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, "sqdist into(dest): dest must be rank-0 (a scalar cell)");
-        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(sqdist<RAcc>(a, b)));
-        return out.dest;
-    } else return sqdist<RAcc>(a, b);
-}
-template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
-          class Tag0, class... Tags>
-_TNY_API decltype(auto) dist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) {
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), "dist: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), "dist: a keyword was given more than once");
-    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;
-    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
-    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {
-        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, "dist into(dest): dest must be rank-0 (a scalar cell)");
-        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(dist<RAcc>(a, b)));
-        return out.dest;
-    } else return dist<RAcc>(a, b);
-}
+_TNY_RED_BINARY_TAGGED(sqdist)
+_TNY_RED_BINARY_TAGGED(dist)
+#undef _TNY_RED_BINARY_TAGGED
 
 /** @brief Out-of-place unit vector `a / norm(a)` -> a NEW dense tensor (static
  *         shape -> stack, dynamic -> heap). The result element type is floating
@@ -1970,18 +2029,17 @@ _TNY_API auto & normalize(const tensor<T,E,L,O> & a, into_t<D> out) {
 
 /* --- axis normalize: divide each sub-vector by its norm over the named axes ------ *
  * `n = norm<Axes...>(a)` removes the reduced axes; restore them as size-1 (keepdim)
- * so it broadcasts back over `a`. Inserting size-1 axes at ascending positions (each
- * unsqueeze grows the rank for the next), so the axes must be distinct & ascending.
+ * so it broadcasts back over `a`. The axes must be distinct but may be listed in ANY
+ * order (`_keepdims` routes through `unsqueeze`, which sorts them — #275/#371).
  * `_keepdims` itself (used here and by the reduction `keepdims` overloads) lives
  * earlier in this file, right before the axis-reduction section that needs it first. */
 
 /** @brief `normalize<Axes...>(a)` — unit vectors along the named axes: each element
  *         divided by the L2 norm over those axes (keepdim broadcast). Floating result
- *         (integer -> double). Axes distinct & ascending (numpy-normalised). */
+ *         (integer -> double). Axes distinct, in any order (numpy-normalised). */
 template <long... Axes, class T, class E, class L, storage O,
           cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
 _TNY_API auto normalize(const tensor<T,E,L,O> & a) {
-    static_assert(_axes_ascending(_norm_axis(Axes, (long)E::rank())...), "normalize: axes must be distinct and ascending");
     auto n = norm<Axes...>(a);                                          // reduced norm (floating tensor)
     return a.div(_keepdims<_norm_axis(Axes, (long)E::rank())...>(n));   // broadcast-divide (keepdim)
 }
@@ -1993,11 +2051,12 @@ _TNY_API auto normalize(const tensor<T,E,L,O> & a, axis<Axes...>) { return norma
 /** @brief `normalize<Axes...>(a, into(y))` — the axis-scoped unit vectors into a
  *         caller buffer `y` (same shape as `a`, since only the DIVISOR is reduced).
  *         Same one-line forward to `.div(..., out)` as the full-tensor form; the
- *         reduced norm itself is still materialised (it is a tensor, not a scalar). */
+ *         reduced norm itself is still materialised (it is a tensor, not a scalar).
+ *         Axes distinct, in any order — same rule as the allocating form (`_keepdims`
+ *         asserts distinctness and sorts). */
 template <long... Axes, class T, class E, class L, storage O, class D,
           cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
 _TNY_API auto & normalize(const tensor<T,E,L,O> & a, into_t<D> out) {
-    static_assert(_axes_ascending(_norm_axis(Axes, (long)E::rank())...), "normalize: axes must be distinct and ascending");
     auto n = norm<Axes...>(a);                                               // reduced norm (floating tensor)
     return a.div(_keepdims<_norm_axis(Axes, (long)E::rank())...>(n), out);   // .div's into overload writes out & returns out.dest
 }
@@ -2090,12 +2149,12 @@ _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::normalize_() {
     return div_(static_cast<T>(tny::norm(*this)));   // tny:: — the member norm() now shadows the free one here
 }
 // in-place unit vectors along the named axes: *this /= norm(*this over Axes) (keepdim).
+// Axes distinct, in any order (`_keepdims` sorts them via `unsqueeze`).
 template <class T,class E,class L,storage O> template <long... Axes>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::normalize_() {
     static_assert(cs::is_floating_point<compute_type_t<T>>::value,
                   "normalize_: requires a floating-point element type (integer division would truncate)");
     static_assert(sizeof...(Axes) > 0, "normalize_<Axes...>: need at least one axis");
-    static_assert(_axes_ascending(_norm_axis(Axes, (long)rank())...), "normalize_: axes must be distinct and ascending");
     auto n = tny::norm<Axes...>(*this);                                          // reduced norm (floating tensor)
     return div_(_keepdims<_norm_axis(Axes, (long)rank())...>(n));                // broadcast-divide (keepdim)
 }
