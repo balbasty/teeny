@@ -36,7 +36,21 @@ that process guide.
    allocates (heap/CUDA storage, out-of-place ops on dynamic shapes) is
    `_TNY_HOST`. Element access, in-place math, views, static-shape out-of-place
    ops are `_TNY_API`. A `_TNY_API` function must not call a `_TNY_HOST` one on
-   the device path.
+   the device path. **Corollary — split every forwarder that straddles the
+   line.** Where a feature has a static/dynamic overload PAIR (static result →
+   stack, `_TNY_API`; dynamic result → heap, `_TNY_HOST`), any *thin forwarder*
+   over that pair — a value-tag twin (`axis<...>{}`, `dtype<T>{}`), a member
+   wrapper around a free function — must itself be split in two, `enable_if`'d
+   on the *same predicate* the pair uses, so each arm's annotation matches the
+   overload it resolves to. A single unconditionally `_TNY_API` forwarder is a
+   `__host__ __device__` function that calls a `__host__` allocator on the
+   dynamic path. The host-only suite is **blind** to this (both macros expand to
+   nothing without `__CUDACC__`), so it is caught only by the nvcc device pass —
+   add any new such spelling to `tests/nvcc_smoke.cu`, in its **dynamic**-shaped
+   form, since a static shape takes the safe arm. Existing instances of the
+   pattern: `to(dtype)` (`tensor.h`), `_TNY_RED_AXIS_DEF`/`_TNY_RED_TAGGED_DEF`
+   and `_red_finish_static`/`_red_finish_dynamic` (`math.h`), and — since #375 —
+   `index_select`'s and `scan`'s `axis<...>{}` value forms.
 5. **Keep it teeny.** Every header is small and single-purpose. Prefer deleting
    code to adding it. The whole point is compactness; resist feature creep that
    does not serve real kernels.

@@ -1038,9 +1038,18 @@ public:
     /** @brief Value form: `t.index_select(idx, axis<Axis>{})` == `t.index_select<Axis>(idx)`.
      *         Deduces `Axis` from the tag, so no `.template` disambiguator is needed
      *         on a type-dependent receiver (the primary reason this form exists —
-     *         the mesh-distance kernels this feature targets call it from templates). */
-    template <class Ti,class Ei,class Li,storage Oi, long Axis>
+     *         the mesh-distance kernels this feature targets call it from templates).
+     *         SPLIT IN TWO on the same key as the `<Axis>` pair it forwards to (#375):
+     *         a static result is stack-owned (host+device) so the forwarder is
+     *         `_TNY_API`; a dynamic result is heap-owned (host only) so it is
+     *         `_TNY_HOST` — else nvcc's device pass would see a `_TNY_API` forwarder
+     *         call a `__host__` allocator. */
+    template <class Ti,class Ei,class Li,storage Oi, long Axis,
+              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>::rank_dynamic() == 0, int> = 0>
     _TNY_API auto index_select(const tensor<Ti,Ei,Li,Oi> & idx, axis<Axis>) const { return index_select<Axis>(idx); }
+    template <class Ti,class Ei,class Li,storage Oi, long Axis,
+              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>::rank_dynamic() != 0, int> = 0>
+    _TNY_HOST auto index_select(const tensor<Ti,Ei,Li,Oi> & idx, axis<Axis>) const { return index_select<Axis>(idx); }
     template <class Ti,class Ei,class Li,storage Oi, long Axis, class D>
     _TNY_API auto & index_select(const tensor<Ti,Ei,Li,Oi> & idx, axis<Axis>, into_t<D> out) const { return index_select<Axis>(idx, out); }
 

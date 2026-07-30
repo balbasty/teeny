@@ -785,8 +785,18 @@ _TNY_HOST auto scan(const tensor<T,E,L,O> & t, Carry init, F f) {
     scan_<Axis>(out, init, f);
     return out;
 }
-template <long Axis, class T, class E, class L, storage O, class Carry, class F>
+/** @brief Value form: `scan(t, axis<Axis>{}, init, f)` == `scan<Axis>(t, init, f)`.
+ *         SPLIT IN TWO on the same `is_static` key as the `<Axis>` pair it forwards
+ *         to (#375): a static shape yields a stack result (host+device) so the
+ *         forwarder is `_TNY_API`; a dynamic shape yields a heap result (host only,
+ *         via `clone()`) so it is `_TNY_HOST` — else nvcc's device pass would see a
+ *         `_TNY_API` forwarder call a `__host__` allocator. */
+template <long Axis, class T, class E, class L, storage O, class Carry, class F,
+          cs::enable_if_t<tensor<T,E,L,O>::is_static, int> = 0>
 _TNY_API auto scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) { return scan<Axis>(t, init, f); }
+template <long Axis, class T, class E, class L, storage O, class Carry, class F,
+          cs::enable_if_t<!tensor<T,E,L,O>::is_static, int> = 0>
+_TNY_HOST auto scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) { return scan<Axis>(t, init, f); }
 
 /** @brief `into(dest)` form: write the scanned result into a preallocated
  *         `dest` (a shape matching `t`'s EXACTLY, checked -- a `static_assert`
