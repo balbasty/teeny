@@ -405,6 +405,11 @@ auto z = zeros<T>(shape); ones<T>(sh); full(sh,v); arange<T>(n);  // creation. z
 zeros(sh, dtype<T>{}); full(sh,v,dtype<T>{}); arange(n, dtype<T>{});  // value-tag T (deduced,
                       //   no .template); a LEADING explicit template arg still names the backend
                       //   — zeros<storage::pinned>(sh, dtype<T>{}). Same for empty().
+zeros<storage::pinned>(sh, dtype<T>{}, fcontiguous{});  // ...and that leading backend arg takes the
+                      //   SAME trailing keyword bag, ANY subset/ANY order (#373) — dtype and/or a
+                      //   layout tag, or none at all (zeros<storage::pinned>(sh)). It used to accept
+                      //   exactly ONE dtype{} tag and nothing else. A storage_c<...>{} tag on top of
+                      //   it is the one rejection ("pick one" — that IS the backend keyword).
 zeros(sh, dtype<T>{}, storage_c<storage::pinned>{});  // ...or compose BOTH value tags, either
                       //   order (zeros(sh, storage_c<...>{}, dtype<T>{}) too) — no explicit
                       //   template argument at all. Same for empty/ones/full/arange.
@@ -1024,8 +1029,12 @@ is generic.
     (`_fac_storage`/`_fac_on_stack`/`_fac_allocates`, `tensor.h`): route the
     call through a class template's `static constexpr ... value` and give each
     HALF of the split its OWN trait name, so the two lists differ by a plain
-    template-id. A condition with no pack in it (the `dtype<T>` forwarders
-    right below them) is fine inline — the pack is the part MSVC chokes on.
+    template-id. A condition with no pack in it is fine inline — the pack is
+    the part MSVC chokes on. NB each factory splits TWICE: once on the `T`-led
+    entry point, once on the BACKEND-led one right below it (#373), and BOTH
+    halves of both pairs must gate on the named traits. #373 reproduced the
+    bug verbatim in its new overloads because that branch predated this fix —
+    which is exactly why this is an authoring rule and not a one-off patch.
   - **Floor a pack-derived array to size 1.** `x[sizeof...(D)]` is a
     zero-length array — a GCC/Clang extension MSVC rejects (`C2466`) — the
     moment a rank-0 operand makes the pack empty. Always

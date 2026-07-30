@@ -2101,7 +2101,10 @@ _TNY_API auto make_view(T * p, Shape e, Layout, Tags... tags) {
  *
  * `empty`/`full`/`zeros`/`ones` each ship TWO overloads whose template parameter
  * lists differ ONLY in this SFINAE condition: the resolved backend is `stack`
- * (host+device, `_TNY_API`) or it allocates (host only, `_TNY_HOST`). Written
+ * (host+device, `_TNY_API`) or it allocates (host only, `_TNY_HOST`). That split
+ * happens TWICE per factory — once on the `T`-led entry point, once on the
+ * BACKEND-led one right below it (#373), which takes the very same keyword pack —
+ * so all four pairs go through these traits. Written
  * INLINE in `enable_if_t<...>`, that condition is a constexpr CALL whose template
  * argument list expands the keyword pack —
  * `storage_resolve(storage_arg<O, storage_deduce, Tags...>(), ...)`. Real MSVC in
@@ -2109,8 +2112,8 @@ _TNY_API auto make_view(T * p, Shape e, Layout, Tags... tags) {
  * apart: it merges the two declarations into ONE template and rejects the second
  * as a redefinition (`C2995`) with duplicated default template arguments
  * (`C2572`), which cascades into every `empty()`/`zeros()`/... call deducing to
- * `void`. (The sibling `dtype<T>` forwarders below keep their inline condition
- * and are fine — theirs has no pack in it, which is the part MSVC chokes on.)
+ * `void`. (`arange`'s backend-led entry point needs none of this — it has no
+ * host/device split to keep apart, so there is only ever one of it.)
  *
  * So: route the call through a class template's `::value`, and give each HALF of
  * the split its OWN name, leaving two parameter lists that differ by a plain
@@ -2180,20 +2183,25 @@ _TNY_HOST auto empty(Shape e, Tags... /*tags*/) {
     using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
     return tensor<ET, Shape, LO, R>(e, _uninit);
 }
-/** @brief Legacy forwarder for the one spelling the generic entry point above
- *  cannot cover: a LEADING explicit template argument that means the BACKEND
- *  rather than the element type, because a `dtype<T>{}` tag makes `T` deducible
- *  from the call instead — `empty<storage::pinned>(e, dtype<double>{})`. A
- *  non-variadic overload is more specialised than a variadic one in partial
- *  ordering, so this wins whenever it applies (verified on both compilers with
- *  a standalone probe before this landed); every other spelling falls through
- *  to the generic entry point above. */
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API auto empty(Shape e, dtype<T>) { return empty<T, O, Layout>(e); }
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
-_TNY_HOST auto empty(Shape e, dtype<T>) { return empty<T, O, Layout>(e); }
+/** @brief BACKEND-LED entry point — the one spelling the `T`-led entry point above
+ *  cannot cover: a LEADING explicit template argument that names the BACKEND rather
+ *  than the element type (`empty<storage::pinned>(e, dtype<double>{}, fcontiguous{})`),
+ *  because a value can never bind the `class T` of the entry point above.
+ *
+ *  `storage O` has **no default** here, so this overload is viable only when the
+ *  backend is actually named: with no explicit template argument `O` is neither
+ *  deducible nor defaulted and the candidate simply drops out, leaving the `T`-led
+ *  entry point alone. Past that leading argument it takes the very SAME keyword bag,
+ *  so every keyword still composes in ANY subset and ANY order (#373) — a leading
+ *  backend argument is no longer a "one `dtype{}` tag and nothing else" dead end. A
+ *  `storage_c<...>{}` tag on top of the explicit backend is the one thing it rejects,
+ *  on `storage_arg`'s named "pick one" `static_assert`. */
+template <storage O, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
+_TNY_API auto empty(Shape e, Tags... tags) { return empty<void, O, Layout>(e, tags...); }
+template <storage O, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
+_TNY_HOST auto empty(Shape e, Tags... tags) { return empty<void, O, Layout>(e, tags...); }
 
 /** @brief `make_local<T>(extents)` — a stack-owned tensor (static shape).
  *         `T` defaults to `float` (numpy's default float dtype). Thin spelling of
@@ -2256,18 +2264,16 @@ _TNY_HOST auto full(Shape e, V v, Tags... /*tags*/) {
     using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
     auto t = empty<ET, R, LO>(e); t.fill_(static_cast<ET>(v)); return t;
 }
-/** @brief Legacy forwarder for the one spelling the generic entry point above
- *  cannot cover: a LEADING explicit template argument that means the BACKEND
- *  rather than the element type, because a `dtype<T>{}` tag makes `T` deducible
- *  from the call instead — `full<storage::pinned>(e, v, dtype<double>{})`. See
- *  `empty()`'s twin (tensor.h) for the full explanation; the same partial-
- *  ordering mechanism applies here. */
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class V, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API auto full(Shape e, V v, dtype<T>) { return full<T, O, Layout>(e, v); }
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class V, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
-_TNY_HOST auto full(Shape e, V v, dtype<T>) { return full<T, O, Layout>(e, v); }
+/** @brief BACKEND-LED entry point — a LEADING explicit template argument that names
+ *  the BACKEND rather than the element type: `full<storage::pinned>(e, v,
+ *  dtype<double>{}, fcontiguous{})`. See `empty()`'s twin above for why `storage O`
+ *  carries no default here and how the keyword bag composes (#373). */
+template <storage O, class Layout = void, class Shape, class V, class... Tags,
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
+_TNY_API auto full(Shape e, V v, Tags... tags) { return full<void, O, Layout>(e, v, tags...); }
+template <storage O, class Layout = void, class Shape, class V, class... Tags,
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
+_TNY_HOST auto full(Shape e, V v, Tags... tags) { return full<void, O, Layout>(e, v, tags...); }
 
 /** @brief `zeros<T>(extents)` / `ones<T>(extents)` — a new tensor of 0s / 1s.
  *         `T` defaults to `float`. Same ownership deduction, backend selector, and
@@ -2296,13 +2302,13 @@ _TNY_HOST auto zeros(Shape e, Tags... /*tags*/) {
     using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
     return full<ET, R, LO>(e, ET(0));
 }
-/** @brief Legacy forwarder — see `full()`'s twin above. */
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API  auto zeros(Shape e, dtype<T>) { return zeros<T, O, Layout>(e); }
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
-_TNY_HOST auto zeros(Shape e, dtype<T>) { return zeros<T, O, Layout>(e); }
+/** @brief BACKEND-LED entry point — see `empty()`'s twin above (#373). */
+template <storage O, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
+_TNY_API  auto zeros(Shape e, Tags... tags) { return zeros<void, O, Layout>(e, tags...); }
+template <storage O, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
+_TNY_HOST auto zeros(Shape e, Tags... tags) { return zeros<void, O, Layout>(e, tags...); }
 
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
           cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
@@ -2325,13 +2331,13 @@ _TNY_HOST auto ones(Shape e, Tags... /*tags*/) {
     using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
     return full<ET, R, LO>(e, ET(1));
 }
-/** @brief Legacy forwarder — see `full()`'s twin above. */
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API  auto ones(Shape e, dtype<T>) { return ones<T, O, Layout>(e); }
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
-_TNY_HOST auto ones(Shape e, dtype<T>) { return ones<T, O, Layout>(e); }
+/** @brief BACKEND-LED entry point — see `empty()`'s twin above (#373). */
+template <storage O, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
+_TNY_API  auto ones(Shape e, Tags... tags) { return ones<void, O, Layout>(e, tags...); }
+template <storage O, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
+_TNY_HOST auto ones(Shape e, Tags... tags) { return ones<void, O, Layout>(e, tags...); }
 
 /** @brief `arange<T>(n)` — a 1-D tensor `[0, 1, ..., n-1]` (heap, host). `T`
  *         defaults to `int64_t` (an integer range, like numpy `arange(n)`). A
@@ -2353,10 +2359,12 @@ _TNY_HOST auto arange(long n, Tags... /*tags*/) {
         "arange<..., storage::gpu>: a device fill needs a kernel launch; use to<storage::gpu>(arange<T>(n)).");
     auto t = empty<ET, R, ccontiguous>(E{n}); t.iota_(); return t;
 }
-/** @brief Legacy forwarder — see `full()`'s twin above (the analogous "leading
- *  O when a dtype tag is present" spelling: `arange<storage::pinned>(n, dtype<double>{})`). */
-template <storage O = storage_deduce, class T>
-_TNY_HOST auto arange(long n, dtype<T>) { return arange<T, O>(n); }
+/** @brief BACKEND-LED entry point — see `empty()`'s twin above (#373). The analogous
+ *  "leading explicit O" spelling: `arange<storage::pinned>(n, dtype<double>{})`. A
+ *  `storage_c<...>{}` tag on top of the explicit backend names the duplicate on
+ *  `storage_arg`'s "pick one" `static_assert` rather than falling off the overload set. */
+template <storage O, class... Tags>
+_TNY_HOST auto arange(long n, Tags... tags) { return arange<void, O>(n, tags...); }
 /** @brief Static `arange<T, N>()` — a stack `[0..N-1]` (host+device, folds). */
 template <class T = cs::int64_t, long N>
 _TNY_API auto arange() { tensor<T, cs::extents<cs::int64_t, static_cast<cs::size_t>(N)>, ccontiguous, storage::stack> t{}; t.iota_(); return t; }
