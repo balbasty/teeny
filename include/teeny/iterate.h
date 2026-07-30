@@ -824,6 +824,15 @@ _TNY_API auto & scan(const tensor<T,E,L,O> & t, Carry init, F f, into_t<D> out) 
     // Windows' LLP64, so it truncated extents above 2^31 while the math engines'
     // copy did not; `check_into_same_shape` compares in a type that is at least
     // 64 bits on every platform.)
+    //
+    // What it actually buys HERE is the DIAGNOSTIC, not memory safety: `copy_` on
+    // the next line checks extents itself (in `bzip_`, in a 64-bit type), so a
+    // mis-shaped dest was already refused — just with a broadcast wording, and one
+    // step later. The exception, and the reason this call is not redundant, is that
+    // `bzip_`'s rule is broadcast-tolerant (`ae[r] == ce[r] || ae[r] == 1`): a
+    // SOURCE extent of 1 against a dest extent n > 1 sails through `copy_` and gets
+    // stretched, while `into(dest)` promises an exact shape match. Only this guard
+    // rejects that pair (`tests/test_into_shape_guard.cpp` pins exactly it).
     _md::check_into_same_shape(out.dest, t, cs::make_index_sequence<E::rank()>{});
     out.dest.copy_(t);
     scan_<Axis>(out.dest, init, f);

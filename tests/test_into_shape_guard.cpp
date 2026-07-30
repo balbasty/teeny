@@ -11,11 +11,29 @@
 // and `scan`'s `into(dest)` form -- and `scan`'s copy hand-rolled its runtime loop
 // comparing extents as `long`. `long` is 32 bits under Windows' LLP64 while
 // teeny's default index type is `int64_t`, so on that platform it TRUNCATED any
-// extent above 2^31: a source of extent 2^32+5 compared EQUAL to a dest of extent
-// 5, the guard passed, and `scan` then copied four billion elements through a
-// five-element buffer. The math engines' copy cast to `cs::size_t` and did not.
-// All three now call `_md::check_into_same_shape`, whose runtime comparison type
+// extent above 2^31 and a source of extent 2^32+5 compared EQUAL to a dest of
+// extent 5. The math engines' copy cast to `cs::size_t` and did not. All three now
+// call `_md::check_into_same_shape`, whose runtime comparison type
 // (`_md::ext_cmp_t`) is at least 64 bits on EVERY platform.
+//
+// SCOPE, honestly: that `long` truncation is a real TYPE bug, but it was not
+// letting a silent out-of-bounds write through, and #363 framed this as
+// maintainability for good reason ("No correctness bug in any of the three copies
+// as they stand"). Two things stood behind `scan`'s guard already. (a) `scan`'s
+// very next statement is `out.dest.copy_(t)`, and `copy_`'s own per-axis extent
+// check inside `bzip_` runs in `_offset_int_t` (64-bit here, whatever `long` is),
+// so it rejects a truncating pair independently -- with `scan`'s guard call
+// deleted outright, both the 8x8-into-2x2 and the 2^32+5-into-5 cases below still
+// abort, just with `copy_`'s broadcast wording instead of the `into(dest)` one.
+// (b) `_TNY_CHECK` is `assert`-based, so none of this exists under NDEBUG anyway.
+// The outcome of the fix is therefore "on one platform (Windows, debug builds) a
+// worse diagnostic becomes the right one", not "an OOB write was prevented".
+//
+// The one shape pair where `scan`'s OWN guard is the only thing standing is a
+// SOURCE extent of 1 against a DEST extent n > 1: `bzip_`'s check is
+// broadcast-aware (`ae[r] == ce[r] || ae[r] == 1`), so it happily STRETCHES the
+// source there, while `into(dest)` requires an exact match and must reject it.
+// That is what pins the `scan` call site below.
 //
 // This pins:
 //   - the comparison type's width and signedness, and that it distinguishes the
@@ -24,9 +42,10 @@
 //   - a correctly-shaped `into(dest)` still works for all three producers, on
 //     static and dynamic shapes alike;
 //   - a MIS-SHAPED dest aborts for all three (the guard is wired in at each of the
-//     three consolidated call sites, not just at two of them);
-//   - and specifically that `scan` aborts on the large-extent mismatch above --
-//     the case the narrow comparison used to wave through.
+//     three consolidated call sites, not just at two of them) -- including the
+//     broadcastable source-extent-1 pair, which is the only one of these that
+//     actually FAILS if `scan`'s call to the helper is removed;
+//   - and that the large-extent mismatch aborts too.
 // The aborts are only expected when _TNY_CHECK is live (host, non-NDEBUG).
 #include <teeny/teeny.h>
 #include <cstdio>
@@ -59,7 +78,7 @@ static_assert(cs::is_unsigned<_md::ext_cmp_t>::value,
 // The truncation the old spelling suffered, demonstrated with a fixed-width type
 // so every platform sees what LLP64 saw...
 static_assert(static_cast<int32_t>(BIG) == static_cast<int32_t>(SMALL),
-              "2^32+5 and 5 are indistinguishable in 32 bits -- this is the bug");
+              "2^32+5 and 5 are indistinguishable in 32 bits -- this is the truncation");
 // ...and the shared comparison telling them apart regardless.
 static_assert(!_md::ext_eq(BIG, SMALL), "ext_eq must not truncate an extent above 2^31");
 static_assert(!_md::ext_eq(SMALL, BIG), "...in either argument order");
@@ -108,6 +127,9 @@ int main() {
     // `static_assert` half), which no runtime suite can exercise -- same convention
     // as test_into.cpp's commented-out repros.
     // `code` indexes the producer so a failure names the site that stopped checking.
+    // NB for `code == 2` this pair (source LARGER than dest in every axis) is also
+    // refused by `copy_` a step later, so it does not by itself prove `scan`'s own
+    // guard is wired in -- the source-extent-1 loop below is the one that does.
     for (int code = 0; code < 3; ++code) {
         pid_t p = fork();
         if (p == 0) {
@@ -124,14 +146,43 @@ int main() {
         if (!(WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT)) return 11 + 2*code;
     }
 
+    // ---- a BROADCASTABLE mismatch: source extent 1, dest extent 4 -----------
+    // The pair that isolates the `into(dest)` guard from every other check in the
+    // library, and the reason it is here: `bzip_` (so `copy_`, so everything the
+    // tensor-rhs family does) accepts `ae[r] == ce[r] || ae[r] == 1` -- a source
+    // axis of extent 1 is legally STRETCHED to the dest's extent. `into(dest)` is
+    // not a broadcast: the caller handed us the buffer to write, its shape must be
+    // the result's shape exactly, and a silently-stretched source is a caller
+    // mistake we are supposed to name.
+    // So this pair passes every downstream check and ONLY `check_into_same_shape`
+    // rejects it -- which makes it the regression probe for the `scan` site
+    // specifically: delete `scan`'s call to the helper and `code == 2` stops
+    // aborting (its `copy_` broadcasts 1 -> 4 happily) and this test fails, whereas
+    // the 8x8-into-2x2 pair above keeps passing on `copy_`'s check alone.
+    for (int code = 0; code < 3; ++code) {
+        pid_t p = fork();
+        if (p == 0) {
+            if (!freopen("/dev/null", "w", stderr)) _exit(2);
+            auto a = zeros<double>(shape<-1>{1});               // ONE element...
+            auto y = zeros<double>(shape<-1>{4});               // ...into four slots
+            if (code == 0) a.mul(2.0, into(y));                 // scalar rhs -> scalo_
+            if (code == 1) exp(a, into(y));                     // unary      -> unaryo_
+            if (code == 2) scan<0>(a, 0.0, sum_op{}, into(y));  // scan
+            _exit(0);                                           // must NOT reach here
+        }
+        int st = 0;
+        if (waitpid(p, &st, 0) < 0) return 16 + 2*code;
+        if (!(WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT)) return 17 + 2*code;
+    }
+
     // ---- the LARGE-EXTENT mismatch: 2^32+5 elements into a 5-element dest ----
-    // The case `scan`'s old `long` comparison waved through on LLP64. Nothing is
-    // allocated and nothing is read: the source is a VIEW claiming a huge extent
-    // over a small buffer, and the guard fires before the first load.
+    // The pair `scan`'s old `long` comparison could not tell apart on LLP64.
+    // Nothing is allocated and nothing is read: the source is a VIEW claiming a
+    // huge extent over a small buffer, and the guard fires before the first load.
     // Case 2 calls the shared helper DIRECTLY, so what aborts is unambiguously the
-    // consolidated guard: `scan`'s own `copy_` would refuse this pair a step later
-    // through `bzip_`'s broadcast check, whereas `scalo_` (case 1) and the helper
-    // (case 2) have nothing else standing between them and a 2^32-element write.
+    // consolidated guard. Case 0 (`scan`) would be refused by its own `copy_` a
+    // step later even without the guard -- see the loop above for the probe that
+    // pins that site.
     for (int code = 0; code < 3; ++code) {
         pid_t p = fork();
         if (p == 0) {
@@ -145,8 +196,8 @@ int main() {
             _exit(0);                                           // must NOT reach here
         }
         int st = 0;
-        if (waitpid(p, &st, 0) < 0) return 16 + 2*code;
-        if (!(WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT)) return 17 + 2*code;
+        if (waitpid(p, &st, 0) < 0) return 22 + 2*code;
+        if (!(WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT)) return 23 + 2*code;
     }
 #endif
     return 0;
