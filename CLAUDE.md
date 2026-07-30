@@ -197,7 +197,11 @@ memory lives in — `wrap(dptr, e, storage_v<storage::gpu>)` wraps a **device** 
 `storage::pinned`/`storage::mapped` page-locked host memory. Since `wrap` always yields a
 VIEW, the space folds to its view kind (`gpu -> gpu_view`, …) via `storage_view_of`, so
 you never spell the `_view` kinds (symmetric with `as_anyrank<Space>` /
-`from_dlpack<T,Space>`). Since #282, that trailing tag is a generic keyword-tag
+`from_dlpack<T,Space>`). `storage::heap`/`storage::stack` name no distinct memory
+space — they're ownership kinds, not backends — so passing one here just folds to a
+plain `storage::view` like any other host-accessible tag (#395); for an OWNING
+heap/stack tensor use `empty<T, storage::heap>(e)`/`make_heap<T>(e)` instead. Since #282,
+that trailing tag is a generic keyword-tag
 bag (kwargs mechanism, #277) rather than a fixed `storage_c<Space>` parameter —
 same behavior today, but a future keyword (e.g. a `stream` tag) lands on all
 `wrap` forms without touching any of them again. Functional

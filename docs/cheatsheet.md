@@ -40,6 +40,9 @@ as_tensor(any_mdspan);  wrap(any_mdspan);      // wrap an mdspan/submdspan resul
 wrap(ptr, shape, storage_v<storage::gpu>);   // memory-space tag — on EVERY wrap form, mdspan included
 wrap(any_mdspan, storage_v<storage::gpu>);   //   pass the plain backend; it folds to the view kind
                                              //   (gpu -> gpu_view) — you never spell the _view kinds
+wrap(ptr, shape, storage_c<storage::heap>{});   // heap/stack name no memory SPACE, so this still folds
+                                                //   to storage::view (NOT an owning tensor) — use
+                                                //   empty<T,storage::heap>(e)/make_heap<T>(e) for that
 
 make_view(ptr, shape);           // alias of wrap that deduces the extents type
 make_view(ptr, shape, fcontiguous{});   // ...same layout spellings as wrap (or make_view<fcontiguous>)
