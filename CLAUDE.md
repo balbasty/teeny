@@ -1026,6 +1026,24 @@ is generic.
     include-order-backwards silently breaks
     this. Also: always write `numeric_limits<T>::min()`/`max()` parenthesized,
     the standard workaround for the same macro collision.
+  - **A scoped-enum template argument can land in an integral NTTP slot on
+    `/permissive-` MSVC** (#316), where the standard says the candidate is
+    discarded. Two shapes, both real: (1) `from_dlpack<T, Space>(m)` written
+    with DEPENDENT arguments inside a template also matched the fixed-rank
+    `from_dlpack<T, cs::size_t R, storage Space>` (`Space` bound to `R`) and
+    went ambiguous — `dispatch_dlpack`/`dispatch_dlpack_dtype` therefore call
+    `_dl::import_anyrank<T, Space>` straight, one candidate on every compiler;
+    with non-dependent arguments MSVC gets it right, so the public
+    `from_dlpack<T, storage::gpu_view>(m)` spelling is fine. (2) `empty<T,
+    storage::O>(shape)` — the shape drags `cuda::std::empty(const T (&)[N])` in
+    by ADL, and with EXACTLY TWO explicit arguments the arity matches, so MSVC
+    hard-errors (C3411) binding the enum to `N`. Three or more explicit
+    arguments (teeny's own internal `empty<T, storage::gpu, Layout>` calls) miss
+    the arity and are unaffected. There is no library-side fix — ADL cannot be
+    turned off — so tests qualify `tny::empty<...>` and `docs/cuda-compat.md`
+    steers users to the keyword spelling `empty<T>(e, storage_c<O>{})`. Watch
+    for it whenever a new API takes a `storage`/enum non-type parameter in the
+    second template slot.
 
 ## Adding a feature — checklist
 
