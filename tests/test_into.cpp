@@ -218,6 +218,81 @@ int main() {
     a.mul(2.0, into(fi2));  if (!close(fi2(0), 2.0) || !close(fi2(2), 6.0)) return 74;
     neg(a, into(fi2));      if (!close(fi2(2), -3.0))                       return 75;
 
+    // ====== TENSOR-RHS into(dest) SHAPE VALIDATION, at COMPILE TIME (#361) ======
+    // The broadcasting producer's own compile-time gate only ever compared the two
+    // OPERANDS with each other, so a static, provably-mismatched dest compiled and
+    // was left to the debug-only runtime check — which `-DNDEBUG` removes, at which
+    // point a dest LARGER than an operand reads that operand past its end (the loop
+    // bounds come from the dest, the operand offsets from its own strides).
+    //
+    // The rule is ASYMMETRIC, and that is the whole subtlety: an OPERAND axis of
+    // extent 1 stretches (stride 0), a DEST axis of extent 1 does not. So (1,3) into
+    // (2,3) is legal as an operand and illegal as a dest. `bc_static_ok_dest` is the
+    // predicate the two static_asserts in the engine ask; exercising it directly is
+    // the only compile-time check this runtime suite can actually run — a firing
+    // static_assert is a hard error, and there is no compile-fail harness here (same
+    // convention as the #357 repros above and the ones commented out below).
+    {
+        using E22 = shape<2,2>; using E88 = shape<8,8>; using E23 = shape<2,3>;
+        using E13 = shape<1,3>; using E3  = shape<3>;   using Edd = shape<-1,-1>;
+        constexpr auto ix2 = cs::make_index_sequence<2>{};
+        // the issue's own repro: an (8,8) operand into a (2,2) dest -> ill-formed
+        static_assert(!_md::bc_static_ok_dest<E88, E22, 2>(ix2),
+                      "#361: a static (8,8) operand into a static (2,2) dest must be rejected");
+        // ...and the other direction, the one that reads OOB under -DNDEBUG
+        static_assert(!_md::bc_static_ok_dest<E22, E88, 2>(ix2),
+                      "#361: a dest LARGER than the operand must be rejected too");
+        // a size-1 OPERAND axis stretches to the dest -> fine
+        static_assert(_md::bc_static_ok_dest<E13, E23, 2>(ix2),
+                      "#361: an extent-1 operand axis broadcasts into the dest");
+        // ...but a size-1 DEST axis does NOT stretch to the operand
+        static_assert(!_md::bc_static_ok_dest<E23, E13, 2>(ix2),
+                      "#361: an extent-1 DEST axis is a real extent, not a stretch");
+        // a SHORTER operand right-aligns; its missing leading axes are extent 1 -> fine
+        static_assert(_md::bc_static_ok_dest<E3, E23, 2>(ix2),
+                      "#361: a shorter operand's padded leading axes are extent 1");
+        // matching shapes, and anything dynamic on either side, stay for the runtime check
+        static_assert(_md::bc_static_ok_dest<E23, E23, 2>(ix2),
+                      "#361: matching static shapes are accepted");
+        static_assert(_md::bc_static_ok_dest<Edd, E22, 2>(ix2) &&
+                      _md::bc_static_ok_dest<E88, Edd, 2>(ix2),
+                      "#361: a dynamic extent on either side is unknowable here -> runtime check");
+    }
+
+    // What must keep working: every CORRECTLY-shaped tensor-rhs into(dest) call.
+    auto bd = local<double, shape<2,3>>(); bd.iota_(1.0, 1.0);      // 1..6
+    auto bcol = local<double, shape<2,1>>(); bcol(0,0)=10; bcol(1,0)=20;
+    auto out23 = local<double, shape<2,3>>();
+    bd.add(bcol, into(out23));                     // (2,1) rhs stretches over (2,3)
+    if (out23(0,0)!=11 || out23(1,2)!=26)    return 116;
+    auto v3 = local<double, shape<3>>(); v3(0)=100; v3(1)=200; v3(2)=300;
+    bd.add(v3, into(out23));                      // SHORTER rhs, right-aligned
+    if (out23(0,0)!=101 || out23(1,2)!=306)  return 117;
+    // ...and a comparison, which drives the same engine directly (bypassing the
+    // wrapper the old operand-vs-operand gate lived in)
+    auto cmask = bd > v3;                         // all false: 1..6 < 100..300
+    if (cmask(0,0) || cmask(1,2))            return 118;
+    // dynamic shapes still go to the runtime check and must pass when they match
+    auto ddyn = zeros<double>(shape<-1,-1>{2,3}); ddyn.iota_(1.0, 1.0);
+    auto odyn = zeros<double>(shape<-1,-1>{2,3});
+    ddyn.add(ddyn, into(odyn));
+    if (odyn(0,0)!=2 || odyn(1,2)!=12)       return 119;
+    // a MIXED static/dynamic pair: the static axis folds, the dynamic one defers
+    auto dmix = zeros<double>(shape<-1,3>{2,3}); dmix.iota_(1.0, 1.0);
+    auto omix = zeros<double>(shape<-1,3>{2,3});
+    dmix.add(dmix, into(omix));
+    if (omix(0,0)!=2 || omix(1,2)!=12)       return 120;
+
+    // The mis-shaped calls are now COMPILE errors, so they cannot live in a running
+    // test — same commented-out convention as the #357 repros above; verified by hand:
+    //   auto a8 = zeros<double>(shape<8,8>{}); auto y2 = zeros<double>(shape<2,2>{});
+    //   a8.add(a8, into(y2));     // static: compile error (was: debug-only _TNY_CHECK)
+    //   y2.add(y2, into(a8));     // static: compile error (was: OOB read under -DNDEBUG)
+    //   auto r23 = zeros<double>(shape<2,3>{}); auto r13 = zeros<double>(shape<1,3>{});
+    //   r23.add(r23, into(r13));  // static: compile error (a dest axis does not stretch)
+    //   auto ad = zeros<double>(shape<-1,-1>{8,8}); auto yd = zeros<double>(shape<-1,-1>{2,2});
+    //   ad.add(ad, into(yd));     // dynamic: _TNY_CHECK fires (unchanged)
+
     // ========= dest's dtype casts the RESULT, not the arithmetic (#379) =========
     // `into(dest)` is the one path where the caller picks the destination's element
     // type, and what that type does is receive the CAST result: the computation

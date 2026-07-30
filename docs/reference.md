@@ -388,16 +388,24 @@ the result would be discarded.
 allocated — the source's own shape for a unary or scalar-rhs op, the broadcast
 shape for a tensor-rhs one. There is no stretching on the way *out*: only the
 operands broadcast, never the destination, so a `y` smaller in any axis is
-rejected, not written repeatedly. For a **unary or scalar-rhs** producer that is a
-**compile error** when both shapes are fully static, and a debug-time check
-(`assert`, off under `-DNDEBUG`) when either is dynamic; the broadcasting
-**tensor-rhs** producer catches it with the debug-time check either way.
+rejected, not written repeatedly. Every producer catches it the same way: a
+**compile error** whenever the extents in play are static, and a debug-time check
+(`assert`, off under `-DNDEBUG`) when any of them is dynamic. A **unary or
+scalar-rhs** producer wants **exact** equality (it has nothing to stretch); a
+**tensor-rhs** one applies its broadcast rule to the *operands* only — each operand
+axis must equal `y`'s or be 1.
 
 ```cpp
 auto a = zeros(shape<8,8>{});
 auto y = zeros(shape<2,2>{});
 a.mul(2.0, into(y));   // compile error: dest's shape must match the source's
 exp(a, into(y));       // same
+a.add(a, into(y));     // same, for the broadcasting tensor-rhs form
+
+auto row = zeros(shape<1,3>{});
+auto out = zeros(shape<2,3>{});
+out.add(row, into(out));   // fine: the (1,3) OPERAND stretches over (2,3)
+out.add(out, into(row));   // compile error: a (1,3) DEST does not stretch
 ```
 
 **`y` must not self-overlap** either — no `extent > 1` axis with stride 0 (only a

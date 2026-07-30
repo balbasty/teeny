@@ -208,6 +208,29 @@ _TNY_API constexpr bool bc_static_ok_r(cs::index_sequence<D...>) {
     ( (ok = ok && bc_axis_ok(bc_sext<Ea, R>(D), bc_sext<Eb, R>(D))), ... );
     return ok;
 }
+// ...and the same question asked of ONE OPERAND against the DESTINATION (#361).
+// `bc_static_ok_r` above compares the two operands with EACH OTHER, which says
+// nothing about the tensor actually written: the destination's shape is the
+// producer's own business for every allocating path, but `into(dest)` lets the
+// caller pick it, and there a static, provably-wrong dest used to compile.
+//
+// ASYMMETRIC, unlike `bc_axis_ok`: the OPERAND may be extent 1 (it stretches to
+// the destination's extent, stride 0), the DESTINATION may not — `bzip_` takes
+// its loop bounds from `c`, so a dest extent of n against an operand extent of
+// 1 < m < n indexes the operand past its own end. Exactly the runtime rule
+// `ae[r] == ce[r] || ae[r] == 1` the engine already checks, hoisted to compile
+// time; either extent dynamic -> unknowable here, left to that check.
+_TNY_API constexpr bool bc_dest_axis_ok(cs::size_t a, cs::size_t c) {
+    return a == cs::dynamic_extent || c == cs::dynamic_extent || a == c || a == 1;
+}
+// `Ec` IS the result extents (rank R), so its axes are read directly; `Ea`
+// right-aligns into R the same way the engine's `bc_ext` does at run time.
+template <class Ea, class Ec, cs::size_t R, cs::size_t... D>
+_TNY_API constexpr bool bc_static_ok_dest(cs::index_sequence<D...>) {
+    bool ok = true;
+    ( (ok = ok && bc_dest_axis_ok(bc_sext<Ea, R>(D), Ec::static_extent(D))), ... );
+    return ok;
+}
 template <class Idx, class Ea, class Eb, cs::size_t R, cs::size_t... D>
 cs::extents<Idx, bc1(bc_sext<Ea, R>(D), bc_sext<Eb, R>(D))...>
 bcast_ext_(cs::index_sequence<D...>);
@@ -398,6 +421,35 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
     // counter `k` is bounded by `ce[d]`, and the extent checks just below pin
     // `ae[d]`/`be[d]` to `ce[d]` (or 1 -> stride 0), so no operand is ever indexed
     // past its own extent in any axis.
+    //
+    // Shape guard against the DESTINATION (#361), the compile-time half of the
+    // per-axis `_TNY_CHECK` a few lines below. `bzip`'s wrapper gate
+    // (`bc_static_ok_r`) only asks whether the two OPERANDS broadcast together —
+    // never whether either one fits `c` — so a fully-static, provably-mismatched
+    // `a.add(a, into(y))` (8x8 into a 2x2) compiled and reached the runtime check.
+    // That check is `assert`-based, so `-DNDEBUG` compiles it OUT, and a
+    // destination LARGER than an operand then reads that operand past its own end
+    // (the bounds come from `c`, the operand offsets from its own strides) — the
+    // same silent-OOB class as #346/#353/#357, just reachable only through
+    // `into(dest)`. Static when every extent in play is static, the existing
+    // `_TNY_CHECK` otherwise; a no-op for every other caller, whose `c` is either
+    // the lhs operand itself (in-place) or built from `bcast_extents` (`oop`,
+    // `oop_cmp`), and so matches by construction.
+    //
+    // Placed HERE, in the engine, for the reachability reason `scalo_` spells out
+    // (#357): `bcmp` calls `bzip_` directly, bypassing the `bzip` wrapper, and one
+    // guard at the single point that does the indexing cannot be bypassed by a
+    // future caller either.
+    static_assert(A::rank() <= C::rank() && B::rank() <= C::rank(),
+                  "broadcast: operand rank exceeds result");   // bc_sext's precondition
+    static_assert(bc_static_ok_dest<typename A::extents_type, typename C::extents_type, C::rank()>(
+                      cs::index_sequence<D...>{}),
+                  "into(dest): dest's shape must match the broadcast result's — each lhs axis must "
+                  "equal dest's or be 1 (an operand stretches, a dest does not).");
+    static_assert(bc_static_ok_dest<typename B::extents_type, typename C::extents_type, C::rank()>(
+                      cs::index_sequence<D...>{}),
+                  "into(dest): dest's shape must match the broadcast result's — each rhs axis must "
+                  "equal dest's or be 1 (an operand stretches, a dest does not).");
     using I = _offset_int_t<typename C::index_type,
                             typename A::extents_type::index_type,
                             typename B::extents_type::index_type>;
@@ -411,6 +463,7 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
             sb[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(bc_str<R>(b, D))... };
     // runtime shape check: each operand extent must equal c's or be 1 (a larger
     // rhs would silently truncate — the worst failure mode in a numerics lib).
+    // The dynamic half of the guard the `static_assert`s above cover statically.
     for (cs::size_t r = 0; r < sizeof...(D); ++r) {
         _TNY_CHECK(ae[r] == ce[r] || ae[r] == 1, "broadcast: lhs extent mismatch");
         _TNY_CHECK(be[r] == ce[r] || be[r] == 1, "broadcast: rhs extent mismatch");
@@ -842,11 +895,12 @@ _TNY_HOST auto uop_out(const A & a, Uop f) {
  * `uop_to`'s `scalo_`/`unaryo_` require EXACT equality with the source — a
  * scalar-rhs or unary op has no stretch semantics at all (#357).
  *
- * Those two ALSO gate it at compile time (`ext_static_eq`) when both shapes are
- * fully static; `bzip_`'s is a `_TNY_CHECK` only, since `bzip`'s own static gate
- * (`bc_static_ok_r`) compares the two OPERANDS with each other, never either one
- * against `c`. Not a silent write either way — just a debug-time trip rather than
- * a compile error for a static mis-shaped tensor-rhs dest.
+ * All three gate it at compile time when the extents in play are static and fall
+ * back to a per-axis `_TNY_CHECK` otherwise — `ext_static_eq` for the exact-match
+ * pair, `bc_static_ok_dest` for `bzip_`'s broadcast rule (#361). `bzip`'s older
+ * wrapper gate (`bc_static_ok_r`) is a different question and stays: it compares
+ * the two OPERANDS with each other, never either one against `c`, so on its own it
+ * let a static mis-shaped tensor-rhs dest through to a check `-DNDEBUG` removes.
  *
  * The dest's ELEMENT TYPE is likewise the caller's alone, and it is the RESULT that
  * is cast to it — the arithmetic itself runs in the OPERANDS' compute type, so each
