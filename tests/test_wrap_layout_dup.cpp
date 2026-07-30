@@ -21,10 +21,12 @@
 // Like `test_into.cpp`'s mis-shaped-`into()` note and `test_math.cpp`'s `dot`
 // note, no compile-fail harness exists in this repo to assert a call fails to
 // compile -- the actual `wrap(...)`/`make_view(...)` duplicate calls below
-// are commented out and were verified manually (both before this fix, where
-// they wrongly compiled or -- for the direct `wrap` case -- compiled with the
-// wrong, generic message; and after, where all four now fail with the named
-// "a layout tag was already given positionally" message). What IS exercised
+// are commented out and were verified manually. Before this fix: the direct
+// `wrap` cases (bad1/bad2) already errored, but only with wrap's generic
+// "unrecognised trailing argument" message, not one naming the actual
+// mistake; the `make_view` case (bad3) compiled SILENTLY (see the mechanism
+// recap above). After this fix, all four fail with the named "a layout tag
+// was already given positionally" message. What IS exercised
 // here at compile time: the underlying `_kw::has<_is_layout_tag, ...>` guard
 // against the exact `Tags...` packs each call site sees (mirroring
 // `test_kwargs.cpp`/`test_kwargs_readers.cpp`'s convention of testing the
@@ -87,14 +89,19 @@ int main() {
     // (commented out -- see the file header: no compile-fail harness exists.
     //  Verified manually, both before and after this fix.)
     //   auto bad1 = wrap(buf, shape<2,3>{}, fcontiguous{}, fcontiguous{});
-    //     // BEFORE: compiled silently (bug). AFTER: "wrap(): a layout tag was
-    //     // already given positionally — remove the duplicate".
+    //     // BEFORE: errored, but only with wrap's generic "unrecognised
+    //     // trailing argument" message (the duplicate landed in Tags... and
+    //     // was rejected as an unknown keyword, not named as a duplicate).
+    //     // AFTER: "wrap(): a layout tag was already given positionally —
+    //     // remove the duplicate".
     //   auto bad2 = wrap(buf, shape<2,3>{}, ccontiguous{}, ccontiguous{});
     //     // same, C-order.
     //   auto bad3 = make_view(buf, shape<2,3>{}, fcontiguous{}, fcontiguous{});
-    //     // BEFORE: compiled silently (the make_view-specific manifestation --
-    //     // see the file header). AFTER: "make_view(): a layout tag was
-    //     // already given positionally — remove the duplicate".
+    //     // BEFORE: compiled SILENTLY (the make_view-specific manifestation --
+    //     // see the file header: partial ordering re-absorbs the duplicate into
+    //     // wrap's own Layout parameter, so wrap's own guard never sees it).
+    //     // AFTER: "make_view(): a layout tag was already given positionally —
+    //     // remove the duplicate".
     //   auto bad4 = wrap(buf, shape<2,3>{}, ccontiguous{}, fcontiguous{});
     //     // the pre-existing DISAGREEING pair -- already errored before this
     //     // fix (with the generic "unrecognised trailing argument" message);
