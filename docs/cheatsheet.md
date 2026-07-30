@@ -158,8 +158,9 @@ x.unfold<Axis>(size, step);  x.unfold<Axis>(size);  // pytorch Tensor.unfold: ap
                     //   selector (like flip/squeeze), not an axis<...> list (only ONE axis binds).
 x.index_select<Axis>(idx);       // gather along Axis by a rank-1 integer index TENSOR
                     //   (runtime data, unlike take_along); idx values wrap negative;
-                    //   static idx shape -> stack result, else heap (source must be
-                    //   host-accessible). into(dest) form too: x.index_select<Axis>(idx,
+                    //   static idx shape -> stack result (host+device, like clone()),
+                    //   else heap (host only, source must be host-accessible).
+                    //   into(dest) form too: x.index_select<Axis>(idx,
                     //   into(dest)) (no alloc, device-safe; dest's axis-Axis extent must
                     //   match idx's, checked; dest must not alias x). Value form takes a
                     //   TRAILING axis<...>{} (no .template on a dependent receiver -- unlike

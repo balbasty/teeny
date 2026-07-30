@@ -299,5 +299,43 @@ int main()
     if (hcol50(2) != 9.0) return 44;
     if (memc(cudaMemcpyDeviceToHost) != 1) return 45;
 
+    // ---- #377: the STATIC (stack-result) allocating index_select is _TNY_API, so
+    //      it must accept a DEVICE source exactly like clone()'s / to()'s static
+    //      overloads do — that spelling is what a kernel holding a gpu_view calls.
+    //      NB the guard this used to carry sat in the function BODY, so it only
+    //      fires on a real CALL: these have to be calls, not decltype probes.
+    //      (The fake runtime's "device" pointers are plain malloc, so the host can
+    //      read the gathered values back here; on a real GPU this is device code.)
+    float sb377[15]; for (int i = 0; i < 15; ++i) sb377[i] = (float)i;
+    auto g377  = to<storage::gpu>(wrap(sb377, shape<5,3>{}));    // owning gpu, 5x3 = 0..14
+    auto gv377 = g377.view();                                    // gpu_view, fully static
+    static_assert(decltype(gv377)::ownership == storage::gpu_view, "view of gpu -> gpu_view");
+
+    auto cl377 = gv377.clone();                                  // the siblings that already worked
+    static_assert(decltype(cl377)::ownership == storage::stack, "static clone() of a gpu_view -> stack");
+    auto tt377 = gv377.to<double, true>();
+    static_assert(decltype(tt377)::ownership == storage::stack, "static to<>() of a gpu_view -> stack");
+
+    local<int, shape<2>> idx377{}; idx377(0) = 3; idx377(1) = 0;   // (negative idx values are
+                                                                   // covered in test_index_select)
+    auto sel377 = gv377.index_select<0>(idx377);                 // <- used to be a static_assert error
+    static_assert(decltype(sel377)::ownership == storage::stack, "static index_select of a gpu_view -> stack");
+    static_assert(cs::is_same<decltype(sel377)::shape_type, shape<2,3>>::value, "gathered shape is (2,3)");
+    if (sel377(0,0) != 9.f  || sel377(0,2) != 11.f) return 46;   // row 3 = [9,10,11]
+    if (sel377(1,0) != 0.f  || sel377(1,2) != 2.f)  return 47;   // row 0 = [0,1,2]
+
+    // ...same for an OWNING gpu source with a device-resident index tensor, through
+    // the axis<...> value form (that forwarder is _TNY_API on this branch too).
+    auto gidx377 = to<storage::gpu>(idx377);
+    auto sel377b = g377.index_select(gidx377, axis<0>{});
+    static_assert(decltype(sel377b)::ownership == storage::stack, "value-form gather of a gpu source -> stack");
+    if (sel377b(0,1) != 10.f || sel377b(1,1) != 1.f) return 48;
+
+    // The DYNAMIC (heap-result) overload stays host-only — it allocates and copies
+    // on the host, so it keeps the host-accessibility guard. Left commented out
+    // because a static_assert failure cannot be exercised by the runtime suite:
+    //   gpu<float, shape<-1,3>> gd(shape<-1,3>{5});
+    //   int hi[2] = {0,1}; auto bad = gd.index_select<0>(wrap(hi, shape<-1>{2}));
+
     return 0;
 }

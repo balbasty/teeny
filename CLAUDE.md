@@ -307,9 +307,10 @@ t.unfold<Axis>(size, step);  t.unfold<Axis>(size);  // pytorch Tensor.unfold (#2
 t.index_select<Axis>(idx);         // gather along Axis by a rank-1 integer index
                       //   TENSOR (#326) — runtime DATA, unlike take_along's compile-time
                       //   indices. idx values wrap negative (built on take_along); static
-                      //   idx shape -> stack result, else heap (source must be host-
-                      //   accessible; a gpu tensor: gather into a device into(dest)
-                      //   instead). Always a COPY (an arbitrary data-dependent gather
+                      //   idx shape -> stack result (host+device, works on a gpu/gpu_view
+                      //   source, same rule as clone()), else heap (host only: source must
+                      //   be host-accessible; a dynamic gpu gather: use a device
+                      //   into(dest)). Always a COPY (an arbitrary data-dependent gather
                       //   isn't an affine mdspan view). into(dest) form too:
                       //   t.index_select<Axis>(idx, into(dest)) (no alloc, device-safe;
                       //   dest's axis-Axis extent must equal idx's, checked; dest must not
