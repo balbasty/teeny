@@ -488,10 +488,11 @@ struct peel_zip_range {
     //   - the DECODE (`peel_zip_axis`'s `off += idx[p] * sd`, and `gather_peel_zip`'s
     //     `data_handle() + off`), exactly as in the four engines above; and
     //   - the CELL's own type. A `peel_zip` cell is a VIEW of its operand, not a
-    //     fresh allocation, so unlike a broadcast RESULT (`_wider_index_t`'s
-    //     documented rationale) its kept-axis strides can legitimately be NEGATIVE
-    //     — an unsigned index type cannot represent them even when the base
-    //     pointer happens to come out right.
+    //     fresh allocation, so unlike a broadcast RESULT its kept-axis strides can
+    //     legitimately be NEGATIVE — an unsigned index type cannot represent them
+    //     even when the base pointer happens to come out right. (The broadcast
+    //     result's own type is `_bcast_index_t`, which is this same
+    //     `_offset_int_t` over its two operands — one rule, #347.)
     // `_offset_int_t` is already variadic (its rule is stated over a participant
     // SET), so the 2- and 3-operand `peel_zip` forms both use it unchanged, and
     // for an all-signed or all-unsigned set it is the plain widest — the same

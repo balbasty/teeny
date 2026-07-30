@@ -90,6 +90,8 @@ grow the destination.) A size-1 axis stretches over its partner as usual;
 If the two operands have different offset [index widths](shapes-strides.md#mixing-widths-in-a-broadcast)
 (e.g. an `int32`-indexed view and an `int64`-indexed one), the result takes the
 **wider** of the two — lossless, and it never truncates the wide operand's strides.
+(Should the two also disagree in *signedness*, the result steps up to a signed type
+wide enough for both ranges, for the same reason the in-place offset math below does.)
 In place (`a.add_(b)`) and into a caller-supplied `into(dest)` there is no new
 result to widen, so the offset math itself runs in a type that covers every tensor in
 play while each keeps its own: a narrow-indexed destination never truncates a

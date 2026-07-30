@@ -317,8 +317,10 @@ rank is source rank − #peeled axes.
 
 Element type of results follows `promote(A,B)` (C++ rules, but among floats the
 **lower** width wins — pytorch-style; `-DTNY_STD_PROMOTION` opts out). The result's
-offset **index type** is the *wider* of the two operands' (a mixed `int32`/`int64`
-broadcast → `int64`), independent of the element promotion.
+offset **index type** is one that covers both operands' — the *wider* of the two for
+the usual (all-signed) pair, so a mixed `int32`/`int64` broadcast → `int64`; a pair
+that disagrees in signedness steps up to a *signed* type wide enough for both ranges.
+Either way it is independent of the element promotion.
 
 ### In-place (mutates `*this`, returns `tensor&`)
 

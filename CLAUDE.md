@@ -743,10 +743,19 @@ is generic.
   Out-of-place: a fully static result → `storage::stack` (host+device); any dynamic →
   `storage::heap` (host only). The SFINAE keys on `bcast_extents<...>::rank_dynamic()`,
   **not** on instantiating a stack tensor (that would fire the "stack needs static
-  shape" `static_assert`). The result's offset **index type** is the WIDER of the two
-  operands' (`_wider_index_t`, by `sizeof`; tie → first operand), so a mixed-width
-  broadcast (int32 view + int64 view) yields an int64 result — lossless, and it stops
-  the engine truncating the wide operand's strides to a narrow result width.
+  shape" `static_assert`). The result's offset **index type** is `_bcast_index_t` of the
+  two operands' — the SAME `_offset_int_t` rule the engines decode in, over those two:
+  the WIDER for a same-signedness pair (so a mixed-width broadcast, int32 view + int64
+  view, yields an int64 result — lossless, and it stops the engine truncating the wide
+  operand's strides to a narrow result width), a SIGNED type wide enough for both ranges
+  for a mixed-signedness one. It was a `sizeof`-only pick (`_wider_int_t`), which is not
+  "holds every value either operand can name" once signedness disagrees (#347): a
+  signed-narrow + unsigned-WIDER pair (int16+uint32) resolved UNSIGNED — handing back a
+  result that breaks teeny's signed-index contract (`flip`/a negative slice step both
+  `static_assert` signed; `index_fits` is a signed reach) — and at EQUAL width the tie
+  kept the FIRST, so int32+uint32 resolved to int32, which cannot hold the uint32
+  operand's upper half. Only mixed-signedness pairs move (unreachable through teeny's own
+  vocabulary — every teeny shape is signed), so this is a latent-hazard fix.
   `bzip_` itself decodes its offsets in `_offset_int_t<C::index_type, Ia, Ib>` — a type
   that holds every extent/stride value ALL THREE participants can produce (#346).
   Out-of-place the result already carries the wider of the two operands (no-op), but
@@ -766,19 +775,18 @@ is generic.
   `data()[off]` takes any integer, so nothing is narrowed back. The 64-bit cap is the
   one contract-backed step (no signed type holds all of `uint64_t`) — a reachable
   offset must fit `ptrdiff_t` anyway, and teeny's reach contract is signed throughout
-  (`index_fits`). `_wider_int_t`/`_wider_index_t` stay the pure WIDTH pick: they name
-  the index type a fresh broadcast RESULT carries (non-negative extents, positive
-  strides), not the type an engine may decode offsets in.
+  (`index_fits`). `_wider_int_t` stays the pure WIDTH pick, but it is now ONLY the width
+  half `_offset_int_t` is built from — nothing else should reach for it (#347).
   The two-operand REDUCTION engine (`zipreduce_decode_`, behind `dot`/`sqdist`/`dist`)
   decodes in that SAME `_offset_int_t`, just over TWO participants instead of three
   (`_offset_int_t<Ia, Ib>` — it writes no tensor, only a scalar accumulator in the
   caller's reduce type, so there is no destination index type in play). It first took
   the first operand's index type alone (truncating the second's: a hard clang error, a
-  silently wrong offset under g++, #342), then the width-only `_wider_index_t` (#342's
+  silently wrong offset under g++, #342), then a width-only pick (#342's
   fix) — which still zero-extended a flipped operand's negative stride whenever the
   OTHER operand was unsigned and wider, i.e. `dot(flipped_int16_view, uint32_view)`
   segfaulted (#355). For an all-signed or all-unsigned pair `_offset_int_t<Ia,Ib>` IS
-  `_wider_index_t` (`_widest_int` of two left-folds to exactly `_wider_int_t`, same tie
+  the plain widest (`_widest_int` of two left-folds to exactly `_wider_int_t`, same tie
   rule), so every non-mixed instantiation is byte-identical. `zipreduce_static_` (the
   #255 static unroll) is exempt by construction, not by luck: it is gated on BOTH
   operands being fully static AND `ccontiguous`, it addresses `data()[Lin]` with a
@@ -796,12 +804,12 @@ is generic.
   was never audited into it: it picked `cs::common_type_t` instead, which applies
   the usual arithmetic conversions, so at EQUAL width the UNSIGNED type wins
   (`common_type_t<int32_t,uint32_t>` is `uint32_t`) — not even a width mistake, the
-  one shape `_wider_index_t` could not make. It is also the one site where the
+  one shape a `sizeof` pick could not make. It is also the one site where the
   decode type is the CELL's type as well, and that second half is a bug in its own
   right: a `peel_zip` cell is a VIEW of its operand, not a fresh allocation, so
-  unlike a broadcast RESULT (the case `_wider_index_t`'s pure width pick is written
-  for) its kept-axis strides can legitimately be NEGATIVE, and an unsigned index
-  type cannot represent them even where the base pointer comes out right. One
+  unlike a broadcast RESULT its kept-axis strides can legitimately be NEGATIVE, and
+  an unsigned index type cannot represent them even where the base pointer comes
+  out right. One
   substitution fixes both halves. `scalo_`/`unaryo_` are only reachable narrow through a caller's
   `into(dest)` (their allocating producers build `c` from `a`'s own extents type) and
   were not even silent — their initializers lacked the `static_cast<I>`s, so g++ warned
