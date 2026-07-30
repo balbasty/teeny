@@ -8,6 +8,14 @@ namespace cs = cuda::std;
 
 static bool close(double a, double b) { return std::fabs(a - b) < 1e-9; }
 
+// The cast a reduction's `into(dest)` must perform, spelled out by hand (#406):
+// a 16-bit float converts only TO `float` and only FROM an arithmetic type, so
+// `half` -> `bfloat16` has to stop there on the way. This is the reference the
+// reduction block at the bottom checks against — `dest.fill_(sum(a))`, the twin
+// used everywhere else in this file, cannot serve as one here: `fill_` takes the
+// tensor's OWN element type, so spelling the twin already needs this same cast.
+template <class To, class From> static To via_float(From v) { return static_cast<To>(static_cast<float>(v)); }
+
 int main() {
     auto a = local<double, shape<3>>(); a(0)=1; a(1)=2; a(2)=3;
     auto b = local<double, shape<3>>(); b(0)=10; b(1)=20; b(2)=30;
@@ -566,6 +574,63 @@ int main() {
     bb.add(hh, into(mh_into));
     mh_twin.copy_(bb.add(hh));
     for (long i = 0; i < 3; ++i) if (!(mh_into(i) == mh_twin(i))) return 115;
+
+    // ---- REDUCTIONS into the OTHER 16-bit float (#406) ------------------
+    // Same non-conversion as the block above, in the other family: a FULL
+    // reduction returns a SCALAR of the tensor's element type and used to
+    // `static_cast` it straight to the destination cell's, which no more compiles
+    // for `half` -> `bfloat16` than the elementwise store did. The cast now stops
+    // at `float` on the way, so each of these lands on exactly the bits the
+    // hand-written two-hop cast gives — and, above all, COMPILES.
+    auto rb = local<bfloat16, shape<>>{};
+    sum(hh, into(rb));     if (!(rb.item() == via_float<bfloat16>(sum(hh))))    return 116;
+    prod(hh, into(rb));    if (!(rb.item() == via_float<bfloat16>(prod(hh))))   return 117;
+    max(hh, into(rb));     if (!(rb.item() == via_float<bfloat16>(max(hh))))    return 118;
+    min(hh, into(rb));     if (!(rb.item() == via_float<bfloat16>(min(hh))))    return 119;
+    mean(hh, into(rb));    if (!(rb.item() == via_float<bfloat16>(mean(hh))))   return 120;
+    sqnorm(hh, into(rb));  if (!(rb.item() == via_float<bfloat16>(sqnorm(hh)))) return 121;
+    norm(hh, into(rb));    if (!(rb.item() == via_float<bfloat16>(norm(hh))))   return 122;
+    dot(hh, hh2, into(rb));    if (!(rb.item() == via_float<bfloat16>(dot(hh, hh2))))    return 123;
+    sqdist(hh, hh2, into(rb)); if (!(rb.item() == via_float<bfloat16>(sqdist(hh, hh2)))) return 124;
+    dist(hh, hh2, into(rb));   if (!(rb.item() == via_float<bfloat16>(dist(hh, hh2))))   return 125;
+
+    // ...and the reverse direction: bfloat16 sources into a `half` cell.
+    auto rh = local<half, shape<>>{};
+    sum(bb, into(rh));      if (!(rh.item() == via_float<half>(sum(bb))))       return 126;
+    max(bb, into(rh));      if (!(rh.item() == via_float<half>(max(bb))))       return 127;
+    norm(bb, into(rh));     if (!(rh.item() == via_float<half>(norm(bb))))      return 128;
+    dot(bb, bb2, into(rh)); if (!(rh.item() == via_float<half>(dot(bb, bb2))))  return 129;
+
+    // Same-type (half -> half) and widening/narrowing sanity: the added stop is an
+    // exact widening of an already-rounded value, so none of these moved a bit.
+    auto rhh = local<half, shape<>>{};
+    sum(hh, into(rhh));
+    if (!(rhh.item() == sum(hh)))                                  return 130;
+    auto rd = local<double, shape<>>{};
+    sum(hh, into(rd));
+    if (!(rd.item() == static_cast<double>(sum(hh))))              return 131;
+    auto rdh = local<half, shape<>>{};
+    sum(a, into(rdh));                                    // double source -> half cell
+    if (!(rdh.item() == static_cast<half>(sum(a))))                return 132;
+
+    // A named accumulator makes the reduction's result `Acc` (here `float`), so the
+    // scalar reaching the cell is no longer a 16-bit float at all — the other half
+    // of the matrix, and it must keep landing on the same bits.
+    sum<float>(hh, into(rb));
+    if (!(rb.item() == static_cast<bfloat16>(sum<float>(hh))))     return 133;
+    sum(hh, dtype<float>{}, into(rb));                    // value-tag spelling of the same
+    if (!(rb.item() == static_cast<bfloat16>(sum<float>(hh))))     return 134;
+
+    // The AXIS reductions reach their destination through `copy_` (which widens to
+    // the dest's compute type like `fill_` does), so they were never broken — pin
+    // them anyway, so the two halves of the family stay tested together.
+    auto hm = local<half, shape<2,3>>();
+    for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j) hm(i,j) = static_cast<half>(1 + 3*i + j);
+    auto rowb = local<bfloat16, shape<2>>(), rowb_twin = local<bfloat16, shape<2>>();
+    sum<1>(hm, into(rowb));  rowb_twin.copy_(sum<1>(hm));
+    for (long i = 0; i < 2; ++i) if (!(rowb(i) == rowb_twin(i))) return 135;
+    norm(hm, axis<1>{}, into(rowb));  rowb_twin.copy_(norm<1>(hm));
+    for (long i = 0; i < 2; ++i) if (!(rowb(i) == rowb_twin(i))) return 136;
 
     return 0;
 }

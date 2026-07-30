@@ -109,10 +109,14 @@ using index_select_extents = decltype(index_select_ext_<E, Axis, NewExt>(cs::mak
  * than an explicit `Axes...` template pack) would leave a dynamic result — the
  * same static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split every axis
  * reduction needs, computed from the TAG so the tag-driven entry point can
- * SFINAE on it exactly like the explicit-Axes one does. `axis<>` (no axes
- * given -- the bare, all-axes reduction) is never dynamic (a full reduction is
- * always a scalar, never allocates) -- that is the primary template below;
- * the partial specialization below handles a real (non-empty) axis list. */
+ * SFINAE on it exactly like the explicit-Axes one does. Three cases, and they
+ * are three DISTINCT things (#398):
+ *   - no `axis` keyword at all (`_kw::unset`, the primary below) -- the bare,
+ *     all-axes reduction. Never dynamic: its result is a scalar, so it never
+ *     allocates.
+ *   - `axis<>{}`, an EXPLICITLY EMPTY list -- reduce over NO axis, so the result
+ *     keeps the SOURCE's extents and is dynamic exactly when the source is.
+ *   - `axis<A0, Rest...>`, a real axis list -- the reduced extents decide.  */
 // Same MSVC two-phase-lookup quirk `_is_static_shape`/`_shape_rank` (above, in
 // the enclosing `tny` scope) work around for `tensor`'s own body: MSVC can
 // mis-resolve `reduced_extents<...>::rank_dynamic()` when it's evaluated
@@ -124,6 +128,7 @@ template <class E, long... Axes>
 _TNY_API constexpr cs::size_t _red_dyn_value() { return reduced_extents<E, Axes...>::rank_dynamic(); }
 
 template <class E, class AxisTag> struct _red_dyn { static constexpr cs::size_t value = 0; };
+template <class E> struct _red_dyn<E, axis<>> { static constexpr cs::size_t value = E::rank_dynamic(); };
 template <class E, long A0, long... Rest> struct _red_dyn<E, axis<A0, Rest...>> {
     static constexpr auto value = _red_dyn_value<E, A0, Rest...>();
 };
@@ -1007,9 +1012,20 @@ public:
      *        VALUES are runtime DATA, so this always materialises a copy — an
      *        arbitrary data-dependent gather isn't expressible as an affine mdspan
      *        view. Prefer the `into(dest)` form (`_TNY_API`, no allocation, device-safe)
-     *        in a kernel; this allocating form is `_TNY_HOST` convenience and copies
-     *        on the HOST, so `*this` must be host-accessible (a `gpu`/`gpu_view`
-     *        source: gather into a preallocated device `into(dest)` instead).
+     *        in a kernel; this allocating form is convenience.
+     *
+     *        SPLIT IN TWO on whether the result shape is fully static, exactly like
+     *        `clone()`/`to()`: a static result is stack-owned, so that overload is
+     *        `_TNY_API` and works on ANY storage — including a `gpu`/`gpu_view`
+     *        source from inside a kernel (the gather itself is `slice_along` +
+     *        `copy_`, `_TNY_API` throughout). A dynamic result is heap-owned, so
+     *        that overload is `_TNY_HOST` and copies on the HOST: it
+     *        `static_assert`s that `*this` is host-accessible (for a `gpu`/`gpu_view`
+     *        source, gather into a preallocated device `into(dest)` instead).
+     *        Calling the static form from the HOST on a device tensor carries the
+     *        same "don't dereference device memory from the host" hazard `clone()`
+     *        already does — use the free `to<Space>(x)` (`<teeny/cuda.h>`) to move
+     *        spaces.
      */
     template <long Axis, class Ti,class Ei,class Li,storage Oi,
               cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>::rank_dynamic() == 0, int> = 0>
@@ -1017,9 +1033,10 @@ public:
         static_assert(cs::is_integral<Ti>::value, "index_select: idx must have an integer element type");
         static_assert(Ei::rank() == 1, "index_select: idx must be rank-1");
         static_assert(_axis_in_range(Axis, rank()), "index_select: axis out of range");
-        static_assert(storage_is_host_accessible(O),
-            "index_select()'s allocating form copies on the host and cannot dereference device "
-            "memory; for a gpu/gpu_view source, gather into a preallocated device into(dest) instead.");
+        // NB no host-accessibility guard here (unlike the dynamic overload below):
+        // the result is a stack tensor and the gather is _TNY_API throughout, so
+        // this form stays device-callable on a gpu/gpu_view source — same rule as
+        // clone()'s / to()'s static overloads.
         using OutE = _md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>;
         tensor<T, OutE, ccontiguous, storage::stack> out{};
         index_select<Axis>(idx, into(out));
@@ -1032,8 +1049,9 @@ public:
         static_assert(Ei::rank() == 1, "index_select: idx must be rank-1");
         static_assert(_axis_in_range(Axis, rank()), "index_select: axis out of range");
         static_assert(storage_is_host_accessible(O),
-            "index_select()'s allocating form copies on the host and cannot dereference device "
-            "memory; for a gpu/gpu_view source, gather into a preallocated device into(dest) instead.");
+            "index_select()'s dynamic-shape allocating form copies on the host and cannot "
+            "dereference device memory; for a gpu/gpu_view source, gather into a preallocated "
+            "device into(dest) instead.");
         constexpr cs::size_t A = _norm_axis(Axis, rank());
         using OutE = _md::index_select_extents<Shape, A, Ei::static_extent(0)>;
         OutE oe = _idxsel_shape<A, OutE>(cs::make_index_sequence<rank()>{}, static_cast<index_type>(idx.extent(0)));
@@ -1779,8 +1797,12 @@ public:
 // `= 0` default).
 #define _TNY_RED_AXIS_IF(E, CMP)                                                                            \
     cs::enable_if_t<(sizeof...(Ax) > 0) && _md::reduced_extents<E,Ax...>::rank_dynamic() CMP 0, int> = 0
+// The "no axis keyword given" sentinel is `_kw::unset`, NOT `axis<>`: an
+// explicitly EMPTY axis list is a DIFFERENT request (reduce over no axis), and
+// overloading one type for both made it silently mean "reduce over everything"
+// (#398). See math.h's `_TNY_RED_TAGGED`.
 #define _TNY_RED_TAGGED_IF(E, CMP)                                                                          \
-    class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                                       \
+    class AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>,                                   \
     cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value CMP 0, int> = 0
 #define _TNY_RED_METHOD_DECL(NAME)                                                                          \
     template <class Acc = void> _TNY_API auto NAME() const;                                                 \

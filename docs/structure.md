@@ -148,6 +148,11 @@ there only for a rank-0 tensor (the one permutation of no axes, a no-op) and is 
 compile error for any other rank — an under-specified permutation is a mistake,
 not a no-op.
 
+The **reductions** read an empty list the same way: `sum(a, axis<>{})` reduces over
+no axis and gives `a`'s shape back, while the plain `sum(a)` — no axis argument at
+all — is the full, every-axis reduction. Same contrast, same reason; see
+[Math & reductions](math.md#an-empty-axis-list-reduces-over-no-axis).
+
 `reshape`/`flatten` follow **numpy semantics**: they return a **view** whenever the
 new shape is reachable without a copy — not only from a C-contiguous tensor, but any
 layout that regroups in C-order (splitting a contiguous axis, merging a contiguous

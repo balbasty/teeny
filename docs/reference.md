@@ -151,7 +151,7 @@ Negative integer indices wrap (count from the back).
 | `t.subsample(axis<Axes...>{}, k, starts...)` | → view | value form, same placement as `slice_along`'s |
 | `t.unfold<Axis>(size, step=1)` | → view | pytorch `Tensor.unfold` — appends a new trailing axis of width `size`, stepped by `step` along `Axis`; `Axis`'s extent shrinks to `(shape(Axis)-size)/step+1`; `size`/`step` accept runtime or `Int<>` (folds static); ND windows compose by chaining one `unfold` per axis; `size`∈`[1,shape(Axis)]`/`step>=1` checked (`static_assert` or debug-time) |
 | `t.unfold(Int<Axis>(), size, step=1)` | → view | value form — single-axis `Int<k>()` selector (like `flip`/`squeeze`), no `.template` on a dependent receiver |
-| `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `slice_along`); `idx` values wrap negative; source must be host-accessible (allocating form copies on the host) |
+| `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `slice_along`); `idx` values wrap negative; static result → stack (host+device, works on a `gpu`/`gpu_view` source, like `clone()`), dynamic result → heap (host only: source must be host-accessible) |
 | `t.index_select<Axis>(idx, into(dest))` | `dest&` | no-allocation, device-safe form; `dest`'s axis-`Axis` extent must equal `idx`'s (checked) and must not alias `t` |
 | `t.index_select(idx, axis<Axis>{})` `t.index_select(idx, axis<Axis>{}, into(dest))` | same as above | value form — no `.template` on a dependent receiver |
 
@@ -207,7 +207,11 @@ the same one `peel`/`slice_along`/
 the reductions use. An **empty** list, `axis<>{}`, names no axis and is therefore a
 **no-op** for `squeeze`/`unsqueeze`/`flip` (numpy's `axis=()` rule) — distinct from the
 no-argument `squeeze()`/`unsqueeze()`/`flip()`, which keep their own meanings; `permute`
-accepts it only at rank 0. See [Views & structure](structure.md).
+accepts it only at rank 0. The **reductions** read it the same way — `sum(a,
+axis<>{})` reduces over no axis and keeps `a`'s shape, where the plain `sum(a)`
+(no axis argument at all) reduces over every axis, see
+[Math & reductions](math.md#an-empty-axis-list-reduces-over-no-axis).
+See [Views & structure](structure.md).
 
 **Type inference — what the output *type* keeps.** A view op transforms the input
 type along four independent facets; staticity is preserved wherever it is
@@ -486,7 +490,8 @@ forgetting the `<axes>` fails to compile instead of splatting the total). An
 **axis** reduction copies its lower-rank result into `dest` — `sum<0>(m, into(buf))`,
 and the `axis<...>` value form takes `into` too (`mean(m, axis<1>{}, into(buf))`);
 its `dest` is broadcast-compatible with the reduced shape (it goes through `copy_`).
-Dtype casts, and the destination is returned by reference.
+Dtype casts — for every pair of element types, `half` into `bfloat16` and back
+included — and the destination is returned by reference.
 
 ### Vector algebra & geometry
 

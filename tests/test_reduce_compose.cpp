@@ -104,5 +104,108 @@ int main() {
     sum(dm, dtype<float>{}, axis<0>{}, into(ddest));
     if (ddest(0)!=3.0f || ddest(1)!=5.0f || ddest(2)!=7.0f) return 23;
 
+    // ---- an EXPLICITLY EMPTY axis list reduces over NO axis (#398) --------------
+    // `axis<>{}` names no axis, so each output cell aggregates the ONE element at
+    // its own index and the result keeps the SOURCE's shape -- numpy's rule for
+    // `np.sum(a, axis=())`, and the same "empty axis list = identity" the rest of
+    // the family already has (squeeze/unsqueeze/slice_along/peel, #369).
+    // It used to be indistinguishable, inside the keyword bag, from "no axis
+    // keyword at all" (both landed on an `axis<>` sentinel), so it silently did
+    // the OPPOSITE extreme: a full, all-axes reduction (sum -> 15, not [[0..5]]).
+    auto z = sum(m, axis<>{});                       // m is [[0,1,2],[3,4,5]]
+    static_assert(decltype(z)::rank() == 2, "empty axis list reduces over NO axis");
+    static_assert(cs::is_same<typename decltype(z)::shape_type, shape<2,3>>::value, "...so the shape is the source's");
+    static_assert(cs::is_same<typename decltype(z)::element_type, double>::value, "...and the element type is the source's");
+    for (int i = 0; i < 2; ++i) for (int j = 0; j < 3; ++j) if (z(i,j) != m(i,j)) return 24;
+    if (z.data() == m.data()) return 25;             // an owning result, not a view
+    // prod/max/min/mean are the same identity over an empty axis list
+    if (prod(m, axis<>{})(1,2) != 5.0 || max(m, axis<>{})(1,2) != 5.0) return 26;
+    if (min(m, axis<>{})(0,1) != 1.0 || mean(m, axis<>{})(1,2) != 5.0) return 27;
+    // sqnorm/norm are Σaᵢ²/√Σaᵢ² OVER THE NAMED AXES, so over none of them they are
+    // the elementwise a² and |a| (the same limit, not a plain identity) -- checked
+    // with a negative element, where the two differ from a copy.
+    auto sgn = local<double, shape<2>>(); sgn(0) = -3; sgn(1) = 4;
+    auto sq = sqnorm(sgn, axis<>{});
+    if (sq(0) != 9.0 || sq(1) != 16.0) return 28;
+    auto nr = norm(sgn, axis<>{});
+    if (nr(0) != 3.0 || nr(1) != 4.0) return 29;
+    // CONTROL: NO axis keyword at all still means the documented FULL reduction
+    if (sum(m) != 15.0 || sum(m, dtype<double>{}) != 15.0) return 30;
+    if (sqnorm(v, dtype<float>{}) != 25.0f) return 31;
+    // ...and a NON-empty axis list is untouched
+    if (sum(m, axis<0>{})(1) != 5.0) return 32;
+
+    // the other keywords compose with an empty axis list exactly as with a real one
+    auto ez = sum(m, axis<>{}, dtype<float>{});
+    static_assert(cs::is_same<typename decltype(ez)::element_type, float>::value, "dtype tag sets the result type");
+    if (ez(1,2) != 5.0f) return 33;
+    auto ek = sum(m, dtype<float>{}, axis<>{}, keepdims);   // no axis was reduced -> nothing to keep
+    static_assert(decltype(ek)::rank() == 2, "keepdims over an empty axis list is the identity");
+    if (ek(1,2) != 5.0f) return 34;
+    auto ed = local<float, shape<2,3>>();
+    auto & red = sum(m, axis<>{}, into(ed));
+    static_assert(cs::is_same<decltype(red), decltype(ed)&>::value, "into returns dest&");
+    if (&red != &ed || ed(0,1) != 1.0f || ed(1,2) != 5.0f) return 35;
+    // integer mean keeps its int->double rule here too
+    auto emi = mean(mi, axis<>{});
+    static_assert(cs::is_same<typename decltype(emi)::element_type, double>::value, "integer mean -> double");
+    if (emi(0,1) != 1.0 || emi(1,2) != 5.0) return 36;
+    // methods: same rule (and the same result type) as the free functions
+    auto em = m.sum(axis<>{});
+    static_assert(cs::is_same<decltype(em), decltype(z)>::value, "method matches free function");
+    if (em(1,2) != 5.0) return 37;
+    if (m.norm(axis<>{})(1,2) != 5.0 || m.mean(axis<>{})(0,1) != 1.0) return 38;
+    // dynamic shape: the result keeps the SOURCE's (dynamic) extents, so it is
+    // heap-owned -- the host-only overload, keyed off the same empty tag.
+    auto edm = sum(dm, axis<>{});
+    static_assert(decltype(edm)::ownership == storage::heap, "dynamic source -> heap result");
+    static_assert(decltype(edm)::rank() == 2, "...with the source's rank");
+    if (edm.shape(0)!=2 || edm.shape(1)!=3 || edm(1,2)!=5.0 || edm(0,1)!=1.0) return 39;
+    auto edd = local<double, shape<2,3>>();
+    sum(dm, axis<>{}, into(edd));
+    if (edd(1,2) != 5.0) return 40;
+    // CROSSED: a DYNAMIC source with `axis<>{}` AND `keepdims` together. No axis was
+    // reduced, so keepdims has nothing to re-insert and the result -- which on the
+    // dynamic path is a MOVE-ONLY heap tensor -- must be handed back as-is. This used
+    // to be a hard compile error ("use of deleted function tensor(const tensor&)"):
+    // the keepdims arm ran even for an empty axis pack and fed that heap tensor to
+    // `_keepdims<>`'s BY-VALUE base overload. (On the static path the same arm merely
+    // paid two silent whole-tensor copies -- also gone.)
+    auto edk = sum(dm, axis<>{}, keepdims);
+    static_assert(decltype(edk)::ownership == storage::heap, "dynamic source -> heap result");
+    static_assert(decltype(edk)::rank() == 2, "keepdims over an empty axis list is the identity");
+    if (edk.shape(0)!=2 || edk.shape(1)!=3) return 41;
+    if (edk(0,1) != 1.0 || edk(1,2) != 5.0) return 42;
+    // ...and with the other keywords crossed in as well (dtype, into, method form)
+    auto edk2 = dm.sum(dtype<float>{}, axis<>{}, keepdims);
+    static_assert(decltype(edk2)::rank() == 2, "keepdims over an empty axis list is the identity (method)");
+    static_assert(cs::is_same<typename decltype(edk2)::element_type, float>::value, "dtype tag sets the result type");
+    if (edk2(0,1) != 1.0f || edk2(1,2) != 5.0f) return 43;
+    auto edki = local<double, shape<2,3>>();
+    auto & redk = sum(dm, axis<>{}, keepdims, into(edki));
+    static_assert(cs::is_same<decltype(redk), decltype(edki)&>::value, "into returns dest&");
+    if (&redk != &edki || edki(0,1) != 1.0 || edki(1,2) != 5.0) return 44;
+    // the rest of the family takes the same crossed path (dynamic x empty axis x keepdims)
+    if (mean(dm, axis<>{}, keepdims)(1,2) != 5.0 || min(dm, axis<>{}, keepdims)(0,1) != 1.0) return 45;
+    if (norm(dm, axis<>{}, keepdims)(1,2) != 5.0 || prod(dm, axis<>{}, keepdims)(0,1) != 1.0) return 46;
+
+    // an EXPLICIT leading accumulator template arg composes with the empty axis tag
+    // just like the `dtype<Acc>{}` value tag does (both fold into the same `RAcc`)
+    auto ea = sum<float>(m, axis<>{});
+    static_assert(decltype(ea)::rank() == 2, "empty axis list reduces over NO axis");
+    static_assert(cs::is_same<typename decltype(ea)::element_type, float>::value, "<Acc> sets the result type");
+    if (ea(0,1) != 1.0f || ea(1,2) != 5.0f) return 47;
+    auto en = norm<float>(sgn, axis<>{});                // sgn is [-3, 4]
+    static_assert(cs::is_same<typename decltype(en)::element_type, float>::value, "<Acc> sets the result type (norm)");
+    if (en(0) != 3.0f || en(1) != 4.0f) return 48;
+
+    // a NON-CONTIGUOUS source: still elementwise over the VIEW's own geometry
+    // (columns 0 and 2 of m), materialised into a dense owning result.
+    auto ns = sum(m(all, slice(0,3,2)), axis<>{});       // [[0,2],[3,5]]
+    static_assert(decltype(ns)::rank() == 2, "empty axis list keeps the source's rank");
+    if (ns.shape(0) != 2 || ns.shape(1) != 2) return 49;
+    if (ns(0,0)!=0.0 || ns(0,1)!=2.0 || ns(1,0)!=3.0 || ns(1,1)!=5.0) return 50;
+    if (!ns.is_contiguous()) return 51;                  // gathered into a dense block
+
     return 0;
 }
