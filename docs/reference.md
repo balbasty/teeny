@@ -469,6 +469,9 @@ numpy reader both use it).
 
 Axis reductions: a fully static result → stack (host+device); any dynamic result
 → heap (host only). `keepdims` applies to `sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`.
+Axis lists must be **distinct** but may be given in **any order** — with or without
+`keepdims` (`sum<2,0>(a, keepdims)` == `sum<0,2>(a, keepdims)`), like every other
+axis-list op.
 The explicit `<Acc, Axes...>` template split stays (C++17 has no universal template
 parameter to unify "leading type = accumulator" vs "leading int = axis"), but past
 that split every TRAILING keyword — `dtype<Acc>{}`, `axis<...>{}`, `keepdims`,
@@ -501,7 +504,7 @@ optimisation — those stay out of teeny).
 | `sqdist(a, b)` | `promote(Ta,Tb)` (accumulated wide) | Σ(aᵢ-bᵢ)²; mathematically `sqnorm(a-b)`, one fused pass (bit-exact only for `double` operands). Binary only (no axis form, like `dot`); `sqdist<Acc>` forces accumulator+result |
 | `dist(a, b)` | floating (`double` for integer operands) | √Σ(aᵢ-bᵢ)²; mathematically `norm(a-b)`, one fused pass (bit-exact only for `double` operands); `dist<Acc>` forces accumulator+result |
 | `a.normalize_()` | `tensor&` | in place `a /= norm(a)`; floating element types only; zero vector → NaN |
-| `a.normalize_<Axes...>()` | `tensor&` | in place, over the named axes (keepdim broadcast); axes distinct & ascending |
+| `a.normalize_<Axes...>()` | `tensor&` | in place, over the named axes (keepdim broadcast); axes distinct, any order |
 | `normalize(a)` | new tensor (floating; integer → `double`) | out-of-place unit vector; static → stack, dynamic → heap |
 | `normalize<Axes...>(a)` / `normalize(a, axis<...>{})` | new tensor (floating) | out-of-place, over the named axes (keepdim) |
 | `cross(a, b)` | new stack 3-vector `promote(Ta,Tb)` | 3D cross product; operands rank-1, length 3 |

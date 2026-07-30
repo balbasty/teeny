@@ -63,9 +63,10 @@ template <cs::size_t... A> _TNY_API constexpr bool _is_perm() noexcept {
 // No repeats among A... (a SUBSET of axes, unlike `_is_perm` which needs a full
 // 0..N-1 permutation). Used by `slice_along`, where a repeated axis would bind two
 // args to the same axis and silently drop one. Also used by `unsqueeze<Ax...>`/
-// `squeeze<Ax...>` (tensor.h, #275) as the ORDER-INDEPENDENT distinctness check, so
-// axes can be listed in any order — `_sort_axes`/`_sorted_axes` below then reorders
-// them into what the fold actually needs.
+// `squeeze<Ax...>` (tensor.h, #275) — and, through `unsqueeze`, by the reduction
+// `keepdims` fold and `normalize<Axes...>` (math.h, #371) — as the ORDER-INDEPENDENT
+// distinctness check, so axes can be listed in any order: `_sort_axes`/`_sorted_axes`
+// below then reorders them into what the fold actually needs.
 template <cs::size_t... A> _TNY_API constexpr bool _all_distinct() noexcept {
     constexpr cs::size_t N = sizeof...(A);
     cs::size_t a[N ? N : 1] = { A... };
@@ -73,14 +74,12 @@ template <cs::size_t... A> _TNY_API constexpr bool _all_distinct() noexcept {
     return true;
 }
 
-// Whether the (already-normalised) axes are STRICTLY ascending — i.e. distinct and
-// in order. `normalize<Axes...>`'s keepdim fold (math.h) folds one axis at a time in
-// ascending order and still requires the CALLER to list them ascending. Takes runtime
-// `long`s (not a template pack) so a call site can normalise first:
-// `_axes_ascending(_norm_axis(Ax, N)...)`.
-_TNY_API constexpr bool _axes_ascending() { return true; }
-_TNY_API constexpr bool _axes_ascending(long) { return true; }
-template <class... R> _TNY_API constexpr bool _axes_ascending(long a, long b, R... r) { return a < b && _axes_ascending(b, r...); }
+// (There used to be an `_axes_ascending(...)` helper here — the ascending-order
+// PRECONDITION its callers imposed. #275 replaced it for `squeeze`/`unsqueeze` and
+// #371 for the reduction `keepdims` fold and `normalize<Axes...>`, both of which
+// now route through `unsqueeze` and so get `_sorted_axes` below for free. Nothing
+// in teeny requires an ascending axis list any more: distinctness (`_all_distinct`
+// above) is the only constraint.)
 
 // Compile-time insertion sort of an (already-normalised, distinct) axis-value pack
 // (#275). `unsqueeze<Ax...>`/`squeeze<Ax...>` (tensor.h) fold one axis at a time in

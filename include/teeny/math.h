@@ -1623,13 +1623,22 @@ template <class T,class E,class L,storage O> _TNY_API bool tensor<T,E,L,O>::any(
 // type (`double`) is the accumulator. Each splits static (stack, host+device) /
 // dynamic (heap, host-only) to match `axreduce`; the result is accumulated in `R`
 // then cast to the public element type by `reduce_to`.
-// keepdim view fold: insert a size-1 axis at each (ascending, already-normalised)
-// position — used by both the generic "finish" step below and axis `normalize`.
-// `_axes_ascending(...)` lives in indexing.h (next to `_norm_axis`) — tensor.h's
-// multi-axis `unsqueeze<Ax...>`/`squeeze<Ax...>` folds need it too, and tensor.h
-// cannot include math.h.
-template <class Tn> _TNY_API auto _keepdims(const Tn & t) { return t; }
-template <long A0, long... Rest, class Tn> _TNY_API auto _keepdims(const Tn & t) { return _keepdims<Rest...>(t.template unsqueeze<A0>()); }
+// keepdim view fold: insert a size-1 axis at each (already-normalised) position —
+// used by both the generic "finish" step below and axis `normalize`. This is
+// exactly `unsqueeze<Axes...>` (tensor.h): the reduced tensor's rank plus the
+// number of reinserted axes IS the source rank, so positions normalised against
+// the source rank are already the "relative to the FINAL rank" positions
+// `unsqueeze` wants. Going through `unsqueeze` means the axes are sorted by
+// `_sorted_axes` (indexing.h, #275) like every other axis-list op, so they may be
+// listed in ANY order (#371) — only distinctness matters, asserted here so the
+// message names the keyword the caller actually wrote.
+// NB the EMPTY pack is NOT `unsqueeze<>()` (that would insert an axis at 0, see
+// #369): an empty keepdim list is a no-op, hence its own branch.
+template <long... Axes, class Tn> _TNY_API auto _keepdims(const Tn & t) {
+    static_assert(_all_distinct<static_cast<cs::size_t>(Axes)...>(), "keepdim fold: axes must be distinct (keepdims / normalize<Axes...>)");
+    if constexpr (sizeof...(Axes) == 0) return t;
+    else                                return t.template unsqueeze<Axes...>();
+}
 
 namespace _md {
 /** @brief Shared "finish" step for every axis reduction's generic trailing
@@ -1637,26 +1646,27 @@ namespace _md {
  *  tensor `r`, apply `keepdims_t` if present in `Tags...` — re-`unsqueeze` the
  *  named axes (normalised against `SrcRank`, the SOURCE tensor's rank) back in
  *  and materialise into a freshly-owned tensor, exactly as the old hand-written
- *  `_TNY_RED_KEEPDIMS` macro did (the view from `_keepdims`'s recursive
- *  `unsqueeze` fold bakes in a `const` element type via its CONST overload, so
+ *  `_TNY_RED_KEEPDIMS` macro did (the view from `_keepdims`'s `unsqueeze` bakes
+ *  in a `const` element type via its CONST overload, so
  *  `.clone()` can't be reused — the target is built explicitly with `r`'s own
  *  element type) — then write into `into_t<D>` if present, else return the
- *  (possibly keepdims-wrapped) tensor by value. Two overloads matching the SAME
- *  static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split as `axreduce` itself.
+ *  (possibly keepdims-wrapped) tensor by value. The axes may be listed in ANY
+ *  order (`_keepdims` -> `unsqueeze` sorts them, #371). Two overloads matching
+ *  the SAME static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split as `axreduce`
+ *  itself.
  *  The keepdims arm is gated on a NON-EMPTY axis pack: for the explicitly empty
  *  list `NAME(a, axis<>{}, keepdims)` (#398) NO axis was reduced, so `r` already
  *  has the source's shape and `keepdims` has nothing to re-insert — it is a
- *  no-op, and `r` is used directly. Without that gate `_keepdims<>`'s base
- *  overload (which takes/returns BY VALUE) would be handed `r` itself rather
- *  than one of the copyable views its recursive `unsqueeze` fold produces: on
- *  the dynamic path that is a move-only `storage::heap` tensor, i.e. a hard
- *  "use of deleted function" error, and on the static path a silent pair of
- *  redundant whole-tensor copies. */
+ *  no-op, and `r` is used directly. Without that gate `_keepdims<>`'s empty-pack
+ *  branch (which takes a `const Tn &` and returns BY VALUE) would be handed `r`
+ *  itself rather than one of the copyable views its `unsqueeze` produces: on the
+ *  dynamic path that is a move-only `storage::heap` tensor, i.e. a hard "use of
+ *  deleted function" error, and on the static path a silent pair of redundant
+ *  whole-tensor copies. */
 template <long SrcRank, long... Axes, class R, class... Tags>
 _TNY_API decltype(auto) _red_finish_static(R && r, Tags... tags) {
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tags...);
     if constexpr (sizeof...(Axes) > 0 && _kw::has<_is_keepdims_tag, Tags...>()) {
-        static_assert(_axes_ascending(_norm_axis(Axes, SrcRank)...), "keepdims: axes must be distinct and ascending");
         auto kv = _keepdims<_norm_axis(Axes, SrcRank)...>(r);
         tensor<typename cs::remove_reference_t<R>::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::stack> c{};
         c.copy_(kv);
@@ -1670,8 +1680,7 @@ _TNY_API decltype(auto) _red_finish_static(R && r, Tags... tags) {
 template <long SrcRank, long... Axes, class R, class... Tags>
 _TNY_HOST decltype(auto) _red_finish_dynamic(R && r, Tags... tags) {
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tags...);
-    if constexpr (sizeof...(Axes) > 0 && _kw::has<_is_keepdims_tag, Tags...>()) {
-        static_assert(_axes_ascending(_norm_axis(Axes, SrcRank)...), "keepdims: axes must be distinct and ascending");
+    if constexpr (sizeof...(Axes) > 0 && _kw::has<_is_keepdims_tag, Tags...>()) {   // sizeof...(Axes) > 0: an empty axis list reduced nothing, so keepdims is a no-op (#398, see above)
         auto kv = _keepdims<_norm_axis(Axes, SrcRank)...>(r);
         tensor<typename cs::remove_reference_t<R>::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::heap> c(kv.extents());
         c.copy_(kv);
@@ -2096,18 +2105,17 @@ _TNY_API auto & normalize(const tensor<T,E,L,O> & a, into_t<D> out) {
 
 /* --- axis normalize: divide each sub-vector by its norm over the named axes ------ *
  * `n = norm<Axes...>(a)` removes the reduced axes; restore them as size-1 (keepdim)
- * so it broadcasts back over `a`. Inserting size-1 axes at ascending positions (each
- * unsqueeze grows the rank for the next), so the axes must be distinct & ascending.
+ * so it broadcasts back over `a`. The axes must be distinct but may be listed in ANY
+ * order (`_keepdims` routes through `unsqueeze`, which sorts them — #275/#371).
  * `_keepdims` itself (used here and by the reduction `keepdims` overloads) lives
  * earlier in this file, right before the axis-reduction section that needs it first. */
 
 /** @brief `normalize<Axes...>(a)` — unit vectors along the named axes: each element
  *         divided by the L2 norm over those axes (keepdim broadcast). Floating result
- *         (integer -> double). Axes distinct & ascending (numpy-normalised). */
+ *         (integer -> double). Axes distinct, in any order (numpy-normalised). */
 template <long... Axes, class T, class E, class L, storage O,
           cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
 _TNY_API auto normalize(const tensor<T,E,L,O> & a) {
-    static_assert(_axes_ascending(_norm_axis(Axes, (long)E::rank())...), "normalize: axes must be distinct and ascending");
     auto n = norm<Axes...>(a);                                          // reduced norm (floating tensor)
     return a.div(_keepdims<_norm_axis(Axes, (long)E::rank())...>(n));   // broadcast-divide (keepdim)
 }
@@ -2200,12 +2208,12 @@ _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::normalize_() {
     return div_(static_cast<T>(tny::norm(*this)));   // tny:: — the member norm() now shadows the free one here
 }
 // in-place unit vectors along the named axes: *this /= norm(*this over Axes) (keepdim).
+// Axes distinct, in any order (`_keepdims` sorts them via `unsqueeze`).
 template <class T,class E,class L,storage O> template <long... Axes>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::normalize_() {
     static_assert(cs::is_floating_point<compute_type_t<T>>::value,
                   "normalize_: requires a floating-point element type (integer division would truncate)");
     static_assert(sizeof...(Axes) > 0, "normalize_<Axes...>: need at least one axis");
-    static_assert(_axes_ascending(_norm_axis(Axes, (long)rank())...), "normalize_: axes must be distinct and ascending");
     auto n = tny::norm<Axes...>(*this);                                          // reduced norm (floating tensor)
     return div_(_keepdims<_norm_axis(Axes, (long)rank())...>(n));                // broadcast-divide (keepdim)
 }
