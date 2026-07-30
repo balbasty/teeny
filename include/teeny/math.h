@@ -1,5 +1,5 @@
-#ifndef TNY_MD_MATH
-#define TNY_MD_MATH
+#ifndef TNY_MATH_H
+#define TNY_MATH_H
 #include <cuda/std/utility>
 #include <cuda/std/type_traits>
 #include <cuda/std/limits>
@@ -2114,4 +2114,4 @@ _TNY_API auto & tensor<T,E,L,O>::cross(const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> 
 
 _TNY_NAMESPACE_END(tny)
 
-#endif // TNY_MD_MATH
+#endif // TNY_MATH_H

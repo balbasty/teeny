@@ -1,5 +1,5 @@
-#ifndef TNY_TEENY
-#define TNY_TEENY
+#ifndef TNY_TEENY_H
+#define TNY_TEENY_H
 
 // teeny: an mdspan-based tensor library: one `tny::tensor<T, Extents, Layout, storage>`
 // with view / stack / heap ownership, a valarray-like math layer, a custom
@@ -16,4 +16,4 @@
 #include <teeny/dynamic.h>
 #include <teeny/cuda.h>   // self-guarded: no-op unless the CUDA runtime is reachable
 
-#endif // TNY_TEENY
+#endif // TNY_TEENY_H
