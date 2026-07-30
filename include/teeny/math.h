@@ -1653,11 +1653,20 @@ namespace _md {
  *  (possibly keepdims-wrapped) tensor by value. The axes may be listed in ANY
  *  order (`_keepdims` -> `unsqueeze` sorts them, #371). Two overloads matching
  *  the SAME static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split as `axreduce`
- *  itself. */
+ *  itself.
+ *  The keepdims arm is gated on a NON-EMPTY axis pack: for the explicitly empty
+ *  list `NAME(a, axis<>{}, keepdims)` (#398) NO axis was reduced, so `r` already
+ *  has the source's shape and `keepdims` has nothing to re-insert — it is a
+ *  no-op, and `r` is used directly. Without that gate `_keepdims<>`'s empty-pack
+ *  branch (which takes a `const Tn &` and returns BY VALUE) would be handed `r`
+ *  itself rather than one of the copyable views its `unsqueeze` produces: on the
+ *  dynamic path that is a move-only `storage::heap` tensor, i.e. a hard "use of
+ *  deleted function" error, and on the static path a silent pair of redundant
+ *  whole-tensor copies. */
 template <long SrcRank, long... Axes, class R, class... Tags>
 _TNY_API decltype(auto) _red_finish_static(R && r, Tags... tags) {
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tags...);
-    if constexpr (_kw::has<_is_keepdims_tag, Tags...>()) {
+    if constexpr (sizeof...(Axes) > 0 && _kw::has<_is_keepdims_tag, Tags...>()) {
         auto kv = _keepdims<_norm_axis(Axes, SrcRank)...>(r);
         tensor<typename cs::remove_reference_t<R>::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::stack> c{};
         c.copy_(kv);
@@ -1671,7 +1680,7 @@ _TNY_API decltype(auto) _red_finish_static(R && r, Tags... tags) {
 template <long SrcRank, long... Axes, class R, class... Tags>
 _TNY_HOST decltype(auto) _red_finish_dynamic(R && r, Tags... tags) {
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tags...);
-    if constexpr (_kw::has<_is_keepdims_tag, Tags...>()) {
+    if constexpr (sizeof...(Axes) > 0 && _kw::has<_is_keepdims_tag, Tags...>()) {   // sizeof...(Axes) > 0: an empty axis list reduced nothing, so keepdims is a no-op (#398, see above)
         auto kv = _keepdims<_norm_axis(Axes, SrcRank)...>(r);
         tensor<typename cs::remove_reference_t<R>::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::heap> c(kv.extents());
         c.copy_(kv);
@@ -1759,12 +1768,42 @@ _TNY_RED_AXIS_ONE(NAME, ==, _TNY_API,  static,  reduce_type_t<T>, EXPR_DEFAULT, 
 _TNY_RED_AXIS_ONE(NAME, !=, _TNY_HOST, dynamic, reduce_type_t<T>, EXPR_DEFAULT, long... Axes)            \
 _TNY_RED_AXIS_ONE(NAME, ==, _TNY_API,  static,  Acc, EXPR_ACC, class Acc, long... Axes)                  \
 _TNY_RED_AXIS_ONE(NAME, !=, _TNY_HOST, dynamic, Acc, EXPR_ACC, class Acc, long... Axes)
+// ...and TWO more overloads per NAME, for the EXPLICITLY EMPTY axis list
+// `NAME(a, axis<>{})` (#398): reduce over NO axis, so every output cell
+// aggregates the single element at its own index and the result keeps the
+// SOURCE's shape (numpy's `np.sum(a, axis=())`). The engine already does exactly
+// that for an empty pack — nothing is marked reduced, `reduced_extents<E>` is
+// `E` — it is only the PUBLIC `NAME<Axes...>` overloads that must exclude the
+// empty pack (their `(sizeof...(Axes) > 0)` key above: an empty one would
+// otherwise collide with the full-reduction `NAME(a)`), which is why this
+// separate, `_md`-internal entry point exists at all. Same shape as
+// `_TNY_RED_AXIS_ONE` above — the static(stack,_TNY_API)/dynamic(heap,_TNY_HOST)
+// split and the `_red_finish_*` tail — but keyed on the SOURCE extents (the
+// result has them) and with ONE overload per half rather than two, since with no
+// axes to spell there is no `<Axes...>`-vs-`<Acc, Axes...>` ambiguity to resolve:
+// a single possibly-void `Acc` covers both forms through `_acc_t`/
+// `_reduce_result_t`. Only the tag dispatcher below calls these.
+//   RTYPE (the trailing variadic argument, so it may contain commas) is what the
+//   in-body `R` alias means — the accumulator type, in terms of `Acc` and `T`.
+#define _TNY_RED_NOAXIS_ONE(NAME, CMP, API, FIN, EXPR, /* RTYPE */...)                                   \
+template <class Acc, class T,class E,class L,storage O, class... Tags,                                  \
+          cs::enable_if_t<E::rank_dynamic() CMP 0, int> = 0>                                            \
+API decltype(auto) _##NAME##_noaxis(const tensor<T,E,L,O> & a, Tags... tags) {                          \
+    using R [[maybe_unused]] = __VA_ARGS__;                                                             \
+    return _red_finish_##FIN<(long)E::rank()>(EXPR, tags...); }
+#define _TNY_RED_NOAXIS(NAME, EXPR, /* RTYPE */...)                                                      \
+namespace _md {                                                                                         \
+_TNY_RED_NOAXIS_ONE(NAME, ==, _TNY_API,  static,  EXPR, __VA_ARGS__)                                     \
+_TNY_RED_NOAXIS_ONE(NAME, !=, _TNY_HOST, dynamic, EXPR, __VA_ARGS__)                                     \
+}
 // The plain shape: accumulate over the named axes with (INIT, OP) — `INIT` is
 // written in terms of the accumulator alias `R` — then cast down to the public
-// result element type (`T` by default, the requested `Acc` when given).
+// result element type (`T` by default, the requested `Acc` when given). Emits the
+// empty-axis-list (`axis<>{}`) pair too, since (INIT, OP) is all it needs either.
 #define _TNY_RED_AXIS_CORE(NAME, INIT, OP)                                                              \
 _TNY_RED_AXIS_CUSTOM(NAME, (_md::reduce_to<T>  (_md::axreduce<Axes...>(a, INIT, _md::OP{}))),            \
-                           (_md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{}))))
+                           (_md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{}))))            \
+_TNY_RED_NOAXIS(NAME, (reduce_to<_reduce_result_t<Acc,T>>(axreduce<>(a, INIT, _md::OP{}))), _acc_t<Acc,T>)
 _TNY_RED_AXIS_CORE(sum,    R(0),                 r_add)
 _TNY_RED_AXIS_CORE(prod,   R(1),                 r_mul)
 _TNY_RED_AXIS_CORE(max,    _reduce_seed_lowest<R>(),  r_max)
@@ -1788,7 +1827,18 @@ _TNY_RED_AXIS_CORE(sqnorm, R(0),                 r_addsq)   // Σaᵢ² over the
  *  (`_NAME_axed`) that pattern-matches the discovered `axis<Axes...>` TAG back
  *  into a real non-type template-argument pack (the only way to turn a value tag
  *  into `Axes...` for an explicit-template call) — `_md::_red_dyn` (tensor.h)
- *  computes the same static/dynamic split from that same tag. */
+ *  computes the same static/dynamic split from that same tag.
+ *
+ *  THREE axis cases, and they are three different requests (#398):
+ *   - **no `axis` keyword at all** (`AxisTag` is `_kw::unset`) — the documented
+ *     default: reduce over EVERY axis, giving a scalar.
+ *   - **`axis<>{}`, an explicitly EMPTY list** — reduce over NO axis: each output
+ *     cell aggregates the one element at its own index, so the result keeps the
+ *     source's shape (numpy's `np.sum(a, axis=())`). Handed to `_NAME_noaxis`
+ *     (emitted next to each reduction's axis core). Before #398 the absence
+ *     sentinel WAS `axis<>`, so an explicitly empty list silently took the
+ *     full-reduction branch — the opposite extreme, with no diagnostic.
+ *   - **`axis<A0, Rest...>`, a real list** — reduce over exactly those axes. */
 // `_NAME_axed::call` forwards into `_TNY_RED_AXIS_CORE`'s explicit-`Axes...`
 // overloads, which only ever accept `keepdims_t`/`into_t<D>` (see the comment
 // above `_TNY_RED_AXIS_CORE`) -- so `call` is handed an ALREADY-CLEANED
@@ -1807,7 +1857,7 @@ template <class Acc, long A0, long... Rest> struct _##NAME##_axed<Acc, axis<A0, 
 };                                                                                                        \
 }                                                                                                         \
 template <class Acc = void, class T,class E,class L,storage O, class Tag0, class... Tags,                \
-          class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                              \
+          class AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>,                          \
           cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value==0, int> = 0>                                  \
 _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags) {                      \
     _TNY_KW_CHECK(#NAME, "dtype<Acc>{}, axis<...>{}, keepdims or into(dest)",                            \
@@ -1815,8 +1865,9 @@ _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
     using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     constexpr bool hasInto = !cs::is_same<decltype(out), _kw::unset>::value;                             \
-    if constexpr (AxisTag::rank == 0) {                                                                  \
-        static_assert(!_kw::has<_is_keepdims_tag, Tag0, Tags...>(),                                      \
+    constexpr bool hasKeep = _kw::has<_is_keepdims_tag, Tag0, Tags...>();                                \
+    if constexpr (cs::is_same<AxisTag, _kw::unset>::value) {         /* NO axis keyword -> ALL axes */   \
+        static_assert(!hasKeep,                                                                          \
                       #NAME ": keepdims requires naming axes (axis<...>{}) -- a full (all-axes) "        \
                       "reduction has no axis left to keep");                                             \
         if constexpr (hasInto) {                                                                         \
@@ -1826,7 +1877,12 @@ _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
             out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(NAME<RAcc>(a))); \
             return out.dest;                                                                             \
         } else return NAME<RAcc>(a);                                                                     \
-    } else if constexpr (_kw::has<_is_keepdims_tag, Tag0, Tags...>()) {                                  \
+    } else if constexpr (_is_empty_axis<AxisTag>::value) {           /* axis<>{} -> NO axis at all */    \
+        if constexpr (hasKeep && hasInto) return _md::_##NAME##_noaxis<RAcc>(a, keepdims, out);          \
+        else if constexpr (hasKeep)       return _md::_##NAME##_noaxis<RAcc>(a, keepdims);               \
+        else if constexpr (hasInto)       return _md::_##NAME##_noaxis<RAcc>(a, out);                    \
+        else                              return _md::_##NAME##_noaxis<RAcc>(a);                         \
+    } else if constexpr (hasKeep) {                                                                      \
         if constexpr (hasInto) return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, keepdims, out);        \
         else                   return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, keepdims);             \
     } else {                                                                                              \
@@ -1835,7 +1891,7 @@ _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
     }                                                                                                      \
 }                                                                                                          \
 template <class Acc = void, class T,class E,class L,storage O, class Tag0, class... Tags,                \
-          class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                              \
+          class AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>,                          \
           cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value!=0, int> = 0>                                  \
 _TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags) {                      \
     _TNY_KW_CHECK(#NAME, "dtype<Acc>{}, axis<...>{}, keepdims or into(dest)",                            \
@@ -1843,7 +1899,13 @@ _TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
     using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     constexpr bool hasInto = !cs::is_same<decltype(out), _kw::unset>::value;                             \
-    if constexpr (_kw::has<_is_keepdims_tag, Tag0, Tags...>()) {                                         \
+    constexpr bool hasKeep = _kw::has<_is_keepdims_tag, Tag0, Tags...>();                                \
+    if constexpr (_is_empty_axis<AxisTag>::value) {                  /* axis<>{} -> NO axis at all */    \
+        if constexpr (hasKeep && hasInto) return _md::_##NAME##_noaxis<RAcc>(a, keepdims, out);          \
+        else if constexpr (hasKeep)       return _md::_##NAME##_noaxis<RAcc>(a, keepdims);               \
+        else if constexpr (hasInto)       return _md::_##NAME##_noaxis<RAcc>(a, out);                    \
+        else                              return _md::_##NAME##_noaxis<RAcc>(a);                         \
+    } else if constexpr (hasKeep) {                                                                      \
         if constexpr (hasInto) return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, keepdims, out);        \
         else                   return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, keepdims);             \
     } else {                                                                                              \
@@ -1873,6 +1935,14 @@ _TNY_RED_TAGGED(sum) _TNY_RED_TAGGED(prod) _TNY_RED_TAGGED(max) _TNY_RED_TAGGED(
 _TNY_RED_AXIS_CUSTOM(mean,
     (_md::reduce_to<_mean_result_t<T>>(_md::_red_mean_scale(_md::reduce_to<_mean_div_t<T>>(sum<R, Axes...>(a)), a.numel()))),
     (_md::_red_mean_scale(sum<Acc, Axes...>(a), a.numel())))
+// ...and mean over an EXPLICITLY EMPTY axis list — `mean(a, axis<>{})` (#398; see
+// the three axis cases documented on `_TNY_RED_TAGGED` above). No axis is
+// reduced, so each cell averages the single element at its own index: the count
+// is 1 and the division is the identity, leaving only mean's own result-type rule
+// (an INTEGER tensor still yields `double`, the numpy rule) and the copy into an
+// owned result.
+_TNY_RED_NOAXIS(mean, (reduce_to<_reduce_result_t<Acc, _mean_result_t<T>>>(axreduce<>(a, R(0), _md::r_add{}))),
+                _acc_t<Acc,T>)
 _TNY_RED_TAGGED(mean)
 
 /** @brief Inner product over matching extents. Accumulates in the reduce type of
@@ -1957,10 +2027,21 @@ _TNY_API auto norm(const tensor<T,E,L,O> & a) {
 _TNY_RED_AXIS_CUSTOM(norm,
     (_md::reduce_to<_mean_result_t<T>>(_md::_red_sqrt(sqnorm<_norm_root_t<T>, Axes...>(a)))),
     (_md::_red_sqrt(sqnorm<Acc, Axes...>(a))))
+// ...and norm over an EXPLICITLY EMPTY axis list — `norm(a, axis<>{})` (#398; see
+// the three axis cases documented on `_TNY_RED_TAGGED` above). `norm` is √(Σaᵢ²
+// over the named axes), so over NO axis each cell's sum of squares is its own
+// element squared and the result is the elementwise `|a|` (in norm's floating
+// result type) — the same limit `sqnorm(a, axis<>{})` gives as the elementwise
+// `a²`. `R` is where the squares are accumulated and the root taken, matching the
+// axis form above: `_norm_root_t<T>` by default, the requested `Acc` when given.
+_TNY_RED_NOAXIS(norm, (reduce_to<_reduce_result_t<Acc, _mean_result_t<T>>>(_red_sqrt(axreduce<>(a, R(0), _md::r_addsq{})))),
+                cs::conditional_t<cs::is_void<Acc>::value, _norm_root_t<T>, Acc>)
 _TNY_RED_TAGGED(norm)
 #undef _TNY_RED_TAGGED
 #undef _TNY_RED_AXIS_CUSTOM
 #undef _TNY_RED_AXIS_ONE
+#undef _TNY_RED_NOAXIS
+#undef _TNY_RED_NOAXIS_ONE
 
 /** @brief Squared Euclidean distance `Σ(aᵢ-bᵢ)²` between two same-shape tensors —
  *         mathematically `sqnorm(a-b)`, computed as one fused pass with no `a-b`

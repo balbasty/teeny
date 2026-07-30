@@ -342,6 +342,10 @@ sum<0>(a, keepdims);  sum(a, axis<0>{}, keepdims);    // keepdims: reduced axis 
                       //   keepdims=True) -> broadcasts back over a. Every axis reduction.
 sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf));  // ...and it ALL composes, any subset/order:
                       //   dtype x axis x keepdims x into == sum<double,0>(a, keepdims, into(buf))
+sum(a, axis<>{});     // an EMPTY axis list reduces over NO axis (numpy's axis=()): each cell
+                      //   aggregates its OWN element alone -> a's shape back, as an owned copy.
+                      //   NOT sum(a) (no axis argument at all = EVERY axis -> a scalar). sqnorm/
+                      //   norm follow the same rule, so they are the elementwise a² / |a| there.
 
 // vector algebra & geometry (contained exact math; on views, host+device)
 sqnorm(a);            // Σaᵢ² over all axes (== dot(a,a)); sqnorm<Acc> forces acc+result
