@@ -36,10 +36,6 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # windows-latest (MSVC) currently fails on a compiler-specific defect in
-    # operator()'s overload set (#268) unrelated to this CI-infra change;
-    # non-blocking until that's root-caused on a real MSVC toolchain.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5

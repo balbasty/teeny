@@ -110,15 +110,16 @@ make CXX=g++ run-examples                               # the example kernels
 CI (`.github/workflows/`) runs the g++ and clang++ test matrix on every PR, plus
 a macOS (AppleClang) and Windows (MSVC) CMake+CTest build — you don't need
 local access to either platform to be confident a PR is portable. The Windows
-job is currently `continue-on-error` (non-blocking): fixing the original
-MSVC-only `operator()` overload-resolution defect
-([#268](https://github.com/balbasty/teeny/issues/268)) let compilation get far
-enough to uncover several more pre-existing, independent MSVC-only defects
-(empty-base-optimization not applying, [#295](https://github.com/balbasty/teeny/issues/295);
-axis-reduction overload resolution, [#296](https://github.com/balbasty/teeny/issues/296)) —
-each was previously masked because #268 aborted MSVC compilation before they
-were ever reached. The job stays non-blocking until those are fixed too.
-macOS staying green is still a real, required signal.
+job used to be `continue-on-error` (non-blocking) while a string of
+pre-existing, independent MSVC-only defects were root-caused: the original
+`operator()` overload-resolution defect
+([#268](https://github.com/balbasty/teeny/issues/268)), empty-base-optimization
+not applying to a mapping with 2+ private empty bases
+([#295](https://github.com/balbasty/teeny/issues/295)), and axis-reduction
+overload resolution ([#296](https://github.com/balbasty/teeny/issues/296)) —
+each was masked in turn until the one before it was fixed. All three are
+closed and Windows CI has been consistently green since, so the job is now a
+required, blocking signal — like Linux and macOS.
 
 ---
 
