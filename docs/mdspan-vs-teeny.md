@@ -53,6 +53,15 @@ with `as_tensor`, so the whole teeny API applies to it:
 ```cpp
 cs::mdspan<double, cs::dextents<int64_t,2>> md = /* ... */;
 auto t = as_tensor(md);   // a non-owning teeny view over the same memory
+auto u = wrap(md);        // the same thing, under the factory name
+```
+
+The mdspan brings its own element type, extents and layout. If it points at memory
+that is not plain host memory, name the space with the same trailing tag every other
+`wrap` form takes — pass the plain backend and it folds to the matching view kind:
+
+```cpp
+auto d = wrap(md, storage_v<storage::gpu>);   // a gpu_view over device memory
 ```
 
 ## Why teeny builds its views by hand

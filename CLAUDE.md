@@ -160,8 +160,11 @@ fcontiguous{})` (value-tag layout: same as `wrap<fcontiguous>`, deduced, no
 `wrap(ptr, extents, strides<S...>{})` (compile-time strides),
 `as_tensor(any_mdspan)` / `wrap(any_mdspan)` (wrap a submdspan/mdspan result as a
 view — same thing, `as_tensor` is what teeny's own view-producing ops call
-internally). Every `wrap`
-overload takes an optional trailing memory-space tag `storage_c<Space>{}` (or the
+internally; the mdspan already carries element type/extents/layout, so THIS form's
+explicit template argument is the memory SPACE — `wrap<storage::gpu>(md)` — not a
+layout type, and a 1-arg `wrap(x)` on a non-mdspan is a clean "no matching
+function", #370). EVERY `wrap`
+overload — the mdspan one included (#370) — takes an optional trailing memory-space tag `storage_c<Space>{}` (or the
 no-braces `storage_v<Space>`), default `storage::view` (host). Pass the plain BACKEND the
 memory lives in — `wrap(dptr, e, storage_v<storage::gpu>)` wraps a **device** pointer,
 `storage::pinned`/`storage::mapped` page-locked host memory. Since `wrap` always yields a
@@ -170,7 +173,7 @@ you never spell the `_view` kinds (symmetric with `as_anyrank<Space>` /
 `from_dlpack<T,Space>`). Since #282, that trailing tag is a generic keyword-tag
 bag (kwargs mechanism, #277) rather than a fixed `storage_c<Space>` parameter —
 same behavior today, but a future keyword (e.g. a `stream` tag) lands on all
-four `wrap` positional forms without touching any of them again. Functional
+`wrap` forms without touching any of them again. Functional
 factories that deduce the extents type: `make_view(ptr,e)`, `make_local<T>(e)`,
 `make_heap<T>(e)`, `make_gpu/pinned/mapped<T>(e)` (E deduced; **T defaults to
 `float`**, override explicitly). The `make_*` owning factories are thin spellings
