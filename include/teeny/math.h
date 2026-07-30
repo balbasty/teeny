@@ -2253,8 +2253,7 @@ template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,clas
           class Tag0, class... Tags, cs::enable_if_t<_kw::is_keyword<Tag0>::value, int> = 0>
 _TNY_API decltype(auto) allclose(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b,
                                  double rtol, double atol, Tag0 tag0, Tags... tags) {
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), "allclose: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), "allclose: a keyword was given more than once");
+    _TNY_KW_CHECK("allclose()", "dtype<Acc>{} or into(dest)", (_is_dtype, _is_into_tag), Tag0, Tags...);
     using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
     if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {
