@@ -1734,8 +1734,7 @@ template <__VA_ARGS__, class T,class E,class L,storage O, class... Tags,        
           cs::enable_if_t<(sizeof...(Axes) > 0) &&                                                      \
                           _md::reduced_extents<E,Axes...>::rank_dynamic() CMP 0, int> = 0>              \
 API decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                      \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), #NAME ": unrecognized keyword argument"); \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), #NAME ": a keyword was given more than once"); \
+    _TNY_KW_CHECK(#NAME, "keepdims or into(dest)", (_is_into_tag, _is_keepdims_tag), Tags...);           \
     using R [[maybe_unused]] = RTYPE;                                                                   \
     return _md::_red_finish_##FIN<(long)E::rank(), Axes...>(EXPR, tags...); }
 // The four-overload axis-reduction shape (`<Axes...>` × static/dynamic,
@@ -1802,10 +1801,8 @@ template <class Acc = void, class T,class E,class L,storage O, class Tag0, class
           class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                              \
           cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value==0, int> = 0>                                  \
 _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags) {                      \
-    static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template known<Tag0,Tags...>(), \
-                  #NAME ": unrecognized keyword argument");                                              \
-    static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template unique<Tag0,Tags...>(), \
-                  #NAME ": a keyword was given more than once");                                         \
+    _TNY_KW_CHECK(#NAME, "dtype<Acc>{}, axis<...>{}, keepdims or into(dest)",                            \
+                  (_is_dtype, _is_axis_tag, _is_into_tag, _is_keepdims_tag), Tag0, Tags...);             \
     using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     constexpr bool hasInto = !cs::is_same<decltype(out), _kw::unset>::value;                             \
@@ -1832,10 +1829,8 @@ template <class Acc = void, class T,class E,class L,storage O, class Tag0, class
           class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                              \
           cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value!=0, int> = 0>                                  \
 _TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags) {                      \
-    static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template known<Tag0,Tags...>(), \
-                  #NAME ": unrecognized keyword argument");                                              \
-    static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template unique<Tag0,Tags...>(), \
-                  #NAME ": a keyword was given more than once");                                         \
+    _TNY_KW_CHECK(#NAME, "dtype<Acc>{}, axis<...>{}, keepdims or into(dest)",                            \
+                  (_is_dtype, _is_axis_tag, _is_into_tag, _is_keepdims_tag), Tag0, Tags...);             \
     using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     constexpr bool hasInto = !cs::is_same<decltype(out), _kw::unset>::value;                             \
@@ -1896,8 +1891,7 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) 
 template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, \
           class Tag0, class... Tags>                                                                     \
 _TNY_API decltype(auto) NAME(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) { \
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), #NAME ": unrecognized keyword argument"); \
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), #NAME ": a keyword was given more than once"); \
+    _TNY_KW_CHECK(#NAME, "dtype<Acc>{} or into(dest)", (_is_dtype, _is_into_tag), Tag0, Tags...);         \
     using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {                                      \

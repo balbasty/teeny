@@ -87,15 +87,21 @@ include/teeny/
                    + axis<...>/dtype<...> value-carrier tags
   half.h           `half` (IEEE binary16) + `bfloat16` element types + compute_type
   kwargs.h         `tny::_kw` — generic keyword-argument primitive (find/get/has/count/
-                   accepts/is_keyword) for the trailing value-carrier tags (dtype/storage/
-                   layout/axis/into/keepdims). Backs every migrated call site (#277's
+                   accepts/resolve/is_keyword) for the trailing value-carrier tags (dtype/
+                   storage/layout/axis/into/keepdims). Backs every migrated call site (#277's
                    umbrella: empty/zeros/ones/full/arange/wrap/make_*, and the reduction
-                   family sum/prod/max/min/mean/sqnorm/norm/dot). The
-                   per-keyword READERS live next to each tag's own definition instead of
-                   here: `dtype_arg_t` (alias.h), `storage_arg` (storage.h), `layout_arg_t`
-                   (layout.h) — each resolves explicit-template-arg > matching value tag >
-                   library default, `static_assert`ing if both an explicit arg and a tag
-                   are given for the same keyword.
+                   family sum/prod/max/min/mean/sqnorm/norm/dot). Two shared entry points,
+                   so neither the guard nor the precedence rule is transcribed again (#376):
+                   **`_TNY_KW_CHECK(SITE, EXPECTED, (PREDS...), Tags...)`** is the one-line
+                   guard every call site opens with (it expands to the unrecognised-keyword
+                   + duplicated-keyword `static_assert` pair; `accepts<Ps...>::known/unique/
+                   check` are the predicates under it), and **`_kw::resolve`** is the one
+                   copy of "explicit-template-arg > matching value tag > library default,
+                   both given = `static_assert`". The per-keyword READERS stay next to each
+                   tag's own definition, each a one-line alias over `resolve` supplying only
+                   its own tag->answer step: `dtype_arg_t` (alias.h, unwraps `dtype<T>` ->
+                   `T`), `storage_arg` (storage.h, travels in a `storage_c<O>` carrier since
+                   its answer is a VALUE), `layout_arg_t` (layout.h, the tag IS the layout).
   storage.h        `storage` enum + storage policies (owning_storage<T,Alloc>, cpp_alloc)
   layout.h         strides<S...> — per-dim static/dynamic strides (extents for strides)
   indexing.h       free indexing/slicing vocabulary: slice()/none, _norm_axis,
@@ -731,8 +737,11 @@ into(buf))` all compose their keywords in **any subset, any order** — the
 factory/`wrap`/`make_*` family (`storage.h`/`layout.h`/`tensor.h`) and the
 reduction family (`math.h`) both build on the same primitive:
 `tny::_kw` (`kwargs.h`) — `find_t`/`has`/`count`/`get` ask questions of the
-trailing pack, `accepts<Ps...>::known/unique` is the guard every call site
-puts in a `static_assert` up front. Where a selector still needs an EXPLICIT
+trailing pack, the `_TNY_KW_CHECK(...)` macro is the ONE guard every call site
+opens with (over `accepts<Ps...>::known/unique`), and `_kw::resolve` is the ONE
+copy of the explicit-arg-beats-tag-beats-default rule each per-keyword reader
+(`dtype_arg_t`/`storage_arg`/`layout_arg_t`) is a one-line alias over. Where a
+selector still needs an EXPLICIT
 `<...>` template argument (an axis list too big to spell as a value in a
 generic context, or the `<Acc, Axes...>` reduction split — C++17 has no
 universal template parameter to unify "leading type = accumulator" with
