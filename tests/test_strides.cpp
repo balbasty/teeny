@@ -156,5 +156,26 @@ int main() {
     static_assert(sizeof(strides<4,1>::mapping<shape<3,3>>) == 1, "fully-static strides mapping is EMPTY (EBO)");
     static_assert(sizeof(tensor<double, shape<3,3>, strides<4,1>>) == sizeof(double*), "...so the view is just a pointer");
 
+    // The two slices tests/nvcc_smoke.cu runs through a kernel, pinned HERE so the
+    // pack shape each one produces -- and therefore which `mapping::stride()` arm the
+    // device test exercises -- is checked rather than merely claimed in a comment.
+    // (Pinned in the host suite, not in the .cu: both compilers verify it here, and
+    //  nvcc_smoke.cu stays a pure device-compile smoke test.)
+    {
+        float * p = nullptr;
+        // A DYNAMIC source folds only the unit inner stride -> a MIXED pack, so
+        // stride() takes both arms, including the dynamic-slot lookup.
+        auto dyn_sliced = wrap(p, shape<-1,-1>{4, 4})(all, slice(1, 3));
+        static_assert(cs::is_same<decltype(dyn_sliced)::layout_type,
+                                  strides<dynamic_stride, 1>>::value,
+                      "a dynamic source folds only the unit inner stride -> MIXED pack");
+        // A STATIC source folds every stride -> an all-static pack (an EBO mapping).
+        auto sta_sliced = wrap(p, shape<4,4>{})(all, slice<1,3>());
+        static_assert(cs::is_same<decltype(sta_sliced)::layout_type,
+                                  strides<4, 1>>::value,
+                      "a static source folds every stride -> all-static pack");
+        (void) dyn_sliced; (void) sta_sliced;
+    }
+
     return 0;
 }

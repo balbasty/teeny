@@ -27,7 +27,14 @@ __global__ void axpy_kernel(V y, V x, float a) {
 // device-usable at all, its `_TNY_API` annotation notwithstanding.
 template <class V>
 __global__ void strided_kernel(V v) {
-    long r = (long) threadIdx.x % (long) v.rank();
+    // NB the rank comes from the EXTENTS (`V::extents_type::rank()`), not from
+    // `v.rank()`. teeny's `tensor::rank()` is a constexpr HOST function: calling it
+    // from a `__host__ __device__` function is merely nvcc warning #20013-D, but
+    // calling it from a `__global__` function -- as this kernel would -- is a hard
+    // error ("calling a constexpr __host__ function from a __global__ function is
+    // not allowed"). CCCL annotates `extents::rank()` __host__ __device__, so this
+    // spelling is device-legal. Same value, no `--expt-relaxed-constexpr` needed.
+    long r = (long) threadIdx.x % (long) V::extents_type::rank();
     if (v.extent(0) > 0 && v.extent(1) > 0) {
         v(0, 0) += (float) v.stride((int) r);   // runtime-rank stride() + strided access
         auto row = v.take_along(axis<0>{}, 0);  // gather a NEW strides<...> view on device
@@ -75,10 +82,18 @@ void smoke() {
     // inner stride (a MIXED pack -> `stride()` exercises both arms, including the
     // dynamic-slot lookup); the static source folds every stride (an all-static
     // pack -> an EBO mapping).
-    auto dyn_sliced = wrap(dx, shape<-1,-1>{4, 4})(all, slice(1, 3));
+    //
+    // NB `tny::all` MUST stay qualified here. CUDA's own headers declare the legacy
+    // warp-vote intrinsic `all()` in the GLOBAL namespace, so under `using namespace
+    // tny;` a bare `all` is ambiguous ("error: `all` is ambiguous") -- but ONLY in a
+    // .cu translation unit, since a host compiler never sees those headers. Do not
+    // "simplify" these back to a bare `all`: the host suite cannot catch the relapse.
+    auto dyn_sliced = wrap(dx, shape<-1,-1>{4, 4})(tny::all, slice(1, 3));
     strided_kernel<<<1, 32>>>(dyn_sliced);
-    auto sta_sliced = wrap(dx, shape<4,4>{})(all, slice<1,3>());
+    auto sta_sliced = wrap(dx, shape<4,4>{})(tny::all, slice<1,3>());
     strided_kernel<<<1, 32>>>(sta_sliced);
+    // (the folded pack each of those two slices produces is pinned by static_assert
+    //  in tests/test_strides.cpp -- this file stays a pure device-compile smoke test)
 
     // ...and an anyrank whose peel cells carry a folded (mixed) `strides<...>` pack:
     // the static-tail tag + layout tag fold the inner stride, and right-aligning that
