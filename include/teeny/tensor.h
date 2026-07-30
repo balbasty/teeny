@@ -1006,30 +1006,30 @@ public:
      *        source: gather into a preallocated device `into(dest)` instead).
      */
     template <long Axis, class Ti,class Ei,class Li,storage Oi,
-              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>::rank_dynamic() == 0, int> = 0>
+              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), _shape_static_extent<Ei>(0)>::rank_dynamic() == 0, int> = 0>
     _TNY_API auto index_select(const tensor<Ti,Ei,Li,Oi> & idx) const {
         static_assert(cs::is_integral<Ti>::value, "index_select: idx must have an integer element type");
-        static_assert(Ei::rank() == 1, "index_select: idx must be rank-1");
+        static_assert(_shape_rank<Ei>() == 1, "index_select: idx must be rank-1");
         static_assert(_axis_in_range(Axis, rank()), "index_select: axis out of range");
         static_assert(storage_is_host_accessible(O),
             "index_select()'s allocating form copies on the host and cannot dereference device "
             "memory; for a gpu/gpu_view source, gather into a preallocated device into(dest) instead.");
-        using OutE = _md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>;
+        using OutE = _md::index_select_extents<Shape, _norm_axis(Axis, rank()), _shape_static_extent<Ei>(0)>;
         tensor<T, OutE, ccontiguous, storage::stack> out{};
         index_select<Axis>(idx, into(out));
         return out;
     }
     template <long Axis, class Ti,class Ei,class Li,storage Oi,
-              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>::rank_dynamic() != 0, int> = 0>
+              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), _shape_static_extent<Ei>(0)>::rank_dynamic() != 0, int> = 0>
     _TNY_HOST auto index_select(const tensor<Ti,Ei,Li,Oi> & idx) const {
         static_assert(cs::is_integral<Ti>::value, "index_select: idx must have an integer element type");
-        static_assert(Ei::rank() == 1, "index_select: idx must be rank-1");
+        static_assert(_shape_rank<Ei>() == 1, "index_select: idx must be rank-1");
         static_assert(_axis_in_range(Axis, rank()), "index_select: axis out of range");
         static_assert(storage_is_host_accessible(O),
             "index_select()'s allocating form copies on the host and cannot dereference device "
             "memory; for a gpu/gpu_view source, gather into a preallocated device into(dest) instead.");
         constexpr cs::size_t A = _norm_axis(Axis, rank());
-        using OutE = _md::index_select_extents<Shape, A, Ei::static_extent(0)>;
+        using OutE = _md::index_select_extents<Shape, A, _shape_static_extent<Ei>(0)>;
         OutE oe = _idxsel_shape<A, OutE>(cs::make_index_sequence<rank()>{}, static_cast<index_type>(idx.extent(0)));
         tensor<T, OutE, ccontiguous, storage::heap> out(oe);
         index_select<Axis>(idx, into(out));
@@ -1045,10 +1045,10 @@ public:
      *         `_TNY_HOST` — else nvcc's device pass would see a `_TNY_API` forwarder
      *         call a `__host__` allocator. */
     template <class Ti,class Ei,class Li,storage Oi, long Axis,
-              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>::rank_dynamic() == 0, int> = 0>
+              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), _shape_static_extent<Ei>(0)>::rank_dynamic() == 0, int> = 0>
     _TNY_API auto index_select(const tensor<Ti,Ei,Li,Oi> & idx, axis<Axis>) const { return index_select<Axis>(idx); }
     template <class Ti,class Ei,class Li,storage Oi, long Axis,
-              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>::rank_dynamic() != 0, int> = 0>
+              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), _shape_static_extent<Ei>(0)>::rank_dynamic() != 0, int> = 0>
     _TNY_HOST auto index_select(const tensor<Ti,Ei,Li,Oi> & idx, axis<Axis>) const { return index_select<Axis>(idx); }
     template <class Ti,class Ei,class Li,storage Oi, long Axis, class D>
     _TNY_API auto & index_select(const tensor<Ti,Ei,Li,Oi> & idx, axis<Axis>, into_t<D> out) const { return index_select<Axis>(idx, out); }
@@ -1064,12 +1064,12 @@ public:
     template <long Axis, class Ti,class Ei,class Li,storage Oi, class D>
     _TNY_API auto & index_select(const tensor<Ti,Ei,Li,Oi> & idx, into_t<D> out) const {
         static_assert(cs::is_integral<Ti>::value, "index_select: idx must have an integer element type");
-        static_assert(Ei::rank() == 1, "index_select: idx must be rank-1");
+        static_assert(_shape_rank<Ei>() == 1, "index_select: idx must be rank-1");
         static_assert(_axis_in_range(Axis, rank()), "index_select: axis out of range");
         constexpr cs::size_t A = _norm_axis(Axis, rank());
         using DstE = typename D::extents_type;
-        constexpr cs::size_t dstA = DstE::static_extent(A);
-        constexpr cs::size_t idxA = Ei::static_extent(0);
+        constexpr cs::size_t dstA = _shape_static_extent<DstE>(A);
+        constexpr cs::size_t idxA = _shape_static_extent<Ei>(0);
         static_assert(dstA == cs::dynamic_extent || idxA == cs::dynamic_extent || dstA == idxA,
             "index_select: dest's axis Axis extent must equal idx's extent(0)");
         _TNY_CHECK(static_cast<index_type>(out.dest.extent(A)) == static_cast<index_type>(idx.extent(0)),
