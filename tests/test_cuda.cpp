@@ -83,9 +83,9 @@ int main()
     auto gv = g(all, slice(0,3));
     static_assert(decltype(gv.permute<1,0>())::ownership == storage::gpu_view, "gpu_view chain stays gpu_view");
 
-    // ...and the rest of the view ops too (take_along / squeeze / reshape /
+    // ...and the rest of the view ops too (slice_along / squeeze / reshape /
     // recast / flatten / peel range) — a contiguous gpu source, so all are valid.
-    static_assert(decltype(g.take_along<0>(1))::ownership == storage::gpu_view, "gpu take_along -> gpu_view");
+    static_assert(decltype(g.slice_along<0>(1))::ownership == storage::gpu_view, "gpu slice_along -> gpu_view");
     static_assert(decltype(g.unsqueeze<0>().squeeze<0>())::ownership == storage::gpu_view, "gpu squeeze -> gpu_view");
     static_assert(decltype(g.reshape<2,10>())::ownership == storage::gpu_view, "gpu reshape -> gpu_view");
     static_assert(decltype(g.recast<shape<4,5>>())::ownership == storage::gpu_view, "gpu recast -> gpu_view");
@@ -239,9 +239,12 @@ int main()
     if (dr0.item() != 4.f) return 18;
 
     // ---- unified empty<T, Space>(...) factory reaches the CUDA backends -------
-    auto eg = empty<float, storage::gpu>(shape<2,3>{});
+    // `tny::` qualified for the same reason as in test_empty.cpp: two explicit
+    // template arguments make ADL's `cuda::std::empty(const T (&)[N])` candidate
+    // hard-error on `/permissive-` MSVC (#316) instead of dropping out.
+    auto eg = tny::empty<float, storage::gpu>(shape<2,3>{});
     static_assert(decltype(eg)::ownership == storage::gpu, "empty<T,storage::gpu> -> gpu");
-    auto ep = empty<float, storage::pinned>(shape<-1,3>{2});          // dynamic pinned
+    auto ep = tny::empty<float, storage::pinned>(shape<-1,3>{2});     // dynamic pinned
     static_assert(decltype(ep)::ownership == storage::pinned, "empty<T,storage::pinned> -> pinned");
     ep.fill_(2.f);                                                // pinned is host-accessible
     if (ep(1,2) != 2.f) return 19;
@@ -259,6 +262,27 @@ int main()
     auto fm = full<double>(shape<2>{}, 2.0, storage_c<storage::mapped>{}); // mapped, value-tag
     static_assert(decltype(fm)::ownership == storage::mapped, "full value-tag -> mapped");
     if (fm(1) != 2.0) return 23;
+
+    // ---- #373: a LEADING explicit BACKEND template argument takes the SAME
+    //            trailing keyword bag (any subset, any order), not just one dtype
+    auto eg373 = empty<storage::gpu>(shape<2,3>{}, dtype<double>{}, fcontiguous{});
+    static_assert(decltype(eg373)::ownership == storage::gpu, "empty<gpu>(e, dtype, layout) -> gpu");
+    static_assert(cs::is_same<typename decltype(eg373)::element_type, double>::value, "...dtype tag honoured");
+    static_assert(cs::is_same<typename decltype(eg373)::layout_type, fcontiguous>::value, "...layout tag honoured");
+    auto zp373 = zeros<storage::pinned>(shape<2,3>{}, fcontiguous{}, dtype<double>{});   // the other order
+    static_assert(decltype(zp373)::ownership == storage::pinned, "zeros<pinned>(e, layout, dtype) -> pinned");
+    static_assert(cs::is_same<typename decltype(zp373)::element_type, double>::value, "...dtype tag honoured");
+    if (zp373(1,2) != 0.0 || zp373.stride(0) != 1) return 46;      // F-order, as the tag asked
+    auto fm373 = full<storage::mapped>(shape<2>{}, 2, dtype<double>{});
+    static_assert(decltype(fm373)::ownership == storage::mapped, "full<mapped>(e, v, dtype) -> mapped");
+    if (fm373(1) != 2.0) return 47;
+    auto ap373 = arange<storage::pinned>(4, dtype<double>{});
+    static_assert(decltype(ap373)::ownership == storage::pinned, "arange<pinned>(n, dtype) -> pinned");
+    if (ap373(3) != 3.0) return 48;
+    auto op373 = ones<storage::pinned>(shape<2,3>{});              // ...and with NO keyword at all
+    static_assert(decltype(op373)::ownership == storage::pinned, "ones<pinned>(e) -> pinned");
+    static_assert(cs::is_same<typename decltype(op373)::element_type, float>::value, "...T defaults to float");
+    if (op373(1,2) != 1.f) return 49;
 
     // ---- #41: a slice/view of pinned/mapped keeps its space, and to_dlpack
     //           labels it kDLCUDAHost (not kDLCPU) ------------------------------
