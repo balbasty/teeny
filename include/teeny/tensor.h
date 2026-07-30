@@ -1952,8 +1952,14 @@ struct _is_mdspan_like<MD, cs::void_t<decltype(cs::declval<const MD &>().data_ha
  *  there is nothing to name. Prefer the value-tag spelling above, which reads the
  *  same on every `wrap` form.
  *
- *  `as_tensor` stays available (it is what teeny's own view-producing ops —
- *  `permute`/`flip`/`squeeze`/… — call internally, with a pre-folded space). */
+ *  `as_tensor` stays public alongside this overload ON PURPOSE — two layers, not
+ *  an accidental duplicate (#351): `wrap` is the caller-facing factory name for
+ *  viewing existing memory whatever the carrier (pointer+shape, pointer+strides,
+ *  an mdspan), with the family's keyword bag and backend->view-kind space folding;
+ *  `as_tensor` is the mdspan-adaptation primitive underneath (no keyword bag, its
+ *  `<OW>` is the already-folded view kind) — what teeny's own view-producing ops
+ *  (`permute`/`flip`/`squeeze`/…) call with a pre-folded space, and the spelling
+ *  the mdspan-interop docs teach. */
 template <storage Space = storage_deduce, class MD, class... Tags,
           cs::enable_if_t<_is_mdspan_like<MD>::value, int> = 0>
 _TNY_API auto wrap(const MD & md, Tags... /*tags*/) {

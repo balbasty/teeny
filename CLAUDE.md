@@ -186,8 +186,16 @@ fcontiguous{})` (value-tag layout: same as `wrap<fcontiguous>`, deduced, no
 `wrap<S...>(ptr, extents, {dyn...})` (mixed static/runtime strides),
 `wrap(ptr, extents, strides<S...>{})` (compile-time strides),
 `as_tensor(any_mdspan)` / `wrap(any_mdspan)` (wrap a submdspan/mdspan result as a
-view — same thing, `as_tensor` is what teeny's own view-producing ops call
-internally; the mdspan already carries element type/extents/layout, so THIS form's
+view. BOTH are public ON PURPOSE — layering, not an accidental duplicate (#351):
+`wrap` is the one caller-facing factory name for "view existing memory, whatever
+carrier you hold" (pointer+shape, pointer+strides, an mdspan — you never switch
+names based on the carrier), with the family conventions (trailing keyword bag,
+plain-backend space folding to its view kind); `as_tensor` is the mdspan-adaptation
+PRIMITIVE under it — no keyword bag, its `<OW>` is the already-folded view kind —
+which teeny's own view-producing ops call directly (pre-folded space, and it must
+be a free function declared before the tensor class: its arg is a `cs::mdspan`, so
+ADL can't find it) and which the mdspan-interop docs teach as the interop spelling.
+The mdspan already carries element type/extents/layout, so the `wrap` form's
 explicit template argument is the memory SPACE — `wrap<storage::gpu>(md)` — not a
 layout type, and a 1-arg `wrap(x)` on a non-mdspan is a clean "no matching
 function", #370). EVERY `wrap`
