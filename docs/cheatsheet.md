@@ -183,6 +183,10 @@ x.unsqueeze<Ax0,Ax1,...>();  x.squeeze<Ax0,Ax1,...>();  // insert/drop SEVERAL a
                                       //   overload); axes must be DISTINCT but may be listed in ANY order —
                                       //   unsqueeze positions are relative to the FINAL rank, squeeze to the
                                       //   SOURCE rank (the fold direction is an implementation detail)
+x.unsqueeze(axis<>{});  x.squeeze(axis<>{});  // an EMPTY axis LIST names no axis -> a NO-OP (numpy's
+                                      //   axis=() rule): same shape/strides back. NOT the same as the
+                                      //   no-argument x.squeeze() (drop EVERY static singleton) /
+                                      //   x.unsqueeze() (insert at axis 0), which keep their meanings
 x.reshape<NewExt...>();               // contiguous-view reshape (one -1 inferred)
 x.flatten();                          // 1-D contiguous view
 x.clone();                            // dense row-major OWNING copy (copies on the HOST; a gpu/gpu_view

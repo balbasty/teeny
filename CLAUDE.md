@@ -310,6 +310,14 @@ t.squeeze<0,2>();     // drop SEVERAL at once: positions relative to the SOURCE 
                       //   must be distinct, in ANY order (sorted internally, #275) -> rank-k view
 t.squeeze(axis<0,2>{});  t.unsqueeze(axis<1,3>{});  t.permute(axis<2,0,1>{});  // axis<...>
                       //   value form (== the <...> template form) for these axis-LIST ops
+t.squeeze(axis<>{});  t.unsqueeze(axis<>{});  // an EMPTY axis LIST names no axis -> a NO-OP:
+                      //   same shape+strides back, as a view (numpy's axis=() rule, #369; the
+                      //   same identity take_along(axis<>{}) / peel(t,axis<>{}) already have).
+                      //   NOT the no-ARGUMENT forms: t.squeeze() still drops EVERY static
+                      //   singleton and t.unsqueeze() still inserts at axis 0 -- an empty
+                      //   LIST and no argument at all are different things. permute needs a
+                      //   FULL permutation, so permute(axis<>{}) is a no-op at rank 0 only
+                      //   and a compile error otherwise (never silent).
 t.reshape<6,4>(); t.flatten();  // reshape / ravel -> VIEW when regroupable without a copy
                                 //   (numpy: not just C-contiguous; strided/permuted often view too).
                                 //   Non-viewable = static_assert (static src) / debug-check (dyn); clone() first.
@@ -644,6 +652,15 @@ does). Three selector vocabularies:
   `t.take_along(axis<0,2>{}, i, slice(1,4))` == `t.take_along<0,2>(...)`,
   `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise `unsqueeze`/`permute`.
   Being a single distinct-typed arg it also disambiguates `take_along`'s two packs.
+  An EMPTY list `axis<>{}` names no axis, so every axis-list op treats it as the
+  IDENTITY (numpy's `axis=()`): `squeeze`/`unsqueeze` return the same shape as a
+  view (#369 — they used to fall through to the DEFAULTED single-axis form and
+  silently drop every singleton / insert at axis 0), matching what
+  `take_along(axis<>{})`, `peel(t, axis<>{})` and `_keepdims<>` already did. The
+  no-ARGUMENT `squeeze()`/`unsqueeze()` are a DIFFERENT thing and keep their own
+  meanings — an empty template pack can't be told from a defaulted one in C++, so
+  only the `axis<...>` spelling can carry "zero axes named". `permute` needs a full
+  permutation and so already rejected it above rank 0.
 - **`dtype<T>`** — a value tag for an element/accumulator type `T` (`alias.h`,
   next to `axis`), numpy's `dtype=` namesake: `empty(shape<3,3>{}, dtype<double>{})`
   == `empty<double>(shape<3,3>{})`, likewise `zeros`/`ones`/`full`/`arange` and
