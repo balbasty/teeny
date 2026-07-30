@@ -1,5 +1,5 @@
-#ifndef TNY_MD_STORAGE
-#define TNY_MD_STORAGE
+#ifndef TNY_STORAGE_H
+#define TNY_STORAGE_H
 #include <cuda/std/array>
 #include <cuda/std/cstddef>
 #include <cuda/std/type_traits>
@@ -193,4 +193,4 @@ struct storage_size<Mapping, true> {
 
 _TNY_NAMESPACE_END(tny)
 
-#endif // TNY_MD_STORAGE
+#endif // TNY_STORAGE_H

@@ -1,5 +1,5 @@
-#ifndef TNY_MD_TENSOR
-#define TNY_MD_TENSOR
+#ifndef TNY_TENSOR_H
+#define TNY_TENSOR_H
 #include <cuda/std/mdspan>
 #include <cuda/std/tuple>
 #include <cuda/std/utility>
@@ -2296,4 +2296,4 @@ as_tensor(const MD & m) {
 
 _TNY_NAMESPACE_END(tny)
 
-#endif // TNY_MD_TENSOR
+#endif // TNY_TENSOR_H

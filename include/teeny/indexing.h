@@ -1,5 +1,5 @@
-#ifndef TNY_MD_INDEXING
-#define TNY_MD_INDEXING
+#ifndef TNY_INDEXING_H
+#define TNY_INDEXING_H
 // Free-function vocabulary for indexing & slicing a tensor: argument
 // classification, python-style axis/index wrapping, the `slice(...)` spec and
 // its traits, and the compile-time output-extents machinery for the range
@@ -321,4 +321,4 @@ _TNY_API constexpr int _pos_in() {
 }
 
 _TNY_NAMESPACE_END(tny)
-#endif // TNY_MD_INDEXING
+#endif // TNY_INDEXING_H

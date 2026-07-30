@@ -1,5 +1,5 @@
-#ifndef TNY_HALF
-#define TNY_HALF
+#ifndef TNY_HALF_H
+#define TNY_HALF_H
 // Half-precision element types: `half` (IEEE binary16) and `bfloat16` (the two
 // PyTorch uses). Under nvcc these ARE the native CUDA types (`__half` /
 // `__nv_bfloat16`) so device kernels get hardware half math; on a host compiler
@@ -146,4 +146,4 @@ using bf16 = bfloat16;
 
 _TNY_NAMESPACE_END(tny)
 
-#endif // TNY_HALF
+#endif // TNY_HALF_H

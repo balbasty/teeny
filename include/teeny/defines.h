@@ -25,8 +25,8 @@
 #   undef interface
 #endif
 
-#ifndef TNY__CORE_DEFINES
-#define TNY__CORE_DEFINES
+#ifndef TNY_DEFINES_H
+#define TNY_DEFINES_H
 
 #ifdef __CUDACC__
 #   define _TNY_HOST         __host__
@@ -120,4 +120,4 @@
 #   define TNY_MAX_RANK 32
 #endif
 
-#endif // TNY__CORE_DEFINES
+#endif // TNY_DEFINES_H
