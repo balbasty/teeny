@@ -37,6 +37,14 @@ namespace _kw { template <class D> struct is_keyword<into_t<D>> : cs::true_type 
 template <class> struct _is_into_tag : cs::false_type {};
 template <class D> struct _is_into_tag<into_t<D>> : cs::true_type {};
 
+/** @brief numpy's default `allclose` tolerances (`rtol=1e-5`, `atol=1e-8`),
+ *  written once so every spelling — free or method, with or without a trailing
+ *  keyword bag — defaults identically. `constexpr` FUNCTIONS rather than
+ *  namespace-scope constants, so they are usable as default arguments from
+ *  device-callable code with no host-variable reference. */
+_TNY_API constexpr double _allclose_rtol() { return 1e-5; }
+_TNY_API constexpr double _allclose_atol() { return 1e-8; }
+
 template <storage OW = storage::view, class MD>
 _TNY_API tensor<typename MD::element_type, typename MD::extents_type,
                 typename MD::layout_type, OW>
@@ -1772,6 +1780,26 @@ public:
     _TNY_API auto dist(const tensor<Tb,Eb,Lb,Ob> & b) const;
     template <class Acc = void, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags>
     _TNY_API decltype(auto) dist(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const;
+    // allclose: dot's binary (no axis) shape, plus numpy's OPTIONAL rtol/atol
+    // positionals ahead of the keyword bag — m.allclose(b) / m.allclose(b, rtol, atol) /
+    // m.allclose<double>(b) / m.allclose(b, dtype<double>{}) / m.allclose(b, into(cell)) /
+    // m.allclose(b, rtol, into(cell)) / m.allclose(b, rtol, atol, dtype<double>{}, into(cell)).
+    // `Tag0` is constrained to a keyword so a tolerance never lands in the bag (and
+    // vice versa): the tagged forms never compete with the bare one above.
+    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob>
+    _TNY_API bool allclose(const tensor<Tb,Eb,Lb,Ob> & b,
+                           double rtol = _allclose_rtol(), double atol = _allclose_atol()) const;
+    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags,
+              cs::enable_if_t<_kw::is_keyword<Tag0>::value, int> = 0>
+    _TNY_API decltype(auto) allclose(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const;
+    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags,
+              cs::enable_if_t<_kw::is_keyword<Tag0>::value, int> = 0>
+    _TNY_API decltype(auto) allclose(const tensor<Tb,Eb,Lb,Ob> & b, double rtol,
+                                     Tag0 tag0, Tags... tags) const;
+    template <class Acc = void, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags,
+              cs::enable_if_t<_kw::is_keyword<Tag0>::value, int> = 0>
+    _TNY_API decltype(auto) allclose(const tensor<Tb,Eb,Lb,Ob> & b, double rtol, double atol,
+                                     Tag0 tag0, Tags... tags) const;
 
     /* --- in-place unary math (element-wise) ----------------------- */
     _TNY_API tensor & neg_();

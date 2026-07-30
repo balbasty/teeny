@@ -324,7 +324,14 @@ sum(a, dtype<double>{});  a.sum(dtype<double>{});  // value-tag Acc == sum<doubl
 sum(a, into(cell)); dot(a, b, into(cell)); dot(a, b, dtype<float>{}, into(cell));  // into(dest):
                       //   FULL reduction -> a RANK-0 dest (local<T,shape<>>{} or wrap(&x,shape<>{}));
                       //   dtype casts, returns dest&. dot composes dtype+into too (no axis concept).
-allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
+allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts) -> bool
+a.allclose(b);  a.allclose(b, rtol, atol);   // ALSO a method (parity with a.dot(b))
+allclose(a, b, dtype<float>{});  allclose(a, b, rtol, atol, into(cell));  // same trailing bag as
+                      //   dot/sqdist/dist: dtype<Acc>{} picks the COMPARISON's compute type
+                      //   (== allclose<Acc>(a,b)); into(dest) writes the answer into a RANK-0 cell
+                      //   (a bool cell keeps it, another dtype takes the 0/1 cast), returns dest&.
+                      //   The tolerances stay POSITIONAL, ahead of the bag — pass any prefix of
+                      //   (rtol, atol) and omit the rest: allclose(a, b, 0.1, into(cell)).
 // axis reductions -> lower-rank tensor (named axes removed; negatives wrap). Same
 //   rule: accumulate in reduce_type, result element type = the tensor's type;
 //   sum<Acc, Axes...>(a) makes Acc accumulator AND result (leading TYPE = acc, int = axis).

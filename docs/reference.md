@@ -434,11 +434,11 @@ integers — then **cast the result back to the tensor's element type** `T`
 (`sum(float_tensor)` → `float`, computed in `double`). A leading **type** argument
 makes that type both the accumulator **and** the result.
 
-Every reduction here (plus `sqnorm`/`norm`/`sqdist`/`dist` below) is **also a
-method** — `a.sum()`, `a.mean()`, `a.dot(b)`, `a.sqdist(b)`, `a.sum<0>()`,
-`a.mean(axis<1>{})`, `a.norm()`, `a.sum(into(cell))` — with the same overload
-shapes as the free form. The free `sum(a)` spelling stays (generic code and the
-numpy reader both use it).
+Every reduction here (plus `sqnorm`/`norm`/`sqdist`/`dist` below, and `allclose`)
+is **also a method** — `a.sum()`, `a.mean()`, `a.dot(b)`, `a.sqdist(b)`,
+`a.allclose(b)`, `a.sum<0>()`, `a.mean(axis<1>{})`, `a.norm()`,
+`a.sum(into(cell))` — with the same overload shapes as the free form. The free
+`sum(a)` spelling stays (generic code and the numpy reader both use it).
 
 | Call | Returns | Notes |
 |---|---|---|
@@ -446,7 +446,9 @@ numpy reader both use it).
 | `dot(a, b)` | `promote(Ta,Tb)` (accumulated wide) | inner product; extents must match **exactly** (no broadcast). The two operands may differ in offset index type — see [Mixing widths](shapes-strides.md#mixing-widths-in-a-broadcast); `sqdist`/`dist` likewise |
 | `sum<Acc>(a)`, `mean<Acc>(a)`, `dot<Acc>(a,b)` | `Acc` | force the accumulator/return type |
 | `sum(a, dtype<Acc>{})`, `dot(a, b, dtype<Acc>{})` | `Acc` | value-tag form of the above — deduces `Acc` from the tag (numpy's `dtype=`); composes freely with an axis list, `keepdims`, and `into(dest)`, in any subset/order (see below) |
-| `allclose(a, b, rtol=1e-5, atol=1e-8)` | `bool` | `\|a−b\| ≤ atol+rtol·\|b\|` everywhere (broadcasts) |
+| `allclose(a, b, rtol=1e-5, atol=1e-8)` | `bool` | `\|a−b\| ≤ atol+rtol·\|b\|` everywhere (broadcasts); also a method, `a.allclose(b, rtol, atol)` |
+| `allclose<Acc>(a, b)`, `allclose(a, b, dtype<Acc>{})` | `bool` | carry the comparison out in `Acc` instead of the operands' compute type |
+| `allclose(a, b, into(cell))`, `allclose(a, b, rtol, atol, dtype<Acc>{}, into(cell))` | `dest&` | the `dot`/`sqdist` keyword bag: `into(dest)` writes the answer into a **rank-0** cell (a `bool` cell keeps it, another dtype takes the 0/1 cast). The tolerances stay positional, ahead of the bag — pass any prefix of `(rtol, atol)` and omit the rest |
 | `sum<Axes...>(a)` `mean<Axes...>` `max`/`min`/`prod<Axes...>` | lower-rank tensor | remove the named axes (negatives wrap) |
 | `sum<Acc, Axes...>(a)` | lower-rank tensor | leading **type** = accumulator, leading **int** = axis |
 | `sum(a, axis<Axes...>{})` (also `mean`/`max`/`min`/`prod`) | lower-rank tensor | value form — numpy `axis=` selector; `sum<Acc>(a, axis<...>{})` for the accumulator; no `.template` on a dependent receiver |
