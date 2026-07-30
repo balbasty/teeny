@@ -205,7 +205,7 @@ template <auto... Es> struct _is_anyshape<anyshape<Es...>> : cs::true_type {};
  *  spelled by VALUE (deducing the axes from the argument type) instead of an
  *  explicit template list, so on a type-dependent receiver they need no
  *  `.template`: `peel(t, axis<0,1>{})` == `peel<0,1>(t)`,
- *  `t.take_along(axis<0,2>{}, i, slice(1,4))` == `t.take_along<0,2>(i, slice(1,4))`.
+ *  `t.slice_along(axis<0,2>{}, i, slice(1,4))` == `t.slice_along<0,2>(i, slice(1,4))`.
  *
  *  Like numpy's `axis: int | list[int]`, one variadic tag covers both a single
  *  axis (`axis<0>{}`) and a list (`axis<0,2>{}`); axes are **signed** (negatives

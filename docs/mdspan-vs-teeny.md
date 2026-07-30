@@ -66,7 +66,7 @@ auto d = wrap(md, storage_v<storage::gpu>);   // a gpu_view over device memory
 
 ## Why teeny builds its views by hand
 
-Every view-making op — `operator()` slicing, `take_along`, `permute`, `flip`,
+Every view-making op — `operator()` slicing, `slice_along`, `permute`, `flip`,
 `squeeze`/`unsqueeze`, `peel` — builds its result view directly rather than calling
 `cs::submdspan`. Two reasons:
 

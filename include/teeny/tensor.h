@@ -536,7 +536,7 @@ private:
         return _wrap_idx<index_type, Wrap>(v, n, dflt);
     }
     // ---- the ONE sub-view builder (gather) ------------------------------------
-    // Every slicing/take_along call routes here: per axis an integer DROPS the
+    // Every slicing/slice_along call routes here: per axis an integer DROPS the
     // axis (into the base offset), `all` KEEPS it, a range keeps a strided window
     // (optional negative step). Output is teeny's strides<...> layout, folding
     // each kept stride to a compile-time value where derivable — so it works on
@@ -846,59 +846,65 @@ public:
     /* --- structural views (return teeny views) --------------- */
 
 private:
-    // per output axis A: the matching take_along arg if A is named, else `all`
+    // per output axis A: the matching slice_along arg if A is named, else `all`
     // (keep the axis). Feeds the gather, so index/all/range all work uniformly.
     template <cs::size_t A, cs::size_t... Axes, class Tup>
-    _TNY_API auto _ta_raw(const Tup & t) const {
+    _TNY_API auto _sa_raw(const Tup & t) const {
         constexpr int p = _pos_in<A, Axes...>();
         if constexpr (p < 0) return cs::full_extent;
         else                 return cs::get<static_cast<cs::size_t>(p)>(t);
     }
     template <cs::size_t... Axes, class P, class Tup, cs::size_t... A>
-    _TNY_API auto _ta_range(P p, const Tup & t, cs::index_sequence<A...> seq) const {
-        return _slice_range(p, seq, _ta_raw<A, Axes...>(t)...);
+    _TNY_API auto _sa_range(P p, const Tup & t, cs::index_sequence<A...> seq) const {
+        return _slice_range(p, seq, _sa_raw<A, Axes...>(t)...);
     }
 public:
     /**
      * @brief Index/slice one or more named axes; other axes are kept.
      *
-     * `take_along<Axes...>(args...)` applies `args[k]` to axis `Axes[k]` (each an
+     * `slice_along<Axes...>(args...)` applies `args[k]` to axis `Axes[k]` (each an
      * integer -- negatives wrap -- or a slice `all`/`rng`) and keeps every other
-     * axis, returning a view. e.g. `t.take_along<1>(2)` drops axis 1 at index 2;
-     * `t.take_along<0,2>(i, rng(1,4))` binds axes 0 and 2 at once.
+     * axis, returning a view. e.g. `t.slice_along<1>(2)` drops axis 1 at index 2;
+     * `t.slice_along<0,2>(i, rng(1,4))` binds axes 0 and 2 at once.
+     *
+     * NB this is NOT numpy's `take_along_axis` / pytorch's `take_along_dim` (a
+     * data-dependent gather driven by an index TENSOR -- that is teeny's
+     * `index_select`). `slice_along` binds compile-time-named axes to a scalar
+     * index or a slice, so it is always an affine view: pytorch's
+     * `select`/`narrow` generalised to several axes at once (#423).
      */
     template <long... Axes, class... Args>
-    _TNY_API auto take_along(Args... args) noexcept {
-        static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
-        static_assert((_axis_in_range(Axes, rank()) && ...), "take_along: axis out of range");
-        static_assert(_all_distinct<_norm_axis(Axes, rank())...>(), "take_along: axes must be distinct");
-        return _ta_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
+    _TNY_API auto slice_along(Args... args) noexcept {
+        static_assert(sizeof...(Axes) == sizeof...(Args), "slice_along: one index per named axis");
+        static_assert((_axis_in_range(Axes, rank()) && ...), "slice_along: axis out of range");
+        static_assert(_all_distinct<_norm_axis(Axes, rank())...>(), "slice_along: axes must be distinct");
+        return _sa_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
     }
     template <long... Axes, class... Args>
-    _TNY_API auto take_along(Args... args) const noexcept {
-        static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
-        static_assert((_axis_in_range(Axes, rank()) && ...), "take_along: axis out of range");
-        static_assert(_all_distinct<_norm_axis(Axes, rank())...>(), "take_along: axes must be distinct");
-        return _ta_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
+    _TNY_API auto slice_along(Args... args) const noexcept {
+        static_assert(sizeof...(Axes) == sizeof...(Args), "slice_along: one index per named axis");
+        static_assert((_axis_in_range(Axes, rank()) && ...), "slice_along: axis out of range");
+        static_assert(_all_distinct<_norm_axis(Axes, rank())...>(), "slice_along: axes must be distinct");
+        return _sa_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
     }
-    /** @brief Value form: `t.take_along(axis<0,2>{}, i, slice(1,4))` ==
-     *         `t.take_along<0,2>(i, slice(1,4))`. The leading `axis<...>` selector is a
+    /** @brief Value form: `t.slice_along(axis<0,2>{}, i, slice(1,4))` ==
+     *         `t.slice_along<0,2>(i, slice(1,4))`. The leading `axis<...>` selector is a
      *         single distinct-typed argument, so it needs no `.template` on a dependent
      *         receiver AND disambiguates cleanly from the template form. */
     template <long... Axes, class... Args>
-    _TNY_API auto take_along(axis<Axes...>, Args... args) noexcept       { return take_along<Axes...>(args...); }
+    _TNY_API auto slice_along(axis<Axes...>, Args... args) noexcept       { return slice_along<Axes...>(args...); }
     template <long... Axes, class... Args>
-    _TNY_API auto take_along(axis<Axes...>, Args... args) const noexcept { return take_along<Axes...>(args...); }
+    _TNY_API auto slice_along(axis<Axes...>, Args... args) const noexcept { return slice_along<Axes...>(args...); }
 
     /**
      * @brief Subsample a coloured/strided sub-lattice: bind named axes to a
      *        `slice(start,none,k)` each, sharing one STEP `k` across all of
      *        them but taking a separate START per axis — sugar for
-     *        `take_along` (#258), for the "every `k`-th voxel, offset per
+     *        `slice_along` (#258), for the "every `k`-th voxel, offset per
      *        axis" pattern coloured Gauss-Seidel relaxation needs
      *        (`loc[d] % k == digit_d(n)`). Pure sugar, no new addressing
      *        power: `t.subsample<0,1>(k, s0, s1)` ==
-     *        `t.take_along<0,1>(slice(s0,none,k), slice(s1,none,k))`.
+     *        `t.slice_along<0,1>(slice(s0,none,k), slice(s1,none,k))`.
      *        `k` and each `start` accept a runtime value OR a compile-time
      *        one (`Int<k>()`) — folds through `slice()`'s own static-range
      *        machinery, so a fully-static `(start,k)` pair keeps a folded
@@ -907,16 +913,16 @@ public:
     template <long... Axes, class K, class... Starts>
     _TNY_API auto subsample(K k, Starts... starts) noexcept {
         static_assert(sizeof...(Axes) == sizeof...(Starts), "subsample: one start per named axis");
-        return take_along<Axes...>(slice(starts, none, k)...);
+        return slice_along<Axes...>(slice(starts, none, k)...);
     }
     template <long... Axes, class K, class... Starts>
     _TNY_API auto subsample(K k, Starts... starts) const noexcept {
         static_assert(sizeof...(Axes) == sizeof...(Starts), "subsample: one start per named axis");
-        return take_along<Axes...>(slice(starts, none, k)...);
+        return slice_along<Axes...>(slice(starts, none, k)...);
     }
     /** @brief Value form: `t.subsample(axis<0,1>{}, k, s0, s1)` ==
      *         `t.subsample<0,1>(k, s0, s1)` — leading `axis<...>` selector,
-     *         same placement as `take_along`'s own value form (a second
+     *         same placement as `slice_along`'s own value form (a second
      *         variadic pack, the starts, needs the disambiguating tag up
      *         front rather than trailing). */
     template <long... Axes, class K, class... Starts>
@@ -996,8 +1002,8 @@ public:
      *        (numpy/pytorch `index_select`/`take`): `out(...,j,...) = a(...,idx(j),...)`
      *        for `j` in `[0, idx.numel())` — axis `Axis`'s extent becomes `idx`'s
      *        (static when `idx`'s own shape is static). `idx`'s values wrap negative
-     *        like any other teeny index (it's built on `take_along`, which already
-     *        wraps). Distinct from `take_along` (compile-time indices/ranges): `idx`'s
+     *        like any other teeny index (it's built on `slice_along`, which already
+     *        wraps). Distinct from `slice_along` (compile-time indices/ranges): `idx`'s
      *        VALUES are runtime DATA, so this always materialises a copy — an
      *        arbitrary data-dependent gather isn't expressible as an affine mdspan
      *        view. Prefer the `into(dest)` form (`_TNY_API`, no allocation, device-safe)
@@ -1075,12 +1081,12 @@ public:
         _TNY_CHECK(static_cast<index_type>(out.dest.extent(A)) == static_cast<index_type>(idx.extent(0)),
             "index_select: dest's axis Axis extent must equal idx.extent(0)");
         // idx(j)'s VALUE (unlike the loop bound) can be negative -- must stay
-        // SIGNED so take_along's wrap (_wrap_idx) takes its negative-index branch
+        // SIGNED so slice_along's wrap (_wrap_idx) takes its negative-index branch
         // rather than reinterpreting a negative value as a huge unsigned index
         // when this tensor's own index_type happens to be unsigned (#326 review).
         const index_type n = static_cast<index_type>(idx.extent(0));
         for (index_type j = 0; j < n; ++j)
-            out.dest.template take_along<(long)A>(j).copy_(take_along<(long)A>(static_cast<cs::make_signed_t<index_type>>(idx(j))));
+            out.dest.template slice_along<(long)A>(j).copy_(slice_along<(long)A>(static_cast<cs::make_signed_t<index_type>>(idx(j))));
         return out.dest;
     }
 
@@ -1566,7 +1572,7 @@ public:
 
     /** @brief Value form: `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise
      *         `unsqueeze`/`permute`. `squeeze`/`unsqueeze`/`permute` are axis-LIST
-     *         ops (like `peel`/`take_along`/the reductions), so — unlike the
+     *         ops (like `peel`/`slice_along`/the reductions), so — unlike the
      *         single-axis `Int<k>()` form above — they take the `axis<...>` tag: a
      *         single distinct-typed argument, so no `.template` is needed on a
      *         dependent receiver.
@@ -1574,7 +1580,7 @@ public:
      *         An EMPTY list — `axis<>{}` — names no axis, so it is a **no-op**: the
      *         same shape and strides back, as a view (numpy's own rule for an empty
      *         axis tuple, `np.squeeze(a, axis=())` / `np.expand_dims(a, axis=())`;
-     *         same identity `_keepdims<>`/`take_along(axis<>{})`/`peel(t, axis<>{})`
+     *         same identity `_keepdims<>`/`slice_along(axis<>{})`/`peel(t, axis<>{})`
      *         already have). It is NOT the same as the no-argument `squeeze()`
      *         (drop EVERY statically-size-1 axis) or `unsqueeze()` (insert at axis
      *         0) — those keep their meanings; only the axis-LIST spelling reads an
@@ -1825,7 +1831,7 @@ _TNY_API into_t<tensor<T,E,L,O>> into(tensor<T,E,L,O> & d) noexcept { return int
  *         straight out of a view-producing op, with no named intermediate:
  *         `cross(a, b, into(N(i, all)))`, `sum(a, into(cells.at(i, j)))`,
  *         `x.add(y, into(z.permute<1,0>()))`. Every view-producing op (slicing,
- *         `at`, `permute`, `unsqueeze`, `take_along`, `peel_at`, …) returns its
+ *         `at`, `permute`, `unsqueeze`, `slice_along`, `peel_at`, …) returns its
  *         view BY VALUE, so without this overload the most natural destination
  *         there is — a slot of a bigger output — had to be given a name first,
  *         which is exactly the boilerplate `into(dest)` exists to remove.
@@ -2079,6 +2085,53 @@ _TNY_API auto make_view(T * p, Shape e, Layout, Tags... tags) {
     return wrap<Layout, Space>(p, e, tags...);
 }
 
+/* --- The creation factories' `_TNY_API`/`_TNY_HOST` split, as NAMED traits. ---
+ *
+ * `empty`/`full`/`zeros`/`ones` each ship TWO overloads whose template parameter
+ * lists differ ONLY in this SFINAE condition: the resolved backend is `stack`
+ * (host+device, `_TNY_API`) or it allocates (host only, `_TNY_HOST`). That split
+ * happens TWICE per factory — once on the `T`-led entry point, once on the
+ * BACKEND-led one right below it (#373), which takes the very same keyword pack —
+ * so all four pairs go through these traits. Written
+ * INLINE in `enable_if_t<...>`, that condition is a constexpr CALL whose template
+ * argument list expands the keyword pack —
+ * `storage_resolve(storage_arg<O, storage_deduce, Tags...>(), ...)`. Real MSVC in
+ * conformance mode (`/permissive-`, #316) cannot tell two such parameter lists
+ * apart: it merges the two declarations into ONE template and rejects the second
+ * as a redefinition (`C2995`) with duplicated default template arguments
+ * (`C2572`), which cascades into every `empty()`/`zeros()`/... call deducing to
+ * `void`. (`arange`'s backend-led entry point needs none of this — it has no
+ * host/device split to keep apart, so there is only ever one of it.)
+ *
+ * So: route the call through a class template's `::value`, and give each HALF of
+ * the split its OWN name, leaving two parameter lists that differ by a plain
+ * template-id — unambiguous on every compiler. This is the same "named trait,
+ * not an inline fold, inside `enable_if_t<...>`" MSVC rule the rest of the
+ * library already follows (see CLAUDE.md's MSVC traps). Each holds a plain
+ * `static constexpr ... value` member — the shape `_md::_red_ext_v` above
+ * already uses — rather than deriving from an `integral_constant` whose non-type
+ * argument is the call, which MSVC does not fold as reliably.
+ * Do not inline these conditions back into the `enable_if_t<...>`.
+ */
+/** @brief The ownership a factory call resolves to: an explicit `O` template
+ *         argument or a `storage_c<...>{}` keyword wins, else it is deduced from
+ *         the shape (fully static -> `stack`, any dynamic extent -> `heap`). */
+template <storage O, class Shape, class... Tags>
+struct _fac_storage {
+    static constexpr storage value =
+        storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+};
+/** @brief The stack half of a factory's split (host+device, no allocation). */
+template <storage O, class Shape, class... Tags>
+struct _fac_on_stack {
+    static constexpr bool value = _fac_storage<O, Shape, Tags...>::value == storage::stack;
+};
+/** @brief The allocating half — exactly the complement of `_fac_on_stack`. */
+template <storage O, class Shape, class... Tags>
+struct _fac_allocates {
+    static constexpr bool value = _fac_storage<O, Shape, Tags...>::value != storage::stack;
+};
+
 /** @brief `empty<T>(extents)` — a new UNINITIALISED tensor. The one factory the
  *  `make_*` family fuses into: ownership is **deduced** from the shape (fully
  *  static -> `stack` (host+device); any dynamic extent -> `heap` (host)) unless a
@@ -2097,7 +2150,7 @@ _TNY_API auto make_view(T * p, Shape e, Layout, Tags... tags) {
  *  unrecognised or duplicated keyword fails on one clean `static_assert` instead
  *  of an overload-resolution wall (#279/#280). */
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
 _TNY_API auto empty(Shape = Shape{}, Tags... /*tags*/) {
     _TNY_KW_CHECK("empty()", "dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})",
                   (_is_dtype, _is_storage_tag, _is_layout_tag), Tags...);
@@ -2106,30 +2159,35 @@ _TNY_API auto empty(Shape = Shape{}, Tags... /*tags*/) {
     return tensor<ET, Shape, LO, storage::stack>(_uninit);
 }
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
 _TNY_HOST auto empty(Shape e, Tags... /*tags*/) {
     _TNY_KW_CHECK("empty()", "dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})",
                   (_is_dtype, _is_storage_tag, _is_layout_tag), Tags...);
     using ET = dtype_arg_t<T, float, Tags...>;
-    constexpr storage R = storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+    constexpr storage R = _fac_storage<O, Shape, Tags...>::value;
     static_assert(!storage_is_view(R), "empty(): a non-owning view kind (view/gpu_view/pinned_view/mapped_view) has no storage to allocate — use wrap()/make_view() for a view.");
     using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
     return tensor<ET, Shape, LO, R>(e, _uninit);
 }
-/** @brief Legacy forwarder for the one spelling the generic entry point above
- *  cannot cover: a LEADING explicit template argument that means the BACKEND
- *  rather than the element type, because a `dtype<T>{}` tag makes `T` deducible
- *  from the call instead — `empty<storage::pinned>(e, dtype<double>{})`. A
- *  non-variadic overload is more specialised than a variadic one in partial
- *  ordering, so this wins whenever it applies (verified on both compilers with
- *  a standalone probe before this landed); every other spelling falls through
- *  to the generic entry point above. */
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API auto empty(Shape e, dtype<T>) { return empty<T, O, Layout>(e); }
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
-_TNY_HOST auto empty(Shape e, dtype<T>) { return empty<T, O, Layout>(e); }
+/** @brief BACKEND-LED entry point — the one spelling the `T`-led entry point above
+ *  cannot cover: a LEADING explicit template argument that names the BACKEND rather
+ *  than the element type (`empty<storage::pinned>(e, dtype<double>{}, fcontiguous{})`),
+ *  because a value can never bind the `class T` of the entry point above.
+ *
+ *  `storage O` has **no default** here, so this overload is viable only when the
+ *  backend is actually named: with no explicit template argument `O` is neither
+ *  deducible nor defaulted and the candidate simply drops out, leaving the `T`-led
+ *  entry point alone. Past that leading argument it takes the very SAME keyword bag,
+ *  so every keyword still composes in ANY subset and ANY order (#373) — a leading
+ *  backend argument is no longer a "one `dtype{}` tag and nothing else" dead end. A
+ *  `storage_c<...>{}` tag on top of the explicit backend is the one thing it rejects,
+ *  on `storage_arg`'s named "pick one" `static_assert`. */
+template <storage O, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
+_TNY_API auto empty(Shape e, Tags... tags) { return empty<void, O, Layout>(e, tags...); }
+template <storage O, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
+_TNY_HOST auto empty(Shape e, Tags... tags) { return empty<void, O, Layout>(e, tags...); }
 
 // A `make_*` factory names its backend in its own NAME, so it hands `empty` a fixed
 // explicit `storage::...` argument. A caller's `storage_c<...>{}` tag would then trip
@@ -2182,7 +2240,7 @@ _TNY_HOST auto make_heap(Shape e, Tags... tags) {
  *  same as `empty` (#280/#281): `full(e, v, fcontiguous{})`,
  *  `full(e, v, storage_c<storage::heap>{}, dtype<double>{})`. */
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class V, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
 _TNY_API auto full(Shape e, V v, Tags... /*tags*/) {
     static_assert(!_kw::is_keyword<V>::value, "full(shape, v, ...): the fill VALUE must come before any keyword tag — "
         "did you mean full(shape, v, dtype<T>{}, ...)?");
@@ -2193,31 +2251,29 @@ _TNY_API auto full(Shape e, V v, Tags... /*tags*/) {
     auto t = empty<ET, storage::stack, LO>(e); t.fill_(static_cast<ET>(v)); return t;
 }
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class V, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
 _TNY_HOST auto full(Shape e, V v, Tags... /*tags*/) {
     static_assert(!_kw::is_keyword<V>::value, "full(shape, v, ...): the fill VALUE must come before any keyword tag — "
         "did you mean full(shape, v, dtype<T>{}, ...)?");
     _TNY_KW_CHECK("full()", "dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})",
                   (_is_dtype, _is_storage_tag, _is_layout_tag), Tags...);
     using ET = dtype_arg_t<T, V, Tags...>;
-    constexpr storage R = storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+    constexpr storage R = _fac_storage<O, Shape, Tags...>::value;
     static_assert(storage_is_host_accessible(R),
         "zeros/ones/full<..., storage::gpu>: a device fill needs a kernel launch; use to<storage::gpu>(full<T>(shape, v)) (or to<storage::gpu>(zeros<T>(shape))), or empty<T, storage::gpu>(shape) then a memset.");
     using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
     auto t = empty<ET, R, LO>(e); t.fill_(static_cast<ET>(v)); return t;
 }
-/** @brief Legacy forwarder for the one spelling the generic entry point above
- *  cannot cover: a LEADING explicit template argument that means the BACKEND
- *  rather than the element type, because a `dtype<T>{}` tag makes `T` deducible
- *  from the call instead — `full<storage::pinned>(e, v, dtype<double>{})`. See
- *  `empty()`'s twin (tensor.h) for the full explanation; the same partial-
- *  ordering mechanism applies here. */
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class V, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API auto full(Shape e, V v, dtype<T>) { return full<T, O, Layout>(e, v); }
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class V, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
-_TNY_HOST auto full(Shape e, V v, dtype<T>) { return full<T, O, Layout>(e, v); }
+/** @brief BACKEND-LED entry point — a LEADING explicit template argument that names
+ *  the BACKEND rather than the element type: `full<storage::pinned>(e, v,
+ *  dtype<double>{}, fcontiguous{})`. See `empty()`'s twin above for why `storage O`
+ *  carries no default here and how the keyword bag composes (#373). */
+template <storage O, class Layout = void, class Shape, class V, class... Tags,
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
+_TNY_API auto full(Shape e, V v, Tags... tags) { return full<void, O, Layout>(e, v, tags...); }
+template <storage O, class Layout = void, class Shape, class V, class... Tags,
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
+_TNY_HOST auto full(Shape e, V v, Tags... tags) { return full<void, O, Layout>(e, v, tags...); }
 
 /** @brief `zeros<T>(extents)` / `ones<T>(extents)` — a new tensor of 0s / 1s.
  *         `T` defaults to `float`. Same ownership deduction, backend selector, and
@@ -2226,7 +2282,7 @@ _TNY_HOST auto full(Shape e, V v, dtype<T>) { return full<T, O, Layout>(e, v); }
  *         `zeros(e, dtype<double>{})`, `zeros(e, fcontiguous{}, storage_c<storage::heap>{})`.
  *         A device backend `static_assert`s — fill via `to<storage::gpu>(zeros<T>(shape))`. */
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
 _TNY_API  auto zeros(Shape e, Tags... /*tags*/) {
     _TNY_KW_CHECK("zeros()", "dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})",
                   (_is_dtype, _is_storage_tag, _is_layout_tag), Tags...);
@@ -2235,25 +2291,25 @@ _TNY_API  auto zeros(Shape e, Tags... /*tags*/) {
     return full<ET, storage::stack, LO>(e, ET(0));
 }
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
 _TNY_HOST auto zeros(Shape e, Tags... /*tags*/) {
     _TNY_KW_CHECK("zeros()", "dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})",
                   (_is_dtype, _is_storage_tag, _is_layout_tag), Tags...);
     using ET = dtype_arg_t<T, float, Tags...>;
-    constexpr storage R = storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+    constexpr storage R = _fac_storage<O, Shape, Tags...>::value;
     using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
     return full<ET, R, LO>(e, ET(0));
 }
-/** @brief Legacy forwarder — see `full()`'s twin above. */
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API  auto zeros(Shape e, dtype<T>) { return zeros<T, O, Layout>(e); }
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
-_TNY_HOST auto zeros(Shape e, dtype<T>) { return zeros<T, O, Layout>(e); }
+/** @brief BACKEND-LED entry point — see `empty()`'s twin above (#373). */
+template <storage O, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
+_TNY_API  auto zeros(Shape e, Tags... tags) { return zeros<void, O, Layout>(e, tags...); }
+template <storage O, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
+_TNY_HOST auto zeros(Shape e, Tags... tags) { return zeros<void, O, Layout>(e, tags...); }
 
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
 _TNY_API  auto ones(Shape e, Tags... /*tags*/) {
     _TNY_KW_CHECK("ones()", "dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})",
                   (_is_dtype, _is_storage_tag, _is_layout_tag), Tags...);
@@ -2262,22 +2318,22 @@ _TNY_API  auto ones(Shape e, Tags... /*tags*/) {
     return full<ET, storage::stack, LO>(e, ET(1));
 }
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
 _TNY_HOST auto ones(Shape e, Tags... /*tags*/) {
     _TNY_KW_CHECK("ones()", "dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})",
                   (_is_dtype, _is_storage_tag, _is_layout_tag), Tags...);
     using ET = dtype_arg_t<T, float, Tags...>;
-    constexpr storage R = storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+    constexpr storage R = _fac_storage<O, Shape, Tags...>::value;
     using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
     return full<ET, R, LO>(e, ET(1));
 }
-/** @brief Legacy forwarder — see `full()`'s twin above. */
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
-_TNY_API  auto ones(Shape e, dtype<T>) { return ones<T, O, Layout>(e); }
-template <storage O = storage_deduce, class Layout = ccontiguous, class Shape, class T,
-          cs::enable_if_t<storage_resolve(O, Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
-_TNY_HOST auto ones(Shape e, dtype<T>) { return ones<T, O, Layout>(e); }
+/** @brief BACKEND-LED entry point — see `empty()`'s twin above (#373). */
+template <storage O, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
+_TNY_API  auto ones(Shape e, Tags... tags) { return ones<void, O, Layout>(e, tags...); }
+template <storage O, class Layout = void, class Shape, class... Tags,
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
+_TNY_HOST auto ones(Shape e, Tags... tags) { return ones<void, O, Layout>(e, tags...); }
 
 /** @brief `arange<T>(n)` — a 1-D tensor `[0, 1, ..., n-1]` (heap, host). `T`
  *         defaults to `int64_t` (an integer range, like numpy `arange(n)`). A
@@ -2297,10 +2353,12 @@ _TNY_HOST auto arange(long n, Tags... /*tags*/) {
         "arange<..., storage::gpu>: a device fill needs a kernel launch; use to<storage::gpu>(arange<T>(n)).");
     auto t = empty<ET, R, ccontiguous>(E{n}); t.iota_(); return t;
 }
-/** @brief Legacy forwarder — see `full()`'s twin above (the analogous "leading
- *  O when a dtype tag is present" spelling: `arange<storage::pinned>(n, dtype<double>{})`). */
-template <storage O = storage_deduce, class T>
-_TNY_HOST auto arange(long n, dtype<T>) { return arange<T, O>(n); }
+/** @brief BACKEND-LED entry point — see `empty()`'s twin above (#373). The analogous
+ *  "leading explicit O" spelling: `arange<storage::pinned>(n, dtype<double>{})`. A
+ *  `storage_c<...>{}` tag on top of the explicit backend names the duplicate on
+ *  `storage_arg`'s "pick one" `static_assert` rather than falling off the overload set. */
+template <storage O, class... Tags>
+_TNY_HOST auto arange(long n, Tags... tags) { return arange<void, O>(n, tags...); }
 /** @brief Static `arange<T, N>()` — a stack `[0..N-1]` (host+device, folds). */
 template <class T = cs::int64_t, long N>
 _TNY_API auto arange() { tensor<T, cs::extents<cs::int64_t, static_cast<cs::size_t>(N)>, ccontiguous, storage::stack> t{}; t.iota_(); return t; }

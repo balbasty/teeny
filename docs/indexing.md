@@ -173,25 +173,25 @@ you want the extent to keep folding:
     t(0, slice<Int<1>, Int<4>>());   // type form (the only way to bake `none`)
     ```
 
-## `take_along<Axes...>` — bind named axes
+## `slice_along<Axes...>` — bind named axes
 
 `operator()` is positional. To name only the axes you touch and keep the rest,
-use `take_along`:
+use `slice_along`:
 
 === "value form"
 
     ```cpp
-    t.take_along(axis<1>{}, 2);                // fix axis 1 at index 2, keep all others
-    t.take_along(axis<0,2>{}, i, slice(1,4));  // bind axes 0 and 2 at once
-    t.take_along(axis<-1>{}, k);               // negative axis: the last one
+    t.slice_along(axis<1>{}, 2);                // fix axis 1 at index 2, keep all others
+    t.slice_along(axis<0,2>{}, i, slice(1,4));  // bind axes 0 and 2 at once
+    t.slice_along(axis<-1>{}, k);               // negative axis: the last one
     ```
 
 === "template form"
 
     ```cpp
-    t.take_along<1>(2);
-    t.take_along<0,2>(i, slice(1,4));
-    t.take_along<-1>(k);
+    t.slice_along<1>(2);
+    t.slice_along<0,2>(i, slice(1,4));
+    t.slice_along<-1>(k);
     ```
 
 Each bind argument is an integer (negatives wrap), `all`, or a `slice` — the same
@@ -199,18 +199,25 @@ specifiers `operator()` accepts. The **value form** leads with an `axis<...>{}`
 selector (a compile-time axis list, sibling of `shape<...>`, like numpy's
 `axis: int | list[int]`); being a single deduced argument it needs no `.template`
 on a type-dependent receiver, and it's the one spelling that disambiguates
-`take_along`'s two argument packs cleanly.
+`slice_along`'s two argument packs cleanly.
+
+`slice_along` is a **view** op: every bind argument is known at the call site, so
+the result is just a different window onto the same memory — pytorch's
+`select`/`narrow`, generalised to several axes at once. It is deliberately *not*
+named after numpy's `take_along_axis` / pytorch's `take_along_dim`, which are
+data-dependent gathers driven by an index **array**; that family is
+[`index_select`](#index_selectaxis--gather-by-a-runtime-index-tensor) below.
 
 ## `subsample<Axes...>` — a coloured/strided sub-lattice
 
 Coloured Gauss-Seidel relaxation walks a sub-lattice selected by
-`loc[d] % k == digit_d(n)` per axis — already expressible with `take_along` and
+`loc[d] % k == digit_d(n)` per axis — already expressible with `slice_along` and
 a `slice(start, none, k)` per named axis, just verbose to spell out when the
 step `k` is shared across every axis and only the per-axis `start` differs.
 `subsample` names that pattern:
 
 ```cpp
-t.subsample<0,1>(k, s0, s1);   // == t.take_along<0,1>(slice(s0,none,k), slice(s1,none,k))
+t.subsample<0,1>(k, s0, s1);   // == t.slice_along<0,1>(slice(s0,none,k), slice(s1,none,k))
 ```
 
 Pure sugar — no new addressing power, just a named shorthand for the multi-axis
@@ -222,7 +229,7 @@ a static output extent, same as a hand-written `slice()`:
 t.subsample<0,1>(Int<2>(), Int<0>(), Int<0>());   // step/starts all compile-time -> static result
 ```
 
-Has the same value form as `take_along` — a leading `axis<...>{}` selector, so
+Has the same value form as `slice_along` — a leading `axis<...>{}` selector, so
 no `.template` is needed on a type-dependent receiver:
 
 ```cpp
@@ -278,7 +285,7 @@ t.unfold<0>(2,1).unfold<1>(2,1);   // (H,W) -> (H-1,W-1,2,2): a 2x2 window per c
 
 ## `index_select<Axis>` — gather by a runtime index tensor
 
-`take_along`'s bind arguments are known at the call site (a literal, a variable
+`slice_along`'s bind arguments are known at the call site (a literal, a variable
 holding one index, a slice). `index_select` is for the opposite case: pulling
 elements along one axis using an arbitrary integer index **tensor** — data you
 don't know until runtime, e.g. an index buffer used to gather triangle vertices
@@ -294,7 +301,7 @@ auto tri = verts.index_select<0>(idx);      // (3,3): rows 2, 0, 4 of verts
 `idx` must be rank-1; axis `Axis`'s extent in the result becomes `idx`'s own
 extent (static when `idx`'s shape is static, so a compile-time-sized index
 buffer keeps the result on the stack). `idx`'s values wrap negative like any
-other teeny index (`index_select` is built on `take_along`, which already
+other teeny index (`index_select` is built on `slice_along`, which already
 wraps), and repeated indices are fine — it's a gather, not a permutation.
 
 Because the index values are runtime data, `index_select` can't return a view
@@ -314,7 +321,7 @@ than erroring). The allocating form copies on the **host**, so the source must
 be host-accessible — gather a `gpu`/`gpu_view` tensor into a preallocated
 device `into(dest)` instead.
 
-Unlike `take_along`'s leading tag, `index_select` has a value form TRAILING
+Unlike `slice_along`'s leading tag, `index_select` has a value form TRAILING
 with an `axis<...>{}` selector — its only other argument, `idx`, is a single
 fixed-arity positional (not an open pack), so a trailing tag is unambiguous
 and deducible. It's the one to reach for on a type-dependent receiver (inside

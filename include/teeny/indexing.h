@@ -4,7 +4,7 @@
 // classification, python-style axis/index wrapping, the `slice(...)` spec and
 // its traits, and the compile-time output-extents machinery for the range
 // slicer. Kept out of tensor.h so the tensor class sits near the top of it.
-// The member helpers that USE these (operator(), take_along, _slice_range, ...)
+// The member helpers that USE these (operator(), slice_along, _slice_range, ...)
 // live in the tensor class; this is the shared toolkit they build on.
 #include <cuda/std/mdspan>
 #include <cuda/std/utility>
@@ -61,7 +61,7 @@ template <cs::size_t... A> _TNY_API constexpr bool _is_perm() noexcept {
 }
 
 // No repeats among A... (a SUBSET of axes, unlike `_is_perm` which needs a full
-// 0..N-1 permutation). Used by `take_along`, where a repeated axis would bind two
+// 0..N-1 permutation). Used by `slice_along`, where a repeated axis would bind two
 // args to the same axis and silently drop one. Also used by `unsqueeze<Ax...>`/
 // `squeeze<Ax...>` (tensor.h, #275) as the ORDER-INDEPENDENT distinctness check, so
 // axes can be listed in any order — `_sort_axes`/`_sorted_axes` below then reorders
@@ -289,7 +289,7 @@ template <class... Args> struct _any_range : cs::integral_constant<bool, (_is_re
 
 /**
  * @brief A python-like slice `[start : stop : step)` for `operator()` /
- *        `take_along`. `none` marks an open end; negative bounds wrap
+ *        `slice_along`. `none` marks an open end; negative bounds wrap
  *        (count from the back); `step` defaults to 1 and may exceed 1.
  *
  * `slice(1, 4)` = `[1,4)`; `slice(none, 4)` = `[0,4)`; `slice(2, none)` =
