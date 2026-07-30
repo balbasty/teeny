@@ -90,6 +90,12 @@ if (TEENY_BUILD_TESTS)
         if (_name STREQUAL "test_cuda")
             target_include_directories(${_name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests/fakecuda")
         endif()
+        # test_atomic_fetch_add uses std::thread (the Makefile passes -pthread
+        # for exactly this one test).
+        if (_name STREQUAL "test_atomic_fetch_add")
+            find_package(Threads REQUIRED)
+            target_link_libraries(${_name} PRIVATE Threads::Threads)
+        endif()
         add_test(NAME ${_name} COMMAND ${_name})
     endforeach()
 endif()
