@@ -60,7 +60,7 @@ Wrap existing memory (→ view):
 | `wrap(ptr, shape, strides<S...>{})` | `view<T,E,strides<S...>>` | **compile-time** strides (fold into the type) |
 | `wrap(…, storage_v<storage::gpu>)` | view in that space | trailing **memory-space** tag on any overload above (default `storage::view`); pass the plain backend — `storage::gpu`/`pinned`/`mapped` — and it folds to the view kind (`gpu_view`/…), since `wrap` always views. `storage_c<S>{}` / `storage_v<S>` are the braced / no-braces spellings |
 | `as_tensor(md)` / `wrap(md)` | `view<…>` | wrap any `cs::mdspan`/`submdspan` result — both spellings, same result; `as_tensor` is what teeny's own view-producing ops call internally |
-| `make_view(ptr, shape)` | `view<T,E>` | an alias of `wrap` that deduces `E` (`make_view<Layout>` for the layout); takes the same trailing `storage_c<Space>{}` tag |
+| `make_view(ptr, shape)` | `view<T,E>` | an alias of `wrap` that deduces `E`; takes the layout the same two ways (`make_view(ptr, shape, fcontiguous{})` or `make_view<Layout>(ptr, shape)`) and the same trailing `storage_c<Space>{}` tag |
 
 **Input → output type — `wrap` view facets.** The element type `T` is deduced
 from the pointer (a `const T*` gives a read-only view); the extents come from the

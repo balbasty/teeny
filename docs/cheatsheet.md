@@ -39,6 +39,7 @@ wrap(ptr, shape, strides<S...>{});           // view with COMPILE-TIME strides (
 as_tensor(any_mdspan);  wrap(any_mdspan);      // wrap an mdspan/submdspan result (same thing)
 
 make_view(ptr, shape);           // alias of wrap that deduces the extents type
+make_view(ptr, shape, fcontiguous{});   // ...same layout spellings as wrap (or make_view<fcontiguous>)
 empty<T>(shape);                 // UNINITIALISED (np.empty); deduces stack (static) / heap (dynamic)
                                  //   (a value-initialised local<...>{} / owned(e) stays zeroed; empty opts out)
 empty<T, storage::gpu>(shape);       // ...or name a backend: stack/heap/gpu/pinned/mapped

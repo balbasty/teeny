@@ -47,15 +47,36 @@ int main() {
     static_assert(decltype(v1)::ownership == storage::view, "");
     if (v1(0,0)!=1 || v1(1,0)!=2) return 4;
 
-    // make_view: forwards its trailing keyword bag to wrap too (storage_c only --
-    // like wrap's own bare-template-Layout overload, make_view's Layout is a
-    // template argument, not a value-tag keyword; use the explicit form for F-order)
+    // make_view: same shape as wrap -- the layout is a positional slot (3rd arg,
+    // value tag or explicit template arg) and storage_c is the trailing keyword
+    // (#282/#374). BOTH layout values work as a value tag, symmetrically.
     auto v3 = make_view<fcontiguous>(buf, shape<2,3>{});
     static_assert(cs::is_same<decltype(v3)::layout_type, fcontiguous>::value, "");
     if (v3(0,0)!=1 || v3(1,0)!=2) return 5;
     auto v4 = make_view(buf, shape<2,3>{}, storage_c<storage::view>{});
     static_assert(cs::is_same<decltype(v4)::layout_type, ccontiguous>::value, "");
     if (v4(0,0)!=1 || v4(1,2)!=6) return 6;
+
+    // the three spellings from #374: a C-order tag, a C-order tag + storage_c,
+    // and an F-order tag (the last of which used to be a static_assert while the
+    // first compiled -- the asymmetry that issue reported).
+    auto v5 = make_view(buf, shape<2,3>{}, ccontiguous{});
+    static_assert(cs::is_same<decltype(v5)::layout_type, ccontiguous>::value, "");
+    static_assert(decltype(v5)::ownership == storage::view, "");
+    if (v5(0,0)!=1 || v5(1,2)!=6) return 7;
+
+    auto v6 = make_view(buf, shape<2,3>{}, ccontiguous{}, storage_v<storage::view>);
+    static_assert(cs::is_same<decltype(v5), decltype(v6)>::value, "layout tag + storage_c");
+    if (v6(0,0)!=1 || v6(1,2)!=6) return 8;
+
+    auto v7 = make_view(buf, shape<2,3>{}, fcontiguous{});
+    static_assert(cs::is_same<decltype(v7)::layout_type, fcontiguous>::value, "");
+    static_assert(cs::is_same<decltype(v7), decltype(v3)>::value, "value tag == explicit <fcontiguous>");
+    if (v7(0,0)!=1 || v7(1,0)!=2) return 9;
+
+    auto v8 = make_view(buf, shape<2,3>{}, fcontiguous{}, storage_c<storage::view>{});
+    static_assert(cs::is_same<decltype(v8), decltype(v7)>::value, "F-order tag + storage_c");
+    if (v8(1,2)!=6) return 10;
 
     return 0;
 }
