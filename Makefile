@@ -66,6 +66,7 @@ TESTS = \
 	$(BUILDDIR)/test_anyrank_tail \
 	$(BUILDDIR)/test_recast_guard \
 	$(BUILDDIR)/test_overlap_guard \
+	$(BUILDDIR)/test_into_shape_guard \
 	$(BUILDDIR)/test_reindex \
 	$(BUILDDIR)/test_dispatch_index \
 	$(BUILDDIR)/test_dispatch_layout \

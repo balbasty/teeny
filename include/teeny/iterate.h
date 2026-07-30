@@ -817,13 +817,14 @@ _TNY_HOST auto scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) { re
  *         (see `docs/api-ux-review.md`'s F4-e). Returns `dest&`. */
 template <long Axis, class T, class E, class L, storage O, class Carry, class F, class D>
 _TNY_API auto & scan(const tensor<T,E,L,O> & t, Carry init, F f, into_t<D> out) {
-    using DstE = typename D::extents_type;
-    static_assert(tensor<T,E,L,O>::rank() == D::rank(), "scan into(dest): rank mismatch");
-    static_assert(_md::ext_static_eq<E, DstE>(cs::make_index_sequence<E::rank()>{}),
-                  "scan into(dest): dest's shape must match the source exactly");
-    for (cs::size_t d = 0; d < tensor<T,E,L,O>::rank(); ++d)
-        _TNY_CHECK(static_cast<long>(out.dest.extent(d)) == static_cast<long>(t.extent(d)),
-                   "scan into(dest): dest's shape must match the source exactly");
+    // The same `into(dest)` shape guard the single-source math producers use, and
+    // since #363 literally the same helper: rank `static_assert`, static per-axis
+    // gate, runtime `_TNY_CHECK` for anything dynamic, one message wording. (Before
+    // that this was a hand-rolled loop comparing extents as `long` — 32-bit under
+    // Windows' LLP64, so it truncated extents above 2^31 while the math engines'
+    // copy did not; `check_into_same_shape` compares in a type that is at least
+    // 64 bits on every platform.)
+    _md::check_into_same_shape(out.dest, t, cs::make_index_sequence<E::rank()>{});
     out.dest.copy_(t);
     scan_<Axis>(out.dest, init, f);
     return out.dest;
