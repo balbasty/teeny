@@ -147,6 +147,19 @@ loop, where they hoist for free.
   strided/permuted view, teeny's own `strides<...>` layout), or the two disagree
   in layout — a strided-vs-contiguous pair still computes the correct result, just
   without the unroll.
+- **The static unroll is for SMALL fixed shapes — and is capped (#343).** Both
+  unrolled paths above (the axis reduction and `dot`/`sqdist`) emit **one unrolled
+  step per element**, so they only pay off for the shapes they were written for: a
+  3-element cross-channel dot, a fixed-size stencil tap accumulation. Left uncapped
+  they scale terribly in *compile* time — clang refuses outright past 256 elements
+  ("instantiating fold expression … exceeded expression nesting limit of 256", its
+  default `-fbracket-depth`), and g++ took ~1 minute on a `shape<64,64>` reduction
+  and never finished a `shape<128,128>` one. So a fully-static shape of more than
+  **`TNY_MAX_STATIC_UNROLL` (256) elements takes the ordinary runtime-decode path**,
+  exactly as a dynamic one does. Same results either way — the cap is a pure
+  compile-time/binary-size guard on an optimisation that was never meant for large
+  shapes. `-DTNY_MAX_STATIC_UNROLL=64` trades more of the unroll away for faster
+  compiles; **raising it past 256 breaks clang**.
 
 !!! note "Measurement over intuition"
     The numbers here (`sizeof`, loop bodies, SIMD) are from `g++ -O2/-O3` on the host.
