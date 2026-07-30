@@ -169,7 +169,7 @@ struct _geom_view {
     using index_type   = typename Shape::index_type;
     mapping_type m;
 
-    static constexpr cs::size_t rank() noexcept { return _shape_rank<Shape>(); }
+    _TNY_API static constexpr cs::size_t rank() noexcept { return _shape_rank<Shape>(); }
 
     template <class Idx, cs::enable_if_t<_is_ic<Idx>::value, int> = 0>
     _TNY_API constexpr auto operator[](Idx) const noexcept {
@@ -371,7 +371,7 @@ struct tensor : private Layout::template mapping<Shape> {
     _TNY_HOST tensor(Shape e, _uninit_t) : mapping_type(e), store_(_alloc_size(mapping_type(e)), _uninit) {}
 
     /* --- geometry ------------------------------------------------- */
-    static constexpr cs::size_t rank() noexcept { return _shape_rank<Shape>(); }
+    _TNY_API static constexpr cs::size_t rank() noexcept { return _shape_rank<Shape>(); }
     _TNY_API constexpr const mapping_type & mapping() const noexcept { return *this; }
     _TNY_API constexpr const Shape & extents() const noexcept { return mapping_type::extents(); }
     static constexpr bool is_strides_layout    = _is_strides<Layout>::value;
