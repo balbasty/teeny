@@ -506,7 +506,7 @@ sqdist(a,b);  dist(a,b);               // Σ(aᵢ-bᵢ)² / √Σ(aᵢ-bᵢ)² -
                       //   a.sqdist(b), a.dist(b).
 a.normalize_();  auto u = normalize(a);// in place a/=norm(a) (floating) / out-of-place unit vector.
                       //   normalize static->stack, dynamic->heap; zero vector -> NaN (no epsilon)
-a.normalize_<1>(); normalize<-1>(a);   // ...over NAMED AXES (keepdim broadcast); axes distinct & ascending
+a.normalize_<1>(); normalize<-1>(a);   // ...over NAMED AXES (keepdim broadcast); axes distinct, ANY order
 auto c = cross(a,b);  a.cross_(b);     // 3D cross product (rank-1, length 3): new / in place (a=a×b).
                       //   Into a separate slot: cross(a,b,into(slot)) -- the slot may be a slice
                       //   of a bigger array, cross(a,b,into(N(i,all))). (no crossto_ spelling.)
@@ -523,6 +523,8 @@ sum<0>(a, into(buf)); mean(a, axis<1>{}, into(buf));  // into(dest) too -> copie
                       //   result into buf (any spelling: <Axes>, <Acc,Axes>, or the axis<...> value form)
 sum<0>(a, keepdims); sum(a, axis<0>{}, keepdims);  // keepdims: reduced axis kept as size-1 (numpy
                       //   keepdims=True), broadcasts back over a. sum/prod/max/min/mean/sqnorm/norm.
+                      //   Axes distinct, in ANY order (sorted internally, #275/#371) — with or
+                      //   without keepdims: sum<2,0>(a, keepdims) == sum<0,2>(a, keepdims).
 sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf));  // ...and every trailing keyword composes,
                       //   any subset/order (dtype/axis/keepdims/into) — see the `_TNY_RED_TAGGED`
                       //   generic entry point in math.h, next to `sum<Acc,Axes...>(a, keepdims,
