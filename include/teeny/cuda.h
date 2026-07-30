@@ -1,5 +1,5 @@
-#ifndef TNY_MD_CUDA
-#define TNY_MD_CUDA
+#ifndef TNY_CUDA_H
+#define TNY_CUDA_H
 // CUDA memory-space storage for tensor (gpu / pinned / mapped owning
 // modes). Safe to include ALWAYS — the body activates ONLY when the CUDA runtime
 // is reachable: compiling with nvcc, or <cuda_runtime.h> is on the include path
@@ -283,4 +283,4 @@ _TNY_NAMESPACE_END(tny)
 
 #endif // TNY_HAS_CUDA
 
-#endif // TNY_MD_CUDA
+#endif // TNY_CUDA_H

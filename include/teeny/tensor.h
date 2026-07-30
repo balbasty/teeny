@@ -1,5 +1,5 @@
-#ifndef TNY_MD_TENSOR
-#define TNY_MD_TENSOR
+#ifndef TNY_TENSOR_H
+#define TNY_TENSOR_H
 #include <cuda/std/mdspan>
 #include <cuda/std/tuple>
 #include <cuda/std/utility>
@@ -1878,6 +1878,12 @@ _TNY_API bool index_fits(const tensor<T,E,L,O> & t) { return t.template index_fi
  *         never spell the `_view` kinds. Symmetric with `as_anyrank<Space>` /
  *         `from_dlpack<T,Space>`.
  *
+ *         `storage::heap`/`storage::stack` name no distinct memory space (they are
+ *         *ownership* kinds, not backends), so passing one here just folds to a plain
+ *         `storage::view`, same as leaving the tag off — it does NOT make `wrap` return
+ *         an owning tensor. For an owning heap/stack tensor, copy into one with
+ *         `empty<T, storage::heap>(e)`/`make_heap<T>(e)` instead.
+ *
  *         The trailing argument is a keyword-tag bag (#277/#282), not a fixed
  *         `storage_c<Space>` parameter — today the only recognised keyword is
  *         `storage_c`/`storage_v`, but a future keyword (e.g. a `stream` tag) lands
@@ -2304,4 +2310,4 @@ as_tensor(const MD & m) {
 
 _TNY_NAMESPACE_END(tny)
 
-#endif // TNY_MD_TENSOR
+#endif // TNY_TENSOR_H

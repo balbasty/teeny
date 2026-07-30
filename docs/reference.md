@@ -79,6 +79,7 @@ an owner):
 | `wrap(md)` | the mdspan's own layout | `storage::view` |
 | `wrap(…, storage_v<storage::gpu>)` | any of the above | `storage::gpu_view` |
 | `wrap(…, storage_v<storage::pinned>)` / `…<storage::mapped>` | any of the above | `pinned_view` / `mapped_view` |
+| `wrap(…, storage_v<storage::heap>)` / `…<storage::stack>` | any of the above | `storage::view` — `heap`/`stack` name no memory *space*, so they fold to a plain view like any other host-accessible tag, not to an owning tensor; use `empty<T, storage::heap>(e)`/`make_heap<T>(e)` for that |
 
 Allocate new storage — element type **`T` defaults to `float`**; static shape →
 stack (host+device), dynamic shape → heap (host only):

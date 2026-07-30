@@ -1,5 +1,5 @@
-#ifndef TNY_MD_DLPACK
-#define TNY_MD_DLPACK
+#ifndef TNY_DLPACK_H
+#define TNY_DLPACK_H
 // teeny <-> DLPack (https://dmlc.github.io/dlpack) zero-copy interchange with
 // numpy / torch / cupy / jax. DLPack exchanges a *pointer + metadata*, never the
 // data itself, so import/export are pure host-side struct work — no CUDA needed
@@ -353,4 +353,4 @@ _TNY_HOST bool dispatch_dlpack_dtype(const Carrier * m, F && f) {
 
 _TNY_NAMESPACE_END(tny)
 
-#endif // TNY_MD_DLPACK
+#endif // TNY_DLPACK_H

@@ -1,5 +1,5 @@
-#ifndef TNY_MD_KWARGS
-#define TNY_MD_KWARGS
+#ifndef TNY_KWARGS_H
+#define TNY_KWARGS_H
 #include <cuda/std/type_traits>
 #include <teeny/defines.h>
 
@@ -100,4 +100,4 @@ template <class X> struct is_keyword : cs::false_type {};
 
 } // namespace _kw
 _TNY_NAMESPACE_END(tny)
-#endif // TNY_MD_KWARGS
+#endif // TNY_KWARGS_H

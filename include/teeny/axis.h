@@ -1,5 +1,5 @@
-#ifndef TNY_MD_AXIS
-#define TNY_MD_AXIS
+#ifndef TNY_AXIS_H
+#define TNY_AXIS_H
 // Axis-manipulation view builders on a raw mdspan: permute, flip, unsqueeze,
 // squeeze. Each reads only extents/strides/data_handle, so it works on ANY
 // source layout, and returns a folded teeny `strides<...>` mdspan the tensor
@@ -228,4 +228,4 @@ _TNY_API constexpr bool reshape_view_strides(const cs::array<Idx, R> & se,
 } // namespace _detail
 
 _TNY_NAMESPACE_END(tny)
-#endif // TNY_MD_AXIS
+#endif // TNY_AXIS_H

@@ -1,5 +1,5 @@
-#ifndef TNY_ALIAS
-#define TNY_ALIAS
+#ifndef TNY_ALIAS_H
+#define TNY_ALIAS_H
 // Convenience: pull the mdspan vocabulary teeny builds on into `tny`, so user
 // code needs only `using namespace tny;`. These are the standard cuda::std
 // names -- none collide with teeny's own, so exposing them is safe (not
@@ -272,4 +272,4 @@ template <> struct _is_keepdims_tag<keepdims_t> : cs::true_type {};
 
 _TNY_NAMESPACE_END(tny)
 
-#endif // TNY_ALIAS
+#endif // TNY_ALIAS_H

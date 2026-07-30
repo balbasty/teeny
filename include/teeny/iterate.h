@@ -1,5 +1,5 @@
-#ifndef TNY_MD_ITERATE
-#define TNY_MD_ITERATE
+#ifndef TNY_ITERATE_H
+#define TNY_ITERATE_H
 #include <cuda/std/mdspan>
 #include <cuda/std/utility>
 #include <cuda/std/tuple>
@@ -834,4 +834,4 @@ _TNY_API auto & scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f, int
 
 _TNY_NAMESPACE_END(tny)
 
-#endif // TNY_MD_ITERATE
+#endif // TNY_ITERATE_H

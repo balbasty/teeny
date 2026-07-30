@@ -1,5 +1,5 @@
-#ifndef TNY_MD_LAYOUT
-#define TNY_MD_LAYOUT
+#ifndef TNY_LAYOUT_H
+#define TNY_LAYOUT_H
 #include <cuda/std/cstddef>
 #include <cuda/std/cstdint>
 #include <cuda/std/array>
@@ -299,4 +299,4 @@ _TNY_API constexpr cs::int64_t _src_sstride() {
 
 _TNY_NAMESPACE_END(tny)
 
-#endif // TNY_MD_LAYOUT
+#endif // TNY_LAYOUT_H

@@ -1,5 +1,5 @@
-#ifndef TNY_MD_DYNAMIC
-#define TNY_MD_DYNAMIC
+#ifndef TNY_DYNAMIC_H
+#define TNY_DYNAMIC_H
 #include <cuda/std/mdspan>
 #include <cuda/std/array>
 #include <teeny/defines.h>
@@ -740,4 +740,4 @@ _TNY_HOST bool dispatch_value(int v, F && f) {
 
 _TNY_NAMESPACE_END(tny)
 
-#endif // TNY_MD_DYNAMIC
+#endif // TNY_DYNAMIC_H
