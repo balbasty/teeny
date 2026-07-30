@@ -116,6 +116,7 @@ a.iota_(start, step);                 // start, start+step, … (row-major)
 a.map_(f);                            // *this = f(*this)      (user functor)
 a.zip_with_(g, b);                    // *this = g(*this, b)   (broadcasts)
 auto c = a.map(f);                    // out-of-place variant
+a.map(f, into(y));                    // ...into a preallocated buffer -> y& (no allocation)
 a.at(i, j).atomic_add_(v);            // scatter: a(i,j) += v — ATOMIC on host and device
 ```
 
@@ -150,9 +151,9 @@ auto cl = clamp(a, lo, hi);                            // elementwise clamp
 
 Every out-of-place producer is **also a method**, for parity with `a.add(b)` and
 for chaining — `a.exp()`, `a.sqrt()`, `a.minimum(b)`, `a.clamp(lo, hi)`,
-`a.normalize()`, `a.cross(b)`, … — and each takes the same optional `into(y)`
-(`a.exp(into(y))`). The free forms (`exp(a)`) and the in-place `_` forms
-(`a.exp_()`) still exist; pick whichever reads best.
+`a.normalize()`, `a.normalize(axis<1>{})`, `a.cross(b)`, `a.map(f)`, … — and each
+takes the same optional `into(y)` (`a.exp(into(y))`). The free forms (`exp(a)`)
+and the in-place `_` forms (`a.exp_()`) still exist; pick whichever reads best.
 
 ### Writing into a preallocated destination — `into(dest)`
 
@@ -168,6 +169,8 @@ a.add(2.0, into(y));          // scalar rhs works too
 exp(a, into(y));  sqrt(a, into(y));  neg(a, into(y));   // every unary
 minimum(a, b, into(y));  maximum(a, s, into(y));  clamp(a, lo, hi, into(y));
 normalize(a, into(y));
+normalize(a, axis<1>{}, into(y));   // the axis form too (y keeps `a`'s full shape)
+a.map(f, into(y));             // the user-functor producer
 cross(a, b, into(N(i, all)));  // 3D cross straight into row i of a matrix ("crossto")
 ```
 
@@ -433,6 +436,8 @@ sqdist(a, b, dtype<double>{}, into(cell));   // dtype/into compose, same trailin
 a.normalize_();       // in place: a /= norm(a)   (floating element types)
 auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, dynamic->heap)
 a.normalize_<1>();  normalize<-1>(a);  normalize(a, axis<1>{});   // OVER NAMED AXES (keepdim broadcast)
+a.normalize(axis<1>{});  a.normalize<1>();                        // ...as a METHOD, either spelling
+normalize(a, axis<1>{}, into(y));  a.normalize<1>(into(y));       // ...and each takes into(y)
 
 auto c = cross(a, b);       // 3D cross product a × b -> new stack 3-vector (rank-1, length 3)
 a.cross_(b);                // in place: a becomes a × b (mirrors add_/mul_; aliasing-safe)

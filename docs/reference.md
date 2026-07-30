@@ -356,6 +356,7 @@ one — see [Mixing widths](shapes-strides.md#mixing-widths-in-a-broadcast).
 | `neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign(a)` | unary free functions — **also methods** (`a.exp()`, …) |
 | `minimum(a,b)` `maximum(a,s)` `clamp(a,lo,hi)` | elementwise min/max/clamp — **also methods** (`a.minimum(b)`, …) |
 | `normalize(a)` `cross(a,b)` | unit vector / 3D cross — **also methods** (`a.normalize()`, `a.cross(b)`) |
+| `normalize<Axes...>(a)` / `normalize(a, axis<...>{})` | unit vectors over the named axes — **also methods** (`a.normalize<1>()`, `a.normalize(axis<1>{})`) |
 | `a.add(b, alpha)` `a.sub(b, alpha)` | fused out-of-place axpy: `a ± alpha*b` (b broadcasts); the in-place twin is `add_(b, alpha)` |
 | `a.map(f)` | new tensor from a user functor |
 
@@ -415,7 +416,9 @@ width and in signedness alike, and `y` keeps its own type; see
 | `a.add(b, alpha, into(y))` `a.sub(b, alpha, into(y))` | `y&` (fused axpy into `y`) |
 | `exp(a, into(y))` … (every unary) | `y&` |
 | `minimum(a,b,into(y))` `maximum(a,s,into(y))` `clamp(a,lo,hi,into(y))` | `y&` |
-| `normalize(a, into(y))` `cross(a,b,into(y))` `cross(a,b,into(N(i,all)))` | `y&` / the slice's `dest&` |
+| `normalize(a, into(y))` `normalize<1>(a, into(y))` `normalize(a, axis<1>{}, into(y))` | `y&` (`y` keeps `a`'s full shape — only the divisor is reduced) |
+| `a.map(f, into(y))` | `y&` (user functor, one fused pass) |
+| `cross(a,b,into(y))` `cross(a,b,into(N(i,all)))` | `y&` / the slice's `dest&` |
 | `sum(a, into(cell))` … `dot(a,b,into(cell))` `sqdist(a,b,into(cell))` | `cell&` (full reduction → **rank-0** dest) |
 | `sum<0>(m, into(buf))` `mean(m, axis<1>{}, into(buf))` | `buf&` (axis reduction → lower-rank dest) |
 
@@ -488,7 +491,7 @@ optimisation — those stay out of teeny).
 | `a.normalize_()` | `tensor&` | in place `a /= norm(a)`; floating element types only; zero vector → NaN |
 | `a.normalize_<Axes...>()` | `tensor&` | in place, over the named axes (keepdim broadcast); axes distinct & ascending |
 | `normalize(a)` | new tensor (floating; integer → `double`) | out-of-place unit vector; static → stack, dynamic → heap |
-| `normalize<Axes...>(a)` / `normalize(a, axis<...>{})` | new tensor (floating) | out-of-place, over the named axes (keepdim) |
+| `normalize<Axes...>(a)` / `normalize(a, axis<...>{})` | new tensor (floating) | out-of-place, over the named axes (keepdim). Also methods (`a.normalize<1>()`, `a.normalize(axis<1>{})`), and every spelling takes `into(y)` |
 | `cross(a, b)` | new stack 3-vector `promote(Ta,Tb)` | 3D cross product; operands rank-1, length 3 |
 | `a.cross_(b)` | `tensor&` | in place: `a` becomes `a × b` (rank-1, length 3; aliasing-safe). Into a separate slot: `slot.copy_(cross(a,b))` |
 
