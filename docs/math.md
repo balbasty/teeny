@@ -243,16 +243,28 @@ n.div(d, into(f));            // f = {3, 4}  — integer division, == f.copy_(n.
 allocated: the source's own shape for a unary or scalar-rhs op, the broadcast shape
 for a tensor-rhs one. Only the *operands* broadcast — the destination never
 stretches, so a `y` that is smaller in any axis is an error, not a repeated write.
-For a unary or scalar-rhs op it is caught at **compile time** when both shapes are
-fully static, and by a debug-time check (an `assert`, compiled out under
-`-DNDEBUG`) when either is dynamic; the broadcasting tensor-rhs form uses the
-debug-time check in both cases:
+It is caught at **compile time** whenever the extents in play are static, and by a
+debug-time check (an `assert`, compiled out under `-DNDEBUG`) when any of them is
+dynamic — for every producer alike, broadcasting or not:
 
 ```cpp
 auto a = zeros(shape<8,8>{});
 auto y = zeros(shape<2,2>{});
 a.mul(2.0, into(y));          // compile error: dest's shape must match the source's
 exp(a, into(y));              // same
+a.add(a, into(y));            // same, for the broadcasting tensor-rhs form
+```
+
+The two rules differ only in what counts as a match. A unary or scalar-rhs op wants
+**exact** equality — it has nothing to stretch. A tensor-rhs op broadcasts, so each
+*operand* axis must either equal `y`'s or be 1 (an extent-1 operand axis stretches
+over `y`). `y`'s own axes never stretch in either case:
+
+```cpp
+auto row = zeros(shape<1,3>{});
+auto out = zeros(shape<2,3>{});
+out.add(row, into(out));      // fine: the (1,3) operand stretches over (2,3)
+out.add(out, into(row));      // compile error: a (1,3) DEST does not stretch
 ```
 
 `y` must also not **self-overlap** — no `extent > 1` axis with stride 0. Such a `y`
