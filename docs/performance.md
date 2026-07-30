@@ -113,7 +113,8 @@ loop, where they hoist for free.
   when `v.index_fits<int32_t>()`; `dispatch_rank<narrow_index>(at, f)` fuses it into the
   anyrank rank dispatch. Opt in per launch site. Cross-width broadcasting (#167) is
   resolved by **broadening** — a mixed-width `a + b` takes the wider operand's index
-  type, which is lossless and avoids truncating the wide operand's strides.
+  type, which is lossless and avoids truncating the wide operand's strides (and, if the
+  two also disagree in signedness, a signed type wide enough for both, #347).
 - **`restrict`/no-alias fast path (#161, #175) — landed.** Contiguous elementwise ops
   now take a **linear fast path** in place of the per-element mixed-radix decode, which
   auto-vectorizes. Two flavours, by whether a second array is in play:

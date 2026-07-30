@@ -211,22 +211,15 @@ _TNY_API constexpr bool bc_static_ok_r(cs::index_sequence<D...>) {
 template <class Idx, class Ea, class Eb, cs::size_t R, cs::size_t... D>
 cs::extents<Idx, bc1(bc_sext<Ea, R>(D), bc_sext<Eb, R>(D))...>
 bcast_ext_(cs::index_sequence<D...>);
-// The WIDER of two offset index TYPES (by `sizeof`; a tie keeps the first, so a
-// same-width pair — the overwhelmingly common case — is unchanged). This is a pure
-// WIDTH pick, used for the index type a broadcast RESULT carries: the result is a
-// fresh, C-contiguous allocation, so its own extents/strides are non-negative and
-// the wider of the two operands' widths holds all of them.
-// (It does not — and cannot from the types alone — widen two equal-narrow operands
-// whose combined SPAN overflows: that stays the caller's responsibility, guarded by
-// index_fits/dispatch_index at the boundary.)
-// NB it is NOT the type an engine may decode OFFSETS in — see `_offset_int_t` below,
-// which is signedness-aware; a pure width pick can select an unsigned type over a
-// signed participant's negative stride and turn it into a huge positive offset.
+// The WIDER of two integer types (by `sizeof`; a tie keeps the FIRST). A pure WIDTH
+// pick, and nothing more: it is the width HALF that `_offset_int_t` below is built
+// from, NOT an answer to "which type holds every value both sides can name" — that
+// question is signedness-sensitive, and a width-only pick can land on an unsigned
+// type next to a signed participant's negative stride (turning it into a huge
+// positive offset) or, at equal width, on the FIRST type even when the second's
+// range is the larger one. Nothing outside `_offset_int_t` should use this directly.
 template <class Ia, class Ib>
 using _wider_int_t = cs::conditional_t<(sizeof(Ib) > sizeof(Ia)), Ib, Ia>;
-// The broadcast RESULT carries the wider of the two OPERANDS' index types.
-template <class Ea, class Eb>
-using _wider_index_t = _wider_int_t<typename Ea::index_type, typename Eb::index_type>;
 
 /* ---- the type an ENGINE decodes its offsets in ---------------------------- *
  * It must represent EVERY extent and stride value that ANY participant (the
@@ -290,6 +283,30 @@ template <class... I> struct _offset_int {
 };
 template <class... I> using _offset_int_t = typename _offset_int<I...>::type;
 
+// The index type a broadcast RESULT carries (#167) — the SAME rule, over the two
+// operands: a type that can represent every extent/stride value either operand's
+// index type can name (widest for an all-signed or all-unsigned pair; a SIGNED type
+// wide enough for both ranges for a mixed one).
+//
+// This was a `sizeof`-only pick (`_wider_int_t` of the two), which is not that rule
+// whenever the operands disagree in signedness (#347), in both directions:
+//   - a signed-narrow + UNSIGNED-WIDER pair (`int16` + `uint32`) resolved to the
+//     UNSIGNED type, handing back a result tensor that breaks teeny's index contract
+//     — signed throughout, which is what `flip()`/a negative slice step (both
+//     `static_assert` a signed index) and `index_fits`'s signed reach are stated
+//     against. A signed pair of operands would silently produce a result no longer
+//     flippable, for no reason the caller can see;
+//   - at EQUAL width the tie kept the FIRST, so an `int32` + `uint32` pair resolved
+//     to `int32` — which cannot represent the `uint32` operand's upper half, i.e.
+//     exactly the truncation the widening exists to prevent.
+// Only the mixed-signedness pairs move (`_offset_int_t` of a same-signedness pair IS
+// `_wider_int_t` of it, same tie rule), and none of those is reachable through
+// teeny's own vocabulary today — `shape`/`shape32`/`rank` are signed by construction
+// — so this is a latent-hazard fix: it keeps the rule true by construction rather
+// than by nothing currently exercising it.
+template <class Ea, class Eb>
+using _bcast_index_t = _offset_int_t<typename Ea::index_type, typename Eb::index_type>;
+
 /* ---- the type an ENGINE runs its OP in (`Cv`) ------------------------------ *
  * Distinct from `_offset_int_t` above (that one is about ADDRESSING): `Cv` is the
  * arithmetic type each element is widened to before the op and cast back from
@@ -315,7 +332,7 @@ template <class C> struct _cv_or_dest<void, C> { using type = compute_type_t<typ
 template <class Cv, class C> using _cv_or_dest_t = typename _cv_or_dest<Cv, C>::type;
 
 template <class Ea, class Eb>
-using bcast_extents = decltype(bcast_ext_<_wider_index_t<Ea, Eb>, Ea, Eb,
+using bcast_extents = decltype(bcast_ext_<_bcast_index_t<Ea, Eb>, Ea, Eb,
     bc_rank(Ea::rank(), Eb::rank())>(cs::make_index_sequence<bc_rank(Ea::rank(), Eb::rank())>{}));
 
 // RUNTIME extent/stride of operand `x` for RESULT axis `d` in result rank `R`,
@@ -364,14 +381,14 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
     // wider-indexed operand's extents/strides: silently, since the `static_cast<I>`s
     // below suppress the narrowing diagnostic that caught the sibling
     // `zipreduce_decode_` bug (#342). An OUT-OF-PLACE `c` already carries
-    // `_wider_index_t` of the two operands (#167), so it is the widest and the WIDTH
-    // half of this is a no-op there; it is the IN-PLACE ops (`c` IS `a`: `a.add_(b)`,
-    // `a.copy_(b)`, …) and a caller-supplied `into(dest)` that can hand us a NARROW
-    // destination next to a wide operand, and there `a.stride()` of 40000 folded to an
-    // int16 -25536 and read off the front of the buffer. The SIGNEDNESS half applies
-    // to both: a mixed-signedness trio (an unsigned-indexed operand next to a flipped,
-    // signed-indexed one) decodes in a signed type, so a stride of -1 stays -1 instead
-    // of becoming 4294967295.
+    // `_bcast_index_t` of the two operands (#167/#347) — this very rule over those
+    // two — so out-of-place this is a no-op; it is the IN-PLACE ops (`c` IS `a`:
+    // `a.add_(b)`, `a.copy_(b)`, …) and a caller-supplied `into(dest)` that can hand
+    // us a NARROW destination next to a wide operand, and there `a.stride()` of 40000
+    // folded to an int16 -25536 and read off the front of the buffer. The SIGNEDNESS
+    // half applies to both: a mixed-signedness trio (an unsigned-indexed operand next
+    // to a flipped, signed-indexed one) decodes in a signed type, so a stride of -1
+    // stays -1 instead of becoming 4294967295.
     //
     // This is not a promise about `c`'s own type: `c`'s own offsets are computed from
     // `c`'s own extents/strides, so they fit `c`'s index type by construction (a wider
@@ -929,7 +946,7 @@ _TNY_API R zipreduce_decode_(const A & a, const B & b, Op op, cs::index_sequence
     // offset instead of stepping backwards, and `a.data()[oa]` reads far off the front
     // of the buffer (#355 — the same defect class `bzip_` carried in #346). So the
     // pick is signedness-aware. For an all-signed or all-unsigned pair — every call
-    // site that is not this mixed case — `_offset_int_t` IS `_wider_index_t`
+    // site that is not this mixed case — `_offset_int_t` is the plain widest
     // (`_widest_int` of two left-folds to exactly `_wider_int_t`, same tie rule), so
     // those instantiations are byte-identical to before.
     //
@@ -1138,10 +1155,9 @@ _TNY_HOST auto reduce_to(tensor<RE, OE, ccontiguous, storage::heap> && r) {
 /* ---- allclose: |a-b| <= atol + rtol*|b| for every (broadcast) element ---- */
 template <class R, class A, class B, cs::size_t... D>
 _TNY_API bool allclose_(const A & a, const B & b, R rtol, R atol, cs::index_sequence<D...>) {
-    // Two read-only operands, so this is the `zipreduce_decode_` situation (#342) — but
-    // the pick is the signedness-aware `_offset_int_t`, not the pure width
-    // `_wider_index_t`: it is an OFFSET decode type, not the index type of a fresh
-    // result (see `_offset_int_t`'s note above). Taking the FIRST operand's index type
+    // Two read-only operands, so this is the `zipreduce_decode_` situation (#342) — the
+    // pick is the signedness-aware `_offset_int_t`, never a pure `sizeof` widening
+    // (see `_offset_int_t`'s note above). Taking the FIRST operand's index type
     // alone truncated a wider-indexed `b`'s extents/strides, silently — the
     // `static_cast<I>`s below suppress the narrowing diagnostic that caught #342 — and
     // a 40000 stride folded to an int16 -25536 reads off the front of the buffer (#353).
