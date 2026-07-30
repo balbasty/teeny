@@ -77,7 +77,7 @@ t.stride(Int<1>());  // a compile-time constant for a strides<> layout, a
 ```
 
 A `strides<...>` tensor is **fully sliceable**. Every view op — `operator()`
-slicing, `take_along`, `permute`, `flip`, `squeeze`/`unsqueeze`, `peel` — works on
+slicing, `slice_along`, `permute`, `flip`, `squeeze`/`unsqueeze`, `peel` — works on
 any source layout including `strides<...>`, and folds the output strides the same
 way. Slicing a contiguous static tensor keeps folded compile-time strides. (If you
 know mdspan, the [mdspan vs teeny](mdspan-vs-teeny.md) page explains how `strides<>`

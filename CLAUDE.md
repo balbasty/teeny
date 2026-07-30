@@ -98,7 +98,7 @@ include/teeny/
   indexing.h       free indexing/slicing vocabulary: slice()/none, _norm_axis,
                    _wrap_idx, slice_spec + traits, _compact output-extents
   tensor.h         the tensor class + view/local/owned aliases + as_tensor
-                   + indexing/slicing, take_along, index_select, permute, unsqueeze/squeeze
+                   + indexing/slicing, slice_along, index_select, permute, unsqueeze/squeeze
   math.h           in-place & out-of-place elementwise (broadcasting) + unary math
                    + reductions (sum/prod/max/min/dot). Members declared in
                    tensor.h, DEFINED here.
@@ -229,7 +229,7 @@ all static): `tensor<float, shape<3,4>, strides<4,1>>(ptr)`. Strides are SIGNED,
 so `-1` means a real stride of −1 (reversed view), NOT dynamic — a runtime
 stride is spelled `dynamic_stride` (`strides<dynamic_stride,1>`, constructed with
 the runtime strides). NB CCCL's `submdspan` does not apply to it, but teeny's own
-slicing/take_along/permute/flip/peel DO (they build views by hand and fold the
+slicing/slice_along/permute/flip/peel DO (they build views by hand and fold the
 output strides), so a strides<...> tensor is fully sliceable.
 
 ## API cheat-sheet
@@ -277,15 +277,17 @@ t(0, slice<1,4>()); t(0, slice<0,8,2>());  // compile-time slice (bounds fold li
                       //   NB a range outputs teeny's strides<...> layout (folding the
                       //   stride where derivable); a COMPILE-TIME range folds its extent
                       //   too (source static + static bounds), a runtime range's is dynamic.
-t.take_along<0,2>(i, slice(1,4));  // bind named axes only; keep every other axis
-t.subsample<Axes...>(k, starts...);  // coloured/strided sub-lattice (#258): take_along +
+t.slice_along<0,2>(i, slice(1,4));  // bind named axes only; keep every other axis (#423: NOT
+                      //   numpy take_along_axis / torch take_along_dim — those are index-TENSOR
+                      //   gathers, i.e. index_select. This is torch select/narrow over N axes.)
+t.subsample<Axes...>(k, starts...);  // coloured/strided sub-lattice (#258): slice_along +
                       //   slice(start,none,k) per named axis, one shared step k, per-axis
                       //   start. Pure sugar, no new addressing power. k/starts accept a
                       //   runtime value or Int<k>() (folds through slice()'s own static-range
                       //   machinery -> a fully-static (start,k) pair keeps a folded static
                       //   result, same as a hand-written slice()). Value form: t.subsample(
                       //   axis<Axes...>{}, k, starts...) -- LEADING tag, same placement as
-                      //   take_along's own (a second variadic pack, the starts, needs the
+                      //   slice_along's own (a second variadic pack, the starts, needs the
                       //   disambiguating tag up front, not trailing).
 t.unfold<Axis>(size, step);  t.unfold<Axis>(size);  // pytorch Tensor.unfold (#256): appends
                       //   a NEW trailing axis of width `size`, stepped by `step` along Axis
@@ -305,8 +307,8 @@ t.unfold<Axis>(size, step);  t.unfold<Axis>(size);  // pytorch Tensor.unfold (#2
                       //   t.unfold(Int<Axis>(), size, step) -- single-axis Int<k>() selector
                       //   (like flip/squeeze), not an axis<...> list (only one axis binds).
 t.index_select<Axis>(idx);         // gather along Axis by a rank-1 integer index
-                      //   TENSOR (#326) — runtime DATA, unlike take_along's compile-time
-                      //   indices. idx values wrap negative (built on take_along); static
+                      //   TENSOR (#326) — runtime DATA, unlike slice_along's compile-time
+                      //   indices. idx values wrap negative (built on slice_along); static
                       //   idx shape -> stack result, else heap (source must be host-
                       //   accessible; a gpu tensor: gather into a device into(dest)
                       //   instead). Always a COPY (an arbitrary data-dependent gather
@@ -314,7 +316,7 @@ t.index_select<Axis>(idx);         // gather along Axis by a rank-1 integer inde
                       //   t.index_select<Axis>(idx, into(dest)) (no alloc, device-safe;
                       //   dest's axis-Axis extent must equal idx's, checked; dest must not
                       //   alias t). Value form: t.index_select(idx, axis<Axis>{}) (TRAILING
-                      //   tag here -- unlike take_along/subsample's leading one, since
+                      //   tag here -- unlike slice_along/subsample's leading one, since
                       //   index_select's only other arg, idx, is a single fixed positional,
                       //   not an open pack, so a trailing tag is unambiguous and deducible)
 t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1) -> view
@@ -329,7 +331,7 @@ t.squeeze(axis<0,2>{});  t.unsqueeze(axis<1,3>{});  t.permute(axis<2,0,1>{});  /
                       //   value form (== the <...> template form) for these axis-LIST ops
 t.squeeze(axis<>{});  t.unsqueeze(axis<>{});  // an EMPTY axis LIST names no axis -> a NO-OP:
                       //   same shape+strides back, as a view (numpy's axis=() rule, #369; the
-                      //   same identity take_along(axis<>{}) / peel(t,axis<>{}) already have).
+                      //   same identity slice_along(axis<>{}) / peel(t,axis<>{}) already have).
                       //   NOT the no-ARGUMENT forms: t.squeeze() still drops EVERY static
                       //   singleton and t.unsqueeze() still inserts at axis 0 -- an empty
                       //   LIST and no argument at all are different things. permute needs a
@@ -365,7 +367,7 @@ to<storage::gpu>(t);                // MEMORY-SPACE move (cuda.h free fn): to<Sp
 t(all, slice(none,none,-1));    // reverse a range (negative step; a[::-1])
 // AXIS template args are signed: negatives count from the back (numpy). e.g.
 //   t.extent(Int<-1>()), t.unsqueeze<-1>() (append), t.permute<-1,0,1>(),
-//   t.take_along<-2>(i), peel<0,-1>(t).
+//   t.slice_along<-2>(i), peel<0,-1>(t).
 
 // --- math (in-place: any tensor/view; mutates *this) ---
 a.add_(b); a.sub_(b); a.mul_(b); a.div_(b);   // tensor rhs BROADCASTS numpy-style
@@ -438,7 +440,7 @@ auto c = a.add(b,alpha); a.sub(b,alpha);  // FUSED out-of-place axpy: a +/- alph
 a.add(b, into(y)); a.mul(2.0, into(y)); a.add(b, alpha, into(y));  // elementwise / scalar / fused
 exp(a, into(y)); sqrt(a, into(y)); minimum(a,b,into(y)); clamp(a,lo,hi,into(y));
 normalize(a, into(y)); cross(a, b, into(N(i, all)));  // cross into row i of a matrix (the "crossto")
-// y may be a TEMPORARY VIEW (#380): every view-producing op (slicing/at/permute/take_along/
+// y may be a TEMPORARY VIEW (#380): every view-producing op (slicing/at/permute/slice_along/
 //   peel_at) returns its view BY VALUE, and into() binds an RVALUE view, so "a slot of a
 //   bigger output" needs no named intermediate -- cross(a,b,into(N(i,all))),
 //   sum(a,into(cells.at(i,j))), sum(m,axis<0>{},into(rows(j,all))). Gated to the non-owning
@@ -540,7 +542,7 @@ for (auto [a,b,c] : peel_zip<0>(x,y,z)) f(a,b,c);  // one cs::tuple<ViewX,ViewY,
                       //   unsigned-indexed one steps backwards instead of wrapping. Decodes fresh
                       //   each step (no incremental cursor yet — a perf follow-up, not #327's scope).
 for (auto [a,b] : peel_zip(x, y, axis<0>{})) f(a,b);   // value form: axis<...> TRAILING (after
-                      //   every positional tensor — unlike take_along/peel_at's LEADING tag,
+                      //   every positional tensor — unlike slice_along/peel_at's LEADING tag,
                       //   which disambiguates a second variadic pack there; peel_zip's tensor
                       //   args are each fixed-arity, so a trailing tag is unambiguous)
 for (auto [m, cell] : peel_zip<0>(x,y).enumerate()) g(m[0], cell);  // (multi_index, tuple) per
@@ -672,14 +674,14 @@ does). Three selector vocabularies:
 - **`axis<...>`** — the numpy-like axis selector (`axis: int | list[int]`), a
   value tag sibling to `shape<...>` (in `alias.h`). For the axis-LIST ops:
   `peel(t, axis<0,1>{})` == `peel<0,1>(t)`, `peel_at(t, i, axis<0,1>{})`,
-  `t.take_along(axis<0,2>{}, i, slice(1,4))` == `t.take_along<0,2>(...)`,
+  `t.slice_along(axis<0,2>{}, i, slice(1,4))` == `t.slice_along<0,2>(...)`,
   `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise `unsqueeze`/`permute`.
-  Being a single distinct-typed arg it also disambiguates `take_along`'s two packs.
+  Being a single distinct-typed arg it also disambiguates `slice_along`'s two packs.
   An EMPTY list `axis<>{}` names no axis, so every axis-list op treats it as the
   IDENTITY (numpy's `axis=()`): `squeeze`/`unsqueeze` return the same shape as a
   view (#369 — they used to fall through to the DEFAULTED single-axis form and
   silently drop every singleton / insert at axis 0), matching what
-  `take_along(axis<>{})`, `peel(t, axis<>{})` and `_keepdims<>` already did. The
+  `slice_along(axis<>{})`, `peel(t, axis<>{})` and `_keepdims<>` already did. The
   no-ARGUMENT `squeeze()`/`unsqueeze()` are a DIFFERENT thing and keep their own
   meanings — an empty template pack can't be told from a defaulted one in C++, so
   only the `axis<...>` spelling can carry "zero axes named". `permute` needs a full
@@ -922,7 +924,7 @@ is generic.
   engine the moment its own gate fails (any dynamic extent, or — for `zipreduce_`
   — a non-C-contiguous or mismatched-layout operand).
 - **The gather** (`tensor.h` `_slice_range`, `iterate.h` `gather_peel`): ALL
-  view-making ops — `operator()` slicing, `take_along`, `peel` — route through
+  view-making ops — `operator()` slicing, `slice_along`, `peel` — route through
   one hand-built gather (NO `cs::submdspan`). Per axis: an integer drops it (into
   the base offset), `all` keeps it, a range keeps a strided window. The output
   layout is teeny's `strides<Sfold...>`, folding each kept stride to a

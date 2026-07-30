@@ -653,7 +653,7 @@ _TNY_API auto peel_zip(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> 
 }
 // value form: peel_zip(a, b, axis<0,1>{}) == peel_zip<0,1>(a, b) -- trailing
 // axis<...> selector (keywords AFTER positionals, per the design discussion on
-// #327), unlike take_along/peel_at's LEADING axis<...> (which disambiguates a
+// #327), unlike slice_along/peel_at's LEADING axis<...> (which disambiguates a
 // second variadic arg pack there; peel_zip's tensor arguments are each a single,
 // fixed-arity positional, so a trailing tag is unambiguous and deducible).
 template <long... Axes, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
