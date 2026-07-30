@@ -47,6 +47,7 @@ TESTS = \
 	$(BUILDDIR)/test_wrap_layout_tag \
 	$(BUILDDIR)/test_wrap_compose \
 	$(BUILDDIR)/test_wrap_mdspan \
+	$(BUILDDIR)/test_wrap_layout_dup \
 	$(BUILDDIR)/test_ops \
 	$(BUILDDIR)/test_fold \
 	$(BUILDDIR)/test_axred \

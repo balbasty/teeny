@@ -1889,10 +1889,15 @@ _TNY_API auto wrap(T * p, Shape e, Tags... /*tags*/) {
  *  explicit `<Layout>` template argument, so a type-dependent receiver needs no
  *  `.template`. Composes with a trailing `storage_c<Space>{}` exactly like the template
  *  form. (`strides<S...>{}` keeps its own dedicated overload above — it carries the
- *  static strides themselves, not just a layout kind, so it is not a `Layout` here.) */
+ *  static strides themselves, not just a layout kind, so it is not a `Layout` here.)
+ *  A SECOND layout tag after this one — `wrap(p, e, fcontiguous{}, fcontiguous{})`,
+ *  agreeing or not — is a `static_assert` (#394): `Layout` is a single positional slot,
+ *  not a composable keyword, so it can only be given once per call. */
 template <class Layout, storage Space = storage_deduce, class T, class Shape, class... Tags,
           cs::enable_if_t<cs::is_same<Layout, ccontiguous>::value || cs::is_same<Layout, fcontiguous>::value, int> = 0>
 _TNY_API auto wrap(T * p, Shape e, Layout, Tags... /*tags*/) {
+    static_assert(!_kw::has<_is_layout_tag, Tags...>(),
+        "wrap(): a layout tag was already given positionally — remove the duplicate");
     using ok = _kw::accepts<_is_storage_tag>;
     static_assert(ok::known<Tags...>(), "wrap(): unrecognised trailing argument — expected storage_c<...>{}/storage_v<...>");
     static_assert(ok::unique<Tags...>(), "wrap(): the same keyword was given twice");
@@ -2055,10 +2060,22 @@ _TNY_API auto make_view(T * p, Shape e, Tags... tags) { return wrap<Layout, Spac
  *  form. Without this overload only `ccontiguous{}` would work — it would reach `wrap`'s
  *  own positional layout overload by accident, because `make_view`'s `Layout` *defaults*
  *  to `ccontiguous` — while `fcontiguous{}` fell through to the keyword bag and was
- *  rejected as an unrecognised trailing argument. */
+ *  rejected as an unrecognised trailing argument.
+ *  A SECOND layout tag — `make_view(p, e, fcontiguous{}, fcontiguous{})` — is a
+ *  `static_assert` (#394), same as `wrap`'s. */
 template <class Layout, storage Space = storage_deduce, class T, class Shape, class... Tags,
           cs::enable_if_t<cs::is_same<Layout, ccontiguous>::value || cs::is_same<Layout, fcontiguous>::value, int> = 0>
-_TNY_API auto make_view(T * p, Shape e, Layout, Tags... tags) { return wrap<Layout, Space>(p, e, tags...); }
+_TNY_API auto make_view(T * p, Shape e, Layout, Tags... tags) {
+    // Checked HERE, before forwarding, not left to wrap()'s own assert: a second
+    // layout tag lives in THIS pack right now, but wrap<Layout, Space>(p, e, tags...)
+    // forwards Layout as an explicit template argument, and wrap's positional-layout
+    // overload then re-consumes a lone matching tag through its own required Layout
+    // parameter (partial ordering prefers that fixed parameter over its Tags... pack)
+    // rather than through Tags — so wrap's assert never sees it there (#394).
+    static_assert(!_kw::has<_is_layout_tag, Tags...>(),
+        "make_view(): a layout tag was already given positionally — remove the duplicate");
+    return wrap<Layout, Space>(p, e, tags...);
+}
 
 /** @brief `empty<T>(extents)` — a new UNINITIALISED tensor. The one factory the
  *  `make_*` family fuses into: ownership is **deduced** from the shape (fully
