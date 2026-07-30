@@ -305,6 +305,13 @@ template <class... I> struct _offset_int {
     using type = typename cs::conditional_t<_mixed, _sint_of_size<_bytes>, _ident<_wide>>::type;
 };
 template <class... I> using _offset_int_t = typename _offset_int<I...>::type;
+// Every call site names a participant's index type as `typename X::index_type`
+// (#363 normalised the spelling: several used to reach through
+// `X::extents_type::index_type`, sometimes both ways within one `using`). The two
+// are the same type for every participant these engines see — a tensor's
+// `index_type` is an alias of its shape's, and an mdspan's likewise — so the
+// difference was never load-bearing, only a hint to the next reader that it might
+// have been.
 
 // The index type a broadcast RESULT carries (#167) — the SAME rule, over the two
 // operands: a type that can represent every extent/stride value either operand's
@@ -451,8 +458,8 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
                   "into(dest): dest's shape must match the broadcast result's — each rhs axis must "
                   "equal dest's or be 1 (an operand stretches, a dest does not).");
     using I = _offset_int_t<typename C::index_type,
-                            typename A::extents_type::index_type,
-                            typename B::extents_type::index_type>;
+                            typename A::index_type,
+                            typename B::index_type>;
     constexpr cs::size_t R = C::rank();   // c has the result (largest) rank; a,b right-align into it
     // Array size floored to 1 (rank-0 c -> empty D..., see scal_'s comment above).
     const I ce[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(c.extent(D))... },
@@ -526,26 +533,45 @@ _TNY_API void check_dest_no_overlap(const C & c, cs::index_sequence<D...>) {
         "out-of-place store into it keeps only the last result — clone() to a dense tensor "
         "first, or write into a non-overlapping destination."), ... );
 }
-// EXACT per-axis extent check between a destination and the single source it is
-// written from — the runtime half of the guard the SINGLE-SOURCE engines
-// (`scalo_`/`unaryo_`) need, and the twin of the compile-time `ext_static_eq`
-// above. Those engines take their loop BOUNDS from the source and their strides
-// from the destination, so a destination shorter in any axis is written past its
-// end (#357): `a.mul(2.0, into(y))` with an 8x8 `a` and a 2x2 `y` stored 64
-// elements through a 4-element buffer. Their allocating producers (`oops`/
-// `uop_out`) build the destination from the source's own extents type, so the only
-// way to reach them mis-shaped is a caller-supplied `into(dest)`.
+// The type a RUNTIME extent comparison is made in. Extents are non-negative by
+// construction, so an unsigned type is lossless and sidesteps a signed/unsigned
+// mismatch between two differently-indexed participants; `unsigned long long` is
+// the one that never truncates, because it is at least 64 bits on EVERY platform.
+// The alternatives both have a host where they are 32-bit and teeny's default
+// `int64_t` index type does not fit them: `long` is 32-bit under Windows' LLP64
+// (this is what `scan`'s hand-rolled copy of the guard below used before #363),
+// and `cs::size_t` is 32-bit on a 32-bit host. Same "pick a type that covers every
+// participant" rule as `_offset_int_t`.
+using ext_cmp_t = unsigned long long;
+_TNY_API constexpr bool ext_eq(ext_cmp_t a, ext_cmp_t b) { return a == b; }
+
+// EXACT per-axis shape check between a destination and the SINGLE source it is
+// written from — the whole `into(dest)` guard for a single-source producer, in one
+// place: the rank `static_assert`, the compile-time `ext_static_eq` gate (fires
+// when both shapes are fully static, so the documented repro is a COMPILE error,
+// not a debug-only trip), and the per-axis runtime `_TNY_CHECK` for anything
+// dynamic. Used by `scalo_`, `unaryo_` and `scan`'s `into(dest)` form — the three
+// spellings #363 folded together.
+//
+// Those producers take their loop BOUNDS from the source and their strides from
+// the destination, so a destination shorter in any axis is written past its end
+// (#357): `a.mul(2.0, into(y))` with an 8x8 `a` and a 2x2 `y` stored 64 elements
+// through a 4-element buffer. Their allocating producers (`oops`/`uop_out`) build
+// the destination from the source's own extents type, so the only way to reach
+// them mis-shaped is a caller-supplied `into(dest)`.
 //
 // EXACT equality, unlike `bzip_`'s `ae[r] == ce[r] || ae[r] == 1`: that engine
-// BROADCASTS (an extent-1 operand axis gets stride 0 and is stretched), these two
-// do not — they index the source with the same counter they index the destination
+// BROADCASTS (an extent-1 operand axis gets stride 0 and is stretched), these do
+// not — they index the source with the same counter they index the destination
 // with, so an extent 1 against an extent n is a plain mismatch, not a stretch.
-// Extents are non-negative by construction, so comparing them as `cs::size_t`
-// (mdspan's own `static_extent` type) is lossless and sidesteps a signed/unsigned
-// mismatch between two differently-indexed tensors.
+// A broadcasting sibling of this helper belongs next to it, not inside it.
 template <class C, class A, cs::size_t... D>
-_TNY_API void check_same_extents(const C & c, const A & a, cs::index_sequence<D...>) {
-    ( _TNY_CHECK(static_cast<cs::size_t>(c.extent(D)) == static_cast<cs::size_t>(a.extent(D)),
+_TNY_API void check_into_same_shape(const C & c, const A & a, cs::index_sequence<D...>) {
+    static_assert(A::rank() == C::rank(), "into(dest): dest's rank must match the source's");
+    static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
+                      cs::index_sequence<D...>{}),
+                  "into(dest): dest's shape must match the source's exactly (no broadcast)");
+    ( _TNY_CHECK(ext_eq(c.extent(D), a.extent(D)),
         "into(dest): dest's shape must match the source's exactly (no broadcast here — a "
         "scalar-rhs or unary op has nothing to stretch); a shorter dest is written past its end."), ... );
 }
@@ -659,17 +685,15 @@ _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
     // #379; compare: `Rc`). It is NOT necessarily `C`'s own type, so the stores below
     // cast to `Ce` explicitly, exactly as `bzip_`'s `w_set`/fast path do.
     //
-    // Shape guard (#357): the bounds below come from `a` and the stores go through
-    // `c`'s strides, so the two must agree in EVERY axis or the write runs off the
-    // end of `c`. Checked HERE, in the engine, rather than in the `scalo` wrapper
-    // the way `bzip` places its own static gate — `scmp` (comparisons) calls
-    // `scalo_` directly, and one guard at the single point that does the indexing
-    // cannot be bypassed by a future caller. Both halves, as `dot`/`scan`'s
-    // `into(dest)` do it: a `static_assert` when both shapes are fully static (the
-    // documented repro is a COMPILE error, not a debug-only trip) and a per-axis
-    // `_TNY_CHECK` for anything dynamic. No-ops for every non-`into` caller, whose
-    // destination is built from `a`'s own extents type (`oops`/`oops_cmp`) or IS
-    // `a` (`unary`).
+    // Shape guard (#357), all three halves in `check_into_same_shape` (see there for
+    // the rule; #363 folded this site, `unaryo_`'s twin and `scan`'s into one helper):
+    // the bounds below come from `a` and the stores go through `c`'s strides, so the
+    // two must agree in EVERY axis or the write runs off the end of `c`. Checked
+    // HERE, in the engine, rather than in the `scalo` wrapper the way `bzip` places
+    // its own static gate — `scmp` (comparisons) calls `scalo_` directly, and one
+    // guard at the single point that does the indexing cannot be bypassed by a future
+    // caller. A no-op for every non-`into` caller, whose destination is built from
+    // `a`'s own extents type (`oops`/`oops_cmp`) or IS `a` (`unary`).
     //
     // ...and the SELF-OVERLAP guard (#364), for the same reachability: a stride-0
     // `into(dest)` axis makes many source elements store into one slot, so all but
@@ -681,14 +705,9 @@ _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
     // the full axis pack, host-debug), and a no-op for every non-`into` caller: the
     // allocating producers build a fresh dense `c`, and the in-place `unary` has
     // already run this exact check before delegating here.
-    static_assert(A::rank() == C::rank(), "into(dest): dest rank must match the source's");
-    static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
-                      cs::make_index_sequence<C::rank()>{}),
-                  "into(dest): dest's shape must match the source's exactly (no broadcast)");
-    check_same_extents(c, a, cs::index_sequence<D...>{});
+    check_into_same_shape(c, a, cs::index_sequence<D...>{});
     check_dest_no_overlap(c, cs::index_sequence<D...>{});
-    using I = _offset_int_t<typename C::index_type,
-                            typename A::extents_type::index_type>;
+    using I = _offset_int_t<typename C::index_type, typename A::index_type>;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.extent(D))... },
             sa[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.stride(D))... },
@@ -725,12 +744,12 @@ _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     // (#353). The allocating producer (`uop_out`) builds `c` from `a`'s extents type,
     // so that path is unchanged.
     //
-    // ...and the same shape guard as `scalo_` (#357), for the same reason: bounds
-    // from `a`, strides from `c`, so a mis-shaped `into(dest)` — the only way a
-    // destination of the caller's own choosing gets here — writes past its end.
-    // `static_assert` when both shapes are static, per-axis `_TNY_CHECK` otherwise;
-    // a no-op for `uop_out` (dest built from `a`'s extents) and for the in-place
-    // `unary`, which passes `c` as both arguments.
+    // ...and the same shape guard as `scalo_` (#357) — literally the same helper
+    // since #363 (`check_into_same_shape`) — for the same reason: bounds from `a`,
+    // strides from `c`, so a mis-shaped `into(dest)` — the only way a destination of
+    // the caller's own choosing gets here — writes past its end. A no-op for
+    // `uop_out` (dest built from `a`'s extents) and for the in-place `unary`, which
+    // passes `c` as both arguments.
     //
     // ...and the SELF-OVERLAP guard, exactly as `scalo_` above documents it (#364):
     // `exp(a, into(y))` into a stride-0 `y` used to drop every result but the last,
@@ -744,14 +763,9 @@ _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     // into(int_y))` exponentiated the TRUNCATED input (#379). It is the SOURCE's
     // compute type there, exactly what `uop_out`'s own destination would have
     // carried; the in-place `unary` still passes `void` (= `c`'s, which is `a`'s).
-    static_assert(A::rank() == C::rank(), "into(dest): dest rank must match the source's");
-    static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
-                      cs::make_index_sequence<C::rank()>{}),
-                  "into(dest): dest's shape must match the source's exactly (no broadcast)");
-    check_same_extents(c, a, cs::index_sequence<D...>{});
+    check_into_same_shape(c, a, cs::index_sequence<D...>{});
     check_dest_no_overlap(c, cs::index_sequence<D...>{});
-    using I = _offset_int_t<typename C::index_type,
-                            typename A::extents_type::index_type>;
+    using I = _offset_int_t<typename C::index_type, typename A::index_type>;
     using Ce = typename C::element_type;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.extent(D))... },
@@ -1019,8 +1033,7 @@ _TNY_API R zipreduce_decode_(const A & a, const B & b, Op op, cs::index_sequence
     // As in `bzip_`, the widening is internal only: neither operand's own type
     // changes, each operand's offsets fit its own index type by construction, and
     // `data()[off]` takes any integer, so nothing is narrowed back on the way out.
-    using I = _offset_int_t<typename A::extents_type::index_type,
-                            typename B::extents_type::index_type>;
+    using I = _offset_int_t<typename A::index_type, typename B::index_type>;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1]  = { static_cast<I>(a.extent(D))... };
     const I be[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(b.extent(D))... };

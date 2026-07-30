@@ -855,7 +855,10 @@ is generic.
   guard, in the ENGINE rather than the wrapper (`scmp` calls `scalo_` directly), in
   both halves: a `static_assert` (`ext_static_eq`, the same one `dot`/`scan`'s
   `into(dest)` use) when both shapes are fully static, and a per-axis `_TNY_CHECK`
-  (`check_same_extents`) otherwise. EXACT equality, NOT `bzip_`'s broadcast-tolerant
+  otherwise. Both halves live in ONE helper, `_md::check_into_same_shape` (#363
+  folded `scalo_`'s, `unaryo_`'s and `scan`'s three copies into it; it compares in
+  `_md::ext_cmp_t`, at least 64 bits on every platform, where `scan`'s copy used to
+  compare as `long` — 32-bit on LLP64). EXACT equality, NOT `bzip_`'s broadcast-tolerant
   `== ce[r] || == 1`: those engines index source and destination with the SAME
   counter and never substitute stride 0, so an extent 1 against an extent n is a
   mismatch, not a stretch. Zero cost for every other caller — the allocating
