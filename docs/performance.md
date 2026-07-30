@@ -154,8 +154,8 @@ loop, where they hoist for free.
   3-element cross-channel dot, a fixed-size stencil tap accumulation. Left uncapped
   they scale terribly in *compile* time — clang refuses outright past 256 elements
   ("instantiating fold expression … exceeded expression nesting limit of 256", its
-  default `-fbracket-depth`), and g++ took ~1 minute on a `shape<64,64>` reduction
-  and never finished a `shape<128,128>` one. So a fully-static shape of more than
+  default `-fbracket-depth`), and g++ took ~1 minute on a `shape<64,64>` reduction;
+  a `shape<128,128>` one was not attempted. So a fully-static shape of more than
   **`TNY_MAX_STATIC_UNROLL` (256) elements takes the ordinary runtime-decode path**,
   exactly as a dynamic one does. Same results either way — the cap is a pure
   compile-time/binary-size guard on an optimisation that was never meant for large

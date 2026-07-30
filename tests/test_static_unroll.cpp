@@ -29,7 +29,7 @@ int main() {
     static_assert(_md::_unrollable<shape<3>>(),            "tiny static shape unrolls");
     static_assert(_md::_unrollable<shape<SML_R,SML_C>>(),  "200 elements unrolls");
     static_assert(_md::_unrollable<shape<16,16>>(),        "exactly 256 elements unrolls (clang's limit)");
-    static_assert(!_md::_unrollable<shape<16,17>>(),       "257 elements does NOT unroll");
+    static_assert(!_md::_unrollable<shape<16,17>>(),       "272 elements does NOT unroll");
     static_assert(!_md::_unrollable<shape<BIG_R,BIG_C>>(), "2048 elements does NOT unroll");
     static_assert(!_md::_unrollable<shape<-1,3>>(),        "a dynamic extent never unrolls");
     static_assert(!_md::_unrollable<shape<-1,-1>>(),       "two dynamic extents never unroll (no wrap-around)");
@@ -87,7 +87,7 @@ int main() {
     auto atc = sum<0>(at);
     for (int j = 0; j < 16; ++j) if (atc(j) != refatcol[j]) return 11;
 
-    // ---- one element PAST the cap (257): the first shape that must decode --
+    // ---- past the cap (272): a shape that must decode --------------------
     auto over = local<double, shape<16,17>>(); over.iota_(1.0, 1.0);
     double refover = 0.0; for (int k = 0; k < 16*17; ++k) refover += double(k+1) * double(k+1);
     if (dot(over, over) != refover) return 12;

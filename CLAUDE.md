@@ -944,7 +944,7 @@ is generic.
   disaster: clang hard-errors past 256 fold arguments ("exceeded expression nesting
   limit of 256", its default `-fbracket-depth` — so `dot` on two `shape<16,17>`
   operands did not compile AT ALL), and g++ grows superlinearly (~1 min for a
-  `shape<64,64>` reduction, >8 min for `shape<128,128>`). Both gates now go through
+  `shape<64,64>` reduction; `shape<128,128>` was not attempted). Both gates now go through
   `_md::_unrollable<E>()` (`math.h`, next to `_static_numel`) = fully static AND
   `numel <= TNY_MAX_STATIC_UNROLL` (`defines.h`, **256** — exactly clang's limit,
   and ~2 orders of magnitude above the 3-27-element shapes the unroll targets).
