@@ -1872,13 +1872,49 @@ _TNY_API auto wrap(T * p, Shape e, Layout, Tags... /*tags*/) {
     return Tn(p, typename Tn::mapping_type(e));
 }
 
+/** @brief Does `MD` look like an `mdspan`? (has `data_handle()`/`mapping()` and the
+ *         `element_type`/`extents_type`/`layout_type` typedefs `as_tensor` reads).
+ *         Constrains `wrap(mdspan)` so a 1-argument `wrap(x)` on something that is
+ *         NOT an mdspan — `wrap(some_teeny_tensor)`, say — fails as a clean "no
+ *         matching function for call to wrap(...)" at the call site instead of an
+ *         unrelated-looking error deep inside `as_tensor` (#370). */
+template <class MD, class = void>
+struct _is_mdspan_like : cs::false_type {};
+template <class MD>
+struct _is_mdspan_like<MD, cs::void_t<decltype(cs::declval<const MD &>().data_handle()),
+                                      decltype(cs::declval<const MD &>().mapping()),
+                                      typename MD::element_type,
+                                      typename MD::extents_type,
+                                      typename MD::layout_type>> : cs::true_type {};
+
 /** @brief `wrap(mdspan)` — a spelling of `as_tensor(mdspan)` under the one factory
  *  name users already reach for. Wrap any `cuda::std::mdspan`/`submdspan` result as
- *  a non-owning view; `OW` (default `storage::view`) names the memory space, exactly
- *  like `as_tensor<OW>(md)`. `as_tensor` stays available (it is what teeny's own
- *  view-producing ops — `permute`/`flip`/`squeeze`/… — call internally). */
-template <storage OW = storage::view, class MD>
-_TNY_API auto wrap(const MD & md) { return as_tensor<OW>(md); }
+ *  a non-owning view; the element type, extents and layout all come from the mdspan.
+ *
+ *  MEMORY SPACE: same contract as the pointer forms — the mdspan wraps a **host**
+ *  pointer unless a trailing `storage_c<Space>{}` (or `storage_v<Space>`) tag names
+ *  where it lives, and since `wrap` always yields a VIEW the plain backend folds to
+ *  its view kind (`storage::gpu -> gpu_view`, …) via `storage_view_of`, so you never
+ *  spell the `_view` kinds: `wrap(md, storage_v<storage::gpu>)` is a `gpu_view`.
+ *  Takes the same trailing keyword-tag bag as the four positional forms (#282/#370).
+ *
+ *  NB the explicit template argument of THIS overload is the memory SPACE (an
+ *  `storage` value: `wrap<storage::gpu>(md)`), not a layout **type** as in
+ *  `wrap<fcontiguous>(p, e)` — the layout is already carried by the mdspan, so
+ *  there is nothing to name. Prefer the value-tag spelling above, which reads the
+ *  same on every `wrap` form.
+ *
+ *  `as_tensor` stays available (it is what teeny's own view-producing ops —
+ *  `permute`/`flip`/`squeeze`/… — call internally, with a pre-folded space). */
+template <storage Space = storage_deduce, class MD, class... Tags,
+          cs::enable_if_t<_is_mdspan_like<MD>::value, int> = 0>
+_TNY_API auto wrap(const MD & md, Tags... /*tags*/) {
+    using ok = _kw::accepts<_is_storage_tag>;
+    static_assert(ok::known<Tags...>(), "wrap(): unrecognised trailing argument — expected storage_c<...>{}/storage_v<...>");
+    static_assert(ok::unique<Tags...>(), "wrap(): the same keyword was given twice");
+    constexpr storage R = storage_arg<Space, storage::view, Tags...>();
+    return as_tensor<storage_view_of(R)>(md);
+}
 
 /** @brief Wrap `p` as a non-owning view with explicit **runtime strides** (a
  *         `layout_stride` view). Pass one stride per dimension — an `array` or a

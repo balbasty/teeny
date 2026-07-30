@@ -58,8 +58,8 @@ Wrap existing memory (→ view):
 | `wrap(ptr, shape, {s0,s1,…})` | `view<T,E,dynamic_strides>` | **runtime** strides (elements; may be negative). A **stride-0** axis self-overlaps — fine to read (broadcast), but an in-place write is a host-debug error (`clone()` first) |
 | `wrap<S...>(ptr, shape, {dyn…})` | `view<T,E,strides<S...>>` | **mixed** static/runtime strides (`dynamic_stride` slots) |
 | `wrap(ptr, shape, strides<S...>{})` | `view<T,E,strides<S...>>` | **compile-time** strides (fold into the type) |
-| `wrap(…, storage_v<storage::gpu>)` | view in that space | trailing **memory-space** tag on any overload above (default `storage::view`); pass the plain backend — `storage::gpu`/`pinned`/`mapped` — and it folds to the view kind (`gpu_view`/…), since `wrap` always views. `storage_c<S>{}` / `storage_v<S>` are the braced / no-braces spellings |
-| `as_tensor(md)` / `wrap(md)` | `view<…>` | wrap any `cs::mdspan`/`submdspan` result — both spellings, same result; `as_tensor` is what teeny's own view-producing ops call internally |
+| `wrap(…, storage_v<storage::gpu>)` | view in that space | trailing **memory-space** tag on **every** overload here, the `mdspan` one included (default `storage::view`); pass the plain backend — `storage::gpu`/`pinned`/`mapped` — and it folds to the view kind (`gpu_view`/…), since `wrap` always views. `storage_c<S>{}` / `storage_v<S>` are the braced / no-braces spellings |
+| `as_tensor(md)` / `wrap(md)` | `view<…>` | wrap any `cs::mdspan`/`submdspan` result — both spellings, same result; `as_tensor` is what teeny's own view-producing ops call internally. Element type, extents and layout all come from the mdspan; only the space is yours to name — `wrap(md, storage_v<storage::gpu>)` (or `wrap<storage::gpu>(md)`, whose explicit template argument is the **space**, since the mdspan already carries the layout) |
 | `make_view(ptr, shape)` | `view<T,E>` | an alias of `wrap` that deduces `E`; takes the layout the same two ways (`make_view(ptr, shape, fcontiguous{})` or `make_view<Layout>(ptr, shape)`) and the same trailing `storage_c<Space>{}` tag |
 
 **Input → output type — `wrap` view facets.** The element type `T` is deduced
@@ -76,6 +76,7 @@ an owner):
 | `wrap(ptr, e, {s0,s1,…})` | `dynamic_strides` (all runtime) | `storage::view` |
 | `wrap<S...>(ptr, e, {dyn…})` | `strides<S...>` (mixed; `dynamic_stride` slots runtime) | `storage::view` |
 | `wrap(ptr, e, strides<S...>{})` | `strides<S...>` (all compile-time, folded) | `storage::view` |
+| `wrap(md)` | the mdspan's own layout | `storage::view` |
 | `wrap(…, storage_v<storage::gpu>)` | any of the above | `storage::gpu_view` |
 | `wrap(…, storage_v<storage::pinned>)` / `…<storage::mapped>` | any of the above | `pinned_view` / `mapped_view` |
 
