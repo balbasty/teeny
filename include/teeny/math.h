@@ -1469,6 +1469,19 @@ using _reduce_result_t = cs::conditional_t<cs::is_same<Acc, void>::value, T, Acc
 // accumulator (`mean<float>(a)`) overrides this and is honoured by `_reduce_result_t`.
 template <class T>
 using _mean_result_t = cs::conditional_t<cs::is_integral<T>::value, double, T>;
+// `mean`'s DIVIDE type (default accumulator form): an integer `T` is converted to
+// `double` BEFORE dividing (so the division is exact, not truncating — the numpy
+// rule above); a floating `T` divides in its own reduce type and is cast down to
+// `T` afterwards. Named so `mean`'s axis form can express both branches as one
+// convert -> divide -> convert chain instead of an `if constexpr` on `T`.
+template <class T>
+using _mean_div_t = cs::conditional_t<cs::is_integral<T>::value, double, reduce_type_t<T>>;
+// `norm`'s ROOT type (default accumulator form): accumulate the squares — and take
+// the square root — in the reduce type when that is floating, else in `double` (an
+// integer tensor's norm is floating, the `mean` rule).
+template <class T>
+using _norm_root_t = cs::conditional_t<cs::is_floating_point<reduce_type_t<T>>::value,
+                                       reduce_type_t<T>, double>;
 
 // Seeds for max/min reductions. `cs::numeric_limits` is NOT specialized for
 // teeny's software half/bfloat16, so `numeric_limits<half>::lowest()` returns the
@@ -1606,6 +1619,28 @@ _TNY_HOST decltype(auto) _red_finish_dynamic(R && r, Tags... tags) {
         else return static_cast<cs::remove_reference_t<R>>(static_cast<R&&>(r));  // force a prvalue (remove_reference_t defends against R ever deducing as a reference -- e.g. if a future caller passed an lvalue): decltype(auto) would otherwise deduce R&& from the xvalue cast and dangle once r's temporary is destroyed
     }
 }
+/** @brief Scale an already-computed axis-reduction result in place: divide every
+ *  element of the reduced tensor `r` by the number of source elements each of its
+ *  cells covers (`total / r.numel()`, `total` being the SOURCE tensor's `numel`),
+ *  in `r`'s own element type. `mean`'s "divide" step, factored out so `mean` can
+ *  be a single expression and reuse the shared axis-reduction shape. Allocates
+ *  nothing (in place + move out), so ONE `_TNY_API` overload serves both the
+ *  stack and the heap result. */
+template <class R, class I>
+_TNY_API auto _red_mean_scale(R && r, I total) {
+    using Rt = cs::remove_reference_t<R>;
+    r.div_(static_cast<typename Rt::element_type>(total / r.numel()));
+    return static_cast<Rt&&>(r);
+}
+/** @brief Square-root an already-computed axis-reduction result in place and move
+ *  it out — `norm`'s tail over `sqnorm`, factored out for the same reason (and
+ *  likewise allocation-free, hence a single `_TNY_API` overload). */
+template <class R>
+_TNY_API auto _red_sqrt(R && r) {
+    using Rt = cs::remove_reference_t<R>;
+    r.sqrt_();
+    return static_cast<Rt&&>(r);
+}
 } // namespace _md
 
 // Axis-reduction "core": `NAME<Axes...>(a, Tags...)` accumulates in the reduce
@@ -1626,37 +1661,55 @@ _TNY_HOST decltype(auto) _red_finish_dynamic(R && r, Tags... tags) {
 // original tag pack -- so a stray `dtype<...>`/`axis<...>` (or anything else)
 // reaching HERE is always a caller mistake, not legitimate passthrough, and the
 // `accepts` guard below can safely reject it instead of silently ignoring it.
+// ONE axis-reduction overload — the single place the shape lives: the
+// `(sizeof...(Axes) > 0)` + static/dynamic SFINAE key, the `_TNY_API`/`_TNY_HOST`
+// split, the keyword guards, and the `_red_finish_*` tail. What varies per
+// reduction is only `EXPR`: an expression, in terms of the source tensor `a` and
+// the local accumulator alias `R`, producing the REDUCED tensor that the finish
+// step then applies `keepdims`/`into` to. Argument notes:
+//   CMP   `==` (static result -> stack, `_TNY_API`) or `!=` (dynamic -> heap, `_TNY_HOST`)
+//   FIN   `static` / `dynamic` — the `_red_finish_*` half matching CMP
+//   RTYPE what the in-body `R` alias means for this form (`reduce_type_t<T>` for
+//         the default form, `Acc` for the explicit-accumulator one) — a local
+//         `using` rather than a defaulted template parameter so that the LEADING
+//         template parameters can be the trailing variadic macro argument (their
+//         `class Acc, long... Axes` comma is then harmless)
+//   EXPR  parenthesised by the caller, so it too may contain commas
+#define _TNY_RED_AXIS_ONE(NAME, CMP, API, FIN, RTYPE, EXPR, /* leading tparams */...)                    \
+template <__VA_ARGS__, class T,class E,class L,storage O, class... Tags,                                \
+          cs::enable_if_t<(sizeof...(Axes) > 0) &&                                                      \
+                          _md::reduced_extents<E,Axes...>::rank_dynamic() CMP 0, int> = 0>              \
+API decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                      \
+    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), #NAME ": unrecognized keyword argument"); \
+    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), #NAME ": a keyword was given more than once"); \
+    using R [[maybe_unused]] = RTYPE;                                                                   \
+    return _md::_red_finish_##FIN<(long)E::rank(), Axes...>(EXPR, tags...); }
+// The four-overload axis-reduction shape (`<Axes...>` × static/dynamic,
+// `<Acc, Axes...>` × static/dynamic) for a reduction whose reduced tensor is an
+// arbitrary EXPRESSION — one per form, since the default form deduces its own
+// result rule from `T` while the `Acc` form is told. `_TNY_RED_AXIS_CORE` below
+// is the common (INIT, OP) special case; `mean` and `norm` — whose result-type
+// rules differ from every other reduction's (integer -> `double`, and floating
+// always, respectively) — are the reason this hook exists rather than being
+// hand-written transcriptions of the shape.
+#define _TNY_RED_AXIS_CUSTOM(NAME, EXPR_DEFAULT, EXPR_ACC)                                              \
+_TNY_RED_AXIS_ONE(NAME, ==, _TNY_API,  static,  reduce_type_t<T>, EXPR_DEFAULT, long... Axes)            \
+_TNY_RED_AXIS_ONE(NAME, !=, _TNY_HOST, dynamic, reduce_type_t<T>, EXPR_DEFAULT, long... Axes)            \
+_TNY_RED_AXIS_ONE(NAME, ==, _TNY_API,  static,  Acc, EXPR_ACC, class Acc, long... Axes)                  \
+_TNY_RED_AXIS_ONE(NAME, !=, _TNY_HOST, dynamic, Acc, EXPR_ACC, class Acc, long... Axes)
+// The plain shape: accumulate over the named axes with (INIT, OP) — `INIT` is
+// written in terms of the accumulator alias `R` — then cast down to the public
+// result element type (`T` by default, the requested `Acc` when given).
 #define _TNY_RED_AXIS_CORE(NAME, INIT, OP)                                                              \
-template <long... Axes, class T,class E,class L,storage O, class... Tags, class R = reduce_type_t<T>,   \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), #NAME ": unrecognized keyword argument"); \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), #NAME ": a keyword was given more than once"); \
-    return _md::_red_finish_static<(long)E::rank(), Axes...>(_md::reduce_to<T>(_md::axreduce<Axes...>(a, INIT, _md::OP{})), tags...); } \
-template <long... Axes, class T,class E,class L,storage O, class... Tags, class R = reduce_type_t<T>,   \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), #NAME ": unrecognized keyword argument"); \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), #NAME ": a keyword was given more than once"); \
-    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(_md::reduce_to<T>(_md::axreduce<Axes...>(a, INIT, _md::OP{})), tags...); } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags, class R = Acc,     \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
-_TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), #NAME ": unrecognized keyword argument"); \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), #NAME ": a keyword was given more than once"); \
-    return _md::_red_finish_static<(long)E::rank(), Axes...>(_md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})), tags...); } \
-template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags, class R = Acc,     \
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0> \
-_TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), #NAME ": unrecognized keyword argument"); \
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), #NAME ": a keyword was given more than once"); \
-    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(_md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{})), tags...); }
+_TNY_RED_AXIS_CUSTOM(NAME, (_md::reduce_to<T>  (_md::axreduce<Axes...>(a, INIT, _md::OP{}))),            \
+                           (_md::reduce_to<Acc>(_md::axreduce<Axes...>(a, INIT, _md::OP{}))))
 _TNY_RED_AXIS_CORE(sum,    R(0),                 r_add)
 _TNY_RED_AXIS_CORE(prod,   R(1),                 r_mul)
 _TNY_RED_AXIS_CORE(max,    _reduce_seed_lowest<R>(),  r_max)
 _TNY_RED_AXIS_CORE(min,    _reduce_seed_highest<R>(), r_min)
 _TNY_RED_AXIS_CORE(sqnorm, R(0),                 r_addsq)   // Σaᵢ² over the named axes (result type = T, like sum)
 #undef _TNY_RED_AXIS_CORE
+// _TNY_RED_AXIS_ONE/_TNY_RED_AXIS_CUSTOM stay defined for mean/norm below; #undef after norm's.
 
 /** @brief Generic trailing keyword-bag entry point, shared by every reduction
  *  with this axis shape (`sum`/`prod`/`max`/`min`/`sqnorm`/`mean`/`norm`; `dot`
@@ -1749,59 +1802,19 @@ _TNY_RED_TAGGED(sum) _TNY_RED_TAGGED(prod) _TNY_RED_TAGGED(max) _TNY_RED_TAGGED(
  *         to `T`. For an INTEGER `T` the result element type is `double` (numpy:
  *         integer mean is float64; divides in `double`, not truncating). `mean<Acc,
  *         Axes...>(a)` makes `Acc` both the accumulator and result type. */
-// `Tags...` (keepdims/into, any subset/order) via the shared `_red_finish_*`
-// helpers, exactly like `_TNY_RED_AXIS_CORE`; mean's own int-vs-float branching
-// stays hand-written since it isn't shared by any other reduction.
-template <long... Axes, class T,class E,class L,storage O, class... Tags, class R = reduce_type_t<T>,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  decltype(auto) mean(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "mean: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "mean: a keyword was given more than once");
-    auto s = sum<R, Axes...>(a);                                          // sum in the (wide) reduce type
-    const auto cnt = a.numel() / s.numel();
-    if constexpr (cs::is_integral<T>::value) {                           // integer -> divide in double, return double
-        auto o = _md::reduce_to<double>(static_cast<decltype(s)&&>(s));
-        o.div_(static_cast<double>(cnt));
-        return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(o)&&>(o), tags...);
-    } else {
-        s.div_(static_cast<R>(cnt));
-        auto o = _md::reduce_to<T>(static_cast<decltype(s)&&>(s));
-        return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(o)&&>(o), tags...);
-    }
-}
-template <long... Axes, class T,class E,class L,storage O, class... Tags, class R = reduce_type_t<T>,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST decltype(auto) mean(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "mean: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "mean: a keyword was given more than once");
-    auto s = sum<R, Axes...>(a);                                          // sum in the (wide) reduce type
-    const auto cnt = a.numel() / s.numel();
-    if constexpr (cs::is_integral<T>::value) {                           // integer -> divide in double, return double
-        auto o = _md::reduce_to<double>(static_cast<decltype(s)&&>(s));
-        o.div_(static_cast<double>(cnt));
-        return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(o)&&>(o), tags...);
-    } else {
-        s.div_(static_cast<R>(cnt));
-        auto o = _md::reduce_to<T>(static_cast<decltype(s)&&>(s));
-        return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(o)&&>(o), tags...);
-    }
-}
-template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  decltype(auto) mean(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "mean: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "mean: a keyword was given more than once");
-    auto s = sum<Acc, Axes...>(a); s.div_(static_cast<Acc>(a.numel() / s.numel()));
-    return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
-}
-template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST decltype(auto) mean(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "mean: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "mean: a keyword was given more than once");
-    auto s = sum<Acc, Axes...>(a); s.div_(static_cast<Acc>(a.numel() / s.numel()));
-    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
-}
+// The four overloads (`<Axes...>` / `<Acc, Axes...>`, each × static/dynamic), the
+// keyword guards and the `Tags...` (keepdims/into, any subset/order) tail come
+// from the shared `_TNY_RED_AXIS_CUSTOM` shape; only the reduced-tensor
+// expression is mean's own. Default form: sum in the (wide) reduce type `R`,
+// convert to the divide type (`_mean_div_t`: `double` for an integer `T`, so the
+// division is exact rather than truncating; `R` itself for a floating one),
+// divide by the reduced count, then cast to the public result type
+// (`_mean_result_t`: `double` for integer, `T` for floating) — the two branches
+// of mean's int-vs-float rule expressed as one convert -> divide -> convert
+// chain. Accumulator form: sum in `Acc` and divide there (`Acc` IS the result).
+_TNY_RED_AXIS_CUSTOM(mean,
+    (_md::reduce_to<_mean_result_t<T>>(_md::_red_mean_scale(_md::reduce_to<_mean_div_t<T>>(sum<R, Axes...>(a)), a.numel()))),
+    (_md::_red_mean_scale(sum<Acc, Axes...>(a), a.numel())))
 _TNY_RED_TAGGED(mean)
 
 /** @brief Inner product over matching extents. Accumulates in the reduce type of
@@ -1816,25 +1829,32 @@ _TNY_API auto dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) 
     return static_cast<_reduce_result_t<Acc, promote_t<Ta,Tb>>>(
         _md::zipreduce_<R>(a, b, _md::mul{}, cs::make_index_sequence<tensor<Ta,Ea,La,Oa>::rank()>{}));
 }
-/** @brief Generic trailing keyword bag for `dot` (no axis concept, being binary):
- *  `dot(a, b, dtype<Acc>{})`, `dot(a, b, into(d))`, or both composed in either
- *  order — `dot`'s own small twin of `_TNY_RED_TAGGED` above (skips the
- *  axis-tag/`_red_dyn` machinery entirely, since dot always reduces every
- *  matching axis). Requires at least one trailing tag so it never competes with
- *  the plain `dot<Acc=void>(a, b)` above. */
-template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
-          class Tag0, class... Tags>
-_TNY_API decltype(auto) dot(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) {
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), "dot: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), "dot: a keyword was given more than once");
-    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;
-    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
-    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {
-        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, "dot into(dest): dest must be rank-0 (a scalar cell)");
-        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(dot<RAcc>(a, b)));
-        return out.dest;
-    } else return dot<RAcc>(a, b);
+/** @brief Generic trailing keyword bag for the BINARY, axis-less reductions
+ *  (`dot`/`sqdist`/`dist`): `NAME(a, b, dtype<Acc>{})`, `NAME(a, b, into(d))`, or
+ *  both composed in either order — the small twin of `_TNY_RED_TAGGED` above for
+ *  reductions that have no axis concept (so it skips the axis-tag/`_red_dyn`
+ *  machinery entirely: these always reduce every matching axis, and the scalar
+ *  result never allocates, hence a single `_TNY_API` overload rather than a
+ *  static/dynamic pair). Requires at least one trailing tag so it never competes
+ *  with the plain `NAME<Acc=void>(a, b)` each of them defines. Invoked once per
+ *  name, right after that name's own definition. */
+#define _TNY_RED_BINARY_TAGGED(NAME)                                                                     \
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, \
+          class Tag0, class... Tags>                                                                     \
+_TNY_API decltype(auto) NAME(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) { \
+    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), #NAME ": unrecognized keyword argument"); \
+    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), #NAME ": a keyword was given more than once"); \
+    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
+    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
+    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {                                      \
+        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, #NAME " into(dest): dest must be rank-0 (a scalar cell)"); \
+        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(NAME<RAcc>(a, b))); \
+        return out.dest;                                                                                 \
+    } else return NAME<RAcc>(a, b);                                                                      \
 }
+_TNY_RED_BINARY_TAGGED(dot)
+// _TNY_RED_BINARY_TAGGED(sqdist)/(dist) are invoked after their own definitions
+// further below (same shape, so the macro applies unchanged); #undef after dist's.
 
 /* ------------------------------------------------------------------ *
  *     Vector algebra & geometry (contained exact math)               *
@@ -1866,52 +1886,24 @@ _TNY_API auto norm(const tensor<T,E,L,O> & a) {
 /* --- axis norm: √(Σaᵢ² over the named axes) -> a lower-rank tensor. Floating result
  *     (integer -> double, mean rule); norm<Acc,Axes...> makes Acc accumulator+result.
  *     Accumulates the squares in a floating type and takes the root there.
- *     `Tags...` (keepdims/into, any subset/order) via `_red_finish_*`, exactly
- *     like `_TNY_RED_AXIS_CORE` — hand-written since norm's deduced Res/R/D
- *     differ from every other reduction's. Reducing (sqrt, cast to Res) BEFORE
- *     applying `_red_finish_*` rather than after is equivalent: `unsqueeze` only
- *     reshapes (no data change), so it commutes with the elementwise sqrt/cast
- *     that follow it either way. --------- */
-template <long... Axes, class T,class E,class L,storage O, class... Tags,
-          class Res = _mean_result_t<T>, class R = reduce_type_t<T>,
-          class D   = cs::conditional_t<cs::is_floating_point<R>::value, R, double>,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "norm: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "norm: a keyword was given more than once");
-    auto s = sqnorm<D, Axes...>(a); s.sqrt_();
-    auto r = _md::reduce_to<Res>(static_cast<decltype(s)&&>(s));
-    return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(r)&&>(r), tags...);
-}
-template <long... Axes, class T,class E,class L,storage O, class... Tags,
-          class Res = _mean_result_t<T>, class R = reduce_type_t<T>,
-          class D   = cs::conditional_t<cs::is_floating_point<R>::value, R, double>,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "norm: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "norm: a keyword was given more than once");
-    auto s = sqnorm<D, Axes...>(a); s.sqrt_();
-    auto r = _md::reduce_to<Res>(static_cast<decltype(s)&&>(s));
-    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(r)&&>(r), tags...);
-}
-template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0>
-_TNY_API  decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "norm: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "norm: a keyword was given more than once");
-    auto s = sqnorm<Acc, Axes...>(a); s.sqrt_();
-    return _md::_red_finish_static<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
-}
-template <class Acc, long... Axes, class T,class E,class L,storage O, class... Tags,
-          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()!=0, int> = 0>
-_TNY_HOST decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template known<Tags...>(), "norm: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "norm: a keyword was given more than once");
-    auto s = sqnorm<Acc, Axes...>(a); s.sqrt_();
-    return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
-}
+ *     `Tags...` (keepdims/into, any subset/order) via `_red_finish_*`: the four
+ *     overloads and their guards come from the shared `_TNY_RED_AXIS_CUSTOM`
+ *     shape, only the reduced-tensor expression is norm's own (its result rule —
+ *     floating always — is what kept it off `_TNY_RED_AXIS_CORE`). Reducing
+ *     (sqrt, cast to the result type) BEFORE applying `_red_finish_*` rather than
+ *     after is equivalent: `unsqueeze` only reshapes (no data change), so it
+ *     commutes with the elementwise sqrt/cast that follow it either way. --------- */
+// Default form: accumulate the squares in `_norm_root_t<T>` (the reduce type when
+// floating, else `double`) and take the root there, then cast to `_mean_result_t<T>`
+// (integer -> double, the mean rule). Accumulator form: squares, root and result
+// all in `Acc`.
+_TNY_RED_AXIS_CUSTOM(norm,
+    (_md::reduce_to<_mean_result_t<T>>(_md::_red_sqrt(sqnorm<_norm_root_t<T>, Axes...>(a)))),
+    (_md::_red_sqrt(sqnorm<Acc, Axes...>(a))))
 _TNY_RED_TAGGED(norm)
 #undef _TNY_RED_TAGGED
+#undef _TNY_RED_AXIS_CUSTOM
+#undef _TNY_RED_AXIS_ONE
 
 /** @brief Squared Euclidean distance `Σ(aᵢ-bᵢ)²` between two same-shape tensors —
  *         mathematically `sqnorm(a-b)`, computed as one fused pass with no `a-b`
@@ -1948,32 +1940,9 @@ _TNY_API auto dist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b)
 }
 
 // dtype/into trailing-bag form (dot's shape: binary, no axis, so no _TNY_RED_TAGGED).
-template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
-          class Tag0, class... Tags>
-_TNY_API decltype(auto) sqdist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) {
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), "sqdist: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), "sqdist: a keyword was given more than once");
-    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;
-    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
-    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {
-        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, "sqdist into(dest): dest must be rank-0 (a scalar cell)");
-        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(sqdist<RAcc>(a, b)));
-        return out.dest;
-    } else return sqdist<RAcc>(a, b);
-}
-template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
-          class Tag0, class... Tags>
-_TNY_API decltype(auto) dist(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) {
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template known<Tag0,Tags...>(), "dist: unrecognized keyword argument");
-    static_assert(_kw::accepts<_is_dtype,_is_into_tag>::template unique<Tag0,Tags...>(), "dist: a keyword was given more than once");
-    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;
-    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
-    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {
-        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, "dist into(dest): dest must be rank-0 (a scalar cell)");
-        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(dist<RAcc>(a, b)));
-        return out.dest;
-    } else return dist<RAcc>(a, b);
-}
+_TNY_RED_BINARY_TAGGED(sqdist)
+_TNY_RED_BINARY_TAGGED(dist)
+#undef _TNY_RED_BINARY_TAGGED
 
 /** @brief Out-of-place unit vector `a / norm(a)` -> a NEW dense tensor (static
  *         shape -> stack, dynamic -> heap). The result element type is floating
