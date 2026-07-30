@@ -400,6 +400,11 @@ auto z = zeros<T>(shape); ones<T>(sh); full(sh,v); arange<T>(n);  // creation. z
 zeros(sh, dtype<T>{}); full(sh,v,dtype<T>{}); arange(n, dtype<T>{});  // value-tag T (deduced,
                       //   no .template); a LEADING explicit template arg still names the backend
                       //   — zeros<storage::pinned>(sh, dtype<T>{}). Same for empty().
+zeros<storage::pinned>(sh, dtype<T>{}, fcontiguous{});  // ...and that leading backend arg takes the
+                      //   SAME trailing keyword bag, ANY subset/ANY order (#373) — dtype and/or a
+                      //   layout tag, or none at all (zeros<storage::pinned>(sh)). It used to accept
+                      //   exactly ONE dtype{} tag and nothing else. A storage_c<...>{} tag on top of
+                      //   it is the one rejection ("pick one" — that IS the backend keyword).
 zeros(sh, dtype<T>{}, storage_c<storage::pinned>{});  // ...or compose BOTH value tags, either
                       //   order (zeros(sh, storage_c<...>{}, dtype<T>{}) too) — no explicit
                       //   template argument at all. Same for empty/ones/full/arange.

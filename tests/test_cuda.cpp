@@ -260,6 +260,27 @@ int main()
     static_assert(decltype(fm)::ownership == storage::mapped, "full value-tag -> mapped");
     if (fm(1) != 2.0) return 23;
 
+    // ---- #373: a LEADING explicit BACKEND template argument takes the SAME
+    //            trailing keyword bag (any subset, any order), not just one dtype
+    auto eg373 = empty<storage::gpu>(shape<2,3>{}, dtype<double>{}, fcontiguous{});
+    static_assert(decltype(eg373)::ownership == storage::gpu, "empty<gpu>(e, dtype, layout) -> gpu");
+    static_assert(cs::is_same<typename decltype(eg373)::element_type, double>::value, "...dtype tag honoured");
+    static_assert(cs::is_same<typename decltype(eg373)::layout_type, fcontiguous>::value, "...layout tag honoured");
+    auto zp373 = zeros<storage::pinned>(shape<2,3>{}, fcontiguous{}, dtype<double>{});   // the other order
+    static_assert(decltype(zp373)::ownership == storage::pinned, "zeros<pinned>(e, layout, dtype) -> pinned");
+    static_assert(cs::is_same<typename decltype(zp373)::element_type, double>::value, "...dtype tag honoured");
+    if (zp373(1,2) != 0.0 || zp373.stride(0) != 1) return 46;      // F-order, as the tag asked
+    auto fm373 = full<storage::mapped>(shape<2>{}, 2, dtype<double>{});
+    static_assert(decltype(fm373)::ownership == storage::mapped, "full<mapped>(e, v, dtype) -> mapped");
+    if (fm373(1) != 2.0) return 47;
+    auto ap373 = arange<storage::pinned>(4, dtype<double>{});
+    static_assert(decltype(ap373)::ownership == storage::pinned, "arange<pinned>(n, dtype) -> pinned");
+    if (ap373(3) != 3.0) return 48;
+    auto op373 = ones<storage::pinned>(shape<2,3>{});              // ...and with NO keyword at all
+    static_assert(decltype(op373)::ownership == storage::pinned, "ones<pinned>(e) -> pinned");
+    static_assert(cs::is_same<typename decltype(op373)::element_type, float>::value, "...T defaults to float");
+    if (op373(1,2) != 1.f) return 49;
+
     // ---- #41: a slice/view of pinned/mapped keeps its space, and to_dlpack
     //           labels it kDLCUDAHost (not kDLCPU) ------------------------------
     auto pt = pinned<float, shape<4,5>>(shape<4,5>{}); pt.zero_();

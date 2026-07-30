@@ -57,6 +57,7 @@ TESTS = \
 	$(BUILDDIR)/test_to \
 	$(BUILDDIR)/test_empty \
 	$(BUILDDIR)/test_factory_dtype \
+	$(BUILDDIR)/test_factory_backend_kw \
 	$(BUILDDIR)/test_reduce_dtype \
 	$(BUILDDIR)/test_reduce_compose \
 	$(BUILDDIR)/test_iterate \

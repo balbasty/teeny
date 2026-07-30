@@ -55,6 +55,9 @@ empty(shape, dtype<T>{});            // value-tag ELEMENT-TYPE form: deduces T, 
 empty(shape, fcontiguous{}, dtype<double>{});   // a layout tag composes with dtype/storage_c, any
                                                  //   order/subset (also zeros/ones/full; arange has no
                                                  //   layout keyword, #277-#281)
+empty<storage::gpu>(shape, fcontiguous{}, dtype<double>{});   // ...and the leading backend arg takes
+                                                 //   that SAME bag, any subset/order (#373) — dtype
+                                                 //   and/or a layout tag, or nothing at all
 make_local<T>(shape);  make_heap<T>(shape);            // thin spellings of empty<T,storage::stack/heap>
 make_gpu<T>(shape); make_pinned<T>(shape); make_mapped<T>(shape);   // empty<T,storage::gpu/...>; T defaults to float
 
