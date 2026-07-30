@@ -292,7 +292,10 @@ a `static_assert`, so forgetting the `<axes>` fails to compile rather than silen
 splatting the grand total); an axis reduction's dest is **broadcast-compatible**
 with the reduced shape (it goes through `copy_`). As elsewhere, `dest`'s dtype need
 not match — the accumulation runs in the reduction's own accumulator type and only
-the final result is cast — and the destination is returned by reference.
+the final result is cast — and the destination is returned by reference. **Every**
+pair of dtypes works here, the two 16-bit floats included: `sum(half_a,
+into(bfloat16_cell))` accumulates as any other `half` reduction does and converts
+the scalar to `bfloat16` on the way out, exactly like a wider destination.
 
 ### Type promotion
 

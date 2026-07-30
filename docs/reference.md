@@ -484,7 +484,8 @@ forgetting the `<axes>` fails to compile instead of splatting the total). An
 **axis** reduction copies its lower-rank result into `dest` — `sum<0>(m, into(buf))`,
 and the `axis<...>` value form takes `into` too (`mean(m, axis<1>{}, into(buf))`);
 its `dest` is broadcast-compatible with the reduced shape (it goes through `copy_`).
-Dtype casts, and the destination is returned by reference.
+Dtype casts — for every pair of element types, `half` into `bfloat16` and back
+included — and the destination is returned by reference.
 
 ### Vector algebra & geometry
 

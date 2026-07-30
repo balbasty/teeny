@@ -1223,6 +1223,35 @@ _TNY_HOST auto reduce_to(tensor<RE, OE, ccontiguous, storage::heap> && r) {
     else { tensor<Ret, OE, ccontiguous, storage::heap> o(r.extents()); o.copy_(r); return o; }
 }
 
+/** @brief Cast a FULL reduction's SCALAR result to an `into(dest)` cell's element
+ *  type — the scalar twin of `reduce_to` just above (which does the same job for
+ *  the tensor an AXIS reduction produces, by way of `copy_`).
+ *
+ *  It exists because the direct `static_cast<To>(v)` this replaces is ILL-FORMED
+ *  for the one pair `To`/`From` can be: the two 16-bit floats. `half`/`bfloat16`
+ *  convert only FROM arithmetic types (their converting constructor is
+ *  SFINAE-gated on `is_arithmetic`) and only TO `float`, so `half -> bfloat16`
+ *  needs two user-defined conversions and the language will not chain them —
+ *  `sum(half_a, into(bfloat16_cell))` did not compile at all (#406). Going through
+ *  `compute_type_t<From>` (`float` for either 16-bit float, `From` itself for
+ *  every other type) supplies exactly that missing stop.
+ *
+ *  Same rule and the same reason as `_round_to`/`_cross_round` on the elementwise
+ *  side (#379/#390), and it is likewise numerically inert everywhere else: for any
+ *  non-16-bit-float `From` the intermediate IS `From`, so the extra cast vanishes.
+ *  For a 16-bit-float `From` it is an EXACT widening of a value that the reduction
+ *  has already rounded to `From` (`_reduce_result_t` casts the accumulator down
+ *  before we ever see it) — so `dest` lands on the same bits the allocating
+ *  spelling `dest.fill_(sum(a))` would have written, which is the equivalence every
+ *  `into(dest)` call site promises. */
+template <class To, class From> _TNY_API To reduce_cast(From v) {
+    return static_cast<To>(static_cast<compute_type_t<From>>(v));
+}
+// The destination element type of an `into(dest)` tag's cell — spelled once here
+// rather than at each of the full-reduction call sites below (the unary keyword
+// bag `_TNY_RED_TAGGED` and its binary twin `_TNY_RED_BINARY_TAGGED`).
+template <class D> using _into_elem_t = typename cs::remove_reference_t<D>::element_type;
+
 /* ---- allclose: |a-b| <= atol + rtol*|b| for every (broadcast) element ---- */
 template <class R, class A, class B, cs::size_t... D>
 _TNY_API bool allclose_(const A & a, const B & b, R rtol, R atol, cs::index_sequence<D...>) {
@@ -1823,7 +1852,7 @@ _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
             static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0,                       \
                           #NAME ": full reduction into(dest): dest must be rank-0 (a scalar cell); "      \
                           "name the axes -- " #NAME "(a, axis<...>{}, into(dest)) -- for a lower-rank destination"); \
-            out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(NAME<RAcc>(a))); \
+            out.dest.fill_(_md::reduce_cast<_md::_into_elem_t<decltype(out.dest)>>(NAME<RAcc>(a))); \
             return out.dest;                                                                             \
         } else return NAME<RAcc>(a);                                                                     \
     } else if constexpr (_kw::has<_is_keepdims_tag, Tag0, Tags...>()) {                                  \
@@ -1905,7 +1934,7 @@ _TNY_API decltype(auto) NAME(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,L
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {                                      \
         static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, #NAME " into(dest): dest must be rank-0 (a scalar cell)"); \
-        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(NAME<RAcc>(a, b))); \
+        out.dest.fill_(_md::reduce_cast<_md::_into_elem_t<decltype(out.dest)>>(NAME<RAcc>(a, b))); \
         return out.dest;                                                                                 \
     } else return NAME<RAcc>(a, b);                                                                      \
 }

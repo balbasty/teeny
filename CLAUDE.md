@@ -905,6 +905,21 @@ is generic.
   of being one rounding more precise. `_cross3`'s `Rt` defaults to `void` = NO rounding
   stop, so the allocating `cross` and the in-place `cross_` keep their single store cast —
   only the `into` overload names it.
+  **The same non-conversion, in the REDUCTIONS (#406).** A FULL reduction's `into(dest)`
+  (`_TNY_RED_TAGGED`'s rank-0 branch, and `_TNY_RED_BINARY_TAGGED`'s — the binary twin
+  `dot`/`sqdist`/`dist` share) writes
+  a SCALAR, so no engine and no `Cv` is involved — but it still had to get that scalar
+  into the cell's element type, and did it with one direct `static_cast`, which is
+  ill-formed for exactly the pair above: `sum(half_a, into(bfloat16_cell))` did not
+  compile at all. They now go through `_md::reduce_cast<To>` (math.h, next to
+  `reduce_to`, the tensor-valued twin an AXIS reduction uses), which casts via
+  `compute_type_t<From>` — `float` for either 16-bit float, `From` itself for everything
+  else, so the added stop is a no-op for every other pair. No rounding question here, in
+  contrast to `_round_to` above: the reduction has ALREADY cast its accumulator down to
+  the result element type (`_reduce_result_t`) before this cast sees it, so the widen to
+  `float` is exact and `dest` lands where it always did. The AXIS reductions never had
+  the bug — their `into` goes through `out.dest.copy_(r)`, and `copy_` widens to the
+  destination's compute type on the way in.
   **Contiguous linear fast path (#161, #175):** contiguous elementwise ops replace the
   per-element mixed-radix decode with a flat `for(i) cp[i]=…` loop that auto-vectorizes.
   Two flavours by whether a second array is in play:
