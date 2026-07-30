@@ -406,19 +406,28 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
             W{}(&c.data()[oc], op(Cv{}, static_cast<Cv>(b.data()[ob])));
     }
 }
-// A self-overlapping DESTINATION — an axis with extent>1 AND stride 0 — makes an
-// in-place write ALIAS: the update lands on the same element repeatedly, so
-// `v.add_(b)` double-counts (and mul_/iota_/... are likewise wrong). Such a view
-// can only come from `wrap(ptr, e, strides-with-a-0)`; teeny's own view ops never
-// make one, and clone()/to() write into a fresh DENSE destination. Host-debug guard
-// (a no-op on device / under -DNDEBUG); DESTINATION only, so a broadcasting RHS
-// (which legitimately stretches with stride 0) is never flagged.
+// A self-overlapping DESTINATION — an axis with extent>1 AND stride 0 — makes every
+// write into it ALIAS: several distinct indices name ONE element. What that spoils
+// depends on the writer, and BOTH kinds get here:
+//   - a read-modify-write (`v.add_(b)`, `mul_`, `iota_`, the in-place `unary`) applies
+//     the update to that one element repeatedly — it DOUBLE-COUNTS;
+//   - a plain store (`scalo_`/`unaryo_` writing a caller-supplied `into(dest)`, e.g.
+//     `a.mul(2.0, into(y))` / `exp(a, into(y))`) DISCARDS all but the last result
+//     landing in the slot (#364).
+// Either way the answer is wrong in a way no later check can recover, so the guard is
+// on the write itself, not on the op. Such a destination can only come from
+// `wrap(ptr, e, strides-with-a-0)`; teeny's own view ops never make one, and
+// clone()/to()/the allocating out-of-place producers write into a fresh DENSE
+// destination. Host-debug guard (a no-op on device / under -DNDEBUG); DESTINATION
+// only, so a broadcasting RHS (which legitimately stretches with stride 0) and an
+// overlapping SOURCE read by `into(dest)` are never flagged.
 template <class C, cs::size_t... D>
 _TNY_API void check_dest_no_overlap(const C & c, cs::index_sequence<D...>) {
     ( _TNY_CHECK(!(static_cast<long long>(c.extent(D)) > 1 && c.stride(D) == 0),
-        "in-place write into a self-overlapping view (an axis has extent>1 and stride 0): "
-        "the update aliases and is applied multiple times to the same element — clone() to a "
-        "dense tensor first, or write into a non-overlapping destination."), ... );
+        "write into a self-overlapping view (an axis has extent>1 and stride 0): several "
+        "indices alias one element, so an in-place update is applied to it repeatedly and an "
+        "out-of-place store into it keeps only the last result — clone() to a dense tensor "
+        "first, or write into a non-overlapping destination."), ... );
 }
 // EXACT per-axis extent check between a destination and the single source it is
 // written from — the runtime half of the guard the SINGLE-SOURCE engines
@@ -558,11 +567,23 @@ _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
     // `_TNY_CHECK` for anything dynamic. No-ops for every non-`into` caller, whose
     // destination is built from `a`'s own extents type (`oops`/`oops_cmp`) or IS
     // `a` (`unary`).
+    //
+    // ...and the SELF-OVERLAP guard (#364), for the same reachability: a stride-0
+    // `into(dest)` axis makes many source elements store into one slot, so all but
+    // the last result is silently dropped. The other four engines that write a
+    // destination (`bzip`, `scal_`, `iota_`, the in-place `unary`) have called
+    // `check_dest_no_overlap` all along — these two never did, so the SAME mistake
+    // aborted with a diagnostic through `a.add(a, into(y))` and passed silently
+    // through `a.mul(2.0, into(y))`. Same convention as those four (destination only,
+    // the full axis pack, host-debug), and a no-op for every non-`into` caller: the
+    // allocating producers build a fresh dense `c`, and the in-place `unary` has
+    // already run this exact check before delegating here.
     static_assert(A::rank() == C::rank(), "into(dest): dest rank must match the source's");
     static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
                       cs::make_index_sequence<C::rank()>{}),
                   "into(dest): dest's shape must match the source's exactly (no broadcast)");
     check_same_extents(c, a, cs::index_sequence<D...>{});
+    check_dest_no_overlap(c, cs::index_sequence<D...>{});
     using I = _offset_int_t<typename C::index_type,
                             typename A::extents_type::index_type>;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
@@ -604,11 +625,18 @@ _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     // `static_assert` when both shapes are static, per-axis `_TNY_CHECK` otherwise;
     // a no-op for `uop_out` (dest built from `a`'s extents) and for the in-place
     // `unary`, which passes `c` as both arguments.
+    //
+    // ...and the SELF-OVERLAP guard, exactly as `scalo_` above documents it (#364):
+    // `exp(a, into(y))` into a stride-0 `y` used to drop every result but the last,
+    // while the tensor-rhs `a.add(a, into(y))` aborted. Redundant-but-harmless for
+    // the in-place `unary`, which checks before delegating here (it needs its own
+    // copy for the dense fast path it takes instead).
     static_assert(A::rank() == C::rank(), "into(dest): dest rank must match the source's");
     static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
                       cs::make_index_sequence<C::rank()>{}),
                   "into(dest): dest's shape must match the source's exactly (no broadcast)");
     check_same_extents(c, a, cs::index_sequence<D...>{});
+    check_dest_no_overlap(c, cs::index_sequence<D...>{});
     using I = _offset_int_t<typename C::index_type,
                             typename A::extents_type::index_type>;
     using Cv = compute_type_t<typename C::element_type>;
