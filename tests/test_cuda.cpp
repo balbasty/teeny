@@ -239,9 +239,12 @@ int main()
     if (dr0.item() != 4.f) return 18;
 
     // ---- unified empty<T, Space>(...) factory reaches the CUDA backends -------
-    auto eg = empty<float, storage::gpu>(shape<2,3>{});
+    // `tny::` qualified for the same reason as in test_empty.cpp: two explicit
+    // template arguments make ADL's `cuda::std::empty(const T (&)[N])` candidate
+    // hard-error on `/permissive-` MSVC (#316) instead of dropping out.
+    auto eg = tny::empty<float, storage::gpu>(shape<2,3>{});
     static_assert(decltype(eg)::ownership == storage::gpu, "empty<T,storage::gpu> -> gpu");
-    auto ep = empty<float, storage::pinned>(shape<-1,3>{2});          // dynamic pinned
+    auto ep = tny::empty<float, storage::pinned>(shape<-1,3>{2});     // dynamic pinned
     static_assert(decltype(ep)::ownership == storage::pinned, "empty<T,storage::pinned> -> pinned");
     ep.fill_(2.f);                                                // pinned is host-accessible
     if (ep(1,2) != 2.f) return 19;

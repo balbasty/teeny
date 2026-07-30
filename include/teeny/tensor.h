@@ -2091,6 +2091,50 @@ _TNY_API auto make_view(T * p, Shape e, Layout, Tags... tags) {
     return wrap<Layout, Space>(p, e, tags...);
 }
 
+/* --- The creation factories' `_TNY_API`/`_TNY_HOST` split, as NAMED traits. ---
+ *
+ * `empty`/`full`/`zeros`/`ones` each ship TWO overloads whose template parameter
+ * lists differ ONLY in this SFINAE condition: the resolved backend is `stack`
+ * (host+device, `_TNY_API`) or it allocates (host only, `_TNY_HOST`). Written
+ * INLINE in `enable_if_t<...>`, that condition is a constexpr CALL whose template
+ * argument list expands the keyword pack —
+ * `storage_resolve(storage_arg<O, storage_deduce, Tags...>(), ...)`. Real MSVC in
+ * conformance mode (`/permissive-`, #316) cannot tell two such parameter lists
+ * apart: it merges the two declarations into ONE template and rejects the second
+ * as a redefinition (`C2995`) with duplicated default template arguments
+ * (`C2572`), which cascades into every `empty()`/`zeros()`/... call deducing to
+ * `void`. (The sibling `dtype<T>` forwarders below keep their inline condition
+ * and are fine — theirs has no pack in it, which is the part MSVC chokes on.)
+ *
+ * So: route the call through a class template's `::value`, and give each HALF of
+ * the split its OWN name, leaving two parameter lists that differ by a plain
+ * template-id — unambiguous on every compiler. This is the same "named trait,
+ * not an inline fold, inside `enable_if_t<...>`" MSVC rule the rest of the
+ * library already follows (see CLAUDE.md's MSVC traps). Each holds a plain
+ * `static constexpr ... value` member — the shape `_md::_red_ext_v` above
+ * already uses — rather than deriving from an `integral_constant` whose non-type
+ * argument is the call, which MSVC does not fold as reliably.
+ * Do not inline these conditions back into the `enable_if_t<...>`.
+ */
+/** @brief The ownership a factory call resolves to: an explicit `O` template
+ *         argument or a `storage_c<...>{}` keyword wins, else it is deduced from
+ *         the shape (fully static -> `stack`, any dynamic extent -> `heap`). */
+template <storage O, class Shape, class... Tags>
+struct _fac_storage {
+    static constexpr storage value =
+        storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+};
+/** @brief The stack half of a factory's split (host+device, no allocation). */
+template <storage O, class Shape, class... Tags>
+struct _fac_on_stack {
+    static constexpr bool value = _fac_storage<O, Shape, Tags...>::value == storage::stack;
+};
+/** @brief The allocating half — exactly the complement of `_fac_on_stack`. */
+template <storage O, class Shape, class... Tags>
+struct _fac_allocates {
+    static constexpr bool value = _fac_storage<O, Shape, Tags...>::value != storage::stack;
+};
+
 /** @brief `empty<T>(extents)` — a new UNINITIALISED tensor. The one factory the
  *  `make_*` family fuses into: ownership is **deduced** from the shape (fully
  *  static -> `stack` (host+device); any dynamic extent -> `heap` (host)) unless a
@@ -2109,7 +2153,7 @@ _TNY_API auto make_view(T * p, Shape e, Layout, Tags... tags) {
  *  duplicated keyword fails on one clean `static_assert` instead of an
  *  overload-resolution wall (#279/#280). */
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
 _TNY_API auto empty(Shape = Shape{}, Tags... /*tags*/) {
     using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
     static_assert(ok::known<Tags...>(), "empty(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
@@ -2119,13 +2163,13 @@ _TNY_API auto empty(Shape = Shape{}, Tags... /*tags*/) {
     return tensor<ET, Shape, LO, storage::stack>(_uninit);
 }
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
 _TNY_HOST auto empty(Shape e, Tags... /*tags*/) {
     using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
     static_assert(ok::known<Tags...>(), "empty(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
     static_assert(ok::unique<Tags...>(), "empty(): the same keyword was given twice");
     using ET = dtype_arg_t<T, float, Tags...>;
-    constexpr storage R = storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+    constexpr storage R = _fac_storage<O, Shape, Tags...>::value;
     static_assert(!storage_is_view(R), "empty(): a non-owning view kind (view/gpu_view/pinned_view/mapped_view) has no storage to allocate — use wrap()/make_view() for a view.");
     using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
     return tensor<ET, Shape, LO, R>(e, _uninit);
@@ -2185,7 +2229,7 @@ _TNY_HOST auto make_heap(Shape e, Tags... tags) { return empty<T, storage::heap,
  *  same as `empty` (#280/#281): `full(e, v, fcontiguous{})`,
  *  `full(e, v, storage_c<storage::heap>{}, dtype<double>{})`. */
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class V, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
 _TNY_API auto full(Shape e, V v, Tags... /*tags*/) {
     static_assert(!_kw::is_keyword<V>::value, "full(shape, v, ...): the fill VALUE must come before any keyword tag — "
         "did you mean full(shape, v, dtype<T>{}, ...)?");
@@ -2197,7 +2241,7 @@ _TNY_API auto full(Shape e, V v, Tags... /*tags*/) {
     auto t = empty<ET, storage::stack, LO>(e); t.fill_(static_cast<ET>(v)); return t;
 }
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class V, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
 _TNY_HOST auto full(Shape e, V v, Tags... /*tags*/) {
     static_assert(!_kw::is_keyword<V>::value, "full(shape, v, ...): the fill VALUE must come before any keyword tag — "
         "did you mean full(shape, v, dtype<T>{}, ...)?");
@@ -2205,7 +2249,7 @@ _TNY_HOST auto full(Shape e, V v, Tags... /*tags*/) {
     static_assert(ok::known<Tags...>(), "full(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
     static_assert(ok::unique<Tags...>(), "full(): the same keyword was given twice");
     using ET = dtype_arg_t<T, V, Tags...>;
-    constexpr storage R = storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+    constexpr storage R = _fac_storage<O, Shape, Tags...>::value;
     static_assert(storage_is_host_accessible(R),
         "zeros/ones/full<..., storage::gpu>: a device fill needs a kernel launch; use to<storage::gpu>(full<T>(shape, v)) (or to<storage::gpu>(zeros<T>(shape))), or empty<T, storage::gpu>(shape) then a memset.");
     using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
@@ -2229,7 +2273,7 @@ _TNY_HOST auto full(Shape e, V v, Tags... tags) { return full<void, O, Layout>(e
  *         `zeros(e, dtype<double>{})`, `zeros(e, fcontiguous{}, storage_c<storage::heap>{})`.
  *         A device backend `static_assert`s — fill via `to<storage::gpu>(zeros<T>(shape))`. */
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
 _TNY_API  auto zeros(Shape e, Tags... /*tags*/) {
     using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
     static_assert(ok::known<Tags...>(), "zeros(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
@@ -2239,13 +2283,13 @@ _TNY_API  auto zeros(Shape e, Tags... /*tags*/) {
     return full<ET, storage::stack, LO>(e, ET(0));
 }
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
 _TNY_HOST auto zeros(Shape e, Tags... /*tags*/) {
     using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
     static_assert(ok::known<Tags...>(), "zeros(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
     static_assert(ok::unique<Tags...>(), "zeros(): the same keyword was given twice");
     using ET = dtype_arg_t<T, float, Tags...>;
-    constexpr storage R = storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+    constexpr storage R = _fac_storage<O, Shape, Tags...>::value;
     using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
     return full<ET, R, LO>(e, ET(0));
 }
@@ -2258,7 +2302,7 @@ template <storage O, class Layout = void, class Shape, class... Tags,
 _TNY_HOST auto zeros(Shape e, Tags... tags) { return zeros<void, O, Layout>(e, tags...); }
 
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
 _TNY_API  auto ones(Shape e, Tags... /*tags*/) {
     using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
     static_assert(ok::known<Tags...>(), "ones(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
@@ -2268,13 +2312,13 @@ _TNY_API  auto ones(Shape e, Tags... /*tags*/) {
     return full<ET, storage::stack, LO>(e, ET(1));
 }
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
 _TNY_HOST auto ones(Shape e, Tags... /*tags*/) {
     using ok = _kw::accepts<_is_dtype, _is_storage_tag, _is_layout_tag>;
     static_assert(ok::known<Tags...>(), "ones(): unrecognised trailing argument — expected dtype<T>{}, storage_c<...>{} or a layout tag (ccontiguous{}/fcontiguous{})");
     static_assert(ok::unique<Tags...>(), "ones(): the same keyword was given twice");
     using ET = dtype_arg_t<T, float, Tags...>;
-    constexpr storage R = storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0);
+    constexpr storage R = _fac_storage<O, Shape, Tags...>::value;
     using LO = layout_arg_t<Layout, ccontiguous, Tags...>;
     return full<ET, R, LO>(e, ET(1));
 }
