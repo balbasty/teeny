@@ -172,7 +172,7 @@ cross(a, b, into(N(i, all)));  // 3D cross straight into row i of a matrix ("cro
 ```
 
 **The destination may be a slice, written in place.** Every view-producing op —
-slicing, `at`, `permute`, `unsqueeze`, `take_along`, … — hands back its view *by
+slicing, `at`, `permute`, `unsqueeze`, `slice_along`, … — hands back its view *by
 value*, and `into()` takes one of those directly, so a slot of a bigger output
 needs no named intermediate. The write goes through to the storage the slice
 refers to:

@@ -266,7 +266,7 @@ int main() {
     // The dest's STRIDES don't change the rule: a non-contiguous int dest takes the
     // per-element decode path instead of the linear fast path, and must agree.
     auto pad = local<int, shape<3,2>>(); pad.zero_();
-    auto icol = pad.take_along<1>(0);
+    auto icol = pad.slice_along<1>(0);
     d3.mul(0.5, into(icol));
     if (pad(0,0)!=0 || pad(1,0)!=1 || pad(2,0)!=1) return 90;
     if (pad(0,1)!=0 || pad(1,1)!=0 || pad(2,1)!=0) return 91;   // gaps untouched

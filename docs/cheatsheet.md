@@ -143,11 +143,13 @@ slice(start, stop);  slice(start, stop, step);  // half-open range, optional (ne
 none;  all;                     // open slice end (== python None); keep-axis marker
 x(none, all, all);  x(0, newaxis, all);   // BARE none/newaxis arg -> insert a size-1
                     //   axis (== unsqueeze at that position); newaxis is an alias of none
-x.take_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest
-x.subsample<Axes...>(k, starts...);  // coloured/strided sub-lattice: take_along + slice(start,
+x.slice_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest -> a VIEW
+                    //   (pytorch select/narrow over several axes). NOT numpy take_along_axis /
+                    //   pytorch take_along_dim -- that index-TENSOR gather is index_select below
+x.subsample<Axes...>(k, starts...);  // coloured/strided sub-lattice: slice_along + slice(start,
                     //   none,k) per named axis, one shared step k, per-axis start; k/starts
                     //   accept runtime or Int<> (folds static). Value form: x.subsample(
-                    //   axis<Axes...>{}, k, starts...) -- same LEADING placement as take_along's
+                    //   axis<Axes...>{}, k, starts...) -- same LEADING placement as slice_along's
 x.unfold<Axis>(size, step);  x.unfold<Axis>(size);  // pytorch Tensor.unfold: appends a NEW
                     //   trailing axis of width `size` stepped by `step` along Axis (step
                     //   defaults to 1); Axis's own extent shrinks to the window COUNT
@@ -157,13 +159,13 @@ x.unfold<Axis>(size, step);  x.unfold<Axis>(size);  // pytorch Tensor.unfold: ap
                     //   Value form: x.unfold(Int<Axis>(), size, step) -- single-axis Int<k>()
                     //   selector (like flip/squeeze), not an axis<...> list (only ONE axis binds).
 x.index_select<Axis>(idx);       // gather along Axis by a rank-1 integer index TENSOR
-                    //   (runtime data, unlike take_along); idx values wrap negative;
+                    //   (runtime data, unlike slice_along); idx values wrap negative;
                     //   static idx shape -> stack result, else heap (source must be
                     //   host-accessible). into(dest) form too: x.index_select<Axis>(idx,
                     //   into(dest)) (no alloc, device-safe; dest's axis-Axis extent must
                     //   match idx's, checked; dest must not alias x). Value form takes a
                     //   TRAILING axis<...>{} (no .template on a dependent receiver -- unlike
-                    //   take_along/subsample's LEADING tag): x.index_select(idx, axis<Axis>{})
+                    //   slice_along/subsample's LEADING tag): x.index_select(idx, axis<Axis>{})
 x.uget(i, j, k);  x.uget(0, slice(1,4));  x.uget(1, ellipsis);  x.uat(i...);
                     // uget = unchecked twin of operator() (element/slice/ellipsis,
                     // one entry point); uat = unchecked at. Skip the negative-index
@@ -207,15 +209,15 @@ to<storage::gpu>(x);                      // memory-space move: to<Space,ET,Forc
 Axis template arguments are signed (negatives count from the back); each `<Ax>` op
 also has a **value form** — `t.permute(Int<2>(),Int<0>(),Int<1>())` == `t.permute<2,0,1>()`,
 `t.recast(shape<-1,3,3>{})` == `t.recast<shape<-1,3,3>>()`. The axis-**list** ops —
-`permute`/`squeeze`/`unsqueeze` **and** `peel`/`peel_at`/`take_along`/the reductions —
+`permute`/`squeeze`/`unsqueeze` **and** `peel`/`peel_at`/`slice_along`/the reductions —
 take an `axis<...>{}` selector (a compile-time axis list, sibling of `shape<...>`,
 like numpy's `axis: int | list[int]`) — reach for this spelling first:
 `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, `t.permute(axis<2,0,1>{})` ==
 `t.permute<2,0,1>()`, `peel(t, axis<0,1>{})` == `peel<0,1>(t)`,
-`t.take_along(axis<0,2>{}, i, slice(1,4))`.
+`t.slice_along(axis<0,2>{}, i, slice(1,4))`.
 Value forms are deduced, so a type-dependent receiver needs no `.template`.
 **Every** view op —
-`operator()`/`take_along`/`peel` **and** `permute`/`flip`/`unsqueeze`/`squeeze` —
+`operator()`/`slice_along`/`peel` **and** `permute`/`flip`/`unsqueeze`/`squeeze` —
 folds its output strides into a static `strides<...>` (compile-time where the
 source strides are static), on any source layout. See [Views & structure](structure.md).
 
@@ -247,7 +249,7 @@ for (auto [a,b,c] : peel_zip<Axes...>(x,y,z)) ...;  // zip-peel 2 or 3 tensors i
                                                  //   every operand, so a flipped operand zipped with
                                                  //   an unsigned-indexed one still steps backwards.
 peel_zip(x, y, axis<Axes...>{});                 // value form: axis<...> TRAILING (after every
-                                                 //   positional tensor -- unlike take_along/peel_at's
+                                                 //   positional tensor -- unlike slice_along/peel_at's
                                                  //   leading tag)
 peel_zip<Axes...>(x,y).enumerate();  peel_zip<Axes...>(x,y).subrange(lo,hi);  // same shape as peel's
 
@@ -305,7 +307,7 @@ a.add(b, into(y));  a.mul(b, into(y));  a.add(2.0, into(y));  a.add(b, alpha, in
 exp(a, into(y)); sqrt(a, into(y)); minimum(a, b, into(y)); clamp(a, lo, hi, into(y));
 normalize(a, into(y));  cross(a, b, into(N(i, all)));  // cross into row i of a matrix ("crossto")
                       //   The dest may be a TEMPORARY VIEW: every view-producing op (slicing,
-                      //   at, permute, take_along, ...) returns by value, and into() takes one
+                      //   at, permute, slice_along, ...) returns by value, and into() takes one
                       //   directly -- no named intermediate for "a slot of a bigger output".
                       //   sum(a, into(cells.at(i,j))); sum(m, axis<0>{}, into(rows(j, all)));
                       //   Use the call for its EFFECT; the returned dest& dangles past the

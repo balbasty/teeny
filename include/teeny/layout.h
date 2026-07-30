@@ -69,7 +69,7 @@ struct _dyn_strides<Index, 0> {
  * still exactly `sizeof` its data. Only the *dynamic* strides are stored.
  *
  * Note: CCCL's `cs::submdspan` is only defined for the standard layouts, so it
- * does not apply here — but teeny's own slicing/`take_along`/`permute`/`flip`/
+ * does not apply here — but teeny's own slicing/`slice_along`/`permute`/`flip`/
  * `peel` build their views by hand (no submdspan), so they all work on a
  * strides<...> source and in fact fold their output strides the same way. And
  * `required_span_size` assumes non-negative strides — negative strides are for
@@ -92,7 +92,7 @@ struct strides {
      *    -- which `stride(rank_type)`, the gather's `fold_mapping`, and
      *    `anyrank`'s cell builder all do -- is a hard device-compile error
      *    ("identifier `S_` is undefined in device code"). That made EVERY
-     *    `strides<...>`-layout view (i.e. every slice / `take_along` / `peel` /
+     *    `strides<...>`-layout view (i.e. every slice / `slice_along` / `peel` /
      *    `index_select` / `scan` result) unusable from device code, `_TNY_API`
      *    annotation notwithstanding.
      *  - CODEGEN. The obvious fix -- a function-LOCAL array `{S...}` -- is

@@ -144,13 +144,13 @@ Negative integer indices wrap (count from the back).
 | `t.at(i, j, k)` (all integers) | rank-0 view | scalar-like: converts to/from `T`, `.item()`, has `atomic_add_` |
 | `t(0, all, slice(1,4))` (any slice arg) | → view | lower-/same-rank |
 | `t(1, ellipsis, 2)` | → view or `T&` | `ellipsis` = `rank − #other args` copies of `all` (≤1 per call) |
-| `t.take_along<Axes...>(args...)` | → view | bind named axes only, keep the rest |
-| `t.take_along(axis<Axes...>{}, args...)` | → view | value form — `axis<...>` selector (numpy-like), no `.template` on a dependent receiver |
-| `t.subsample<Axes...>(k, starts...)` | → view | coloured/strided sub-lattice — sugar for `take_along` + `slice(start,none,k)` per named axis, one shared step `k`; `k`/`starts` accept runtime or `Int<>` (folds static) |
-| `t.subsample(axis<Axes...>{}, k, starts...)` | → view | value form, same placement as `take_along`'s |
+| `t.slice_along<Axes...>(args...)` | → view | bind named axes only, keep the rest — pytorch `select`/`narrow` over several axes at once. NOT numpy's `take_along_axis`/pytorch's `take_along_dim` (an index-tensor gather; that's `index_select`) |
+| `t.slice_along(axis<Axes...>{}, args...)` | → view | value form — `axis<...>` selector (numpy-like), no `.template` on a dependent receiver |
+| `t.subsample<Axes...>(k, starts...)` | → view | coloured/strided sub-lattice — sugar for `slice_along` + `slice(start,none,k)` per named axis, one shared step `k`; `k`/`starts` accept runtime or `Int<>` (folds static) |
+| `t.subsample(axis<Axes...>{}, k, starts...)` | → view | value form, same placement as `slice_along`'s |
 | `t.unfold<Axis>(size, step=1)` | → view | pytorch `Tensor.unfold` — appends a new trailing axis of width `size`, stepped by `step` along `Axis`; `Axis`'s extent shrinks to `(shape(Axis)-size)/step+1`; `size`/`step` accept runtime or `Int<>` (folds static); ND windows compose by chaining one `unfold` per axis; `size`∈`[1,shape(Axis)]`/`step>=1` checked (`static_assert` or debug-time) |
 | `t.unfold(Int<Axis>(), size, step=1)` | → view | value form — single-axis `Int<k>()` selector (like `flip`/`squeeze`), no `.template` on a dependent receiver |
-| `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `take_along`); `idx` values wrap negative; source must be host-accessible (allocating form copies on the host) |
+| `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `slice_along`); `idx` values wrap negative; source must be host-accessible (allocating form copies on the host) |
 | `t.index_select<Axis>(idx, into(dest))` | `dest&` | no-allocation, device-safe form; `dest`'s axis-`Axis` extent must equal `idx`'s (checked) and must not alias `t` |
 | `t.index_select(idx, axis<Axis>{})` `t.index_select(idx, axis<Axis>{}, into(dest))` | same as above | value form — no `.template` on a dependent receiver |
 
@@ -201,7 +201,7 @@ a **value form** — pass `Int<Ax>()` in place of the template argument
 (`t.squeeze(Int<1>()) == t.squeeze<1>()`, likewise `permute`/`flip`/`unsqueeze`/
 `reshape`/`recast`); the value spelling is the preferred one. The axis-**list**
 ops — `permute`, `squeeze`, `unsqueeze` — additionally take an `axis<...>{}` tag
-(`t.squeeze(axis<0,2>{}) == t.squeeze<0,2>()`), the same one `peel`/`take_along`/
+(`t.squeeze(axis<0,2>{}) == t.squeeze<0,2>()`), the same one `peel`/`slice_along`/
 the reductions use. An **empty** list, `axis<>{}`, names no axis and is therefore a
 **no-op** for `squeeze`/`unsqueeze` (numpy's `axis=()` rule) — distinct from the
 no-argument `squeeze()`/`unsqueeze()`, which keep their own meanings; `permute`
@@ -216,7 +216,7 @@ ops (no accidental fallback to runtime extents/strides):
 |---|---|
 | **extents** | each *kept* axis keeps its source extent — static stays static. Peeling the batch dims off `shape<-1,-1,M,N>` yields a `<M,N>` cell; a *static-bounds* slice/range keeps a static extent, a runtime range is dynamic; `unsqueeze` inserts a static `1` |
 | **strides** | folded to a compile-time `strides<...>` slot wherever `source_stride × step` is known at compile time — a static source keeps folded strides, and a partially-dynamic *contiguous* stride folds from the static extents it spans (`shape<-1,3,3>` → `stride0 = 9`); otherwise runtime |
-| **layout** | the view ops (`operator()`, `take_along`, `permute`, `flip`, `un/squeeze`, `peel`) output a folded `strides<...>`. `recast<keep_strides>` (the default) instead **preserves the source layout type** (`ccontiguous` stays `ccontiguous`, `strides<>` stays `strides<>`) |
+| **layout** | the view ops (`operator()`, `slice_along`, `permute`, `flip`, `un/squeeze`, `peel`) output a folded `strides<...>`. `recast<keep_strides>` (the default) instead **preserves the source layout type** (`ccontiguous` stays `ccontiguous`, `strides<>` stays `strides<>`) |
 | **space** | `storage_view_of(source)`: a `gpu`/`gpu_view` source → `gpu_view`, `pinned`/`mapped` → the matching `_view`, else `view` — a view never loses its memory space |
 
 Worked input→output shapes (`E` = source extents):
@@ -295,7 +295,7 @@ free **`to<Space>(t)`** (`cuda.h`) above, which is device-aware.
 | `peel_front_at<N>(t, i)` | → view | the `i`-th (random access / grid-stride) |
 | `size_front<N>(t)` | → index | # cells `peel_front<N>` yields (product of the peeled extents), no range built |
 | `peel_zip<Axes...>(a, b[, c])` | a range of `cs::tuple<ViewA,ViewB[,ViewC]>` | zip-peel 2 or 3 tensors' named axes in **lock-step** — a distinct name from `peel` (1 tensor → a view per step, 2+ → a tuple is a silent arity-driven return-type bifurcation, so it gets its own name, mirroring python's `zip()`). Operands may differ in shape if **broadcast-compatible** (numpy right-align, the rule `a+b` uses); `Axes...` are in the **broadcast rank's** numbering. Operands may also differ in **index type** — the cells carry one wide (and, on mixed signedness, signed) enough to address every operand exactly, so a reversed operand zipped against an unsigned-indexed one still steps backwards. Decodes fresh each step (no incremental cursor yet) |
-| `peel_zip(a, b[, c], axis<Axes...>{})` | same | value form — axis tag **trailing** (after every positional tensor), unlike `take_along`/`peel_at`'s leading tag |
+| `peel_zip(a, b[, c], axis<Axes...>{})` | same | value form — axis tag **trailing** (after every positional tensor), unlike `slice_along`/`peel_at`'s leading tag |
 | `peel_zip<Axes...>(a, b[, c]).enumerate()` | a range of `{index, tuple}` | same shape as `peel(...).enumerate()` |
 | `peel_zip<Axes...>(a, b[, c]).subrange(lo,hi)` | a `[lo,hi)` sub-range | same shape as `peel(...).subrange()` |
 | `scan_<Axis>(t, init, f)` | `void` (in-place) | sequential fold along `Axis` — `carry=init`, then `carry=f(carry,x); x=carry` for each element (increasing order), batched (peeled) over every other axis; `f` is a device-safe functor (like `map_`'s own convention). Reverse sweep: `scan_<Axis>(t.flip<Axis>(), init, f)` (a temporary view binds fine — `scan_` has lvalue and rvalue overloads) |

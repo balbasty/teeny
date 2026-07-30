@@ -536,7 +536,7 @@ private:
         return _wrap_idx<index_type, Wrap>(v, n, dflt);
     }
     // ---- the ONE sub-view builder (gather) ------------------------------------
-    // Every slicing/take_along call routes here: per axis an integer DROPS the
+    // Every slicing/slice_along call routes here: per axis an integer DROPS the
     // axis (into the base offset), `all` KEEPS it, a range keeps a strided window
     // (optional negative step). Output is teeny's strides<...> layout, folding
     // each kept stride to a compile-time value where derivable — so it works on
@@ -846,59 +846,65 @@ public:
     /* --- structural views (return teeny views) --------------- */
 
 private:
-    // per output axis A: the matching take_along arg if A is named, else `all`
+    // per output axis A: the matching slice_along arg if A is named, else `all`
     // (keep the axis). Feeds the gather, so index/all/range all work uniformly.
     template <cs::size_t A, cs::size_t... Axes, class Tup>
-    _TNY_API auto _ta_raw(const Tup & t) const {
+    _TNY_API auto _sa_raw(const Tup & t) const {
         constexpr int p = _pos_in<A, Axes...>();
         if constexpr (p < 0) return cs::full_extent;
         else                 return cs::get<static_cast<cs::size_t>(p)>(t);
     }
     template <cs::size_t... Axes, class P, class Tup, cs::size_t... A>
-    _TNY_API auto _ta_range(P p, const Tup & t, cs::index_sequence<A...> seq) const {
-        return _slice_range(p, seq, _ta_raw<A, Axes...>(t)...);
+    _TNY_API auto _sa_range(P p, const Tup & t, cs::index_sequence<A...> seq) const {
+        return _slice_range(p, seq, _sa_raw<A, Axes...>(t)...);
     }
 public:
     /**
      * @brief Index/slice one or more named axes; other axes are kept.
      *
-     * `take_along<Axes...>(args...)` applies `args[k]` to axis `Axes[k]` (each an
+     * `slice_along<Axes...>(args...)` applies `args[k]` to axis `Axes[k]` (each an
      * integer -- negatives wrap -- or a slice `all`/`rng`) and keeps every other
-     * axis, returning a view. e.g. `t.take_along<1>(2)` drops axis 1 at index 2;
-     * `t.take_along<0,2>(i, rng(1,4))` binds axes 0 and 2 at once.
+     * axis, returning a view. e.g. `t.slice_along<1>(2)` drops axis 1 at index 2;
+     * `t.slice_along<0,2>(i, rng(1,4))` binds axes 0 and 2 at once.
+     *
+     * NB this is NOT numpy's `take_along_axis` / pytorch's `take_along_dim` (a
+     * data-dependent gather driven by an index TENSOR -- that is teeny's
+     * `index_select`). `slice_along` binds compile-time-named axes to a scalar
+     * index or a slice, so it is always an affine view: pytorch's
+     * `select`/`narrow` generalised to several axes at once (#423).
      */
     template <long... Axes, class... Args>
-    _TNY_API auto take_along(Args... args) noexcept {
-        static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
-        static_assert((_axis_in_range(Axes, rank()) && ...), "take_along: axis out of range");
-        static_assert(_all_distinct<_norm_axis(Axes, rank())...>(), "take_along: axes must be distinct");
-        return _ta_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
+    _TNY_API auto slice_along(Args... args) noexcept {
+        static_assert(sizeof...(Axes) == sizeof...(Args), "slice_along: one index per named axis");
+        static_assert((_axis_in_range(Axes, rank()) && ...), "slice_along: axis out of range");
+        static_assert(_all_distinct<_norm_axis(Axes, rank())...>(), "slice_along: axes must be distinct");
+        return _sa_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
     }
     template <long... Axes, class... Args>
-    _TNY_API auto take_along(Args... args) const noexcept {
-        static_assert(sizeof...(Axes) == sizeof...(Args), "take_along: one index per named axis");
-        static_assert((_axis_in_range(Axes, rank()) && ...), "take_along: axis out of range");
-        static_assert(_all_distinct<_norm_axis(Axes, rank())...>(), "take_along: axes must be distinct");
-        return _ta_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
+    _TNY_API auto slice_along(Args... args) const noexcept {
+        static_assert(sizeof...(Axes) == sizeof...(Args), "slice_along: one index per named axis");
+        static_assert((_axis_in_range(Axes, rank()) && ...), "slice_along: axis out of range");
+        static_assert(_all_distinct<_norm_axis(Axes, rank())...>(), "slice_along: axes must be distinct");
+        return _sa_range<_norm_axis(Axes, rank())...>(store_.data(), cs::make_tuple(args...), cs::make_index_sequence<rank()>{});
     }
-    /** @brief Value form: `t.take_along(axis<0,2>{}, i, slice(1,4))` ==
-     *         `t.take_along<0,2>(i, slice(1,4))`. The leading `axis<...>` selector is a
+    /** @brief Value form: `t.slice_along(axis<0,2>{}, i, slice(1,4))` ==
+     *         `t.slice_along<0,2>(i, slice(1,4))`. The leading `axis<...>` selector is a
      *         single distinct-typed argument, so it needs no `.template` on a dependent
      *         receiver AND disambiguates cleanly from the template form. */
     template <long... Axes, class... Args>
-    _TNY_API auto take_along(axis<Axes...>, Args... args) noexcept       { return take_along<Axes...>(args...); }
+    _TNY_API auto slice_along(axis<Axes...>, Args... args) noexcept       { return slice_along<Axes...>(args...); }
     template <long... Axes, class... Args>
-    _TNY_API auto take_along(axis<Axes...>, Args... args) const noexcept { return take_along<Axes...>(args...); }
+    _TNY_API auto slice_along(axis<Axes...>, Args... args) const noexcept { return slice_along<Axes...>(args...); }
 
     /**
      * @brief Subsample a coloured/strided sub-lattice: bind named axes to a
      *        `slice(start,none,k)` each, sharing one STEP `k` across all of
      *        them but taking a separate START per axis — sugar for
-     *        `take_along` (#258), for the "every `k`-th voxel, offset per
+     *        `slice_along` (#258), for the "every `k`-th voxel, offset per
      *        axis" pattern coloured Gauss-Seidel relaxation needs
      *        (`loc[d] % k == digit_d(n)`). Pure sugar, no new addressing
      *        power: `t.subsample<0,1>(k, s0, s1)` ==
-     *        `t.take_along<0,1>(slice(s0,none,k), slice(s1,none,k))`.
+     *        `t.slice_along<0,1>(slice(s0,none,k), slice(s1,none,k))`.
      *        `k` and each `start` accept a runtime value OR a compile-time
      *        one (`Int<k>()`) — folds through `slice()`'s own static-range
      *        machinery, so a fully-static `(start,k)` pair keeps a folded
@@ -907,16 +913,16 @@ public:
     template <long... Axes, class K, class... Starts>
     _TNY_API auto subsample(K k, Starts... starts) noexcept {
         static_assert(sizeof...(Axes) == sizeof...(Starts), "subsample: one start per named axis");
-        return take_along<Axes...>(slice(starts, none, k)...);
+        return slice_along<Axes...>(slice(starts, none, k)...);
     }
     template <long... Axes, class K, class... Starts>
     _TNY_API auto subsample(K k, Starts... starts) const noexcept {
         static_assert(sizeof...(Axes) == sizeof...(Starts), "subsample: one start per named axis");
-        return take_along<Axes...>(slice(starts, none, k)...);
+        return slice_along<Axes...>(slice(starts, none, k)...);
     }
     /** @brief Value form: `t.subsample(axis<0,1>{}, k, s0, s1)` ==
      *         `t.subsample<0,1>(k, s0, s1)` — leading `axis<...>` selector,
-     *         same placement as `take_along`'s own value form (a second
+     *         same placement as `slice_along`'s own value form (a second
      *         variadic pack, the starts, needs the disambiguating tag up
      *         front rather than trailing). */
     template <long... Axes, class K, class... Starts>
@@ -996,8 +1002,8 @@ public:
      *        (numpy/pytorch `index_select`/`take`): `out(...,j,...) = a(...,idx(j),...)`
      *        for `j` in `[0, idx.numel())` — axis `Axis`'s extent becomes `idx`'s
      *        (static when `idx`'s own shape is static). `idx`'s values wrap negative
-     *        like any other teeny index (it's built on `take_along`, which already
-     *        wraps). Distinct from `take_along` (compile-time indices/ranges): `idx`'s
+     *        like any other teeny index (it's built on `slice_along`, which already
+     *        wraps). Distinct from `slice_along` (compile-time indices/ranges): `idx`'s
      *        VALUES are runtime DATA, so this always materialises a copy — an
      *        arbitrary data-dependent gather isn't expressible as an affine mdspan
      *        view. Prefer the `into(dest)` form (`_TNY_API`, no allocation, device-safe)
@@ -1075,12 +1081,12 @@ public:
         _TNY_CHECK(static_cast<index_type>(out.dest.extent(A)) == static_cast<index_type>(idx.extent(0)),
             "index_select: dest's axis Axis extent must equal idx.extent(0)");
         // idx(j)'s VALUE (unlike the loop bound) can be negative -- must stay
-        // SIGNED so take_along's wrap (_wrap_idx) takes its negative-index branch
+        // SIGNED so slice_along's wrap (_wrap_idx) takes its negative-index branch
         // rather than reinterpreting a negative value as a huge unsigned index
         // when this tensor's own index_type happens to be unsigned (#326 review).
         const index_type n = static_cast<index_type>(idx.extent(0));
         for (index_type j = 0; j < n; ++j)
-            out.dest.template take_along<(long)A>(j).copy_(take_along<(long)A>(static_cast<cs::make_signed_t<index_type>>(idx(j))));
+            out.dest.template slice_along<(long)A>(j).copy_(slice_along<(long)A>(static_cast<cs::make_signed_t<index_type>>(idx(j))));
         return out.dest;
     }
 
@@ -1566,7 +1572,7 @@ public:
 
     /** @brief Value form: `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise
      *         `unsqueeze`/`permute`. `squeeze`/`unsqueeze`/`permute` are axis-LIST
-     *         ops (like `peel`/`take_along`/the reductions), so — unlike the
+     *         ops (like `peel`/`slice_along`/the reductions), so — unlike the
      *         single-axis `Int<k>()` form above — they take the `axis<...>` tag: a
      *         single distinct-typed argument, so no `.template` is needed on a
      *         dependent receiver.
@@ -1574,7 +1580,7 @@ public:
      *         An EMPTY list — `axis<>{}` — names no axis, so it is a **no-op**: the
      *         same shape and strides back, as a view (numpy's own rule for an empty
      *         axis tuple, `np.squeeze(a, axis=())` / `np.expand_dims(a, axis=())`;
-     *         same identity `_keepdims<>`/`take_along(axis<>{})`/`peel(t, axis<>{})`
+     *         same identity `_keepdims<>`/`slice_along(axis<>{})`/`peel(t, axis<>{})`
      *         already have). It is NOT the same as the no-argument `squeeze()`
      *         (drop EVERY statically-size-1 axis) or `unsqueeze()` (insert at axis
      *         0) — those keep their meanings; only the axis-LIST spelling reads an
@@ -1825,7 +1831,7 @@ _TNY_API into_t<tensor<T,E,L,O>> into(tensor<T,E,L,O> & d) noexcept { return int
  *         straight out of a view-producing op, with no named intermediate:
  *         `cross(a, b, into(N(i, all)))`, `sum(a, into(cells.at(i, j)))`,
  *         `x.add(y, into(z.permute<1,0>()))`. Every view-producing op (slicing,
- *         `at`, `permute`, `unsqueeze`, `take_along`, `peel_at`, …) returns its
+ *         `at`, `permute`, `unsqueeze`, `slice_along`, `peel_at`, …) returns its
  *         view BY VALUE, so without this overload the most natural destination
  *         there is — a slot of a bigger output — had to be given a name first,
  *         which is exactly the boilerplate `into(dest)` exists to remove.

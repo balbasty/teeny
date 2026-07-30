@@ -83,9 +83,9 @@ int main()
     auto gv = g(all, slice(0,3));
     static_assert(decltype(gv.permute<1,0>())::ownership == storage::gpu_view, "gpu_view chain stays gpu_view");
 
-    // ...and the rest of the view ops too (take_along / squeeze / reshape /
+    // ...and the rest of the view ops too (slice_along / squeeze / reshape /
     // recast / flatten / peel range) — a contiguous gpu source, so all are valid.
-    static_assert(decltype(g.take_along<0>(1))::ownership == storage::gpu_view, "gpu take_along -> gpu_view");
+    static_assert(decltype(g.slice_along<0>(1))::ownership == storage::gpu_view, "gpu slice_along -> gpu_view");
     static_assert(decltype(g.unsqueeze<0>().squeeze<0>())::ownership == storage::gpu_view, "gpu squeeze -> gpu_view");
     static_assert(decltype(g.reshape<2,10>())::ownership == storage::gpu_view, "gpu reshape -> gpu_view");
     static_assert(decltype(g.recast<shape<4,5>>())::ownership == storage::gpu_view, "gpu recast -> gpu_view");
