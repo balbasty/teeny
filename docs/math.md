@@ -374,7 +374,9 @@ sum<0>(a, keepdims, into(dest));  // and with into(dest) — dest matches the ke
 
 Applies to every axis reduction (`sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`).
 `keepdims` is a distinct empty-tag value (like `all`/`none`), so it never collides
-with another argument.
+with another argument. The axes must be **distinct**, but — as everywhere else in
+teeny — you may list them in **any order**: `sum<2,0>(a, keepdims)` ==
+`sum<0,2>(a, keepdims)`, kept axes and all.
 
 ### Accumulator type vs result type
 
@@ -451,7 +453,8 @@ narrow element type `sqdist(a,b)` can be *more* accurate than the un-fused
 the two are only guaranteed bit-identical for `double` operands.
 `normalize`/`normalize_` mirror `sqnorm`/`norm`: with
 `<Axes...>` each sub-vector is divided by its norm over those axes (the reduced axes
-are kept as size-1 so the norm broadcasts back). Axes must be distinct and ascending.
+are kept as size-1 so the norm broadcasts back). Axes must be distinct, but may be
+listed in any order (`normalize<2,0>(a)` == `normalize<0,2>(a)`).
 `normalize` of a zero vector yields NaNs — this is exact math with no epsilon; add
 one at the call site if you need it. `cross` is defined only for rank-1, length-3
 operands (a `static_assert` catches a wrong static length; a runtime length is
