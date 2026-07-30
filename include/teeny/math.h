@@ -1593,7 +1593,29 @@ _TNY_HOST decltype(auto) _red_finish_dynamic(R && r, Tags... tags) {
 // original tag pack -- so a stray `dtype<...>`/`axis<...>` (or anything else)
 // reaching HERE is always a caller mistake, not legitimate passthrough, and the
 // `accepts` guard below can safely reject it instead of silently ignoring it.
+// ...and one more entry point per NAME, for the EXPLICITLY EMPTY axis list
+// `NAME(a, axis<>{})` (#398): reduce over NO axis, so every output cell
+// aggregates the single element at its own index and the result keeps the
+// SOURCE's shape (numpy's `np.sum(a, axis=())`). The engine already does exactly
+// that for an empty pack — nothing is marked reduced, `reduced_extents<E>` is
+// `E` — it is only the PUBLIC `NAME<Axes...>` overloads that must exclude the
+// empty pack (they would otherwise collide with the full-reduction `NAME(a)`),
+// which is why this separate, `_md`-internal entry point exists at all. Same
+// static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split, keyed on the SOURCE
+// extents since the result has them. Only the tag dispatcher below calls it.
 #define _TNY_RED_AXIS_CORE(NAME, INIT, OP)                                                              \
+namespace _md {                                                                                         \
+template <class Acc, class T,class E,class L,storage O, class... Tags,                                  \
+          cs::enable_if_t<E::rank_dynamic()==0, int> = 0>                                               \
+_TNY_API  decltype(auto) _##NAME##_noaxis(const tensor<T,E,L,O> & a, Tags... tags) {                    \
+    using R = _acc_t<Acc, T>;                                                                            \
+    return _red_finish_static<(long)E::rank()>(reduce_to<_reduce_result_t<Acc,T>>(axreduce<>(a, INIT, OP{})), tags...); } \
+template <class Acc, class T,class E,class L,storage O, class... Tags,                                  \
+          cs::enable_if_t<E::rank_dynamic()!=0, int> = 0>                                               \
+_TNY_HOST decltype(auto) _##NAME##_noaxis(const tensor<T,E,L,O> & a, Tags... tags) {                    \
+    using R = _acc_t<Acc, T>;                                                                            \
+    return _red_finish_dynamic<(long)E::rank()>(reduce_to<_reduce_result_t<Acc,T>>(axreduce<>(a, INIT, OP{})), tags...); } \
+}                                                                                                        \
 template <long... Axes, class T,class E,class L,storage O, class... Tags, class R = reduce_type_t<T>,   \
           cs::enable_if_t<(sizeof...(Axes) > 0) && _md::reduced_extents<E,Axes...>::rank_dynamic()==0, int> = 0> \
 _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                \
@@ -1640,7 +1662,18 @@ _TNY_RED_AXIS_CORE(sqnorm, R(0),                 r_addsq)   // Σaᵢ² over the
  *  (`_NAME_axed`) that pattern-matches the discovered `axis<Axes...>` TAG back
  *  into a real non-type template-argument pack (the only way to turn a value tag
  *  into `Axes...` for an explicit-template call) — `_md::_red_dyn` (tensor.h)
- *  computes the same static/dynamic split from that same tag. */
+ *  computes the same static/dynamic split from that same tag.
+ *
+ *  THREE axis cases, and they are three different requests (#398):
+ *   - **no `axis` keyword at all** (`AxisTag` is `_kw::unset`) — the documented
+ *     default: reduce over EVERY axis, giving a scalar.
+ *   - **`axis<>{}`, an explicitly EMPTY list** — reduce over NO axis: each output
+ *     cell aggregates the one element at its own index, so the result keeps the
+ *     source's shape (numpy's `np.sum(a, axis=())`). Handed to `_NAME_noaxis`
+ *     (emitted next to each reduction's axis core). Before #398 the absence
+ *     sentinel WAS `axis<>`, so an explicitly empty list silently took the
+ *     full-reduction branch — the opposite extreme, with no diagnostic.
+ *   - **`axis<A0, Rest...>`, a real list** — reduce over exactly those axes. */
 // `_NAME_axed::call` forwards into `_TNY_RED_AXIS_CORE`'s explicit-`Axes...`
 // overloads, which only ever accept `keepdims_t`/`into_t<D>` (see the comment
 // above `_TNY_RED_AXIS_CORE`) -- so `call` is handed an ALREADY-CLEANED
@@ -1659,7 +1692,7 @@ template <class Acc, long A0, long... Rest> struct _##NAME##_axed<Acc, axis<A0, 
 };                                                                                                        \
 }                                                                                                         \
 template <class Acc = void, class T,class E,class L,storage O, class Tag0, class... Tags,                \
-          class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                              \
+          class AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>,                          \
           cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value==0, int> = 0>                                  \
 _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags) {                      \
     static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template known<Tag0,Tags...>(), \
@@ -1669,8 +1702,9 @@ _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
     using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     constexpr bool hasInto = !cs::is_same<decltype(out), _kw::unset>::value;                             \
-    if constexpr (AxisTag::rank == 0) {                                                                  \
-        static_assert(!_kw::has<_is_keepdims_tag, Tag0, Tags...>(),                                      \
+    constexpr bool hasKeep = _kw::has<_is_keepdims_tag, Tag0, Tags...>();                                \
+    if constexpr (cs::is_same<AxisTag, _kw::unset>::value) {         /* NO axis keyword -> ALL axes */   \
+        static_assert(!hasKeep,                                                                          \
                       #NAME ": keepdims requires naming axes (axis<...>{}) -- a full (all-axes) "        \
                       "reduction has no axis left to keep");                                             \
         if constexpr (hasInto) {                                                                         \
@@ -1680,7 +1714,12 @@ _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
             out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(NAME<RAcc>(a))); \
             return out.dest;                                                                             \
         } else return NAME<RAcc>(a);                                                                     \
-    } else if constexpr (_kw::has<_is_keepdims_tag, Tag0, Tags...>()) {                                  \
+    } else if constexpr (_is_empty_axis<AxisTag>::value) {           /* axis<>{} -> NO axis at all */    \
+        if constexpr (hasKeep && hasInto) return _md::_##NAME##_noaxis<RAcc>(a, keepdims, out);          \
+        else if constexpr (hasKeep)       return _md::_##NAME##_noaxis<RAcc>(a, keepdims);               \
+        else if constexpr (hasInto)       return _md::_##NAME##_noaxis<RAcc>(a, out);                    \
+        else                              return _md::_##NAME##_noaxis<RAcc>(a);                         \
+    } else if constexpr (hasKeep) {                                                                      \
         if constexpr (hasInto) return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, keepdims, out);        \
         else                   return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, keepdims);             \
     } else {                                                                                              \
@@ -1689,7 +1728,7 @@ _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
     }                                                                                                      \
 }                                                                                                          \
 template <class Acc = void, class T,class E,class L,storage O, class Tag0, class... Tags,                \
-          class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                              \
+          class AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>,                          \
           cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value!=0, int> = 0>                                  \
 _TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags) {                      \
     static_assert(_kw::accepts<_is_dtype,_is_axis_tag,_is_into_tag,_is_keepdims_tag>::template known<Tag0,Tags...>(), \
@@ -1699,7 +1738,13 @@ _TNY_HOST decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
     using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;                                                  \
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     constexpr bool hasInto = !cs::is_same<decltype(out), _kw::unset>::value;                             \
-    if constexpr (_kw::has<_is_keepdims_tag, Tag0, Tags...>()) {                                         \
+    constexpr bool hasKeep = _kw::has<_is_keepdims_tag, Tag0, Tags...>();                                \
+    if constexpr (_is_empty_axis<AxisTag>::value) {                  /* axis<>{} -> NO axis at all */    \
+        if constexpr (hasKeep && hasInto) return _md::_##NAME##_noaxis<RAcc>(a, keepdims, out);          \
+        else if constexpr (hasKeep)       return _md::_##NAME##_noaxis<RAcc>(a, keepdims);               \
+        else if constexpr (hasInto)       return _md::_##NAME##_noaxis<RAcc>(a, out);                    \
+        else                              return _md::_##NAME##_noaxis<RAcc>(a);                         \
+    } else if constexpr (hasKeep) {                                                                      \
         if constexpr (hasInto) return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, keepdims, out);        \
         else                   return _md::_##NAME##_axed<RAcc, AxisTag>::call(a, keepdims);             \
     } else {                                                                                              \
@@ -1768,6 +1813,23 @@ _TNY_HOST decltype(auto) mean(const tensor<T,E,L,O> & a, Tags... tags) {
     static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "mean: a keyword was given more than once");
     auto s = sum<Acc, Axes...>(a); s.div_(static_cast<Acc>(a.numel() / s.numel()));
     return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
+}
+// mean over an EXPLICITLY EMPTY axis list — `mean(a, axis<>{})` (#398; see the
+// three axis cases documented on `_TNY_RED_TAGGED` above). No axis is reduced, so
+// each cell averages the single element at its own index: the count is 1 and the
+// division is the identity, leaving only mean's own result-type rule (an INTEGER
+// tensor still yields `double`, the numpy rule) and the copy into an owned result.
+namespace _md {
+template <class Acc, class T,class E,class L,storage O, class... Tags,
+          cs::enable_if_t<E::rank_dynamic()==0, int> = 0>
+_TNY_API  decltype(auto) _mean_noaxis(const tensor<T,E,L,O> & a, Tags... tags) {
+    return _red_finish_static<(long)E::rank()>(
+        reduce_to<_reduce_result_t<Acc, _mean_result_t<T>>>(axreduce<>(a, _acc_t<Acc,T>(0), r_add{})), tags...); }
+template <class Acc, class T,class E,class L,storage O, class... Tags,
+          cs::enable_if_t<E::rank_dynamic()!=0, int> = 0>
+_TNY_HOST decltype(auto) _mean_noaxis(const tensor<T,E,L,O> & a, Tags... tags) {
+    return _red_finish_dynamic<(long)E::rank()>(
+        reduce_to<_reduce_result_t<Acc, _mean_result_t<T>>>(axreduce<>(a, _acc_t<Acc,T>(0), r_add{})), tags...); }
 }
 _TNY_RED_TAGGED(mean)
 
@@ -1876,6 +1938,29 @@ _TNY_HOST decltype(auto) norm(const tensor<T,E,L,O> & a, Tags... tags) {
     static_assert(_kw::accepts<_is_into_tag,_is_keepdims_tag>::template unique<Tags...>(), "norm: a keyword was given more than once");
     auto s = sqnorm<Acc, Axes...>(a); s.sqrt_();
     return _md::_red_finish_dynamic<(long)E::rank(), Axes...>(static_cast<decltype(s)&&>(s), tags...);
+}
+// norm over an EXPLICITLY EMPTY axis list — `norm(a, axis<>{})` (#398; see the
+// three axis cases documented on `_TNY_RED_TAGGED` above). `norm` is √(Σaᵢ² over
+// the named axes), so over NO axis each cell's sum of squares is its own element
+// squared and the result is the elementwise `|a|` (in norm's floating result
+// type) — the same limit `sqnorm(a, axis<>{})` gives as the elementwise `a²`.
+namespace _md {
+template <class Acc, class T,class E,class L,storage O, class... Tags,
+          cs::enable_if_t<E::rank_dynamic()==0, int> = 0>
+_TNY_API  decltype(auto) _norm_noaxis(const tensor<T,E,L,O> & a, Tags... tags) {
+    using A0 = _acc_t<Acc,T>;   // accumulate the squares where the axis core does: Acc if given, else the reduce type (a float type, for the root)
+    using D  = cs::conditional_t<cs::is_void<Acc>::value && !cs::is_floating_point<A0>::value, double, A0>;
+    auto s = axreduce<>(a, D(0), r_addsq{}); s.sqrt_();
+    return _red_finish_static<(long)E::rank()>(
+        reduce_to<_reduce_result_t<Acc, _mean_result_t<T>>>(static_cast<decltype(s)&&>(s)), tags...); }
+template <class Acc, class T,class E,class L,storage O, class... Tags,
+          cs::enable_if_t<E::rank_dynamic()!=0, int> = 0>
+_TNY_HOST decltype(auto) _norm_noaxis(const tensor<T,E,L,O> & a, Tags... tags) {
+    using A0 = _acc_t<Acc,T>;
+    using D  = cs::conditional_t<cs::is_void<Acc>::value && !cs::is_floating_point<A0>::value, double, A0>;
+    auto s = axreduce<>(a, D(0), r_addsq{}); s.sqrt_();
+    return _red_finish_dynamic<(long)E::rank()>(
+        reduce_to<_reduce_result_t<Acc, _mean_result_t<T>>>(static_cast<decltype(s)&&>(s)), tags...); }
 }
 _TNY_RED_TAGGED(norm)
 #undef _TNY_RED_TAGGED

@@ -510,6 +510,12 @@ sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf));  // ...and every traili
                       //   any subset/order (dtype/axis/keepdims/into) — see the `_TNY_RED_TAGGED`
                       //   generic entry point in math.h, next to `sum<Acc,Axes...>(a, keepdims,
                       //   into(buf))`'s explicit-template twin (`_TNY_RED_AXIS_CORE`).
+sum(a, axis<>{});     // an EMPTY axis list reduces over NO axis (numpy's axis=(), #398): each cell
+                      //   aggregates its OWN element alone -> a's shape back, as an OWNED copy.
+                      //   DIFFERENT from `sum(a)` — no axis argument at all is the full, EVERY-axis
+                      //   reduction (a scalar). sqnorm/norm are Σaᵢ²/√Σaᵢ² over the NAMED axes, so
+                      //   over none they are the elementwise a² / |a| (not a plain copy); the other
+                      //   keywords compose as usual (keepdims has no reduced axis to keep).
 
 // --- nd-peel: iterate a SUBSET of axes, each yielding a lower-rank view ---
 for (auto line : peel<0,1>(t)) f(line);   // peel axes 0,1; each `line` is a view. The range-for is
@@ -683,7 +689,13 @@ does). Three selector vocabularies:
   no-ARGUMENT `squeeze()`/`unsqueeze()` are a DIFFERENT thing and keep their own
   meanings — an empty template pack can't be told from a defaulted one in C++, so
   only the `axis<...>` spelling can carry "zero axes named". `permute` needs a full
-  permutation and so already rejected it above rank 0.
+  permutation and so already rejected it above rank 0. The REDUCTIONS follow the
+  same rule (#398): `sum(a, axis<>{})` reduces over no axis and gives `a`'s shape
+  back (numpy's `np.sum(a, axis=())`), while a call with NO axis keyword at all is
+  the full every-axis reduction. A call site whose axis keyword is OPTIONAL must
+  therefore spell "not supplied" as `_kw::unset`, never as `axis<>` — overloading
+  one type for both is what made `sum(a, axis<>{})` silently reduce everything;
+  `_is_empty_axis<X>` (alias.h) is the "explicitly empty" test.
 - **`dtype<T>`** — a value tag for an element/accumulator type `T` (`alias.h`,
   next to `axis`), numpy's `dtype=` namesake: `empty(shape<3,3>{}, dtype<double>{})`
   == `empty<double>(shape<3,3>{})`, likewise `zeros`/`ones`/`full`/`arange` and
@@ -722,7 +734,11 @@ factory/`wrap`/`make_*` family (`storage.h`/`layout.h`/`tensor.h`) and the
 reduction family (`math.h`) both build on the same primitive:
 `tny::_kw` (`kwargs.h`) — `find_t`/`has`/`count`/`get` ask questions of the
 trailing pack, `accepts<Ps...>::known/unique` is the guard every call site
-puts in a `static_assert` up front. Where a selector still needs an EXPLICIT
+puts in a `static_assert` up front. **A keyword's "not supplied" sentinel must be
+`_kw::unset`, never a degenerate value of the keyword's own type** — `axis<>`
+doubling as both "no axis keyword" and "an explicitly empty axis list" is what
+made `sum(a, axis<>{})` silently reduce over everything (#398). Where a selector
+still needs an EXPLICIT
 `<...>` template argument (an axis list too big to spell as a value in a
 generic context, or the `<Acc, Axes...>` reduction split — C++17 has no
 universal template parameter to unify "leading type = accumulator" with

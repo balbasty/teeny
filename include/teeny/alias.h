@@ -217,6 +217,15 @@ namespace _kw { template <long... Axes> struct is_keyword<axis<Axes...>> : cs::t
  *  `dtype<...>`/`into_t<...>`/`keepdims_t`/... siblings. */
 template <class> struct _is_axis_tag : cs::false_type {};
 template <long... Axes> struct _is_axis_tag<axis<Axes...>> : cs::true_type {};
+/** @brief `_is_empty_axis<X>::value` is true iff `X` is the EXPLICITLY EMPTY axis
+ *  list `axis<>` — "over NO axis", which every axis-list op treats as the identity
+ *  (numpy's `axis=()`). It is a REQUEST, and a different one from "no axis keyword
+ *  was supplied at all" (a call site spells that absence with `_kw::unset`, whose
+ *  meaning is that call site's own default — all axes, for a reduction). Using one
+ *  type for both is exactly what made `sum(a, axis<>{})` silently reduce over
+ *  everything (#398), so keep the two apart wherever an axis tag is optional. */
+template <class> struct _is_empty_axis : cs::false_type {};
+template <> struct _is_empty_axis<axis<>> : cs::true_type {};
 
 /** @brief Compile-time **element-type tag** — a value carrier for `T`, the
  *  sibling of `axis<...>` for the dtype argument. It lets a type-parameterised

@@ -104,5 +104,66 @@ int main() {
     sum(dm, dtype<float>{}, axis<0>{}, into(ddest));
     if (ddest(0)!=3.0f || ddest(1)!=5.0f || ddest(2)!=7.0f) return 23;
 
+    // ---- an EXPLICITLY EMPTY axis list reduces over NO axis (#398) --------------
+    // `axis<>{}` names no axis, so each output cell aggregates the ONE element at
+    // its own index and the result keeps the SOURCE's shape -- numpy's rule for
+    // `np.sum(a, axis=())`, and the same "empty axis list = identity" the rest of
+    // the family already has (squeeze/unsqueeze/take_along/peel, #369).
+    // It used to be indistinguishable, inside the keyword bag, from "no axis
+    // keyword at all" (both landed on an `axis<>` sentinel), so it silently did
+    // the OPPOSITE extreme: a full, all-axes reduction (sum -> 15, not [[0..5]]).
+    auto z = sum(m, axis<>{});                       // m is [[0,1,2],[3,4,5]]
+    static_assert(decltype(z)::rank() == 2, "empty axis list reduces over NO axis");
+    static_assert(cs::is_same<typename decltype(z)::shape_type, shape<2,3>>::value, "...so the shape is the source's");
+    static_assert(cs::is_same<typename decltype(z)::element_type, double>::value, "...and the element type is the source's");
+    for (int i = 0; i < 2; ++i) for (int j = 0; j < 3; ++j) if (z(i,j) != m(i,j)) return 24;
+    if (z.data() == m.data()) return 25;             // an owning result, not a view
+    // prod/max/min/mean are the same identity over an empty axis list
+    if (prod(m, axis<>{})(1,2) != 5.0 || max(m, axis<>{})(1,2) != 5.0) return 26;
+    if (min(m, axis<>{})(0,1) != 1.0 || mean(m, axis<>{})(1,2) != 5.0) return 27;
+    // sqnorm/norm are Σaᵢ²/√Σaᵢ² OVER THE NAMED AXES, so over none of them they are
+    // the elementwise a² and |a| (the same limit, not a plain identity) -- checked
+    // with a negative element, where the two differ from a copy.
+    auto sgn = local<double, shape<2>>(); sgn(0) = -3; sgn(1) = 4;
+    auto sq = sqnorm(sgn, axis<>{});
+    if (sq(0) != 9.0 || sq(1) != 16.0) return 28;
+    auto nr = norm(sgn, axis<>{});
+    if (nr(0) != 3.0 || nr(1) != 4.0) return 29;
+    // CONTROL: NO axis keyword at all still means the documented FULL reduction
+    if (sum(m) != 15.0 || sum(m, dtype<double>{}) != 15.0) return 30;
+    if (sqnorm(v, dtype<float>{}) != 25.0f) return 31;
+    // ...and a NON-empty axis list is untouched
+    if (sum(m, axis<0>{})(1) != 5.0) return 32;
+
+    // the other keywords compose with an empty axis list exactly as with a real one
+    auto ez = sum(m, axis<>{}, dtype<float>{});
+    static_assert(cs::is_same<typename decltype(ez)::element_type, float>::value, "dtype tag sets the result type");
+    if (ez(1,2) != 5.0f) return 33;
+    auto ek = sum(m, dtype<float>{}, axis<>{}, keepdims);   // no axis was reduced -> nothing to keep
+    static_assert(decltype(ek)::rank() == 2, "keepdims over an empty axis list is the identity");
+    if (ek(1,2) != 5.0f) return 34;
+    auto ed = local<float, shape<2,3>>();
+    auto & red = sum(m, axis<>{}, into(ed));
+    static_assert(cs::is_same<decltype(red), decltype(ed)&>::value, "into returns dest&");
+    if (&red != &ed || ed(0,1) != 1.0f || ed(1,2) != 5.0f) return 35;
+    // integer mean keeps its int->double rule here too
+    auto emi = mean(mi, axis<>{});
+    static_assert(cs::is_same<typename decltype(emi)::element_type, double>::value, "integer mean -> double");
+    if (emi(0,1) != 1.0 || emi(1,2) != 5.0) return 36;
+    // methods: same rule (and the same result type) as the free functions
+    auto em = m.sum(axis<>{});
+    static_assert(cs::is_same<decltype(em), decltype(z)>::value, "method matches free function");
+    if (em(1,2) != 5.0) return 37;
+    if (m.norm(axis<>{})(1,2) != 5.0 || m.mean(axis<>{})(0,1) != 1.0) return 38;
+    // dynamic shape: the result keeps the SOURCE's (dynamic) extents, so it is
+    // heap-owned -- the host-only overload, keyed off the same empty tag.
+    auto edm = sum(dm, axis<>{});
+    static_assert(decltype(edm)::ownership == storage::heap, "dynamic source -> heap result");
+    static_assert(decltype(edm)::rank() == 2, "...with the source's rank");
+    if (edm.shape(0)!=2 || edm.shape(1)!=3 || edm(1,2)!=5.0 || edm(0,1)!=1.0) return 39;
+    auto edd = local<double, shape<2,3>>();
+    sum(dm, axis<>{}, into(edd));
+    if (edd(1,2) != 5.0) return 40;
+
     return 0;
 }

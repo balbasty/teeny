@@ -205,7 +205,11 @@ ops — `permute`, `squeeze`, `unsqueeze` — additionally take an `axis<...>{}`
 the reductions use. An **empty** list, `axis<>{}`, names no axis and is therefore a
 **no-op** for `squeeze`/`unsqueeze` (numpy's `axis=()` rule) — distinct from the
 no-argument `squeeze()`/`unsqueeze()`, which keep their own meanings; `permute`
-accepts it only at rank 0. See [Views & structure](structure.md).
+accepts it only at rank 0. The **reductions** read it the same way — `sum(a,
+axis<>{})` reduces over no axis and keeps `a`'s shape, where the plain `sum(a)`
+(no axis argument at all) reduces over every axis, see
+[Math & reductions](math.md#an-empty-axis-list-reduces-over-no-axis).
+See [Views & structure](structure.md).
 
 **Type inference — what the output *type* keeps.** A view op transforms the input
 type along four independent facets; staticity is preserved wherever it is

@@ -109,10 +109,14 @@ using index_select_extents = decltype(index_select_ext_<E, Axis, NewExt>(cs::mak
  * than an explicit `Axes...` template pack) would leave a dynamic result — the
  * same static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split every axis
  * reduction needs, computed from the TAG so the tag-driven entry point can
- * SFINAE on it exactly like the explicit-Axes one does. `axis<>` (no axes
- * given -- the bare, all-axes reduction) is never dynamic (a full reduction is
- * always a scalar, never allocates) -- that is the primary template below;
- * the partial specialization below handles a real (non-empty) axis list. */
+ * SFINAE on it exactly like the explicit-Axes one does. Three cases, and they
+ * are three DISTINCT things (#398):
+ *   - no `axis` keyword at all (`_kw::unset`, the primary below) -- the bare,
+ *     all-axes reduction. Never dynamic: its result is a scalar, so it never
+ *     allocates.
+ *   - `axis<>{}`, an EXPLICITLY EMPTY list -- reduce over NO axis, so the result
+ *     keeps the SOURCE's extents and is dynamic exactly when the source is.
+ *   - `axis<A0, Rest...>`, a real axis list -- the reduced extents decide.  */
 // Same MSVC two-phase-lookup quirk `_is_static_shape`/`_shape_rank` (above, in
 // the enclosing `tny` scope) work around for `tensor`'s own body: MSVC can
 // mis-resolve `reduced_extents<...>::rank_dynamic()` when it's evaluated
@@ -124,6 +128,7 @@ template <class E, long... Axes>
 _TNY_API constexpr cs::size_t _red_dyn_value() { return reduced_extents<E, Axes...>::rank_dynamic(); }
 
 template <class E, class AxisTag> struct _red_dyn { static constexpr cs::size_t value = 0; };
+template <class E> struct _red_dyn<E, axis<>> { static constexpr cs::size_t value = E::rank_dynamic(); };
 template <class E, long A0, long... Rest> struct _red_dyn<E, axis<A0, Rest...>> {
     static constexpr auto value = _red_dyn_value<E, A0, Rest...>();
 };
@@ -1739,8 +1744,12 @@ public:
 // `= 0` default).
 #define _TNY_RED_AXIS_IF(E, CMP)                                                                            \
     cs::enable_if_t<(sizeof...(Ax) > 0) && _md::reduced_extents<E,Ax...>::rank_dynamic() CMP 0, int> = 0
+// The "no axis keyword given" sentinel is `_kw::unset`, NOT `axis<>`: an
+// explicitly EMPTY axis list is a DIFFERENT request (reduce over no axis), and
+// overloading one type for both made it silently mean "reduce over everything"
+// (#398). See math.h's `_TNY_RED_TAGGED`.
 #define _TNY_RED_TAGGED_IF(E, CMP)                                                                          \
-    class AxisTag = _kw::find_t<_is_axis_tag, axis<>, Tag0, Tags...>,                                       \
+    class AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>,                                   \
     cs::enable_if_t<_md::_red_dyn<E,AxisTag>::value CMP 0, int> = 0
 #define _TNY_RED_METHOD_DECL(NAME)                                                                          \
     template <class Acc = void> _TNY_API auto NAME() const;                                                 \
