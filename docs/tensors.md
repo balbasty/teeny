@@ -48,7 +48,7 @@ Factories:
 | `wrap(ptr, shape, {s0,s1,...})` | view with runtime strides (`dynamic_strides`) |
 | `wrap<S...>(ptr, shape, {dyn...})` | mixed static/runtime strides (`dynamic_stride` slots) |
 | `as_tensor(any_mdspan)` / `wrap(any_mdspan)` | wrap a raw `mdspan`/`submdspan` result as a view — both spellings, same result; `as_tensor` is what teeny's own view-producing ops (`permute`/`flip`/…) call internally |
-| `make_view(ptr, shape)` / `make_view(ptr, shape, fcontiguous{})` | an alias of `wrap` in the `make_*` family (same result, same spellings) |
+| `make_view(ptr, shape)` / `make_view(ptr, shape, fcontiguous{})` | an alias of `wrap` in the `make_*` family (same result, same layout + storage spellings — not the stride-tag rows above) |
 
 `wrap` already deduces the shape type from its argument, so `make_view` is a plain
 synonym that exists for symmetry with `make_local` / `make_heap` / `make_gpu`. Use
