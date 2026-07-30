@@ -31,7 +31,7 @@ int main() {
 
     auto sv = st(1, all, all);                     // slice a strides source (was submdspan)
     if (sv(2,3) != st(1,2,3)) return 4;
-    auto ta = st.take_along<2>(1);                 // drop axis 2 at index 1
+    auto ta = st.slice_along<2>(1);                 // drop axis 2 at index 1
     if (ta(0,0) != st(0,0,1) || ta(1,2) != st(1,2,1)) return 5;
     auto rv = st(all, slice(1,3), all);            // range on a strides source
     if (rv(0,0,0) != st(0,1,0) || rv(1,1,3) != st(1,2,3)) return 6;

@@ -83,7 +83,7 @@ sum(m); prod(m); max(m); min(m); dot(a,b);
 // indexing / slicing (python-like: negatives wrap; none = open end; 3rd arg = step):
 t(0, -1, slice(1,4));                                // element, or a sub-view
 t(all, slice(none,4), slice(1,none,2));              // keep axis / open ends / strided
-t.take_along(axis<0,2>{}, i, all);                   // bind named axes, keep the rest
+t.slice_along(axis<0,2>{}, i, all);                   // bind named axes, keep the rest
 t.permute(Int<2>(), Int<0>(), Int<1>());             // reorder axes
 t.unsqueeze(Int<2>());                               // insert a size-1 axis (numpy newaxis)
 for (auto line : peel(t, axis<0,1>{})) work(line);   // nd-peel: iterate a subset of axes
@@ -105,7 +105,7 @@ auto hh = local<half, shape<64,64>>();
 | `layout.h` | `strides<S...>` (`= layout_static_stride`) — per-dim static/dynamic strides |
 | `indexing.h` | slice vocabulary: `slice()`/`none`, axis/index wrapping |
 | `axis.h` | view builders: `permute`/`flip`/`squeeze`/`unsqueeze` |
-| `tensor.h` | `tensor<T, Extents, Layout, storage>` + `view`/`local`/`owned` + slicing / `take_along` / `at` |
+| `tensor.h` | `tensor<T, Extents, Layout, storage>` + `view`/`local`/`owned` + slicing / `slice_along` / `at` |
 | `math.h` | in-place / out-of-place ops (broadcasting) + unary math + reductions |
 | `iterate.h` | nd-peel: `peel` / `peel_at` / `peel_front` / `peel_front_at` |
 | `dynamic.h` | `anyrank` (rank-erased carrier) + `peel_front<-Sr>` + `dispatch_rank` |

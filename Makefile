@@ -51,12 +51,14 @@ TESTS = \
 	$(BUILDDIR)/test_ops \
 	$(BUILDDIR)/test_fold \
 	$(BUILDDIR)/test_axred \
+	$(BUILDDIR)/test_static_unroll \
 	$(BUILDDIR)/test_valueform \
 	$(BUILDDIR)/test_compare \
 	$(BUILDDIR)/test_ellipsis \
 	$(BUILDDIR)/test_to \
 	$(BUILDDIR)/test_empty \
 	$(BUILDDIR)/test_factory_dtype \
+	$(BUILDDIR)/test_factory_backend_kw \
 	$(BUILDDIR)/test_reduce_dtype \
 	$(BUILDDIR)/test_reduce_compose \
 	$(BUILDDIR)/test_iterate \
@@ -73,7 +75,7 @@ TESTS = \
 	$(BUILDDIR)/test_reshape \
 	$(BUILDDIR)/test_subperm \
 	$(BUILDDIR)/test_flip_axes \
-	$(BUILDDIR)/test_takealong \
+	$(BUILDDIR)/test_slicealong \
 	$(BUILDDIR)/test_subsample \
 	$(BUILDDIR)/test_unfold \
 	$(BUILDDIR)/test_scan \

@@ -612,7 +612,7 @@ Use `owned<T,E>(extents)`.
 | `anyrank< T, offset_t, _meta_store< offset_t, MaxRank > >` | [`as_anyrank`](#as_anyrank-1)  | `as_anyrank(data, shape, stride, ndim, copy_meta)` — COPY shape/stride into an inline store, so the carrier is trivially copyable and can be passed into a CUDA kernel by value (peel on device). |
 | `bool` | [`dispatch_rank`](#dispatch_rank)  | Call `f` with a fixed-rank view of `t` chosen by its runtime `ndim`. |
 | `bool` | [`dispatch_value`](#dispatch_value)  | Turn a runtime value into a compile-time one from a candidate list. |
-| `auto` | [`slice`](#slice)  | A python-like slice `[start : stop : step)` for `operator()` / `take_along`. |
+| `auto` | [`slice`](#slice)  | A python-like slice `[start : stop : step)` for `operator()` / `slice_along`. |
 | `auto` | [`slice`](#slice-1)  |  |
 | `auto` | [`slice`](#slice-2)  |  |
 | `auto` | [`peel_at`](#peel_at)  | The `i`-th sub-view obtained by peeling `Axes...` (0 <= i < product of the peeled extents). |
@@ -849,7 +849,7 @@ dispatch_value<1,2,3>(ndim_spatial, [&](auto d){ kernel<d.value>(view); });
 template<class A, class B> auto slice(A start, B stop)
 ```
 
-A python-like slice `[start : stop : step)` for `operator()` / `take_along`.
+A python-like slice `[start : stop : step)` for `operator()` / `slice_along`.
 
 `none` marks an open end; negative bounds wrap (count from the back); `step` defaults to 1 and may exceed 1.
 
@@ -3172,7 +3172,7 @@ tensor<float, shape<-1,4>, strides<dynamic_stride,1>>(ptr, {n}); // outer stride
 ```
  When every stride is static the mapping is empty (EBO), so a stack tensor is still exactly `sizeof` its data. Only the *dynamic* strides are stored.
 
-Note: CCCL's `submdspan` is only defined for the standard layouts, so it does not apply here — but teeny's own slicing/`take_along`/`permute`/`flip`/ `peel` build their views by hand (no submdspan), so they all work on a strides<...> source and in fact fold their output strides the same way. And `required_span_size` assumes non-negative strides — negative strides are for VIEWS into existing storage, not owning allocation.
+Note: CCCL's `submdspan` is only defined for the standard layouts, so it does not apply here — but teeny's own slicing/`slice_along`/`permute`/`flip`/ `peel` build their views by hand (no submdspan), so they all work on a strides<...> source and in fact fold their output strides the same way. And `required_span_size` assumes non-negative strides — negative strides are for VIEWS into existing storage, not owning allocation.
 
 #### Template Parameters
 * `S` One stride per dimension: a compile-time value (may be negative), or `dynamic_stride` for a runtime stride.
@@ -3603,8 +3603,8 @@ The layout / extents / offset mapping is delegated to `cuda::std::mdspan` (the m
 | [`operator()`](#operator-21) | `function` | Declared here |
 | [`operator T`](#operatort) | `function` | Declared here |
 | [`item`](#item) | `function` | Declared here |
-| [`take_along`](#take_along) | `function` | Declared here |
-| [`take_along`](#take_along-1) | `function` | Declared here |
+| [`slice_along`](#slice_along) | `function` | Declared here |
+| [`slice_along`](#slice_along-1) | `function` | Declared here |
 | [`permute`](#permute) | `function` | Declared here |
 | [`permute`](#permute-1) | `function` | Declared here |
 | [`flip`](#flip) | `function` | Declared here |
@@ -3762,8 +3762,8 @@ Defined in include/teeny/tensor.h:86
 | `decltype(auto)` | [`operator()`](#operator-21) `const` `inline` `noexcept` |  |
 |  | [`operator T`](#operatort) `const` `inline` `noexcept` |  |
 | `T` | [`item`](#item) `const` `inline` `noexcept` | The single element of a rank-0 tensor (explicit reader). |
-| `auto` | [`take_along`](#take_along) `inline` `noexcept` | Index/slice one or more named axes; other axes are kept. |
-| `auto` | [`take_along`](#take_along-1) `const` `inline` `noexcept` |  |
+| `auto` | [`slice_along`](#slice_along) `inline` `noexcept` | Index/slice one or more named axes; other axes are kept. |
+| `auto` | [`slice_along`](#slice_along-1) `const` `inline` `noexcept` |  |
 | `auto` | [`permute`](#permute) `inline` `noexcept` | Reorder the axes (a permutation of 0..N-1; negatives wrap) -> a rank-N view. |
 | `auto` | [`permute`](#permute-1) `const` `inline` `noexcept` |  |
 | `auto` | [`flip`](#flip) `inline` `noexcept` | Reverse axis `Ax` (negatives wrap) -> a view (numpy `flip`). |
@@ -4332,28 +4332,28 @@ The single element of a rank-0 tensor (explicit reader).
 
 ---
 
-#### take_along
+#### slice_along
 
 `inline` `noexcept`
 
 ```cpp
-template<long... Axes, class... Args> inline auto take_along(Args... args) noexcept
+template<long... Axes, class... Args> inline auto slice_along(Args... args) noexcept
 ```
 
 Defined in include/teeny/tensor.h:473
 
 Index/slice one or more named axes; other axes are kept.
 
-`take_along<Axes...>(args...)` applies `args[k]` to axis `Axes[k]` (each an integer &ndash; negatives wrap &ndash; or a slice `all`/`rng`) and keeps every other axis, returning a view. e.g. `t.take_along<1>(2)` drops axis 1 at index 2; `t.take_along<0,2>(i, rng(1,4))` binds axes 0 and 2 at once.
+`slice_along<Axes...>(args...)` applies `args[k]` to axis `Axes[k]` (each an integer &ndash; negatives wrap &ndash; or a slice `all`/`rng`) and keeps every other axis, returning a view. e.g. `t.slice_along<1>(2)` drops axis 1 at index 2; `t.slice_along<0,2>(i, rng(1,4))` binds axes 0 and 2 at once.
 
 ---
 
-#### take_along
+#### slice_along
 
 `const` `inline` `noexcept`
 
 ```cpp
-template<long... Axes, class... Args> inline auto take_along(Args... args) const noexcept
+template<long... Axes, class... Args> inline auto slice_along(Args... args) const noexcept
 ```
 
 Defined in include/teeny/tensor.h:478
