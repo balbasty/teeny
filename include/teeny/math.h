@@ -1542,11 +1542,20 @@ namespace _md {
  *  `.clone()` can't be reused — the target is built explicitly with `r`'s own
  *  element type) — then write into `into_t<D>` if present, else return the
  *  (possibly keepdims-wrapped) tensor by value. Two overloads matching the SAME
- *  static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split as `axreduce` itself. */
+ *  static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split as `axreduce` itself.
+ *  The keepdims arm is gated on a NON-EMPTY axis pack: for the explicitly empty
+ *  list `NAME(a, axis<>{}, keepdims)` (#398) NO axis was reduced, so `r` already
+ *  has the source's shape and `keepdims` has nothing to re-insert — it is a
+ *  no-op, and `r` is used directly. Without that gate `_keepdims<>`'s base
+ *  overload (which takes/returns BY VALUE) would be handed `r` itself rather
+ *  than one of the copyable views its recursive `unsqueeze` fold produces: on
+ *  the dynamic path that is a move-only `storage::heap` tensor, i.e. a hard
+ *  "use of deleted function" error, and on the static path a silent pair of
+ *  redundant whole-tensor copies. */
 template <long SrcRank, long... Axes, class R, class... Tags>
 _TNY_API decltype(auto) _red_finish_static(R && r, Tags... tags) {
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tags...);
-    if constexpr (_kw::has<_is_keepdims_tag, Tags...>()) {
+    if constexpr (sizeof...(Axes) > 0 && _kw::has<_is_keepdims_tag, Tags...>()) {
         static_assert(_axes_ascending(_norm_axis(Axes, SrcRank)...), "keepdims: axes must be distinct and ascending");
         auto kv = _keepdims<_norm_axis(Axes, SrcRank)...>(r);
         tensor<typename cs::remove_reference_t<R>::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::stack> c{};
@@ -1561,7 +1570,7 @@ _TNY_API decltype(auto) _red_finish_static(R && r, Tags... tags) {
 template <long SrcRank, long... Axes, class R, class... Tags>
 _TNY_HOST decltype(auto) _red_finish_dynamic(R && r, Tags... tags) {
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tags...);
-    if constexpr (_kw::has<_is_keepdims_tag, Tags...>()) {
+    if constexpr (sizeof...(Axes) > 0 && _kw::has<_is_keepdims_tag, Tags...>()) {
         static_assert(_axes_ascending(_norm_axis(Axes, SrcRank)...), "keepdims: axes must be distinct and ascending");
         auto kv = _keepdims<_norm_axis(Axes, SrcRank)...>(r);
         tensor<typename cs::remove_reference_t<R>::element_type, typename decltype(kv)::extents_type, ccontiguous, storage::heap> c(kv.extents());
