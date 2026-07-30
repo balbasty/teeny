@@ -296,7 +296,8 @@ auto c = a.add(b, alpha);  a.sub(b, alpha);  // fused out-of-place axpy: a +/- a
 //   dest). Scalar-rhs/unary: a compile error when both shapes are static, a debug-time
 //   check otherwise; tensor rhs: the debug-time check. y's dtype may differ: the math runs
 //   in the OPERANDS' precision (scalar rhs / axpy alpha too) and only the RESULT is cast to
-//   y, so a.op(b, into(y)) == y.copy_(a.op(b)) numerically, minus the temporary.
+//   y, so a.op(b, into(y)) == y.copy_(a.op(b)) numerically, minus the temporary (holds for
+//   half/bfloat16 operands too: into(y) rounds through the twin's own promote_t first).
 a.add(b, into(y));  a.mul(b, into(y));  a.add(2.0, into(y));  a.add(b, alpha, into(y));
 exp(a, into(y)); sqrt(a, into(y)); minimum(a, b, into(y)); clamp(a, lo, hi, into(y));
 normalize(a, into(y));  cross(a, b, into(N(i, all)));  // cross into row i of a matrix ("crossto")

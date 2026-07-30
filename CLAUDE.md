@@ -848,6 +848,20 @@ is generic.
   moves from `addss` to `addsd`). `scan`'s `into(dest)` remains the DELIBERATE exception:
   it `copy_`s into `dest` FIRST, so the whole recurrence runs in `dest`'s precision — a
   sequential carry has no "final result only" to cast (`docs/api-ux-review.md`'s F4-e).
+  **`Cv` alone is not quite the whole invariant, though — a follow-up review of this same
+  PR caught the gap:** the allocating twin doesn't store its result AT `Cv`, it stores at
+  `promote_t<Ta,Tb>`, THEN copies that into `dest`. Those two types coincide for every
+  element type except `half`/`bfloat16`, whose `compute_type_t` is `float` — so a
+  half/bfloat16-sourced twin rounds float -> half -> dest, while a naive `Cv`-only
+  `into(dest)` went straight float -> dest and skipped that rounding stop:
+  `half(1.3).add(1.5, into(double_y))` gave 2.7998046875 (one rounding) where the twin's
+  2.80078125 (two roundings) is what the invariant promises. `oop_to`/`oops_to`/`uop_to`
+  (and `_cross3`'s `into` overload) now wrap `op` in `_round_to<Rt, Op>` — `Rt` being the
+  allocating twin's own element type — so the result is cast to `Rt` before the engine's
+  writer casts it to `dest`'s. `Rt == Cv` for every non-16-bit-float type, so that extra
+  cast is a no-op there (verified: object code for every int/float/double combination is
+  unchanged, both compilers); it only changes half/bfloat16-SOURCED `into` calls, making
+  them match their twin exactly instead of being one rounding more precise.
   **Contiguous linear fast path (#161, #175):** contiguous elementwise ops replace the
   per-element mixed-radix decode with a flat `for(i) cp[i]=…` loop that auto-vectorizes.
   Two flavours by whether a second array is in play:

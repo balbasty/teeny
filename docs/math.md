@@ -219,6 +219,15 @@ a.mul(0.5, into(y));          // y = {0, 1, 1}   (0.75, 1.25, 1.75 truncated on 
 exp(a, into(y));              // y = {4, 12, 33} (exp of 1.5/2.5/3.5, then truncated)
 ```
 
+This holds for a `half`/`bfloat16` operand too, not just for wider types: the
+arithmetic runs in `float` either way, but `into(y)` rounds through the *allocating
+twin's own element type* (`promote_t<Ta,Tb>` — a 16-bit float, when the source is)
+before casting to `y`, exactly mirroring the extra rounding step
+`y.copy_(a.op(b))` performs when it narrows its temporary result down to that
+16-bit type on the way. Skipping that stop would make `into(y)` slightly more
+precise than its twin (one rounding instead of two) — closer to the exact math, but
+a different number, which breaks the equivalence this section promises.
+
 The flip side is that the operands' own promotion rule still applies, whatever `y`
 is: two integer tensors divide as integers even into a floating destination, exactly
 as they would without `into` (`y`'s dtype never promotes the operation).

@@ -366,7 +366,9 @@ what lets `add`/`sub` also take the fused `alpha`). `y` may alias an operand and
 have a different dtype — the arithmetic still runs in the **operands'** precision
 (scalar right-hand side and axpy coefficient included) and only the **result** is
 cast to `y`'s type, so `a.op(b, into(y))` produces exactly the numbers
-`y.copy_(a.op(b))` would.
+`y.copy_(a.op(b))` would — including when the source is `half`/`bfloat16`: `into(y)`
+rounds through the twin's own `promote_t` (a 16-bit float there) before casting to
+`y`, the same extra rounding step the twin's temporary result goes through.
 
 **`y` may be a slice**, written straight out of a view-producing op —
 `cross(a, b, into(N(i, all)))`, `sum(a, into(cells.at(i, j)))`,

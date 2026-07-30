@@ -839,20 +839,53 @@ _TNY_HOST auto uop_out(const A & a, Uop f) {
  * included: `a.mul(0.5, into(int_y))` multiplied by `int(0.5)` == 0, and
  * `a.add(b, 0.5, into(int_y))` left `y` == `a`. With the operands' type, each
  * `x.op(y, into(dest))` is numerically identical to `dest.copy_(x.op(y))` — the
- * `into` form just skips the temporary. (A `half`/`bfloat16` DEST over half/float
- * operands is unaffected: `compute_type_t` is `float` on both sides. Over WIDER
- * operands it now computes in the wider type and narrows on the store, which is
- * the same "cast the result" rule, not a half-specific carve-out.)
+ * `into` form just skips the temporary.
  *
  * The allocating producers (`oop`/`oops`/`uop_out`) keep the default: their
  * destination IS built as the promoted type, so `compute_type_t<C::element_type>`
- * already IS the operands' compute type there — same type, byte-identical code. */
-template <class Op, class Out, class A, class B> _TNY_API void oop_to (Out & o, const A & a, const B & b, Op op)
-{ bzip<w_set, false, compute_type_t<promote_t<typename A::element_type, typename B::element_type>>>(o, a, b, op); }
-template <class Op, class Out, class A, class S>  _TNY_API void oops_to(Out & o, const A & a, S s, Op op)
-{ scalo<false, compute_type_t<promote_t<typename A::element_type, S>>>(o, a, s, op); }
-template <class Uop, class Out, class A>          _TNY_API void uop_to (Out & o, const A & a, Uop f)
-{ unaryo<false, compute_type_t<typename A::element_type>>(o, a, f); }
+ * already IS the operands' compute type there — same type, byte-identical code.
+ *
+ * `Cv` alone does not finish the job, though. The twin materialises its result in
+ * `Rt` — the element type of the tensor it allocates — and only then copies that
+ * into `dest`, so it ROUNDS THROUGH `Rt` on the way. `Rt` and `Cv` are the same
+ * type for every element type but two: `compute_type_t` is the identity except on
+ * `half`/`bfloat16`, where it is `float`. So for a half/bfloat16-typed result the
+ * twin rounds float -> half -> dest while a straight `Cv` -> dest store does not,
+ * and the two disagree: with `half a = 1.3`, `a.add(1.5, into(double_y))` gave
+ * 2.7998046875 where `double_y.copy_(a.add(1.5))` gives 2.80078125. `_round_to`
+ * below reinstates that stop, so the equivalence holds for EVERY element type.
+ * Being `static_cast<Rt>` of a value already of type `Rt` whenever `Rt == Cv`, it
+ * is an identity for every non-16-bit-float result — no codegen change there.
+ *
+ * This is also what the REDUCTIONS have always done: they build their scalar in the
+ * accumulator type, cast it to the tensor's element type (`reduce_to<T>`), and only
+ * then write it into `dest`. Same rule, now spelled the same way in both families. */
+
+// Wrap an op so its result is rounded through `Rt` (the allocating twin's element
+// type) before the engine's writer casts it to the destination's. Lambda-free and
+// trivially copyable, like every other functor on this page.
+template <class Rt, class Op> struct _round_to {
+    Op op;
+    template <class X, class Y> _TNY_API Rt operator()(X x, Y y) const { return static_cast<Rt>(op(x, y)); }
+    template <class X>          _TNY_API Rt operator()(X x)      const { return static_cast<Rt>(op(x)); }
+};
+// Forward the "this op never reads its lhs" property through the wrapper — the
+// engines key that trait on the OP TYPE to skip a load that would otherwise race a
+// concurrent atomic RMW, and a wrapper that hid it would reintroduce that race.
+template <class Rt, class Op> struct _ignores_lhs<_round_to<Rt, Op>> : _ignores_lhs<Op> {};
+
+template <class Op, class Out, class A, class B> _TNY_API void oop_to (Out & o, const A & a, const B & b, Op op) {
+    using Rt = promote_t<typename A::element_type, typename B::element_type>;   // == `oop`'s dest type
+    bzip<w_set, false, compute_type_t<Rt>>(o, a, b, _round_to<Rt, Op>{op});
+}
+template <class Op, class Out, class A, class S>  _TNY_API void oops_to(Out & o, const A & a, S s, Op op) {
+    using Rt = promote_t<typename A::element_type, S>;                          // == `oops`'s dest type
+    scalo<false, compute_type_t<Rt>>(o, a, s, _round_to<Rt, Op>{op});
+}
+template <class Uop, class Out, class A>          _TNY_API void uop_to (Out & o, const A & a, Uop f) {
+    using Rt = typename A::element_type;                                        // == `uop_out`'s dest type
+    unaryo<false, compute_type_t<Rt>>(o, a, _round_to<Rt, Uop>{f});
+}
 
 // static element count of a fully-static extents type (moved ahead of
 // zipreduce_/axreduce, #255: both static fast paths need it).
@@ -1939,10 +1972,21 @@ _TNY_API auto normalize(const tensor<T,E,L,O> & a, axis<Axes...>) { return norma
 // three components into temporaries FIRST, so `out` may alias `a` or `b` (this is
 // what makes both `cross` and the in-place `cross_` — where out IS a — safe). Runs
 // in the compute type (`half` in float). Not public: use `cross`/`cross_` below.
-template <class To,class Eo,class Lo,storage Oo,
+//
+// `Rt` is the type each component is rounded through before the store, i.e. the
+// element type of the tensor the ALLOCATING `cross(a,b)` would have produced. It
+// defaults to `To` — an identity for the allocating form (whose dest IS that type)
+// and for the in-place `cross_` (which, like every other in-place op, computes in
+// its own element type and is not held to the twin equivalence). Only the
+// `into(dest)` overload names it, so that `cross(a,b,into(y))` rounds exactly where
+// `y.copy_(cross(a,b))` does — the same `_round_to` rule as the engines above,
+// which matters for the same reason: `promote_t` of a half/bfloat16 pair is a
+// 16-bit float, but the arithmetic runs in `float`.
+template <class Rt = void, class To,class Eo,class Lo,storage Oo,
           class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
 _TNY_API void _cross3(tensor<To,Eo,Lo,Oo> & out,
                       const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b) {
+    using R = cs::conditional_t<cs::is_void<Rt>::value, To, Rt>;
     static_assert(Eo::rank() == 1 && Ea::rank() == 1 && Eb::rank() == 1, "cross: operands must be rank-1 3-vectors");
     static_assert(Ea::static_extent(0) == 3 || Ea::static_extent(0) == cs::dynamic_extent, "cross: a must have length 3");
     static_assert(Eb::static_extent(0) == 3 || Eb::static_extent(0) == cs::dynamic_extent, "cross: b must have length 3");
@@ -1951,9 +1995,9 @@ _TNY_API void _cross3(tensor<To,Eo,Lo,Oo> & out,
     using C = compute_type_t<promote_t<Ta,Tb>>;
     const C a0 = static_cast<C>(a(0)), a1 = static_cast<C>(a(1)), a2 = static_cast<C>(a(2));
     const C b0 = static_cast<C>(b(0)), b1 = static_cast<C>(b(1)), b2 = static_cast<C>(b(2));
-    out(0) = static_cast<To>(a1 * b2 - a2 * b1);
-    out(1) = static_cast<To>(a2 * b0 - a0 * b2);
-    out(2) = static_cast<To>(a0 * b1 - a1 * b0);
+    out(0) = static_cast<To>(static_cast<R>(a1 * b2 - a2 * b1));
+    out(1) = static_cast<To>(static_cast<R>(a2 * b0 - a0 * b2));
+    out(2) = static_cast<To>(static_cast<R>(a0 * b1 - a1 * b0));
 }
 
 /** @brief 3D cross product `a × b` -> a NEW stack 3-vector of `promote(Ta,Tb)`.
@@ -1972,7 +2016,7 @@ _TNY_API auto cross(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b
  *         of 3-vectors (`into()` binds such a temporary view — tensor.h). */
 template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob, class D>
 _TNY_API auto & cross(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) {
-    _cross3(out.dest, a, b);
+    _cross3<promote_t<Ta,Tb>>(out.dest, a, b);   // round through the allocating twin's type
     return out.dest;
 }
 

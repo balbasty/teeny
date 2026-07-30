@@ -384,5 +384,47 @@ int main() {
     //   sum(a, into(local<double, shape<>>{}));         // static_assert: temporary must be a VIEW
     //   a.add(b, into(zeros<double>(shape<-1>{3})));    // same, for a heap owner
 
+    // ---- half/bfloat16 SOURCE into a wider dest (#379 follow-up) --------
+    // The engine computes in `compute_type_t<promote_t<Ta,Tb>>` (float, for a
+    // half/bfloat16 source), but the twin `y.copy_(a.op(b))` first materialises
+    // its result as a `promote_t<Ta,Tb>` tensor — a 16-bit float — which rounds
+    // the float value down to ~11 bits of mantissa BEFORE it is ever widened to
+    // `y`'s type. `into(dest)` must round through that same 16-bit stop, not
+    // straight from float to `y`'s type, or the two disagree (this exact repro
+    // was a real, reviewer-found gap in the original #379 fix): with
+    // `half a = 1.3`, `a.add(1.5, into(double_y))` must equal
+    // `double_y.copy_(a.add(1.5))` bit for bit, not the "one rounding, more
+    // precise" value a straight float->double cast would give.
+    auto ha = local<half, shape<1>>(); ha(0) = static_cast<half>(1.3);
+    auto hy_into = local<double, shape<1>>(), hy_twin = local<double, shape<1>>();
+    ha.add(1.5, into(hy_into));
+    hy_twin.copy_(ha.add(1.5));
+    if (hy_into(0) != hy_twin(0))            return 100;
+    if (hy_into(0) != 2.80078125)            return 101;   // pinned: NOT 2.7998046875
+
+    auto bfa = local<bfloat16, shape<1>>(); bfa(0) = static_cast<bfloat16>(1.3);
+    auto by_into = local<double, shape<1>>(), by_twin = local<double, shape<1>>();
+    bfa.mul(1.3, into(by_into));
+    by_twin.copy_(bfa.mul(1.3));
+    if (by_into(0) != by_twin(0))            return 102;
+    if (by_into(0) != 1.6875)                return 103;   // pinned: NOT 1.6859374046325684...
+
+    // Same rule for a tensor rhs and for `cross` (which rounds through its own
+    // internal `_cross3`, not one of the shared engines).
+    auto hb = local<half, shape<1>>(); hb(0) = static_cast<half>(2.7);
+    auto hz_into = local<double, shape<1>>(), hz_twin = local<double, shape<1>>();
+    ha.add(hb, into(hz_into));
+    hz_twin.copy_(ha.add(hb));
+    if (hz_into(0) != hz_twin(0))             return 104;
+
+    auto ha3 = local<half, shape<3>>();
+    ha3(0) = static_cast<half>(1.3); ha3(1) = static_cast<half>(2.7); ha3(2) = static_cast<half>(3.1);
+    auto hb3 = local<half, shape<3>>();
+    hb3(0) = static_cast<half>(0.4); hb3(1) = static_cast<half>(1.9); hb3(2) = static_cast<half>(2.2);
+    auto hc_into = local<double, shape<3>>(), hc_twin = local<double, shape<3>>();
+    cross(ha3, hb3, into(hc_into));
+    hc_twin.copy_(cross(ha3, hb3));
+    if (hc_into(0) != hc_twin(0) || hc_into(1) != hc_twin(1) || hc_into(2) != hc_twin(2)) return 105;
+
     return 0;
 }
