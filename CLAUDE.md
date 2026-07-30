@@ -856,12 +856,22 @@ is generic.
   `into(dest)` went straight float -> dest and skipped that rounding stop:
   `half(1.3).add(1.5, into(double_y))` gave 2.7998046875 (one rounding) where the twin's
   2.80078125 (two roundings) is what the invariant promises. `oop_to`/`oops_to`/`uop_to`
-  (and `_cross3`'s `into` overload) now wrap `op` in `_round_to<Rt, Op>` — `Rt` being the
-  allocating twin's own element type — so the result is cast to `Rt` before the engine's
-  writer casts it to `dest`'s. `Rt == Cv` for every non-16-bit-float type, so that extra
-  cast is a no-op there (verified: object code for every int/float/double combination is
-  unchanged, both compilers); it only changes half/bfloat16-SOURCED `into` calls, making
-  them match their twin exactly instead of being one rounding more precise.
+  (and `_cross3`'s `into` overload) now wrap `op` in `_round_to<Cv, Rt, Op>` — `Rt` being
+  the allocating twin's own element type — which casts the result to `Rt` and then **back
+  to `Cv`**, leaving the engine's writer to make the final cast to `dest`'s type. Both
+  steps matter: `Rt` is the twin's rounding stop, and the widen back to `Cv` is what the
+  twin's own `copy_` does when it reads that stored `Rt` back. Handing the writer a bare
+  `Rt` instead is not just a different rounding, it does not COMPILE when `Rt` and `dest`
+  are the two DIFFERENT 16-bit floats — `half`/`bfloat16` convert only from arithmetic
+  types and only to `float`, so `half -> bfloat16` would need two user-defined
+  conversions. (That is exactly how this shipped once and was caught in review:
+  `half_a.add(b, into(bfloat16_y))` became a compile error while its twin compiled fine.)
+  `Rt == Cv` for every non-16-bit-float type, so both casts vanish there (verified: object
+  code for every int/float/double combination is unchanged, both compilers); it only
+  changes half/bfloat16-SOURCED `into` calls, making them match their twin exactly instead
+  of being one rounding more precise. `_cross3`'s `Rt` defaults to `void` = NO rounding
+  stop, so the allocating `cross` and the in-place `cross_` keep their single store cast —
+  only the `into` overload names it.
   **Contiguous linear fast path (#161, #175):** contiguous elementwise ops replace the
   per-element mixed-radix decode with a flat `for(i) cp[i]=…` loop that auto-vectorizes.
   Two flavours by whether a second array is in play:

@@ -426,5 +426,71 @@ int main() {
     hc_twin.copy_(cross(ha3, hb3));
     if (hc_into(0) != hc_twin(0) || hc_into(1) != hc_twin(1) || hc_into(2) != hc_twin(2)) return 105;
 
+    // ---- the two 16-bit floats INTO EACH OTHER (#379 follow-up, round 2) ----
+    // `half` and `bfloat16` convert only FROM arithmetic types and only TO `float`,
+    // so there is no direct `half` -> `bfloat16` conversion. The rounding stop above
+    // must therefore hand the engine back a value in the COMPUTE type (`float`) and
+    // let the store make the final cast — exactly the two steps the twin's `copy_`
+    // takes. Rounding to the 16-bit type and stopping there would make these four
+    // calls fail to COMPILE while their twins compile fine, which is how this was
+    // first shipped and caught. Least-travelled corner of the whole `into` family:
+    // pin both directions, on all three engines plus `cross`.
+    auto hh = local<half, shape<3>>();
+    hh(0) = static_cast<half>(1.3); hh(1) = static_cast<half>(2.7); hh(2) = static_cast<half>(3.1);
+    auto hh2 = local<half, shape<3>>();
+    hh2(0) = static_cast<half>(0.4); hh2(1) = static_cast<half>(1.9); hh2(2) = static_cast<half>(2.2);
+
+    auto hb_into = local<bfloat16, shape<3>>(), hb_twin = local<bfloat16, shape<3>>();
+    hh.add(hh2, into(hb_into));                 // bzip_ engine
+    hb_twin.copy_(hh.add(hh2));
+    for (long i = 0; i < 3; ++i) if (!(hb_into(i) == hb_twin(i))) return 106;
+
+    hh.mul(0.5, into(hb_into));                 // scalo_ engine
+    hb_twin.copy_(hh.mul(0.5));
+    for (long i = 0; i < 3; ++i) if (!(hb_into(i) == hb_twin(i))) return 107;
+
+    exp(hh, into(hb_into));                     // unaryo_ engine
+    hb_twin.copy_(exp(hh));
+    for (long i = 0; i < 3; ++i) if (!(hb_into(i) == hb_twin(i))) return 108;
+
+    cross(hh, hh2, into(hb_into));              // _cross3
+    hb_twin.copy_(cross(hh, hh2));
+    for (long i = 0; i < 3; ++i) if (!(hb_into(i) == hb_twin(i))) return 109;
+
+    // ...and the reverse direction: bfloat16 sources into a `half` dest.
+    auto bb = local<bfloat16, shape<3>>();
+    bb(0) = static_cast<bfloat16>(1.3); bb(1) = static_cast<bfloat16>(2.7); bb(2) = static_cast<bfloat16>(3.1);
+    auto bb2 = local<bfloat16, shape<3>>();
+    bb2(0) = static_cast<bfloat16>(0.4); bb2(1) = static_cast<bfloat16>(1.9); bb2(2) = static_cast<bfloat16>(2.2);
+
+    auto bh_into = local<half, shape<3>>(), bh_twin = local<half, shape<3>>();
+    bb.add(bb2, into(bh_into));
+    bh_twin.copy_(bb.add(bb2));
+    for (long i = 0; i < 3; ++i) if (!(bh_into(i) == bh_twin(i))) return 110;
+
+    bb.mul(0.5, into(bh_into));
+    bh_twin.copy_(bb.mul(0.5));
+    for (long i = 0; i < 3; ++i) if (!(bh_into(i) == bh_twin(i))) return 111;
+
+    exp(bb, into(bh_into));
+    bh_twin.copy_(exp(bb));
+    for (long i = 0; i < 3; ++i) if (!(bh_into(i) == bh_twin(i))) return 112;
+
+    cross(bb, bb2, into(bh_into));
+    bh_twin.copy_(cross(bb, bb2));
+    for (long i = 0; i < 3; ++i) if (!(bh_into(i) == bh_twin(i))) return 113;
+
+    // A MIXED half/bfloat16 operand pair, into each of the two (promote_t picks one
+    // of them, so one direction rounds through the OTHER 16-bit type on its way out).
+    auto mx_into = local<bfloat16, shape<3>>(), mx_twin = local<bfloat16, shape<3>>();
+    hh.add(bb, into(mx_into));
+    mx_twin.copy_(hh.add(bb));
+    for (long i = 0; i < 3; ++i) if (!(mx_into(i) == mx_twin(i))) return 114;
+
+    auto mh_into = local<half, shape<3>>(), mh_twin = local<half, shape<3>>();
+    bb.add(hh, into(mh_into));
+    mh_twin.copy_(bb.add(hh));
+    for (long i = 0; i < 3; ++i) if (!(mh_into(i) == mh_twin(i))) return 115;
+
     return 0;
 }
