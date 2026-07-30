@@ -2095,7 +2095,10 @@ _TNY_API auto make_view(T * p, Shape e, Layout, Tags... tags) {
  *
  * `empty`/`full`/`zeros`/`ones` each ship TWO overloads whose template parameter
  * lists differ ONLY in this SFINAE condition: the resolved backend is `stack`
- * (host+device, `_TNY_API`) or it allocates (host only, `_TNY_HOST`). Written
+ * (host+device, `_TNY_API`) or it allocates (host only, `_TNY_HOST`). That split
+ * happens TWICE per factory — once on the `T`-led entry point, once on the
+ * BACKEND-led one right below it (#373), which takes the very same keyword pack —
+ * so all four pairs go through these traits. Written
  * INLINE in `enable_if_t<...>`, that condition is a constexpr CALL whose template
  * argument list expands the keyword pack —
  * `storage_resolve(storage_arg<O, storage_deduce, Tags...>(), ...)`. Real MSVC in
@@ -2103,8 +2106,8 @@ _TNY_API auto make_view(T * p, Shape e, Layout, Tags... tags) {
  * apart: it merges the two declarations into ONE template and rejects the second
  * as a redefinition (`C2995`) with duplicated default template arguments
  * (`C2572`), which cascades into every `empty()`/`zeros()`/... call deducing to
- * `void`. (The sibling `dtype<T>` forwarders below keep their inline condition
- * and are fine — theirs has no pack in it, which is the part MSVC chokes on.)
+ * `void`. (`arange`'s backend-led entry point needs none of this — it has no
+ * host/device split to keep apart, so there is only ever one of it.)
  *
  * So: route the call through a class template's `::value`, and give each HALF of
  * the split its OWN name, leaving two parameter lists that differ by a plain
@@ -2188,10 +2191,10 @@ _TNY_HOST auto empty(Shape e, Tags... /*tags*/) {
  *  `storage_c<...>{}` tag on top of the explicit backend is the one thing it rejects,
  *  on `storage_arg`'s named "pick one" `static_assert`. */
 template <storage O, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
 _TNY_API auto empty(Shape e, Tags... tags) { return empty<void, O, Layout>(e, tags...); }
 template <storage O, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
 _TNY_HOST auto empty(Shape e, Tags... tags) { return empty<void, O, Layout>(e, tags...); }
 
 /** @brief `make_local<T>(extents)` — a stack-owned tensor (static shape).
@@ -2260,10 +2263,10 @@ _TNY_HOST auto full(Shape e, V v, Tags... /*tags*/) {
  *  dtype<double>{}, fcontiguous{})`. See `empty()`'s twin above for why `storage O`
  *  carries no default here and how the keyword bag composes (#373). */
 template <storage O, class Layout = void, class Shape, class V, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
 _TNY_API auto full(Shape e, V v, Tags... tags) { return full<void, O, Layout>(e, v, tags...); }
 template <storage O, class Layout = void, class Shape, class V, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
 _TNY_HOST auto full(Shape e, V v, Tags... tags) { return full<void, O, Layout>(e, v, tags...); }
 
 /** @brief `zeros<T>(extents)` / `ones<T>(extents)` — a new tensor of 0s / 1s.
@@ -2295,10 +2298,10 @@ _TNY_HOST auto zeros(Shape e, Tags... /*tags*/) {
 }
 /** @brief BACKEND-LED entry point — see `empty()`'s twin above (#373). */
 template <storage O, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
 _TNY_API  auto zeros(Shape e, Tags... tags) { return zeros<void, O, Layout>(e, tags...); }
 template <storage O, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
 _TNY_HOST auto zeros(Shape e, Tags... tags) { return zeros<void, O, Layout>(e, tags...); }
 
 template <class T = void, storage O = storage_deduce, class Layout = void, class Shape, class... Tags,
@@ -2324,10 +2327,10 @@ _TNY_HOST auto ones(Shape e, Tags... /*tags*/) {
 }
 /** @brief BACKEND-LED entry point — see `empty()`'s twin above (#373). */
 template <storage O, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) == storage::stack, int> = 0>
+          cs::enable_if_t<_fac_on_stack<O, Shape, Tags...>::value, int> = 0>
 _TNY_API  auto ones(Shape e, Tags... tags) { return ones<void, O, Layout>(e, tags...); }
 template <storage O, class Layout = void, class Shape, class... Tags,
-          cs::enable_if_t<storage_resolve(storage_arg<O, storage_deduce, Tags...>(), Shape::rank_dynamic() == 0) != storage::stack, int> = 0>
+          cs::enable_if_t<_fac_allocates<O, Shape, Tags...>::value, int> = 0>
 _TNY_HOST auto ones(Shape e, Tags... tags) { return ones<void, O, Layout>(e, tags...); }
 
 /** @brief `arange<T>(n)` — a 1-D tensor `[0, 1, ..., n-1]` (heap, host). `T`

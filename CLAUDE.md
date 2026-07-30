@@ -1002,8 +1002,12 @@ is generic.
     (`_fac_storage`/`_fac_on_stack`/`_fac_allocates`, `tensor.h`): route the
     call through a class template's `static constexpr ... value` and give each
     HALF of the split its OWN trait name, so the two lists differ by a plain
-    template-id. A condition with no pack in it (the `dtype<T>` forwarders
-    right below them) is fine inline — the pack is the part MSVC chokes on.
+    template-id. A condition with no pack in it is fine inline — the pack is
+    the part MSVC chokes on. NB each factory splits TWICE: once on the `T`-led
+    entry point, once on the BACKEND-led one right below it (#373), and BOTH
+    halves of both pairs must gate on the named traits. #373 reproduced the
+    bug verbatim in its new overloads because that branch predated this fix —
+    which is exactly why this is an authoring rule and not a one-off patch.
   - **Floor a pack-derived array to size 1.** `x[sizeof...(D)]` is a
     zero-length array — a GCC/Clang extension MSVC rejects (`C2466`) — the
     moment a rank-0 operand makes the pack empty. Always
