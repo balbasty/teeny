@@ -72,6 +72,7 @@ TESTS = \
 	$(BUILDDIR)/test_reshape_view \
 	$(BUILDDIR)/test_reshape \
 	$(BUILDDIR)/test_subperm \
+	$(BUILDDIR)/test_flip_axes \
 	$(BUILDDIR)/test_takealong \
 	$(BUILDDIR)/test_subsample \
 	$(BUILDDIR)/test_unfold \

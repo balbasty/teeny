@@ -1096,10 +1096,40 @@ public:
      *         negative stride, so the index type must be signed (`shape<...>` is). */
     template <long Ax = 0>
     _TNY_API auto flip() noexcept
-    { static_assert(_axis_in_range(Ax, rank()), "flip: axis out of range"); return as_tensor<storage_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(mdspan(), cs::make_index_sequence<rank()>{})); }
+    { static_assert(_axis_in_range(Ax, rank()), "flip: axis out of range"); return as_tensor<storage_view_of(O)>(_detail::flip_md(mdspan(), cs::index_sequence<_norm_axis(Ax, rank())>{}, cs::make_index_sequence<rank()>{})); }
     template <long Ax = 0>
     _TNY_API auto flip() const noexcept
-    { static_assert(_axis_in_range(Ax, rank()), "flip: axis out of range"); return as_tensor<storage_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(mdspan(), cs::make_index_sequence<rank()>{})); }
+    { static_assert(_axis_in_range(Ax, rank()), "flip: axis out of range"); return as_tensor<storage_view_of(O)>(_detail::flip_md(mdspan(), cs::index_sequence<_norm_axis(Ax, rank())>{}, cs::make_index_sequence<rank()>{})); }
+
+    /** @brief Reverse SEVERAL axes at once (numpy `flip(a, axis=(...))`) -> a
+     *         rank-N view. The axes are relative to the source rank (negatives
+     *         count from the back) and must be distinct, in ANY order — flipping
+     *         axes commutes, so `t.flip<0,2>()`, `t.flip<2,0>()` and
+     *         `t.flip<0>().flip<2>()` are the same view (same type, same
+     *         elements). Each named axis gets its stride negated and the base
+     *         pointer moved to its last element, all in ONE view — no chain of
+     *         intermediates. Arity picks this overload; one axis (or none) still
+     *         means `flip<Ax>()` above. */
+    template <long Ax0, long Ax1, long... Rest>
+    _TNY_API auto flip() noexcept {
+        static_assert(_axis_in_range(Ax0, rank()) && _axis_in_range(Ax1, rank()) && (_axis_in_range(Rest, rank()) && ...),
+                      "flip: axis out of range");
+        static_assert(_all_distinct<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>(),
+                      "flip: axes must be distinct");
+        return as_tensor<storage_view_of(O)>(_detail::flip_md(mdspan(),
+            cs::index_sequence<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>{},
+            cs::make_index_sequence<rank()>{}));
+    }
+    template <long Ax0, long Ax1, long... Rest>
+    _TNY_API auto flip() const noexcept {
+        static_assert(_axis_in_range(Ax0, rank()) && _axis_in_range(Ax1, rank()) && (_axis_in_range(Rest, rank()) && ...),
+                      "flip: axis out of range");
+        static_assert(_all_distinct<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>(),
+                      "flip: axes must be distinct");
+        return as_tensor<storage_view_of(O)>(_detail::flip_md(mdspan(),
+            cs::index_sequence<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>{},
+            cs::make_index_sequence<rank()>{}));
+    }
 
     /** @brief A dense, row-major OWNING copy of this tensor (materialise a view /
      *         non-contiguous / permuted / flipped tensor). Static shape -> stack
@@ -1565,11 +1595,11 @@ public:
     template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && _all_ic<I...>::value, int> = 0> _TNY_API auto permute(I...) const noexcept { return permute<static_cast<long>(I::value)...>(); }
 
     /** @brief Value form: `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise
-     *         `unsqueeze`/`permute`. `squeeze`/`unsqueeze`/`permute` are axis-LIST
-     *         ops (like `peel`/`take_along`/the reductions), so — unlike the
-     *         single-axis `Int<k>()` form above — they take the `axis<...>` tag: a
-     *         single distinct-typed argument, so no `.template` is needed on a
-     *         dependent receiver.
+     *         `unsqueeze`/`flip`/`permute`. `squeeze`/`unsqueeze`/`flip`/`permute`
+     *         are axis-LIST ops (like `peel`/`take_along`/the reductions), so —
+     *         unlike the single-axis `Int<k>()` form above — they take the
+     *         `axis<...>` tag: a single distinct-typed argument, so no `.template`
+     *         is needed on a dependent receiver.
      *
      *         An EMPTY list — `axis<>{}` — names no axis, so it is a **no-op**: the
      *         same shape and strides back, as a view (numpy's own rule for an empty
@@ -1594,6 +1624,10 @@ public:
     { if constexpr (sizeof...(Axes) == 0) return view(); else return unsqueeze<Axes...>(); }
     template <long... Axes> _TNY_API auto unsqueeze(axis<Axes...>) const noexcept
     { if constexpr (sizeof...(Axes) == 0) return view(); else return unsqueeze<Axes...>(); }
+    template <long... Axes> _TNY_API auto flip(axis<Axes...>)       noexcept
+    { if constexpr (sizeof...(Axes) == 0) return view(); else return flip<Axes...>(); }
+    template <long... Axes> _TNY_API auto flip(axis<Axes...>) const noexcept
+    { if constexpr (sizeof...(Axes) == 0) return view(); else return flip<Axes...>(); }
     template <long... Axes> _TNY_API auto permute(axis<Axes...>)       noexcept { return permute<Axes...>(); }
     template <long... Axes> _TNY_API auto permute(axis<Axes...>) const noexcept { return permute<Axes...>(); }
     template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && _all_ic<I...>::value, int> = 0> _TNY_API auto reshape(I...)       noexcept { return reshape<static_cast<long>(I::value)...>(); }
