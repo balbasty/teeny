@@ -57,6 +57,13 @@ tag (`make_view(ptr, shape, fcontiguous{})`) or an explicit template argument
 (`make_view<fcontiguous>(ptr, shape)`) — and the same trailing
 `storage_c<Space>{}` memory-space tag.
 
+That memory-space tag only recognizes actual *spaces* — `storage::gpu`,
+`storage::pinned`, `storage::mapped` (plus host, the default). `storage::heap` and
+`storage::stack` describe *ownership*, not a space, so passing either one to `wrap`
+doesn't make it return an owning tensor: it just falls through to the same plain
+`storage::view` you'd get without the tag. If you want an owning heap or stack
+tensor, reach for `empty<T, storage::heap>(e)` or `make_heap<T>(e)` instead.
+
 Copying a view copies the pointer, not the data; memory lifetime is the caller's.
 
 !!! warning "`a = b` rebinds a view; `a(ellipsis) = b` copies elements"
