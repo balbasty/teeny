@@ -83,6 +83,10 @@ way. Slicing a contiguous static tensor keeps folded compile-time strides. (If y
 know mdspan, the [mdspan vs teeny](mdspan-vs-teeny.md) page explains how `strides<>`
 relates to `layout_static_stride` and why teeny builds these views by hand.)
 
+Those views are also **usable from CUDA device code**: a `strides<...>` view passes
+into a kernel by value and indexes there exactly like a contiguous one, so you can
+slice on the host and hand the slice to a kernel, or slice again inside it.
+
 ## The static/runtime idiom
 
 The API accepts runtime integers, static integers (`integral_constant`), and

@@ -24,9 +24,9 @@ int main() {
                       decltype(r)::extents_type::static_extent(2) == 4, "static extents");
         // result layout is a folded strides<...> with the C-contiguous strides (12,4,1)
         static_assert(_is_strides<decltype(r)::layout_type>::value, "reshape -> strides<...> view");
-        static_assert(decltype(r)::layout_type::S_[0] == 12 &&
-                      decltype(r)::layout_type::S_[1] == 4  &&
-                      decltype(r)::layout_type::S_[2] == 1, "folded C strides");
+        static_assert(decltype(r)::layout_type::static_stride(0) == 12 &&
+                      decltype(r)::layout_type::static_stride(1) == 4  &&
+                      decltype(r)::layout_type::static_stride(2) == 1, "folded C strides");
         if (!r.is_contiguous()) return 1;                 // still C-order
         for (long a = 0; a < 2; ++a) for (long b = 0; b < 3; ++b) for (long c = 0; c < 4; ++c)
             if (r(a,b,c) != t(a*3 + b, c)) return 2;
@@ -52,9 +52,9 @@ int main() {
         auto r = t.reshape<3,2,4>();                      // 8 -> (2,4): a contiguous split
         static_assert(_is_strides<decltype(r)::layout_type>::value, "strides<...> view");
         // derived strides: outer 16 (unchanged), inner run (4,1)
-        static_assert(decltype(r)::layout_type::S_[0] == 16 &&
-                      decltype(r)::layout_type::S_[1] == 4  &&
-                      decltype(r)::layout_type::S_[2] == 1, "folded split strides");
+        static_assert(decltype(r)::layout_type::static_stride(0) == 16 &&
+                      decltype(r)::layout_type::static_stride(1) == 4  &&
+                      decltype(r)::layout_type::static_stride(2) == 1, "folded split strides");
         for (long i = 0; i < 3; ++i) for (long j = 0; j < 2; ++j) for (long k = 0; k < 4; ++k)
             if (r(i,j,k) != t(i, j*4 + k)) return 13;
     }

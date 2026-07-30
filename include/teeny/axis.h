@@ -37,7 +37,7 @@ _TNY_API auto fold_mapping(const OE & oe, const Idx * rstr) {
     else {
         cs::array<Idx, SF::ndyn()> dyn{};
         for (cs::size_t r = 0; r < _shape_rank<OE>(); ++r)
-            if (SF::S_[r] == dynamic_stride) dyn[SF::slot(r)] = rstr[r];
+            if (SF::static_stride(r) == dynamic_stride) dyn[SF::slot(r)] = rstr[r];
         return Map(oe, dyn);
     }
 }

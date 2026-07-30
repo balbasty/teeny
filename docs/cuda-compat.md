@@ -208,3 +208,19 @@ nvcc -std=c++17 -arch=sm_75 -I include \
 `.github/workflows/nvcc-compile.yaml` compiles the device smoke translation unit
 across the whole supported range — **`nvcc` 11.8** (`sm_52`), **12.6** (`sm_70`),
 and **13.0** (`sm_75`) — so both ends of the CUDA range stay green.
+
+### `nvcc` checks device code you never call
+
+Worth knowing when you build a `.cu` file against teeny: for a function marked
+host **and** device, `nvcc` generates and checks its device version as soon as the
+function is instantiated — **whether or not any kernel calls it**. A host-only call
+site in a `.cu` translation unit is enough to surface a device-side error.
+
+Two practical consequences:
+
+- Compiling a `.cu` file is a real device check even before you write a kernel, so
+  the smoke translation unit above catches device problems from plain host code.
+- The same code in a `.cpp` file, or under `clang`'s CUDA front end (which defers
+  these diagnostics until the function is genuinely reachable from a kernel), will
+  *not* report them. If a `.cu` build fails where the `.cpp` build passed, this
+  asymmetry — not your call site — is usually why.

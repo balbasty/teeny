@@ -63,7 +63,7 @@ struct _tail_str {
     static constexpr cs::size_t K = TailS::N;
     static constexpr cs::int64_t at(cs::size_t j) noexcept {
         const long tj = static_cast<long>(j) - (static_cast<long>(Sr) - static_cast<long>(K));
-        return tj < 0 ? dynamic_stride : TailS::S_[static_cast<cs::size_t>(tj)];
+        return tj < 0 ? dynamic_stride : TailS::static_stride(static_cast<cs::size_t>(tj));
     }
     static constexpr bool all_dyn() noexcept {
         for (cs::size_t j = 0; j < Sr; ++j) if (at(j) != dynamic_stride) return false;
@@ -130,8 +130,8 @@ template <cs::size_t R, class HeadS, class TailS>
 struct _ends_str {
     static constexpr cs::size_t H = HeadS::N, K = TailS::N;
     static constexpr cs::int64_t at(cs::size_t j) noexcept {
-        if (j < H)      return HeadS::S_[j];
-        if (j + K >= R) return TailS::S_[j - (R - K)];
+        if (j < H)      return HeadS::static_stride(j);
+        if (j + K >= R) return TailS::static_stride(j - (R - K));
         return dynamic_stride;
     }
     static constexpr bool all_dyn() noexcept {
@@ -169,8 +169,8 @@ _TNY_HOST void _check_ends(const Idx * shp, const Idx * strd, int ndim) {
         _TNY_CHECK(Head::static_extent(j) == cs::dynamic_extent ||
                    static_cast<Idx>(Head::static_extent(j)) == shp[d],
                    "as_anyrank/from_dlpack: a static Head extent does not match the runtime shape");
-        _TNY_CHECK(HeadS::S_[j] == dynamic_stride || shp[d] <= Idx(1) ||
-                   static_cast<Idx>(HeadS::S_[j]) == strd[d],
+        _TNY_CHECK(HeadS::static_stride(j) == dynamic_stride || shp[d] <= Idx(1) ||
+                   static_cast<Idx>(HeadS::static_stride(j)) == strd[d],
                    "as_anyrank/from_dlpack: a static Head stride does not match the runtime strides");
     }
     for (cs::size_t j = 0; j < K; ++j) {                       // trailing Tail, anchored at ndim
@@ -178,8 +178,8 @@ _TNY_HOST void _check_ends(const Idx * shp, const Idx * strd, int ndim) {
         _TNY_CHECK(Tail::static_extent(j) == cs::dynamic_extent ||
                    static_cast<Idx>(Tail::static_extent(j)) == shp[d],
                    "as_anyrank/from_dlpack: a static tail extent does not match the runtime shape");
-        _TNY_CHECK(TailS::S_[j] == dynamic_stride || shp[d] <= Idx(1) ||
-                   static_cast<Idx>(TailS::S_[j]) == strd[d],
+        _TNY_CHECK(TailS::static_stride(j) == dynamic_stride || shp[d] <= Idx(1) ||
+                   static_cast<Idx>(TailS::static_stride(j)) == strd[d],
                    "as_anyrank/from_dlpack: a static tail stride does not match the runtime strides "
                    "(the inner block is not laid out as the layout tag promised)");
     }
@@ -317,7 +317,7 @@ struct anyrank {
         } else {
             cs::array<offset_t, CL::ndyn() ? CL::ndyn() : 1> dyn{};     // dynamic slots only, dim order
             for (cs::size_t i = 0, s = 0; i < R; ++i)
-                if (CL::S_[i] == dynamic_stride) dyn[s++] = stride(d0 + static_cast<int>(i));
+                if (CL::static_stride(i) == dynamic_stride) dyn[s++] = stride(d0 + static_cast<int>(i));
             return Cell(p, typename CL::template mapping<E>(E(ext), dyn));
         }
     }
