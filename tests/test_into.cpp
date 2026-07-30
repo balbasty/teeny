@@ -292,6 +292,8 @@ int main() {
     //   r23.add(r23, into(r13));  // static: compile error (a dest axis does not stretch)
     //   auto ad = zeros<double>(shape<-1,-1>{8,8}); auto yd = zeros<double>(shape<-1,-1>{2,2});
     //   ad.add(ad, into(yd));     // dynamic: _TNY_CHECK fires (unchanged)
+    //   auto a13 = zeros<double>(shape<1,3>{}); auto b23 = zeros<double>(shape<2,3>{});
+    //   a13.add_(b23);            // in-place static rhs mismatch: compile error too (was: debug-only _TNY_CHECK)
 
     // ========= dest's dtype casts the RESULT, not the arithmetic (#379) =========
     // `into(dest)` is the one path where the caller picks the destination's element

@@ -432,9 +432,14 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
     // (the bounds come from `c`, the operand offsets from its own strides) — the
     // same silent-OOB class as #346/#353/#357, just reachable only through
     // `into(dest)`. Static when every extent in play is static, the existing
-    // `_TNY_CHECK` otherwise; a no-op for every other caller, whose `c` is either
-    // the lhs operand itself (in-place) or built from `bcast_extents` (`oop`,
-    // `oop_cmp`), and so matches by construction.
+    // `_TNY_CHECK` otherwise. The A-vs-C half is a no-op for the `oop`/`oop_cmp`
+    // (out-of-place/compare) callers, since their `c` is built from
+    // `bcast_extents` over `a`; for IN-PLACE callers (`c` IS `a`) it's trivial by
+    // construction too. But the B-vs-C half is NOT a no-op for in-place callers —
+    // `b` is an independent operand there, so this is exactly what now catches a
+    // static rhs/destination shape mismatch (`a13.add_(b23)`) at compile time,
+    // where it previously only failed at runtime under `_TNY_CHECK` (or read OOB
+    // under `-DNDEBUG`).
     //
     // Placed HERE, in the engine, for the reachability reason `scalo_` spells out
     // (#357): `bcmp` calls `bzip_` directly, bypassing the `bzip` wrapper, and one
@@ -444,12 +449,14 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
                   "broadcast: operand rank exceeds result");   // bc_sext's precondition
     static_assert(bc_static_ok_dest<typename A::extents_type, typename C::extents_type, C::rank()>(
                       cs::index_sequence<D...>{}),
-                  "into(dest): dest's shape must match the broadcast result's — each lhs axis must "
-                  "equal dest's or be 1 (an operand stretches, a dest does not).");
+                  "broadcast: each lhs axis must equal the destination's extent or be 1 (an "
+                  "operand stretches, the destination does not) — for into(dest), the dest must "
+                  "match the broadcast result.");
     static_assert(bc_static_ok_dest<typename B::extents_type, typename C::extents_type, C::rank()>(
                       cs::index_sequence<D...>{}),
-                  "into(dest): dest's shape must match the broadcast result's — each rhs axis must "
-                  "equal dest's or be 1 (an operand stretches, a dest does not).");
+                  "broadcast: each rhs axis must equal the destination's extent or be 1 (an "
+                  "operand stretches, the destination does not) — for into(dest), the dest must "
+                  "match the broadcast result.");
     using I = _offset_int_t<typename C::index_type,
                             typename A::extents_type::index_type,
                             typename B::extents_type::index_type>;
