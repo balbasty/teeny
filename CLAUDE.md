@@ -176,7 +176,10 @@ same behavior today, but a future keyword (e.g. a `stream` tag) lands on all
 `wrap` forms without touching any of them again. Functional
 factories that deduce the extents type: `make_view(ptr,e)`, `make_local<T>(e)`,
 `make_heap<T>(e)`, `make_gpu/pinned/mapped<T>(e)` (E deduced; **T defaults to
-`float`**, override explicitly). The `make_*` owning factories are thin spellings
+`float`**, override explicitly). `make_view` takes the layout the same two ways
+`wrap` does — a positional value tag (`make_view(ptr, e, fcontiguous{})`) or the
+explicit `make_view<fcontiguous>(ptr, e)` (#374) — plus the trailing `storage_c`
+tag. The `make_*` owning factories are thin spellings
 of one **`empty<T[, storage::Space]>(e)`** factory: ownership is deduced from the
 shape (static→stack, dynamic→heap) unless a backend is named as a template arg
 (`empty<T, storage::gpu>(e)`) or a value-tag (`empty<T>(e, storage_c<storage::gpu>{})`);

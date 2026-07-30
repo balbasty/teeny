@@ -2012,10 +2012,24 @@ using owned = tensor<T, Shape, Layout, storage::heap>;
  * type is deduced, so a runtime-built shape needs no `decltype` spelling.       */
 
 /** @brief `make_view<L>(ptr, extents)` — a non-owning view (alias of `wrap`).
- *         Takes the same optional trailing keyword-tag bag as `wrap` (#282) —
- *         today just `storage_c<Space>{}`/`storage_v<Space>`. */
+ *         The layout may be an explicit `<L>` template argument or, like `wrap`,
+ *         a positional value tag (`make_view(p, e, fcontiguous{})`) — see the
+ *         overload below. Takes the same optional trailing keyword-tag bag as
+ *         `wrap` (#282) — today just `storage_c<Space>{}`/`storage_v<Space>`. */
 template <class Layout = ccontiguous, storage Space = storage_deduce, class T, class Shape, class... Tags>
 _TNY_API auto make_view(T * p, Shape e, Tags... tags) { return wrap<Layout, Space>(p, e, tags...); }
+
+/** @brief Value-tag layout form, mirroring `wrap`'s (#374):
+ *  `make_view(p, e, fcontiguous{})` == `make_view<fcontiguous>(p, e)`, deduced from a
+ *  bare `ccontiguous{}`/`fcontiguous{}` argument so a type-dependent receiver needs no
+ *  `.template`. Composes with a trailing `storage_c<Space>{}` exactly like the template
+ *  form. Without this overload only `ccontiguous{}` would work — it would reach `wrap`'s
+ *  own positional layout overload by accident, because `make_view`'s `Layout` *defaults*
+ *  to `ccontiguous` — while `fcontiguous{}` fell through to the keyword bag and was
+ *  rejected as an unrecognised trailing argument. */
+template <class Layout, storage Space = storage_deduce, class T, class Shape, class... Tags,
+          cs::enable_if_t<cs::is_same<Layout, ccontiguous>::value || cs::is_same<Layout, fcontiguous>::value, int> = 0>
+_TNY_API auto make_view(T * p, Shape e, Layout, Tags... tags) { return wrap<Layout, Space>(p, e, tags...); }
 
 /** @brief `empty<T>(extents)` — a new UNINITIALISED tensor. The one factory the
  *  `make_*` family fuses into: ownership is **deduced** from the shape (fully
