@@ -317,9 +317,14 @@ verts.index_select<0>(idx, into(dest));     // dest must already have the right 
 `dest`'s extent on axis `Axis` must equal `idx`'s (checked — a `static_assert`
 when both are static shapes, a debug-time check otherwise) and `dest` must not
 alias `verts`' own storage (an aliased in-place gather silently reorders rather
-than erroring). The allocating form copies on the **host**, so the source must
-be host-accessible — gather a `gpu`/`gpu_view` tensor into a preallocated
-device `into(dest)` instead.
+than erroring).
+
+The allocating form follows exactly the same rule as `clone()`: a **static**
+result is stack-owned, so it works on any storage — including a `gpu`/`gpu_view`
+tensor from inside a kernel. A **dynamic** result is heap-owned, so it allocates
+and copies on the host and the source must be host-accessible; gather a
+`gpu`/`gpu_view` tensor into a preallocated device `into(dest)` instead (or move
+spaces first with the free `to<Space>(x)` from `<teeny/cuda.h>`).
 
 Unlike `slice_along`'s leading tag, `index_select` has a value form TRAILING
 with an `axis<...>{}` selector — its only other argument, `idx`, is a single

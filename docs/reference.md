@@ -151,7 +151,7 @@ Negative integer indices wrap (count from the back).
 | `t.subsample(axis<Axes...>{}, k, starts...)` | → view | value form, same placement as `slice_along`'s |
 | `t.unfold<Axis>(size, step=1)` | → view | pytorch `Tensor.unfold` — appends a new trailing axis of width `size`, stepped by `step` along `Axis`; `Axis`'s extent shrinks to `(shape(Axis)-size)/step+1`; `size`/`step` accept runtime or `Int<>` (folds static); ND windows compose by chaining one `unfold` per axis; `size`∈`[1,shape(Axis)]`/`step>=1` checked (`static_assert` or debug-time) |
 | `t.unfold(Int<Axis>(), size, step=1)` | → view | value form — single-axis `Int<k>()` selector (like `flip`/`squeeze`), no `.template` on a dependent receiver |
-| `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `slice_along`); `idx` values wrap negative; source must be host-accessible (allocating form copies on the host) |
+| `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `slice_along`); `idx` values wrap negative; static result → stack (host+device, works on a `gpu`/`gpu_view` source, like `clone()`), dynamic result → heap (host only: source must be host-accessible) |
 | `t.index_select<Axis>(idx, into(dest))` | `dest&` | no-allocation, device-safe form; `dest`'s axis-`Axis` extent must equal `idx`'s (checked) and must not alias `t` |
 | `t.index_select(idx, axis<Axis>{})` `t.index_select(idx, axis<Axis>{}, into(dest))` | same as above | value form — no `.template` on a dependent receiver |
 
