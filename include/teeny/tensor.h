@@ -1125,7 +1125,11 @@ public:
     { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); static_assert(_is_perm<_norm_axis(Perm, rank())...>(), "permute: axes must be a permutation of 0..N-1 (in range, no repeats)"); return as_tensor<storage_view_of(O)>(_detail::perm_md(mdspan(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
 
     /** @brief Reverse axis `Ax` (negatives wrap) -> a view (numpy `flip`). Uses a
-     *         negative stride, so the index type must be signed (`shape<...>` is). */
+     *         negative stride, so the index type must be signed (`shape<...>` is).
+     *
+     *         An EMPTY tensor (`numel() == 0`) flips to a view over the *same*
+     *         base pointer: there is no last element to move the origin to, so
+     *         `data()` is left exactly where it was. */
     template <long Ax = 0>
     _TNY_API auto flip() noexcept
     { static_assert(_axis_in_range(Ax, rank()), "flip: axis out of range"); return as_tensor<storage_view_of(O)>(_detail::flip_md(mdspan(), cs::index_sequence<_norm_axis(Ax, rank())>{}, cs::make_index_sequence<rank()>{})); }
@@ -1141,7 +1145,11 @@ public:
      *         elements). Each named axis gets its stride negated and the base
      *         pointer moved to its last element, all in ONE view — no chain of
      *         intermediates. Arity picks this overload; one axis (or none) still
-     *         means `flip<Ax>()` above. */
+     *         means `flip<Ax>()` above.
+     *
+     *         As for the single-axis form, an EMPTY tensor keeps its base pointer
+     *         (`data()` unchanged) — even when only *one* axis is empty and the
+     *         others are flipped. */
     template <long Ax0, long Ax1, long... Rest>
     _TNY_API auto flip() noexcept {
         static_assert(_axis_in_range(Ax0, rank()) && _axis_in_range(Ax1, rank()) && (_axis_in_range(Rest, rank()) && ...),

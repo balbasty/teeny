@@ -114,6 +114,12 @@ gets its stride negated and the base pointer moved to its last element along tha
 axis, and every stride the source knows at compile time stays compile-time known
 (negated).
 
+One edge case worth naming: an **empty** tensor (`numel() == 0`) has no last
+element for the origin to move to, so flipping it leaves `data()` exactly where
+it was — whichever axes you name, and whether it is a named axis or some other
+one that is empty. So `wrap(p, shape<-1,3>{0}).flip<0,1>().data() == p`, and the
+view never forms a pointer past the (possibly zero-length) allocation.
+
 A single axis (or none, for `squeeze`) still means the one-axis form above —
 arity alone picks the multi-axis overload.
 

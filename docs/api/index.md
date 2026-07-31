@@ -7744,6 +7744,8 @@ Reverse axis `Ax` (negatives wrap) -> a view (numpy `flip`).
 
 Uses a negative stride, so the index type must be signed (`shape<...>` is).
 
+An EMPTY tensor (`[numel()](#numel) == 0`) flips to a view over the *same* base pointer: there is no last element to move the origin to, so `[data()](#data-6)` is left exactly where it was.
+
 ---
 
 #### flip
@@ -7771,6 +7773,8 @@ Defined in include/teeny/tensor.h:1138
 Reverse SEVERAL axes at once (numpy `flip(a, axis=(...))`) -> a rank-N view.
 
 The axes are relative to the source rank (negatives count from the back) and must be distinct, in ANY order — flipping axes commutes, so `t.flip<0,2>()`, `t.flip<2,0>()` and `t.flip<0>().flip<2>()` are the same view (same type, same elements). Each named axis gets its stride negated and the base pointer moved to its last element, all in ONE view — no chain of intermediates. Arity picks this overload; one axis (or none) still means `flip<Ax>()` above.
+
+As for the single-axis form, an EMPTY tensor keeps its base pointer (`[data()](#data-6)` unchanged) — even when only *one* axis is empty and the others are flipped.
 
 ---
 
