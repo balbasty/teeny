@@ -379,6 +379,14 @@ A fully-static result is stack-owned (host and device); any dynamic extent makes
 it heap-owned (host only — it allocates, so it is not callable on the device
 path). Reducing over every axis is the scalar form above.
 
+The axes must be **distinct**. You may list them in any order (`sum<2,0>(a)` ==
+`sum<0,2>(a)`), but naming one twice is a **compile error** rather than a silently
+dropped duplicate — `sum<0,0>(a)` and `sum(a, axis<0,0>{})` both fail with
+*"sum: axes must be distinct — each axis may be reduced only once"*. Negative axes
+are normalised first, so a duplicate spelled two different ways is caught too
+(`mean<1,-2>(a)` on a rank-3 tensor). The rule is the same with and without
+`keepdims`.
+
 ### An empty axis list reduces over *no* axis
 
 `axis<>{}` names no axis, so `sum(a, axis<>{})` reduces over none of them: each
@@ -427,9 +435,10 @@ sum<0>(a, keepdims, into(dest));  // and with into(dest) — dest matches the ke
 
 Applies to every axis reduction (`sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`).
 `keepdims` is a distinct empty-tag value (like `all`/`none`), so it never collides
-with another argument. The axes must be **distinct**, but — as everywhere else in
-teeny — you may list them in **any order**: `sum<2,0>(a, keepdims)` ==
-`sum<0,2>(a, keepdims)`, kept axes and all.
+with another argument. The axes must be **distinct** (a repeat is a compile error),
+but — as everywhere else in teeny — you may list them in **any order**:
+`sum<2,0>(a, keepdims)` == `sum<0,2>(a, keepdims)`, kept axes and all. Both rules
+hold identically with and without `keepdims`.
 
 ### Accumulator type vs result type
 
