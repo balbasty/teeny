@@ -144,5 +144,33 @@ int main() {
     if (mean<0>(di)(0) != 2.5) return 35;
     if (norm<0>(di)(0) != cs::sqrt(17.0)) return 36;   // sqrt(1+16)
 
+    // ---- #433: a DUPLICATE axis is a compile error, keepdims or not -------------
+    // A repeated axis has no useful meaning (the engine just marks that axis
+    // reduced twice), so it is rejected up front. Before #433 only the `keepdims`
+    // path checked -- `sum<0,0>(m, keepdims)` failed, but `sum<0,0>(m)` compiled
+    // and silently computed `sum<0>(m)`. Both spellings now hit the SAME shared
+    // guard in the axis-reduction core ("<name>: axes must be distinct -- each
+    // axis may be reduced only once").
+    // These lines cannot be exercised by the runtime suite (a static_assert is a
+    // hard error and there is no compile-fail harness here, same as test_into.cpp
+    // / test_to.cpp); enabling any of them is a compile error:
+    //   sum<0,0>(m);                 // plain form -- the #433 regression
+    //   sum<0,0>(m, keepdims);       // keepdims form (already rejected pre-#433)
+    //   sum(m, axis<0,0>{});         // the axis<...> value-tag entry point
+    //   m.sum<0,0>();                // ...and the method forwarder
+    //   sum<double,0,0>(m);          // the <Acc, Axes...> form
+    //   mean<1,-2>(t);               // a duplicate spelled two ways (-2 == 1 at rank 3)
+    //   prod<0,0>(t); max<0,0>(t); min<0,0>(t); sqnorm<0,0>(t); norm<0,0>(t);
+    //   sum<0,0>(d);                 // the dynamic (heap) overload too
+    //   normalize<0,0>(t);           // and the keepdim fold's own direct caller
+    // What must KEEP compiling is a distinct list in any order (#371) -- pinned
+    // here by value so the guard can never over-reject:
+    static_assert(cs::is_same<decltype(sum<2,0>(t)), decltype(sum<0,2>(t))>::value, "distinct, descending: still fine");
+    if (!allclose(sum<2,0>(t), sum<0,2>(t)))   return 37;
+    if (!allclose(sum<-1,0>(t), sum<0,2>(t)))  return 38;   // mixed sign, distinct
+    if (!allclose(sum(t, axis<2,0>{}), sum<0,2>(t))) return 39;
+    auto d3 = zeros<double>(shape<-1,-1,-1>{2,3,4}); d3.iota_(1.0);   // dynamic source: heap overload
+    if (!allclose(sum<2,0>(d3), sum<0,2>(d3))) return 40;
+
     return 0;
 }

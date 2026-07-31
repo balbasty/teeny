@@ -544,6 +544,9 @@ sum<0>(a); mean<0,2>(a); max<1>(a); min<-1>(a); prod<0>(a); sum<double,0>(a);
 //   VALUE FORM (numpy `axis=`): sum(a, axis<0,2>{}) == sum<0,2>(a); sum<double>(a, axis<0>{})
 //   == sum<double,0>(a). Deduced -> no `.template` on a dependent receiver.
 //   static result -> stack (host+device); any dynamic -> heap (HOST ONLY: allocates)
+//   AXES MUST BE DISTINCT, in ANY order: sum<0,0>(a) / sum(a, axis<0,0>{}) is a COMPILE
+//   ERROR, not a silently dropped duplicate (#433) -- negatives are normalised first, so
+//   mean<1,-2>(a) at rank 3 is caught too. Same rule with and without keepdims.
 sum<0>(a, into(buf)); mean(a, axis<1>{}, into(buf));  // into(dest) too -> copies the lower-rank
                       //   result into buf (any spelling: <Axes>, <Acc,Axes>, or the axis<...> value form)
 sum<0>(a, keepdims); sum(a, axis<0>{}, keepdims);  // keepdims: reduced axis kept as size-1 (numpy

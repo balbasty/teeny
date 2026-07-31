@@ -478,7 +478,10 @@ Axis reductions: a fully static result → stack (host+device); any dynamic resu
 → heap (host only). `keepdims` applies to `sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`.
 Axis lists must be **distinct** but may be given in **any order** — with or without
 `keepdims` (`sum<2,0>(a, keepdims)` == `sum<0,2>(a, keepdims)`), like every other
-axis-list op.
+axis-list op. A repeated axis is a **compile error** in every spelling —
+`sum<0,0>(a)`, `sum(a, axis<0,0>{})`, `a.sum<0,0>()`, `mean<1,-2>(a)` on a rank-3
+tensor (negatives are normalised before the check) — not a silently dropped
+duplicate.
 The explicit `<Acc, Axes...>` template split stays (C++17 has no universal template
 parameter to unify "leading type = accumulator" vs "leading int = axis"), but past
 that split every TRAILING keyword — `dtype<Acc>{}`, `axis<...>{}`, `keepdims`,
