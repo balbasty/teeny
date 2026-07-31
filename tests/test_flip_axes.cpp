@@ -136,5 +136,49 @@ int main() {
     for (int i = 0; i < 2; ++i) for (int j = 0; j < 3; ++j) for (int k = 0; k < 4; ++k)
         if (cl(i,j,k) != t(1-i,j,3-k)) return 28;
 
+    // ---- EMPTY tensors: the origin never moves (#436) ---------------------------
+    // A flipped axis normally shifts the base pointer to its last element. An empty
+    // tensor has none, so the shift must be skipped ENTIRELY — not just for the axis
+    // that happens to be empty. Otherwise a tensor emptied by ONE axis but flipped
+    // on OTHERS forms a pointer past what may be a zero-length allocation, which is
+    // UB even though nothing ever dereferences it.
+    {
+        // a genuinely zero-length allocation: nothing may be formed past `p[0]`
+        double * p = new double[1];                          // 1 elt: ASan traps p+2
+        auto e0 = wrap(p, shape<-1,3>{0});                   // (0,3) -> numel 0
+        if (e0.numel() != 0) return 29;
+        if (e0.flip<0>().data()    != p) return 30;          // empty axis flipped
+        if (e0.flip<1>().data()    != p) return 31;          // NON-empty axis flipped
+        if (e0.flip<0,1>().data()  != p) return 32;          // the issue's case (was p+2)
+        if (e0.flip(axis<0,1>{}).data() != p) return 33;     // value form agrees
+        // ...emptied by the SECOND axis instead, with the first one long
+        auto e1 = wrap(p, shape<-1,-1>{4,0});
+        if (e1.flip<0>().data() != p || e1.flip<1>().data() != p
+            || e1.flip<1,0>().data() != p) return 34;
+        // a dynamic shape that is NOT empty still shifts (the guard is not a blanket
+        // "dynamic -> no offset")
+        double sbuf[6] = {0,1,2,3,4,5};
+        auto ne = wrap(sbuf, shape<-1,3>{2});
+        if (ne.flip<0,1>().data() != &sbuf[5]) return 35;
+        delete[] p;
+    }
+    // a STATICALLY empty shape: the guard folds at compile time (no code emitted),
+    // and a flipped view of it is still a well-formed empty view over the base.
+    {
+        double * q = new double[1];
+        auto se = wrap(q, shape<0,3>{});
+        static_assert(decltype(se)::is_static, "shape<0,3> is fully static");
+        if (se.numel() != 0) return 36;
+        if (se.flip<1>().data() != q || se.flip<0,1>().data() != q) return 37;
+        // the strides still fold exactly as on a non-empty static shape
+        using SEL = decltype(se.flip<0,1>())::layout_type;
+        static_assert(SEL::all_static() && SEL::static_stride(0) == -3
+                      && SEL::static_stride(1) == -1, "static folding survives the guard");
+        delete[] q;
+    }
+    // the fully-static NON-empty path is unchanged: still EBO'd down to a pointer
+    // and still folded (the guard costs neither size nor a runtime branch)
+    static_assert(sizeof(t.flip<0,1,2>()) == sizeof(double *), "guard adds no state");
+
     return 0;
 }

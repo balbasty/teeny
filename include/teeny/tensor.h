@@ -705,6 +705,31 @@ private:
         if constexpr (Wrap) return (*this)(_ellip_arg<out_ax, ell_pos, fill>(t)...);
         else                return uget(_ellip_arg<out_ax, ell_pos, fill>(t)...);
     }
+    // ---- tuple-unpack indexing (#338) --------------------------------------
+    // `t(p)` for a tuple-like index pack `p`: hand each element to the ordinary
+    // variadic entry point, so the EXISTING three-way dispatch (element / view /
+    // ellipsis) — and all of its `static_assert`s (arity, one index per axis, at
+    // most one ellipsis) — decide the result and diagnose a bad pack. Pure packing
+    // sugar, so there is one tiny helper per accessor: each keeps its own checked
+    // vs unchecked and element vs rank-0-view semantics by re-entering ITSELF.
+    // (Same cs::get-over-tuple + re-dispatch shape as `_ellip_call` above.)
+    template <class P> using _pack_seq = cs::make_index_sequence<cs::tuple_size<P>::value>;
+    template <class P, cs::size_t... I>
+    _TNY_API decltype(auto) _pack_get(const P & p, cs::index_sequence<I...>)        noexcept { return (*this)(cs::get<I>(p)...); }
+    template <class P, cs::size_t... I>
+    _TNY_API decltype(auto) _pack_get(const P & p, cs::index_sequence<I...>)  const noexcept { return (*this)(cs::get<I>(p)...); }
+    template <class P, cs::size_t... I>
+    _TNY_API decltype(auto) _pack_at(const P & p, cs::index_sequence<I...>)         noexcept { return at(cs::get<I>(p)...); }
+    template <class P, cs::size_t... I>
+    _TNY_API decltype(auto) _pack_at(const P & p, cs::index_sequence<I...>)   const noexcept { return at(cs::get<I>(p)...); }
+    template <class P, cs::size_t... I>
+    _TNY_API decltype(auto) _pack_uget(const P & p, cs::index_sequence<I...>)       noexcept { return uget(cs::get<I>(p)...); }
+    template <class P, cs::size_t... I>
+    _TNY_API decltype(auto) _pack_uget(const P & p, cs::index_sequence<I...>) const noexcept { return uget(cs::get<I>(p)...); }
+    template <class P, cs::size_t... I>
+    _TNY_API decltype(auto) _pack_uat(const P & p, cs::index_sequence<I...>)        noexcept { return uat(cs::get<I>(p)...); }
+    template <class P, cs::size_t... I>
+    _TNY_API decltype(auto) _pack_uat(const P & p, cs::index_sequence<I...>)  const noexcept { return uat(cs::get<I>(p)...); }
 public:
     /** @brief Element access when every argument is an integer (negatives wrap). */
     template <class... Args, cs::enable_if_t<_all_index<Args...>::value, int> = 0>
@@ -737,10 +762,12 @@ public:
      *         inserts a size-1 axis (static extent 1, stride 0) at its position —
      *         all via the one gather (folds static strides into `strides<...>`;
      *         works on any source layout). `t(none,all,all)` == `unsqueeze<0>()`. */
-    template <class... Args, cs::enable_if_t<!_all_index<Args...>::value && !_has_ellipsis<Args...>::value, int> = 0>
+    template <class... Args, cs::enable_if_t<!_all_index<Args...>::value && !_has_ellipsis<Args...>::value
+                                             && !_is_pack_call<Args...>::value, int> = 0>
     _TNY_API auto operator()(Args... a) noexcept
     { return _slice_range(store_.data(), cs::make_index_sequence<sizeof...(a)>{}, a...); }
-    template <class... Args, cs::enable_if_t<!_all_index<Args...>::value && !_has_ellipsis<Args...>::value, int> = 0>
+    template <class... Args, cs::enable_if_t<!_all_index<Args...>::value && !_has_ellipsis<Args...>::value
+                                             && !_is_pack_call<Args...>::value, int> = 0>
     _TNY_API auto operator()(Args... a) const noexcept
     { return _slice_range(store_.data(), cs::make_index_sequence<sizeof...(a)>{}, a...); }
 
@@ -773,10 +800,12 @@ public:
     { return store_.data()[_offset<false>(cs::make_index_sequence<rank()>{}, a...)]; }
 
     // slice: at least one slice arg, no ellipsis -> a VIEW
-    template <class... Args, cs::enable_if_t<!_all_index<Args...>::value && !_has_ellipsis<Args...>::value, int> = 0>
+    template <class... Args, cs::enable_if_t<!_all_index<Args...>::value && !_has_ellipsis<Args...>::value
+                                             && !_is_pack_call<Args...>::value, int> = 0>
     _TNY_API auto uget(Args... a) noexcept
     { return _slice_range<false>(store_.data(), cs::make_index_sequence<sizeof...(a)>{}, a...); }
-    template <class... Args, cs::enable_if_t<!_all_index<Args...>::value && !_has_ellipsis<Args...>::value, int> = 0>
+    template <class... Args, cs::enable_if_t<!_all_index<Args...>::value && !_has_ellipsis<Args...>::value
+                                             && !_is_pack_call<Args...>::value, int> = 0>
     _TNY_API auto uget(Args... a) const noexcept
     { return _slice_range<false>(store_.data(), cs::make_index_sequence<sizeof...(a)>{}, a...); }
 
@@ -810,6 +839,45 @@ public:
     template <class... Args, cs::enable_if_t<_has_ellipsis<Args...>::value, int> = 0>
     _TNY_API decltype(auto) operator()(Args... a) const noexcept
     { return _ellip_call(cs::make_tuple(a...), cs::make_index_sequence<rank() + _n_newaxis<Args...>()>{}); }
+
+    /** @brief **Tuple-unpack form** — `t(m)` where `m` is a single tuple-like index
+     *         pack (a `cuda::std::array` or `cuda::std::tuple`) holding the WHOLE
+     *         index list: exactly numpy's `x[(a, b, c)] == x[a, b, c]`.
+     *
+     * The pack is unpacked and re-dispatched through the ordinary variadic call, so
+     * everything that call does still applies: its elements may be integers/`Int<>`,
+     * `all`, `slice(...)`, a bare `none` (newaxis) or one `ellipsis`, and the result
+     * is an element (`T&`) or a view exactly as if they had been written out. Arity
+     * and validity are diagnosed by that call's own `static_assert`s.
+     *
+     * This is pure packing sugar and is **single-argument only** — the pack IS the
+     * index list, and is never mixed with other positional arguments. It closes the
+     * loop with a peel range's `enumerate()` / `it.index()`, whose multi-index is a
+     * `cuda::std::array`: `for (auto [m, cell] : peel(t, axis<0,1>{}).enumerate())
+     * out(m) = f(cell);`. Also available on `at`/`uget`/`uat` (and, on C++23,
+     * `t[m]`). */
+    template <class P, cs::enable_if_t<_is_index_pack<P>::value, int> = 0>
+    _TNY_API decltype(auto) operator()(const P & p) noexcept       { return _pack_get(p, _pack_seq<P>{}); }
+    template <class P, cs::enable_if_t<_is_index_pack<P>::value, int> = 0>
+    _TNY_API decltype(auto) operator()(const P & p) const noexcept { return _pack_get(p, _pack_seq<P>{}); }
+
+    /** @brief Tuple-unpack `at`: `t.at(m)` == `t.at(m[0], m[1], ...)` — the element
+     *         as a rank-0 VIEW. All-integer packs only (as with variadic `at`). */
+    template <class P, cs::enable_if_t<_is_index_pack<P>::value, int> = 0>
+    _TNY_API decltype(auto) at(const P & p) noexcept               { return _pack_at(p, _pack_seq<P>{}); }
+    template <class P, cs::enable_if_t<_is_index_pack<P>::value, int> = 0>
+    _TNY_API decltype(auto) at(const P & p) const noexcept         { return _pack_at(p, _pack_seq<P>{}); }
+
+    /** @brief Tuple-unpack `uget` / `uat`: the unchecked twins (no negative-index
+     *         wrap), same unpack, same result types as the checked forms. */
+    template <class P, cs::enable_if_t<_is_index_pack<P>::value, int> = 0>
+    _TNY_API decltype(auto) uget(const P & p) noexcept             { return _pack_uget(p, _pack_seq<P>{}); }
+    template <class P, cs::enable_if_t<_is_index_pack<P>::value, int> = 0>
+    _TNY_API decltype(auto) uget(const P & p) const noexcept       { return _pack_uget(p, _pack_seq<P>{}); }
+    template <class P, cs::enable_if_t<_is_index_pack<P>::value, int> = 0>
+    _TNY_API decltype(auto) uat(const P & p) noexcept              { return _pack_uat(p, _pack_seq<P>{}); }
+    template <class P, cs::enable_if_t<_is_index_pack<P>::value, int> = 0>
+    _TNY_API decltype(auto) uat(const P & p) const noexcept        { return _pack_uat(p, _pack_seq<P>{}); }
 
 #if defined(__cpp_multidimensional_subscript)
     /** @brief C++23 multidimensional subscript: `t[i, j, k]` / `t[0, all, slice(1,4)]`
@@ -1125,7 +1193,11 @@ public:
     { static_assert(sizeof...(Perm) == rank(), "permute: need N axes"); static_assert(_is_perm<_norm_axis(Perm, rank())...>(), "permute: axes must be a permutation of 0..N-1 (in range, no repeats)"); return as_tensor<storage_view_of(O)>(_detail::perm_md(mdspan(), cs::index_sequence<_norm_axis(Perm, rank())...>{})); }
 
     /** @brief Reverse axis `Ax` (negatives wrap) -> a view (numpy `flip`). Uses a
-     *         negative stride, so the index type must be signed (`shape<...>` is). */
+     *         negative stride, so the index type must be signed (`shape<...>` is).
+     *
+     *         An EMPTY tensor (`numel() == 0`) flips to a view over the *same*
+     *         base pointer: there is no last element to move the origin to, so
+     *         `data()` is left exactly where it was. */
     template <long Ax = 0>
     _TNY_API auto flip() noexcept
     { static_assert(_axis_in_range(Ax, rank()), "flip: axis out of range"); return as_tensor<storage_view_of(O)>(_detail::flip_md(mdspan(), cs::index_sequence<_norm_axis(Ax, rank())>{}, cs::make_index_sequence<rank()>{})); }
@@ -1141,7 +1213,11 @@ public:
      *         elements). Each named axis gets its stride negated and the base
      *         pointer moved to its last element, all in ONE view — no chain of
      *         intermediates. Arity picks this overload; one axis (or none) still
-     *         means `flip<Ax>()` above. */
+     *         means `flip<Ax>()` above.
+     *
+     *         As for the single-axis form, an EMPTY tensor keeps its base pointer
+     *         (`data()` unchanged) — even when only *one* axis is empty and the
+     *         others are flipped. */
     template <long Ax0, long Ax1, long... Rest>
     _TNY_API auto flip() noexcept {
         static_assert(_axis_in_range(Ax0, rank()) && _axis_in_range(Ax1, rank()) && (_axis_in_range(Rest, rank()) && ...),

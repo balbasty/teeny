@@ -148,6 +148,13 @@ slice(start, stop);  slice(start, stop, step);  // half-open range, optional (ne
 none;  all;                     // open slice end (== python None); keep-axis marker
 x(none, all, all);  x(0, newaxis, all);   // BARE none/newaxis arg -> insert a size-1
                     //   axis (== unsqueeze at that position); newaxis is an alias of none
+x(m);  x.at(m);  x.uget(m);  x.uat(m);    // TUPLE-UNPACK: ONE tuple-like arg (cs::array /
+                    //   cs::tuple) carrying the WHOLE index list -- numpy's x[(a,b,c)] == x[a,b,c].
+                    //   Elements may be anything the variadic call takes (ints/Int<>/all/slice/
+                    //   none/one ellipsis), and the result type is identical. Single-arg only
+                    //   (never mixed with other positional args); C++23 x[m] forwards too.
+                    //   Closes the loop with peel(...).enumerate(), whose m IS a cs::array:
+                    //   for (auto [m, cell] : peel(a, axis<0,1,2>{}).enumerate()) b(m) = f(cell);
 x.slice_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest -> a VIEW
                     //   (pytorch select/narrow over several axes). NOT numpy take_along_axis /
                     //   pytorch take_along_dim -- that index-TENSOR gather is index_select below
