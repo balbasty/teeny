@@ -343,7 +343,10 @@ t.index_select<Axis>(idx);         // gather along Axis by a rank-1 integer inde
                       //   alias t). Value form: t.index_select(idx, axis<Axis>{}) (TRAILING
                       //   tag here -- unlike slice_along/subsample's leading one, since
                       //   index_select's only other arg, idx, is a single fixed positional,
-                      //   not an open pack, so a trailing tag is unambiguous and deducible)
+                      //   not an open pack, so a trailing tag is unambiguous and deducible).
+                      //   axis<...>{} and into(dest) ride the generic _kw bag (#451, like
+                      //   scan's pair and the reductions'), so they compose in ANY subset
+                      //   and ANY order: t.index_select(idx, into(dest), axis<Axis>{}) too
 t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1) -> view
 t.flip<1>();          // reverse an axis (negative-stride view; needs signed index)
 t.flip<0,2>();        // reverse SEVERAL at once (numpy flip(a, axis=(0,2))): distinct axes in
@@ -827,8 +830,9 @@ misbehaviour or a wall of overload-resolution noise). So `empty(shape<3,3>{},
 dtype<double>{}, fcontiguous{})`, `zeros(shape, storage_c<storage::pinned>{},
 dtype<double>{})`, and `sum(a, dtype<double>{}, axis<0>{}, keepdims,
 into(buf))` all compose their keywords in **any subset, any order** — the
-factory/`wrap`/`make_*` family (`storage.h`/`layout.h`/`tensor.h`) and the
-reduction family (`math.h`) both build on the same primitive:
+factory/`wrap`/`make_*` family (`storage.h`/`layout.h`/`tensor.h`), the
+reduction family (`math.h`), and the single-axis pair `index_select` (#451) /
+`scan_`+`scan` (#348) all build on the same primitive:
 `tny::_kw` (`kwargs.h`) — `find_t`/`has`/`count`/`get` ask questions of the
 trailing pack, the `_TNY_KW_CHECK(...)` macro is the ONE guard every call site
 opens with (over `accepts<Ps...>::known/unique`), and `_kw::resolve` is the ONE
@@ -852,7 +856,11 @@ the tensor, even though `init`/`f` are fixed-arity like `index_select`'s `idx`)
 and `#348` moved it to trailing — `scan_(t, init, f, axis<0>{})`. That was a
 BREAKING argument-order change to a shipped API, taken as a clean break: there
 is no deprecated leading-form alias, and a call that still passes the tag
-leading fails on a `static_assert` naming the new order.
+leading fails on a `static_assert` naming the new order. `index_select`'s
+`axis`/`into` pair was already trailing but was still hand-written overloads
+(one per arrangement); #451 moved it onto the generic bag too — a purely
+internal, non-breaking migration (every existing spelling is unchanged), and
+what it adds is order-freedom, `t.index_select(idx, into(dest), axis<0>{})`.
 
 ## How the hard parts work (so you don't re-derive them)
 

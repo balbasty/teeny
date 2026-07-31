@@ -167,5 +167,59 @@ int main() {
     auto selsv = vsub.index_select(idxs, axis<0>{});  // value form on the strides<...> receiver
     for (long j=0;j<3;++j) if (selsv(0,j) != vsub(2,j)) return 35;
 
+    // #451: the trailing keywords now ride the generic `_kw` bag (kwargs.h) rather
+    // than one hand-written overload per arrangement, so `axis<A>{}` and `into(dest)`
+    // compose in EITHER ORDER -- the same call. `axis<0>{}, into(dest)` was already
+    // the only accepted arrangement (pinned at line 96 above); the SWAPPED spelling
+    // is what this unlocks, and it must be indistinguishable from it.
+    auto kdest = local<double, shape<3,3>>(); kdest.zero_();
+    auto & kref = verts.index_select(idx, into(kdest), axis<0>{});     // keywords SWAPPED
+    if (&kref != &kdest) return 36;                                     // still returns dest&
+    for (long i=0;i<3;++i) for (long j=0;j<3;++j) if (kdest(i,j) != sel(i,j)) return 37;
+    // ...and it agrees element-for-element with the un-swapped spelling.
+    auto kdest2 = local<double, shape<3,3>>(); kdest2.zero_();
+    verts.index_select(idx, axis<0>{}, into(kdest2));
+    for (long i=0;i<3;++i) for (long j=0;j<3;++j) if (kdest2(i,j) != kdest(i,j)) return 38;
+    static_assert(cs::is_same<decltype(verts.index_select(idx, into(kdest), axis<0>{})),
+                              decltype(verts.index_select(idx, axis<0>{}, into(kdest)))>::value,
+                  "#451: swapped keywords must yield the same type as the un-swapped call");
+
+    // an into(dest) call allocates NOTHING, so it stays on the _TNY_API arm even for
+    // a DYNAMIC index tensor (the _TNY_HOST arm exists only for the heap result).
+    auto kdyn = local<double, shape<2,3>>(); kdyn.zero_();
+    verts.index_select(idxd, into(kdyn), axis<0>{});
+    for (long j=0;j<3;++j) { if (kdyn(0,j) != seld(0,j)) return 39; if (kdyn(1,j) != seld(1,j)) return 40; }
+
+    // the bag on a strides<...> receiver too (the #366 combination), swapped.
+    auto kdsub = local<double, shape<3,3>>(); kdsub.zero_();
+    vsub.index_select(idxs, into(kdsub), axis<0>{});
+    for (long j=0;j<3;++j) if (kdsub(0,j) != vsub(2,j) || kdsub(1,j) != vsub(0,j) || kdsub(2,j) != vsub(1,j))
+        return 41;
+
+    // A NEGATIVE axis through the swapped bag resolves exactly like the <Axis> form.
+    auto kneg = local<double, shape<5,2>>(); kneg.zero_();
+    verts.index_select(idx1, into(kneg), axis<-1>{});
+    for (long i=0;i<5;++i) { if (kneg(i,0) != sel1(i,0)) return 42; if (kneg(i,1) != sel1(i,1)) return 43; }
+
+    // #451: a bad keyword bag is now ONE named static_assert (`_TNY_KW_CHECK` /
+    // the "needs exactly ONE axis" guard), not a wall of overload-resolution noise.
+    // Left commented out because a static_assert failure cannot be exercised by the
+    // runtime suite (same convention as test_scan.cpp's #450 repro and test_into.cpp's
+    // #357/#361 ones); verified by hand -- each line is a compile error whose message
+    // is exactly the one quoted, not a generic "no matching function":
+    //   verts.index_select(idx, axis<0>{}, axis<1>{});
+    //     // error: static assertion failed: index_select: the same keyword was given twice
+    //   verts.index_select(idx, dtype<double>{});
+    //     // error: static assertion failed: index_select: unrecognised trailing argument
+    //     // — expected axis<A>{} or into(dest)
+    //   verts.index_select(idx, into(kdest));               // no axis keyword at all
+    //     // error: static assertion failed: index_select: needs exactly ONE axis --
+    //     // t.index_select(idx, axis<A>{})
+    //   verts.index_select(idx, axis<0,1>{});               // a multi-axis LIST
+    //     // error: static assertion failed: index_select: needs exactly ONE axis --
+    //     // t.index_select(idx, axis<A>{})
+    // If someone later drops `_TNY_KW_CHECK` or the `_one_axis` guard, those lines
+    // start failing with an unnamed error instead -- this comment is the pin.
+
     return 0;
 }

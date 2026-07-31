@@ -382,3 +382,16 @@ a kernel template), since it needs no `.template` disambiguator:
 verts.index_select(idx, axis<0>{});               // == verts.index_select<0>(idx)
 verts.index_select(idx, axis<0>{}, into(dest));    // == verts.index_select<0>(idx, into(dest))
 ```
+
+`axis<...>{}` and `into(dest)` are ordinary **trailing keywords**, exactly like
+`sum`'s `dtype`/`axis`/`keepdims`/`into` or `scan`'s own pair: they compose in
+any subset and in any order, so the two lines below are the same call.
+
+```cpp
+verts.index_select(idx, axis<0>{}, into(dest));
+verts.index_select(idx, into(dest), axis<0>{});   // keywords swapped — same call
+```
+
+Passing a keyword this call doesn't take, the same keyword twice, or no axis at
+all is a compile error that names the mistake (`unrecognised trailing argument
+— expected axis<A>{} or into(dest)`), not a list of rejected overloads.
