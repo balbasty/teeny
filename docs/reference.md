@@ -166,6 +166,11 @@ Slice specifiers:
 | `none` | open slice end (python `None`) |
 | `ellipsis` | fill the middle with `all` |
 
+That vocabulary is closed: an index argument that is none of the above (nor an
+integer) is a **compile error** naming the mistake — notably a `std::array`/
+`std::tuple` where the tuple-unpack form wants `cuda::std`'s — never a silently
+kept full axis.
+
 Assignment **into** a slice copies (broadcasts); on a **named** view it rebinds:
 
 | Statement | Effect |

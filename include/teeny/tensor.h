@@ -625,6 +625,25 @@ private:
             if (cnt <= index_type(0)) st = index_type(0);
             off += st * sd; ext[k] = cnt; str[k] = step * sd; ++k;  // stride may be negative
         } else {                                                    // full_extent (all)
+            // This last branch is `all` ITSELF, not "whatever the branches above did
+            // not match": the per-axis dispatch is CLOSED (#448). Without the guard an
+            // argument type the dispatch does not recognise falls through here and is
+            // silently taken as a kept full axis — so a plausible typo (`std::array`/
+            // `std::tuple` where teeny's index pack wants `cs::array`/`cs::tuple`)
+            // compiles and quietly hands back the WHOLE view instead of the element it
+            // looks like. Every legitimate argument reaching here is exactly
+            // `cs::full_extent_t`: the caller's `all`, `slice_along`'s filler for an
+            // unnamed axis (`_sa_raw`), `squeeze()`'s keep-this-axis filler (`_sq_arg`)
+            // and the ellipsis expansion (`_ellip_arg`) all hand over `cs::full_extent`.
+            // (`slice(none,none)` is a `_slice_spec` and takes the range branch above;
+            // an `ellipsis`/`etc` is expanded into `all`s before the gather runs.)
+            static_assert(cs::is_same<Arg, cs::full_extent_t>::value,
+                          "slice: unrecognised index argument. Each argument must be an integer "
+                          "or `Int<>` (drops the axis), `all` (keeps it), a `slice(...)` (a strided "
+                          "window), a bare `none`/`newaxis` (inserts a size-1 axis), or "
+                          "`ellipsis`/`etc`. NB the tuple-like index PACK is a "
+                          "`cuda::std::array`/`cuda::std::tuple` (`cs::array`/`cs::tuple`), NOT "
+                          "`std::array`/`std::tuple`, and it must be the call's ONLY argument.");
             ext[k] = n; str[k] = sd; ++k;
         }
         }
@@ -799,7 +818,12 @@ public:
      *         `all` keeps it, a range keeps a strided window, and a bare `none`
      *         inserts a size-1 axis (static extent 1, stride 0) at its position —
      *         all via the one gather (folds static strides into `strides<...>`;
-     *         works on any source layout). `t(none,all,all)` == `unsqueeze<0>()`. */
+     *         works on any source layout). `t(none,all,all)` == `unsqueeze<0>()`.
+     *
+     *         That vocabulary is CLOSED: an argument type the gather does not
+     *         recognise is a compile error naming the mistake (a `std::array`/
+     *         `std::tuple` where the index pack wants `cuda::std`'s, say), never a
+     *         silently kept full axis (#448). */
     template <class... Args, cs::enable_if_t<!_all_index<Args...>::value && !_has_ellipsis<Args...>::value
                                              && !_is_pack_call<Args...>::value, int> = 0>
     _TNY_API auto operator()(Args... a) noexcept

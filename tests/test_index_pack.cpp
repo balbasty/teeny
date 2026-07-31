@@ -9,6 +9,8 @@
 #include <cuda/std/type_traits>
 #include <cuda/std/array>
 #include <cuda/std/tuple>
+#include <array>          // #448: the std:: near-misses the gather must REJECT
+#include <tuple>
 
 using namespace tny;
 namespace cs = cuda::std;
@@ -161,6 +163,48 @@ int main()
         if (&r(3) != &t(1, 3))                                    return 31;
     }
 #endif
+
+    // ---- #448: the gather's per-axis dispatch is CLOSED ---------------------
+    // A trap found while reviewing this feature (#442's review) and PRE-EXISTING
+    // (it reproduced byte-identically before #338): the slicing gather's last
+    // branch (`_sl_axis` in tensor.h) was a bare `else` meaning "everything the
+    // branches above did not match", so an argument type it does not recognise
+    // fell through as `all` -- a KEPT FULL AXIS. The pack spellings above put that
+    // typo one namespace away (`std::array`/`std::tuple` where the index pack is
+    // `cs::array`/`cs::tuple`), and it did not error: the call compiled and quietly
+    // returned the WHOLE view instead of the element it looks like. That branch now
+    // `static_assert`s the argument really is `cs::full_extent_t` (the caller
+    // genuinely wrote `all`). The only types that legitimately reach it are exactly
+    // that: the user's `all`, `slice_along`'s filler for an unnamed axis,
+    // `squeeze()`'s keep-this-axis filler, and the `ellipsis` expansion.
+    //
+    // Like `test_wrap_layout_dup.cpp` / `test_into.cpp`, no compile-fail harness
+    // exists in this repo, so the offending calls are commented out and were
+    // verified by hand on both clang++ and g++ -- before this fix all three compiled
+    // and returned a full view; after it, each is a compile error carrying the named
+    // "slice: unrecognised index argument" message:
+    //
+    //   double b1[24]; auto v = wrap(b1, shape<24>{});
+    //   v(std::array<long, 1>{ 7 });    // BEFORE: the whole rank-1 view (24 elements),
+    //                                   //   silently, instead of the &v(7) it looks like.
+    //                                   //   AFTER: compile error.
+    //   v(std::tuple<long>{ 7 });       // ditto -- a std::tuple is not a cs::tuple.
+    //   t(cs::array<long, 1>{ 1 }, 2L); // a genuine cs::array, but NOT alone: pack
+    //                                   //   indexing is single-argument only (the pack IS
+    //                                   //   the whole index list), so this is an ordinary
+    //                                   //   variadic call and the array is not an index
+    //                                   //   argument. BEFORE: `all` for axis 0. AFTER:
+    //                                   //   compile error.
+    //
+    // What IS exercised at compile time is the trait that decides all of the above:
+    // the pack carriers and the per-element index vocabulary are `cuda::std`'s only.
+    static_assert(!_is_index_pack<std::array<long, 1>>::value, "std::array is NOT an index pack");
+    static_assert(!_is_index_pack<std::tuple<long>>::value,    "std::tuple is NOT an index pack");
+    static_assert(!_is_index_arg<std::array<long, 1>>::value,  "...nor a single index argument");
+    static_assert(!_is_index_arg<std::tuple<long>>::value,     "...nor a single index argument");
+    static_assert(_is_index_pack<cs::array<long, 1>>::value,   "cs::array IS an index pack");
+    static_assert(_is_index_pack<cs::tuple<long>>::value,      "cs::tuple IS an index pack");
+    static_assert(!_is_index_arg<cs::array<long, 1>>::value,   "a pack is not itself an index ARGUMENT");
 
     return 0;
 }
