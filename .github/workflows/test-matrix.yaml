@@ -3,6 +3,9 @@ name: Run matrix of tests
 # Reusable: fan test.yaml across the supported compilers. teeny's golden rule is
 # that everything compiles on both g++ and clang++ at -std=c++17, so both are
 # required to pass.
+#
+# `target` is forwarded to test.yaml, so the same fan-out also covers a
+# build-variant target (e.g. `negindex`) on both compilers.
 
 on:
   workflow_dispatch:
@@ -11,12 +14,21 @@ on:
         description: Commit / Branch / Tag / SHA to checkout
         required: false
         default: ""
+      target:
+        description: Makefile target to run (run-test, negindex, hardened, …)
+        required: false
+        default: "run-test"
   workflow_call:
     inputs:
       tag:
         description: Commit / Branch / Tag / SHA to checkout
         required: false
         default: ""
+        type: string
+      target:
+        description: Makefile target to run (run-test, negindex, hardened, …)
+        required: false
+        default: "run-test"
         type: string
 
 permissions:
@@ -32,3 +44,4 @@ jobs:
     with:
       tag: ${{ inputs.tag }}
       cxx: ${{ matrix.cxx }}
+      target: ${{ inputs.target }}

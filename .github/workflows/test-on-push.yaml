@@ -32,5 +32,17 @@ permissions:
 jobs:
   tests:
     uses: ./.github/workflows/test-matrix.yaml
+  # The same suite on the same two compilers, rebuilt with
+  # -DTNY_NO_NEGATIVE_INDEX (`make negindex`). That is a real, documented build
+  # flag, but it used to be covered only by "remember to try it locally" — so
+  # five tests that silently assumed the negative-index wrap it removes drifted
+  # in unnoticed and had to be spotted by hand ([#446]). Now a regression under
+  # the flag fails CI like any other (#455).
+  #
+  # [#446]: https://github.com/balbasty/teeny/issues/446
+  tests-negindex:
+    uses: ./.github/workflows/test-matrix.yaml
+    with:
+      target: negindex
   tests-cmake:
     uses: ./.github/workflows/test-cmake-matrix.yaml

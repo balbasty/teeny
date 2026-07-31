@@ -3,6 +3,11 @@ name: Run tests
 # Reusable, single-compiler test run. Builds every tests/test_*.cpp with the
 # requested C++ compiler at -std=c++17 and runs them (`make run-test`). Called
 # by test-matrix.yaml (once per compiler) and directly runnable from the UI.
+#
+# `target` picks the Makefile entry point, so the same job also drives the
+# build-variant targets (`negindex` = -DTNY_NO_NEGATIVE_INDEX, and likewise
+# `release` / `hardened` / `cxx23`) — each of those cleans and rebuilds the
+# whole suite under its own flags, so nothing else here needs to change.
 
 on:
   workflow_dispatch:
@@ -15,6 +20,10 @@ on:
         description: C++ compiler (g++ or clang++)
         required: false
         default: "g++"
+      target:
+        description: Makefile target to run (run-test, negindex, hardened, …)
+        required: false
+        default: "run-test"
   workflow_call:
     inputs:
       tag:
@@ -26,6 +35,11 @@ on:
         description: C++ compiler (g++ or clang++)
         required: false
         default: "g++"
+        type: string
+      target:
+        description: Makefile target to run (run-test, negindex, hardened, …)
+        required: false
+        default: "run-test"
         type: string
 
 permissions:
@@ -56,5 +70,5 @@ jobs:
           fi
           ${{ inputs.cxx }} --version
 
-      - name: Build and run tests
-        run: make CXX=${{ inputs.cxx }} run-test
+      - name: Build and run tests (make ${{ inputs.target }})
+        run: make CXX=${{ inputs.cxx }} ${{ inputs.target }}

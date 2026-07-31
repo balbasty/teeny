@@ -103,11 +103,23 @@ make CXX=g++ run-examples                               # the example kernels
       -fsanitize=address,undefined -g tests/test_<feature>.cpp -o /tmp/t && /tmp/t
   ```
 
-- If you touch slicing / broadcasting / layout folds, also build once with
+- If you touch slicing / broadcasting / layout folds, also run the suite with
   `-DTNY_NO_NEGATIVE_INDEX` — the compile-time fold and the runtime gather must
-  agree under every flag (a divergence is UB).
+  agree under every flag (a divergence is UB). There is a target for it; it
+  cleans and rebuilds everything under the flag:
 
-CI (`.github/workflows/`) runs the g++ and clang++ test matrix on every PR, plus
+  ```sh
+  make CXX=g++ negindex && make CXX=clang++ negindex
+  ```
+
+  Its siblings work the same way: `release` (`-O2 -DNDEBUG`), `hardened`
+  (`-DTNY_HARDENED` element-access bounds checks), `cxx23` (`-std=c++23`).
+
+CI (`.github/workflows/`) runs the g++ and clang++ test matrix on every PR —
+twice: once plain (`tests`), and once as `make negindex` (`tests-negindex`), so
+a test that quietly relies on the negative-index wrap the flag removes fails CI
+instead of drifting in unnoticed
+([#446](https://github.com/balbasty/teeny/issues/446)). Plus
 a macOS (AppleClang) and Windows (MSVC) CMake+CTest build — you don't need
 local access to either platform to be confident a PR is portable. The Windows
 job used to be `continue-on-error` (non-blocking) while a string of
