@@ -163,8 +163,9 @@ x.unfold<Axis>(size, step);  x.unfold<Axis>(size);  // pytorch Tensor.unfold: ap
                     //   selector (like flip/squeeze), not an axis<...> list (only ONE axis binds).
 x.index_select<Axis>(idx);       // gather along Axis by a rank-1 integer index TENSOR
                     //   (runtime data, unlike slice_along); idx values wrap negative;
-                    //   static idx shape -> stack result, else heap (source must be
-                    //   host-accessible). into(dest) form too: x.index_select<Axis>(idx,
+                    //   static idx shape -> stack result (host+device, like clone()),
+                    //   else heap (host only, source must be host-accessible).
+                    //   into(dest) form too: x.index_select<Axis>(idx,
                     //   into(dest)) (no alloc, device-safe; dest's axis-Axis extent must
                     //   match idx's, checked; dest must not alias x). Value form takes a
                     //   TRAILING axis<...>{} (no .template on a dependent receiver -- unlike
@@ -186,15 +187,19 @@ See [Indexing & slicing](indexing.md).
 ```cpp
 x.permute<Perm...>();                 // reorder axes
 x.flip<Ax>();                         // reverse an axis (negative-stride view)
+x.flip<Ax0,Ax1,...>();  x.flip(axis<0,2>{});  // reverse SEVERAL axes at once (numpy flip(a,axis=(0,2))):
+                                      //   distinct axes, ANY order — flips commute, so flip<0,2> ==
+                                      //   flip<2,0> == flip<0>().flip<2>(), built in ONE pass
 x.unsqueeze<Ax>();  x.squeeze<Ax>();  // insert / drop a size-1 axis
 x.unsqueeze<Ax0,Ax1,...>();  x.squeeze<Ax0,Ax1,...>();  // insert/drop SEVERAL at once (arity picks this
                                       //   overload); axes must be DISTINCT but may be listed in ANY order —
                                       //   unsqueeze positions are relative to the FINAL rank, squeeze to the
                                       //   SOURCE rank (the fold direction is an implementation detail)
-x.unsqueeze(axis<>{});  x.squeeze(axis<>{});  // an EMPTY axis LIST names no axis -> a NO-OP (numpy's
-                                      //   axis=() rule): same shape/strides back. NOT the same as the
-                                      //   no-argument x.squeeze() (drop EVERY static singleton) /
-                                      //   x.unsqueeze() (insert at axis 0), which keep their meanings
+x.unsqueeze(axis<>{});  x.squeeze(axis<>{});  x.flip(axis<>{});  // an EMPTY axis LIST names no axis -> a
+                                      //   NO-OP (numpy's axis=() rule): same shape/strides back. NOT the
+                                      //   same as the no-argument x.squeeze() (drop EVERY static singleton)
+                                      //   / x.unsqueeze() (insert at axis 0) / x.flip() (reverse axis 0),
+                                      //   which keep their meanings
 x.reshape<NewExt...>();               // contiguous-view reshape (one -1 inferred)
 x.flatten();                          // 1-D contiguous view
 x.clone();                            // dense row-major OWNING copy (copies on the HOST; a gpu/gpu_view
@@ -288,7 +293,7 @@ a.neg_(); a.abs_(); a.exp_(); a.log_(); a.sin_(); a.cos_(); a.sqrt_(); a.tanh_()
 a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_(); a.pow_(e); a.clamp_(lo, hi);
 a & b; a | b; a ^ b; ~a; a &= b; a |= s;  // bitwise (INTEGER element types only)
 a.fill_(v); a.zero_(); a.copy_(b); a.iota_(start, step);
-a.map_(f); a.zip_with_(g, b);  auto c = a.map(f);  // user functor (device-safe)
+a.map_(f); a.zip_with_(g, b);  auto c = a.map(f);  a.map(f, into(y));  // user functor (device-safe)
 a.at(i...).atomic_add_(v);                         // scatter-accumulate (atomic, host and device)
 
 // out-of-place -> new tensor (promotes types; static->stack, dyn->heap)
@@ -308,7 +313,8 @@ auto c = a.add(b, alpha);  a.sub(b, alpha);  // fused out-of-place axpy: a +/- a
 //   half/bfloat16 operands too: into(y) rounds through the twin's own promote_t first).
 a.add(b, into(y));  a.mul(b, into(y));  a.add(2.0, into(y));  a.add(b, alpha, into(y));
 exp(a, into(y)); sqrt(a, into(y)); minimum(a, b, into(y)); clamp(a, lo, hi, into(y));
-normalize(a, into(y));  cross(a, b, into(N(i, all)));  // cross into row i of a matrix ("crossto")
+normalize(a, into(y));  normalize(a, axis<1>{}, into(y));  a.map(f, into(y));
+cross(a, b, into(N(i, all)));                          // cross into row i of a matrix ("crossto")
                       //   The dest may be a TEMPORARY VIEW: every view-producing op (slicing,
                       //   at, permute, slice_along, ...) returns by value, and into() takes one
                       //   directly -- no named intermediate for "a slot of a bigger output".
@@ -361,6 +367,9 @@ sqdist(a,b); dist(a,b);// Σ(aᵢ-bᵢ)² / √Σ(aᵢ-bᵢ)² (one fused pass, 
                       //   only (no axis form, like dot); sqdist<Acc>/dist<Acc>, dtype<Acc>{}/into
 a.normalize_();       // in place a /= norm(a) (floating types); zero vector -> NaN
 auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, dyn->heap)
+a.normalize_<1>();  normalize<-1>(a);  a.normalize(axis<1>{});   // OVER NAMED AXES (keepdim
+                      //   broadcast) — free or method, either spelling, each taking into(y):
+                      //   normalize(a, axis<1>{}, into(y));  a.normalize<1>(into(y));
 auto c = cross(a, b);  a.cross_(b);          // 3D cross (rank-1 length-3): new / in place (a = a×b)
                                              //   into a slot: cross(a, b, into(N(i, all)))
 ```

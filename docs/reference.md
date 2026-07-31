@@ -151,7 +151,7 @@ Negative integer indices wrap (count from the back).
 | `t.subsample(axis<Axes...>{}, k, starts...)` | → view | value form, same placement as `slice_along`'s |
 | `t.unfold<Axis>(size, step=1)` | → view | pytorch `Tensor.unfold` — appends a new trailing axis of width `size`, stepped by `step` along `Axis`; `Axis`'s extent shrinks to `(shape(Axis)-size)/step+1`; `size`/`step` accept runtime or `Int<>` (folds static); ND windows compose by chaining one `unfold` per axis; `size`∈`[1,shape(Axis)]`/`step>=1` checked (`static_assert` or debug-time) |
 | `t.unfold(Int<Axis>(), size, step=1)` | → view | value form — single-axis `Int<k>()` selector (like `flip`/`squeeze`), no `.template` on a dependent receiver |
-| `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `slice_along`); `idx` values wrap negative; source must be host-accessible (allocating form copies on the host) |
+| `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `slice_along`); `idx` values wrap negative; static result → stack (host+device, works on a `gpu`/`gpu_view` source, like `clone()`), dynamic result → heap (host only: source must be host-accessible) |
 | `t.index_select<Axis>(idx, into(dest))` | `dest&` | no-allocation, device-safe form; `dest`'s axis-`Axis` extent must equal `idx`'s (checked) and must not alias `t` |
 | `t.index_select(idx, axis<Axis>{})` `t.index_select(idx, axis<Axis>{}, into(dest))` | same as above | value form — no `.template` on a dependent receiver |
 
@@ -201,11 +201,12 @@ template args are signed (negatives count from the back). Each `<Ax>` op also ha
 a **value form** — pass `Int<Ax>()` in place of the template argument
 (`t.squeeze(Int<1>()) == t.squeeze<1>()`, likewise `permute`/`flip`/`unsqueeze`/
 `reshape`/`recast`); the value spelling is the preferred one. The axis-**list**
-ops — `permute`, `squeeze`, `unsqueeze` — additionally take an `axis<...>{}` tag
-(`t.squeeze(axis<0,2>{}) == t.squeeze<0,2>()`), the same one `peel`/`slice_along`/
+ops — `permute`, `flip`, `squeeze`, `unsqueeze` — additionally take an `axis<...>{}` tag
+(`t.squeeze(axis<0,2>{}) == t.squeeze<0,2>()`, `t.flip(axis<0,2>{}) == t.flip<0,2>()`),
+the same one `peel`/`slice_along`/
 the reductions use. An **empty** list, `axis<>{}`, names no axis and is therefore a
-**no-op** for `squeeze`/`unsqueeze` (numpy's `axis=()` rule) — distinct from the
-no-argument `squeeze()`/`unsqueeze()`, which keep their own meanings; `permute`
+**no-op** for `squeeze`/`unsqueeze`/`flip` (numpy's `axis=()` rule) — distinct from the
+no-argument `squeeze()`/`unsqueeze()`/`flip()`, which keep their own meanings; `permute`
 accepts it only at rank 0. The **reductions** read it the same way — `sum(a,
 axis<>{})` reduces over no axis and keeps `a`'s shape, where the plain `sum(a)`
 (no axis argument at all) reduces over every axis, see
@@ -238,6 +239,7 @@ Worked input→output shapes (`E` = source extents):
 |---|---|---|
 | `t.permute<Perm...>()` | → view | reorder axes (a permutation of `0..N-1`) |
 | `t.flip<Ax>()` | → view | reverse an axis (negative-stride) |
+| `t.flip<Ax0,Ax1,...>()` | → view | reverse **several** axes at once (numpy `flip(a, axis=(0,2))`); distinct, any order — flips commute, so `flip<0,2>` == `flip<2,0>` == `flip<0>().flip<2>()`, built in one pass (#349) |
 | `t.unsqueeze<Ax>()` | → view, rank+1 | insert a size-1 axis |
 | `t.unsqueeze<Ax0,Ax1,...>()` | → view, rank+k | insert **several** size-1 axes at once; positions are relative to the *final* rank, distinct, any order (#275) |
 | `t.squeeze<Ax>()` / `t.squeeze()` | → view, rank−1 / − all size-1 | drop size-1 axis / axes |
@@ -363,6 +365,7 @@ one — see [Mixing widths](shapes-strides.md#mixing-widths-in-a-broadcast).
 | `neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign(a)` | unary free functions — **also methods** (`a.exp()`, …) |
 | `minimum(a,b)` `maximum(a,s)` `clamp(a,lo,hi)` | elementwise min/max/clamp — **also methods** (`a.minimum(b)`, …) |
 | `normalize(a)` `cross(a,b)` | unit vector / 3D cross — **also methods** (`a.normalize()`, `a.cross(b)`) |
+| `normalize<Axes...>(a)` / `normalize(a, axis<...>{})` | unit vectors over the named axes — **also methods** (`a.normalize<1>()`, `a.normalize(axis<1>{})`) |
 | `a.add(b, alpha)` `a.sub(b, alpha)` | fused out-of-place axpy: `a ± alpha*b` (b broadcasts); the in-place twin is `add_(b, alpha)` |
 | `a.map(f)` | new tensor from a user functor |
 
@@ -430,7 +433,9 @@ width and in signedness alike, and `y` keeps its own type; see
 | `a.add(b, alpha, into(y))` `a.sub(b, alpha, into(y))` | `y&` (fused axpy into `y`) |
 | `exp(a, into(y))` … (every unary) | `y&` |
 | `minimum(a,b,into(y))` `maximum(a,s,into(y))` `clamp(a,lo,hi,into(y))` | `y&` |
-| `normalize(a, into(y))` `cross(a,b,into(y))` `cross(a,b,into(N(i,all)))` | `y&` / the slice's `dest&` |
+| `normalize(a, into(y))` `normalize<1>(a, into(y))` `normalize(a, axis<1>{}, into(y))` | `y&` (`y` keeps `a`'s full shape — only the divisor is reduced) |
+| `a.map(f, into(y))` | `y&` (user functor, one fused pass) |
+| `cross(a,b,into(y))` `cross(a,b,into(N(i,all)))` | `y&` / the slice's `dest&` |
 | `sum(a, into(cell))` … `dot(a,b,into(cell))` `sqdist(a,b,into(cell))` | `cell&` (full reduction → **rank-0** dest) |
 | `sum<0>(m, into(buf))` `mean(m, axis<1>{}, into(buf))` | `buf&` (axis reduction → lower-rank dest) |
 
@@ -490,7 +495,8 @@ forgetting the `<axes>` fails to compile instead of splatting the total). An
 **axis** reduction copies its lower-rank result into `dest` — `sum<0>(m, into(buf))`,
 and the `axis<...>` value form takes `into` too (`mean(m, axis<1>{}, into(buf))`);
 its `dest` is broadcast-compatible with the reduced shape (it goes through `copy_`).
-Dtype casts, and the destination is returned by reference.
+Dtype casts — for every pair of element types, `half` into `bfloat16` and back
+included — and the destination is returned by reference.
 
 ### Vector algebra & geometry
 
@@ -508,7 +514,7 @@ optimisation — those stay out of teeny).
 | `a.normalize_()` | `tensor&` | in place `a /= norm(a)`; floating element types only; zero vector → NaN |
 | `a.normalize_<Axes...>()` | `tensor&` | in place, over the named axes (keepdim broadcast); axes distinct, any order |
 | `normalize(a)` | new tensor (floating; integer → `double`) | out-of-place unit vector; static → stack, dynamic → heap |
-| `normalize<Axes...>(a)` / `normalize(a, axis<...>{})` | new tensor (floating) | out-of-place, over the named axes (keepdim) |
+| `normalize<Axes...>(a)` / `normalize(a, axis<...>{})` | new tensor (floating) | out-of-place, over the named axes (keepdim). Also methods (`a.normalize<1>()`, `a.normalize(axis<1>{})`), and every spelling takes `into(y)` |
 | `cross(a, b)` | new stack 3-vector `promote(Ta,Tb)` | 3D cross product; operands rank-1, length 3 |
 | `a.cross_(b)` | `tensor&` | in place: `a` becomes `a × b` (rank-1, length 3; aliasing-safe). Into a separate slot: `slot.copy_(cross(a,b))` |
 

@@ -68,12 +68,14 @@ TESTS = \
 	$(BUILDDIR)/test_anyrank_tail \
 	$(BUILDDIR)/test_recast_guard \
 	$(BUILDDIR)/test_overlap_guard \
+	$(BUILDDIR)/test_into_shape_guard \
 	$(BUILDDIR)/test_reindex \
 	$(BUILDDIR)/test_dispatch_index \
 	$(BUILDDIR)/test_dispatch_layout \
 	$(BUILDDIR)/test_reshape_view \
 	$(BUILDDIR)/test_reshape \
 	$(BUILDDIR)/test_subperm \
+	$(BUILDDIR)/test_flip_axes \
 	$(BUILDDIR)/test_slicealong \
 	$(BUILDDIR)/test_subsample \
 	$(BUILDDIR)/test_unfold \

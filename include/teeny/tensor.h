@@ -1020,9 +1020,20 @@ public:
      *        VALUES are runtime DATA, so this always materialises a copy — an
      *        arbitrary data-dependent gather isn't expressible as an affine mdspan
      *        view. Prefer the `into(dest)` form (`_TNY_API`, no allocation, device-safe)
-     *        in a kernel; this allocating form is `_TNY_HOST` convenience and copies
-     *        on the HOST, so `*this` must be host-accessible (a `gpu`/`gpu_view`
-     *        source: gather into a preallocated device `into(dest)` instead).
+     *        in a kernel; this allocating form is convenience.
+     *
+     *        SPLIT IN TWO on whether the result shape is fully static, exactly like
+     *        `clone()`/`to()`: a static result is stack-owned, so that overload is
+     *        `_TNY_API` and works on ANY storage — including a `gpu`/`gpu_view`
+     *        source from inside a kernel (the gather itself is `slice_along` +
+     *        `copy_`, `_TNY_API` throughout). A dynamic result is heap-owned, so
+     *        that overload is `_TNY_HOST` and copies on the HOST: it
+     *        `static_assert`s that `*this` is host-accessible (for a `gpu`/`gpu_view`
+     *        source, gather into a preallocated device `into(dest)` instead).
+     *        Calling the static form from the HOST on a device tensor carries the
+     *        same "don't dereference device memory from the host" hazard `clone()`
+     *        already does — use the free `to<Space>(x)` (`<teeny/cuda.h>`) to move
+     *        spaces.
      */
     template <long Axis, class Ti,class Ei,class Li,storage Oi,
               cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>::rank_dynamic() == 0, int> = 0>
@@ -1030,9 +1041,10 @@ public:
         static_assert(cs::is_integral<Ti>::value, "index_select: idx must have an integer element type");
         static_assert(Ei::rank() == 1, "index_select: idx must be rank-1");
         static_assert(_axis_in_range(Axis, rank()), "index_select: axis out of range");
-        static_assert(storage_is_host_accessible(O),
-            "index_select()'s allocating form copies on the host and cannot dereference device "
-            "memory; for a gpu/gpu_view source, gather into a preallocated device into(dest) instead.");
+        // NB no host-accessibility guard here (unlike the dynamic overload below):
+        // the result is a stack tensor and the gather is _TNY_API throughout, so
+        // this form stays device-callable on a gpu/gpu_view source — same rule as
+        // clone()'s / to()'s static overloads.
         using OutE = _md::index_select_extents<Shape, _norm_axis(Axis, rank()), Ei::static_extent(0)>;
         tensor<T, OutE, ccontiguous, storage::stack> out{};
         index_select<Axis>(idx, into(out));
@@ -1045,8 +1057,9 @@ public:
         static_assert(Ei::rank() == 1, "index_select: idx must be rank-1");
         static_assert(_axis_in_range(Axis, rank()), "index_select: axis out of range");
         static_assert(storage_is_host_accessible(O),
-            "index_select()'s allocating form copies on the host and cannot dereference device "
-            "memory; for a gpu/gpu_view source, gather into a preallocated device into(dest) instead.");
+            "index_select()'s dynamic-shape allocating form copies on the host and cannot "
+            "dereference device memory; for a gpu/gpu_view source, gather into a preallocated "
+            "device into(dest) instead.");
         constexpr cs::size_t A = _norm_axis(Axis, rank());
         using OutE = _md::index_select_extents<Shape, A, Ei::static_extent(0)>;
         OutE oe = _idxsel_shape<A, OutE>(cs::make_index_sequence<rank()>{}, static_cast<index_type>(idx.extent(0)));
@@ -1115,10 +1128,40 @@ public:
      *         negative stride, so the index type must be signed (`shape<...>` is). */
     template <long Ax = 0>
     _TNY_API auto flip() noexcept
-    { static_assert(_axis_in_range(Ax, rank()), "flip: axis out of range"); return as_tensor<storage_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(mdspan(), cs::make_index_sequence<rank()>{})); }
+    { static_assert(_axis_in_range(Ax, rank()), "flip: axis out of range"); return as_tensor<storage_view_of(O)>(_detail::flip_md(mdspan(), cs::index_sequence<_norm_axis(Ax, rank())>{}, cs::make_index_sequence<rank()>{})); }
     template <long Ax = 0>
     _TNY_API auto flip() const noexcept
-    { static_assert(_axis_in_range(Ax, rank()), "flip: axis out of range"); return as_tensor<storage_view_of(O)>(_detail::flip_md<_norm_axis(Ax, rank())>(mdspan(), cs::make_index_sequence<rank()>{})); }
+    { static_assert(_axis_in_range(Ax, rank()), "flip: axis out of range"); return as_tensor<storage_view_of(O)>(_detail::flip_md(mdspan(), cs::index_sequence<_norm_axis(Ax, rank())>{}, cs::make_index_sequence<rank()>{})); }
+
+    /** @brief Reverse SEVERAL axes at once (numpy `flip(a, axis=(...))`) -> a
+     *         rank-N view. The axes are relative to the source rank (negatives
+     *         count from the back) and must be distinct, in ANY order — flipping
+     *         axes commutes, so `t.flip<0,2>()`, `t.flip<2,0>()` and
+     *         `t.flip<0>().flip<2>()` are the same view (same type, same
+     *         elements). Each named axis gets its stride negated and the base
+     *         pointer moved to its last element, all in ONE view — no chain of
+     *         intermediates. Arity picks this overload; one axis (or none) still
+     *         means `flip<Ax>()` above. */
+    template <long Ax0, long Ax1, long... Rest>
+    _TNY_API auto flip() noexcept {
+        static_assert(_axis_in_range(Ax0, rank()) && _axis_in_range(Ax1, rank()) && (_axis_in_range(Rest, rank()) && ...),
+                      "flip: axis out of range");
+        static_assert(_all_distinct<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>(),
+                      "flip: axes must be distinct");
+        return as_tensor<storage_view_of(O)>(_detail::flip_md(mdspan(),
+            cs::index_sequence<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>{},
+            cs::make_index_sequence<rank()>{}));
+    }
+    template <long Ax0, long Ax1, long... Rest>
+    _TNY_API auto flip() const noexcept {
+        static_assert(_axis_in_range(Ax0, rank()) && _axis_in_range(Ax1, rank()) && (_axis_in_range(Rest, rank()) && ...),
+                      "flip: axis out of range");
+        static_assert(_all_distinct<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>(),
+                      "flip: axes must be distinct");
+        return as_tensor<storage_view_of(O)>(_detail::flip_md(mdspan(),
+            cs::index_sequence<_norm_axis(Ax0, rank()), _norm_axis(Ax1, rank()), _norm_axis(Rest, rank())...>{},
+            cs::make_index_sequence<rank()>{}));
+    }
 
     /** @brief A dense, row-major OWNING copy of this tensor (materialise a view /
      *         non-contiguous / permuted / flipped tensor). Static shape -> stack
@@ -1584,11 +1627,11 @@ public:
     template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && _all_ic<I...>::value, int> = 0> _TNY_API auto permute(I...) const noexcept { return permute<static_cast<long>(I::value)...>(); }
 
     /** @brief Value form: `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise
-     *         `unsqueeze`/`permute`. `squeeze`/`unsqueeze`/`permute` are axis-LIST
-     *         ops (like `peel`/`slice_along`/the reductions), so — unlike the
-     *         single-axis `Int<k>()` form above — they take the `axis<...>` tag: a
-     *         single distinct-typed argument, so no `.template` is needed on a
-     *         dependent receiver.
+     *         `unsqueeze`/`flip`/`permute`. `squeeze`/`unsqueeze`/`flip`/`permute`
+     *         are axis-LIST ops (like `peel`/`slice_along`/the reductions), so —
+     *         unlike the single-axis `Int<k>()` form above — they take the
+     *         `axis<...>` tag: a single distinct-typed argument, so no `.template`
+     *         is needed on a dependent receiver.
      *
      *         An EMPTY list — `axis<>{}` — names no axis, so it is a **no-op**: the
      *         same shape and strides back, as a view (numpy's own rule for an empty
@@ -1613,6 +1656,10 @@ public:
     { if constexpr (sizeof...(Axes) == 0) return view(); else return unsqueeze<Axes...>(); }
     template <long... Axes> _TNY_API auto unsqueeze(axis<Axes...>) const noexcept
     { if constexpr (sizeof...(Axes) == 0) return view(); else return unsqueeze<Axes...>(); }
+    template <long... Axes> _TNY_API auto flip(axis<Axes...>)       noexcept
+    { if constexpr (sizeof...(Axes) == 0) return view(); else return flip<Axes...>(); }
+    template <long... Axes> _TNY_API auto flip(axis<Axes...>) const noexcept
+    { if constexpr (sizeof...(Axes) == 0) return view(); else return flip<Axes...>(); }
     template <long... Axes> _TNY_API auto permute(axis<Axes...>)       noexcept { return permute<Axes...>(); }
     template <long... Axes> _TNY_API auto permute(axis<Axes...>) const noexcept { return permute<Axes...>(); }
     template <class... I, cs::enable_if_t<(sizeof...(I) > 0) && _all_ic<I...>::value, int> = 0> _TNY_API auto reshape(I...)       noexcept { return reshape<static_cast<long>(I::value)...>(); }
@@ -1722,6 +1769,18 @@ public:
     template <class D> _TNY_API auto & clamp(T lo, T hi, into_t<D> out) const;
     _TNY_API auto normalize() const;                                                      // unit vector (a.normalize_() is in place)
     template <class D> _TNY_API auto & normalize(into_t<D> out) const;
+    // ...over NAMED AXES (keepdim broadcast), both spellings — parity with the free
+    // `normalize<Axes...>(a)` / `normalize(a, axis<Axes...>{})` and with the in-place
+    // `normalize_<Axes...>()`. The empty pack is SFINAE'd out, so `a.normalize()` and
+    // `a.normalize(into(y))` still resolve to the full-tensor forms just above.
+    template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+    _TNY_API auto normalize() const;                                                      // a.normalize<0>()
+    template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+    _TNY_API auto normalize(axis<Axes...>) const;                                         // a.normalize(axis<0>{})
+    template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+    _TNY_API auto & normalize(into_t<D> out) const;                                       // a.normalize<0>(into(y))
+    template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+    _TNY_API auto & normalize(axis<Axes...>, into_t<D> out) const;                        // a.normalize(axis<0>{}, into(y))
     template <class Tb,class Eb,class Lb,storage Ob> _TNY_API auto cross(const tensor<Tb,Eb,Lb,Ob> & b) const;   // 3D (a.cross_(b) is in place)
     template <class Tb,class Eb,class Lb,storage Ob, class D> _TNY_API auto & cross(const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) const;
 
@@ -1732,6 +1791,7 @@ public:
     template <class F> _TNY_API tensor & map_(F f);                    // *this = f(*this)
     template <class G, class B> _TNY_API tensor & zip_with_(G g, const B & b);  // *this = g(*this, b) (broadcasts)
     template <class F> _TNY_API auto map(F f) const;                   // -> new tensor = f(*this)
+    template <class F, class D> _TNY_API auto & map(F f, into_t<D> out) const;  // ...into a caller buffer -> out.dest&
 
     /* --- boolean reductions (numpy-style; `all` is the slice keyword, so
      *     these are members, and chain after a comparison: (a<b).all()) ---- */

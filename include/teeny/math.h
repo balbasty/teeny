@@ -305,6 +305,13 @@ template <class... I> struct _offset_int {
     using type = typename cs::conditional_t<_mixed, _sint_of_size<_bytes>, _ident<_wide>>::type;
 };
 template <class... I> using _offset_int_t = typename _offset_int<I...>::type;
+// Every call site names a participant's index type as `typename X::index_type`
+// (#363 normalised the spelling: several used to reach through
+// `X::extents_type::index_type`, sometimes both ways within one `using`). The two
+// are the same type for every participant these engines see — a tensor's
+// `index_type` is an alias of its shape's, and an mdspan's likewise — so the
+// difference was never load-bearing, only a hint to the next reader that it might
+// have been.
 
 // The index type a broadcast RESULT carries (#167) — the SAME rule, over the two
 // operands: a type that can represent every extent/stride value either operand's
@@ -451,8 +458,8 @@ _TNY_API void bzip_(C & c, const A & a, const B & b, Op op, cs::index_sequence<D
                   "into(dest): dest's shape must match the broadcast result's — each rhs axis must "
                   "equal dest's or be 1 (an operand stretches, a dest does not).");
     using I = _offset_int_t<typename C::index_type,
-                            typename A::extents_type::index_type,
-                            typename B::extents_type::index_type>;
+                            typename A::index_type,
+                            typename B::index_type>;
     constexpr cs::size_t R = C::rank();   // c has the result (largest) rank; a,b right-align into it
     // Array size floored to 1 (rank-0 c -> empty D..., see scal_'s comment above).
     const I ce[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(c.extent(D))... },
@@ -526,26 +533,45 @@ _TNY_API void check_dest_no_overlap(const C & c, cs::index_sequence<D...>) {
         "out-of-place store into it keeps only the last result — clone() to a dense tensor "
         "first, or write into a non-overlapping destination."), ... );
 }
-// EXACT per-axis extent check between a destination and the single source it is
-// written from — the runtime half of the guard the SINGLE-SOURCE engines
-// (`scalo_`/`unaryo_`) need, and the twin of the compile-time `ext_static_eq`
-// above. Those engines take their loop BOUNDS from the source and their strides
-// from the destination, so a destination shorter in any axis is written past its
-// end (#357): `a.mul(2.0, into(y))` with an 8x8 `a` and a 2x2 `y` stored 64
-// elements through a 4-element buffer. Their allocating producers (`oops`/
-// `uop_out`) build the destination from the source's own extents type, so the only
-// way to reach them mis-shaped is a caller-supplied `into(dest)`.
+// The type a RUNTIME extent comparison is made in. Extents are non-negative by
+// construction, so an unsigned type is lossless and sidesteps a signed/unsigned
+// mismatch between two differently-indexed participants; `unsigned long long` is
+// the one that never truncates, because it is at least 64 bits on EVERY platform.
+// The alternatives both have a host where they are 32-bit and teeny's default
+// `int64_t` index type does not fit them: `long` is 32-bit under Windows' LLP64
+// (this is what `scan`'s hand-rolled copy of the guard below used before #363),
+// and `cs::size_t` is 32-bit on a 32-bit host. Same "pick a type that covers every
+// participant" rule as `_offset_int_t`.
+using ext_cmp_t = unsigned long long;
+_TNY_API constexpr bool ext_eq(ext_cmp_t a, ext_cmp_t b) { return a == b; }
+
+// EXACT per-axis shape check between a destination and the SINGLE source it is
+// written from — the whole `into(dest)` guard for a single-source producer, in one
+// place: the rank `static_assert`, the compile-time `ext_static_eq` gate (fires
+// when both shapes are fully static, so the documented repro is a COMPILE error,
+// not a debug-only trip), and the per-axis runtime `_TNY_CHECK` for anything
+// dynamic. Used by `scalo_`, `unaryo_` and `scan`'s `into(dest)` form — the three
+// spellings #363 folded together.
+//
+// Those producers take their loop BOUNDS from the source and their strides from
+// the destination, so a destination shorter in any axis is written past its end
+// (#357): `a.mul(2.0, into(y))` with an 8x8 `a` and a 2x2 `y` stored 64 elements
+// through a 4-element buffer. Their allocating producers (`oops`/`uop_out`) build
+// the destination from the source's own extents type, so the only way to reach
+// them mis-shaped is a caller-supplied `into(dest)`.
 //
 // EXACT equality, unlike `bzip_`'s `ae[r] == ce[r] || ae[r] == 1`: that engine
-// BROADCASTS (an extent-1 operand axis gets stride 0 and is stretched), these two
-// do not — they index the source with the same counter they index the destination
+// BROADCASTS (an extent-1 operand axis gets stride 0 and is stretched), these do
+// not — they index the source with the same counter they index the destination
 // with, so an extent 1 against an extent n is a plain mismatch, not a stretch.
-// Extents are non-negative by construction, so comparing them as `cs::size_t`
-// (mdspan's own `static_extent` type) is lossless and sidesteps a signed/unsigned
-// mismatch between two differently-indexed tensors.
+// A broadcasting sibling of this helper belongs next to it, not inside it.
 template <class C, class A, cs::size_t... D>
-_TNY_API void check_same_extents(const C & c, const A & a, cs::index_sequence<D...>) {
-    ( _TNY_CHECK(static_cast<cs::size_t>(c.extent(D)) == static_cast<cs::size_t>(a.extent(D)),
+_TNY_API void check_into_same_shape(const C & c, const A & a, cs::index_sequence<D...>) {
+    static_assert(A::rank() == C::rank(), "into(dest): dest's rank must match the source's");
+    static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
+                      cs::index_sequence<D...>{}),
+                  "into(dest): dest's shape must match the source's exactly (no broadcast)");
+    ( _TNY_CHECK(ext_eq(c.extent(D), a.extent(D)),
         "into(dest): dest's shape must match the source's exactly (no broadcast here — a "
         "scalar-rhs or unary op has nothing to stretch); a shorter dest is written past its end."), ... );
 }
@@ -659,17 +685,15 @@ _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
     // #379; compare: `Rc`). It is NOT necessarily `C`'s own type, so the stores below
     // cast to `Ce` explicitly, exactly as `bzip_`'s `w_set`/fast path do.
     //
-    // Shape guard (#357): the bounds below come from `a` and the stores go through
-    // `c`'s strides, so the two must agree in EVERY axis or the write runs off the
-    // end of `c`. Checked HERE, in the engine, rather than in the `scalo` wrapper
-    // the way `bzip` places its own static gate — `scmp` (comparisons) calls
-    // `scalo_` directly, and one guard at the single point that does the indexing
-    // cannot be bypassed by a future caller. Both halves, as `dot`/`scan`'s
-    // `into(dest)` do it: a `static_assert` when both shapes are fully static (the
-    // documented repro is a COMPILE error, not a debug-only trip) and a per-axis
-    // `_TNY_CHECK` for anything dynamic. No-ops for every non-`into` caller, whose
-    // destination is built from `a`'s own extents type (`oops`/`oops_cmp`) or IS
-    // `a` (`unary`).
+    // Shape guard (#357), all three halves in `check_into_same_shape` (see there for
+    // the rule; #363 folded this site, `unaryo_`'s twin and `scan`'s into one helper):
+    // the bounds below come from `a` and the stores go through `c`'s strides, so the
+    // two must agree in EVERY axis or the write runs off the end of `c`. Checked
+    // HERE, in the engine, rather than in the `scalo` wrapper the way `bzip` places
+    // its own static gate — `scmp` (comparisons) calls `scalo_` directly, and one
+    // guard at the single point that does the indexing cannot be bypassed by a future
+    // caller. A no-op for every non-`into` caller, whose destination is built from
+    // `a`'s own extents type (`oops`/`oops_cmp`) or IS `a` (`unary`).
     //
     // ...and the SELF-OVERLAP guard (#364), for the same reachability: a stride-0
     // `into(dest)` axis makes many source elements store into one slot, so all but
@@ -681,14 +705,9 @@ _TNY_API void scalo_(C & c, const A & a, S s, Op op, cs::index_sequence<D...>) {
     // the full axis pack, host-debug), and a no-op for every non-`into` caller: the
     // allocating producers build a fresh dense `c`, and the in-place `unary` has
     // already run this exact check before delegating here.
-    static_assert(A::rank() == C::rank(), "into(dest): dest rank must match the source's");
-    static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
-                      cs::make_index_sequence<C::rank()>{}),
-                  "into(dest): dest's shape must match the source's exactly (no broadcast)");
-    check_same_extents(c, a, cs::index_sequence<D...>{});
+    check_into_same_shape(c, a, cs::index_sequence<D...>{});
     check_dest_no_overlap(c, cs::index_sequence<D...>{});
-    using I = _offset_int_t<typename C::index_type,
-                            typename A::extents_type::index_type>;
+    using I = _offset_int_t<typename C::index_type, typename A::index_type>;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.extent(D))... },
             sa[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.stride(D))... },
@@ -725,12 +744,12 @@ _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     // (#353). The allocating producer (`uop_out`) builds `c` from `a`'s extents type,
     // so that path is unchanged.
     //
-    // ...and the same shape guard as `scalo_` (#357), for the same reason: bounds
-    // from `a`, strides from `c`, so a mis-shaped `into(dest)` — the only way a
-    // destination of the caller's own choosing gets here — writes past its end.
-    // `static_assert` when both shapes are static, per-axis `_TNY_CHECK` otherwise;
-    // a no-op for `uop_out` (dest built from `a`'s extents) and for the in-place
-    // `unary`, which passes `c` as both arguments.
+    // ...and the same shape guard as `scalo_` (#357) — literally the same helper
+    // since #363 (`check_into_same_shape`) — for the same reason: bounds from `a`,
+    // strides from `c`, so a mis-shaped `into(dest)` — the only way a destination of
+    // the caller's own choosing gets here — writes past its end. A no-op for
+    // `uop_out` (dest built from `a`'s extents) and for the in-place `unary`, which
+    // passes `c` as both arguments.
     //
     // ...and the SELF-OVERLAP guard, exactly as `scalo_` above documents it (#364):
     // `exp(a, into(y))` into a stride-0 `y` used to drop every result but the last,
@@ -744,14 +763,9 @@ _TNY_API void unaryo_(C & c, const A & a, Uop f, cs::index_sequence<D...>) {
     // into(int_y))` exponentiated the TRUNCATED input (#379). It is the SOURCE's
     // compute type there, exactly what `uop_out`'s own destination would have
     // carried; the in-place `unary` still passes `void` (= `c`'s, which is `a`'s).
-    static_assert(A::rank() == C::rank(), "into(dest): dest rank must match the source's");
-    static_assert(ext_static_eq<typename C::extents_type, typename A::extents_type>(
-                      cs::make_index_sequence<C::rank()>{}),
-                  "into(dest): dest's shape must match the source's exactly (no broadcast)");
-    check_same_extents(c, a, cs::index_sequence<D...>{});
+    check_into_same_shape(c, a, cs::index_sequence<D...>{});
     check_dest_no_overlap(c, cs::index_sequence<D...>{});
-    using I = _offset_int_t<typename C::index_type,
-                            typename A::extents_type::index_type>;
+    using I = _offset_int_t<typename C::index_type, typename A::index_type>;
     using Ce = typename C::element_type;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(a.extent(D))... },
@@ -1019,8 +1033,7 @@ _TNY_API R zipreduce_decode_(const A & a, const B & b, Op op, cs::index_sequence
     // As in `bzip_`, the widening is internal only: neither operand's own type
     // changes, each operand's offsets fit its own index type by construction, and
     // `data()[off]` takes any integer, so nothing is narrowed back on the way out.
-    using I = _offset_int_t<typename A::extents_type::index_type,
-                            typename B::extents_type::index_type>;
+    using I = _offset_int_t<typename A::index_type, typename B::index_type>;
     // Array size floored to 1 (rank-0 operands -> empty D..., see scal_'s comment above).
     const I e[sizeof...(D) ? sizeof...(D) : 1]  = { static_cast<I>(a.extent(D))... };
     const I be[sizeof...(D) ? sizeof...(D) : 1] = { static_cast<I>(b.extent(D))... };
@@ -1222,6 +1235,35 @@ _TNY_HOST auto reduce_to(tensor<RE, OE, ccontiguous, storage::heap> && r) {
     if constexpr (cs::is_same<Ret, RE>::value) return static_cast<tensor<RE,OE,ccontiguous,storage::heap>&&>(r);
     else { tensor<Ret, OE, ccontiguous, storage::heap> o(r.extents()); o.copy_(r); return o; }
 }
+
+/** @brief Cast a FULL reduction's SCALAR result to an `into(dest)` cell's element
+ *  type — the scalar twin of `reduce_to` just above (which does the same job for
+ *  the tensor an AXIS reduction produces, by way of `copy_`).
+ *
+ *  It exists because the direct `static_cast<To>(v)` this replaces is ILL-FORMED
+ *  for the one pair `To`/`From` can be: the two 16-bit floats. `half`/`bfloat16`
+ *  convert only FROM arithmetic types (their converting constructor is
+ *  SFINAE-gated on `is_arithmetic`) and only TO `float`, so `half -> bfloat16`
+ *  needs two user-defined conversions and the language will not chain them —
+ *  `sum(half_a, into(bfloat16_cell))` did not compile at all (#406). Going through
+ *  `compute_type_t<From>` (`float` for either 16-bit float, `From` itself for
+ *  every other type) supplies exactly that missing stop.
+ *
+ *  Same rule and the same reason as `_round_to`/`_cross_round` on the elementwise
+ *  side (#379/#390), and it is likewise numerically inert everywhere else: for any
+ *  non-16-bit-float `From` the intermediate IS `From`, so the extra cast vanishes.
+ *  For a 16-bit-float `From` it is an EXACT widening of a value that the reduction
+ *  has already rounded to `From` (`_reduce_result_t` casts the accumulator down
+ *  before we ever see it) — so `dest` lands on the same bits the allocating
+ *  spelling `dest.fill_(sum(a))` would have written, which is the equivalence every
+ *  `into(dest)` call site promises. */
+template <class To, class From> _TNY_API To reduce_cast(From v) {
+    return static_cast<To>(static_cast<compute_type_t<From>>(v));
+}
+// The destination element type of an `into(dest)` tag's cell — spelled once here
+// rather than at each of the full-reduction call sites below (the unary keyword
+// bag `_TNY_RED_TAGGED` and its binary twin `_TNY_RED_BINARY_TAGGED`).
+template <class D> using _into_elem_t = typename cs::remove_reference_t<D>::element_type;
 
 /* ---- allclose: |a-b| <= atol + rtol*|b| for every (broadcast) element ---- */
 template <class R, class A, class B, cs::size_t... D>
@@ -1478,6 +1520,11 @@ template <class T,class E,class L,storage O> template <class G, class B>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::zip_with_(G g, const B & b) { _md::bzip(*this, *this, b, g); return *this; }
 template <class T,class E,class L,storage O> template <class F>
 _TNY_API auto tensor<T,E,L,O>::map(F f) const { return _md::uop_out(*this, f); }
+// `into(dest)` twin: one fused pass into a caller buffer, NO allocation — the same
+// engine every other unary producer's `into` form uses (`exp(a, into(y))`), so a
+// narrower/wider `dest` is cast on store and its extents are checked against `*this`.
+template <class T,class E,class L,storage O> template <class F, class D>
+_TNY_API auto & tensor<T,E,L,O>::map(F f, into_t<D> out) const { _md::uop_to(out.dest, *this, f); return out.dest; }
 
 /* ------------------------------------------------------------------ *
  *     Reductions                                                      *
@@ -1874,7 +1921,7 @@ _TNY_API  decltype(auto) NAME(const tensor<T,E,L,O> & a, Tag0 tag0, Tags... tags
             static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0,                       \
                           #NAME ": full reduction into(dest): dest must be rank-0 (a scalar cell); "      \
                           "name the axes -- " #NAME "(a, axis<...>{}, into(dest)) -- for a lower-rank destination"); \
-            out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(NAME<RAcc>(a))); \
+            out.dest.fill_(_md::reduce_cast<_md::_into_elem_t<decltype(out.dest)>>(NAME<RAcc>(a))); \
             return out.dest;                                                                             \
         } else return NAME<RAcc>(a);                                                                     \
     } else if constexpr (_is_empty_axis<AxisTag>::value) {           /* axis<>{} -> NO axis at all */    \
@@ -1975,7 +2022,7 @@ _TNY_API decltype(auto) NAME(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,L
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);                                      \
     if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {                                      \
         static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, #NAME " into(dest): dest must be rank-0 (a scalar cell)"); \
-        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(NAME<RAcc>(a, b))); \
+        out.dest.fill_(_md::reduce_cast<_md::_into_elem_t<decltype(out.dest)>>(NAME<RAcc>(a, b))); \
         return out.dest;                                                                                 \
     } else return NAME<RAcc>(a, b);                                                                      \
 }
@@ -2123,6 +2170,23 @@ _TNY_API auto normalize(const tensor<T,E,L,O> & a) {
 template <long... Axes, class T, class E, class L, storage O,
           cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
 _TNY_API auto normalize(const tensor<T,E,L,O> & a, axis<Axes...>) { return normalize<Axes...>(a); }
+
+/** @brief `normalize<Axes...>(a, into(y))` — the axis-scoped unit vectors into a
+ *         caller buffer `y` (same shape as `a`, since only the DIVISOR is reduced).
+ *         Same one-line forward to `.div(..., out)` as the full-tensor form; the
+ *         reduced norm itself is still materialised (it is a tensor, not a scalar).
+ *         Axes distinct, in any order — same rule as the allocating form (`_keepdims`
+ *         asserts distinctness and sorts). */
+template <long... Axes, class T, class E, class L, storage O, class D,
+          cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+_TNY_API auto & normalize(const tensor<T,E,L,O> & a, into_t<D> out) {
+    auto n = norm<Axes...>(a);                                               // reduced norm (floating tensor)
+    return a.div(_keepdims<_norm_axis(Axes, (long)E::rank())...>(n), out);   // .div's into overload writes out & returns out.dest
+}
+// value form: normalize(a, axis<Axes...>{}, into(y)) == normalize<Axes...>(a, into(y))
+template <long... Axes, class T, class E, class L, storage O, class D,
+          cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+_TNY_API auto & normalize(const tensor<T,E,L,O> & a, axis<Axes...>, into_t<D> out) { return normalize<Axes...>(a, out); }
 
 // internal: 3D cross product a × b into `out` (all rank-1, length 3). Computes the
 // three components into temporaries FIRST, so `out` may alias `a` or `b` (this is
@@ -2451,6 +2515,17 @@ template <class T,class E,class L,storage O>
 _TNY_API auto tensor<T,E,L,O>::normalize() const { return tny::normalize(*this); }
 template <class T,class E,class L,storage O> template <class D>
 _TNY_API auto & tensor<T,E,L,O>::normalize(into_t<D> out) const { return tny::normalize(*this, out); }
+// axis forms (both spellings x with/without into) — thin forwarders to the free
+// `normalize<Axes...>`. The enable_if key repeats the declaration's WITHOUT the
+// `= 0` default (an out-of-line definition may not restate a default template arg).
+template <class T,class E,class L,storage O> template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0), int>>
+_TNY_API auto tensor<T,E,L,O>::normalize() const { return tny::normalize<Axes...>(*this); }
+template <class T,class E,class L,storage O> template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0), int>>
+_TNY_API auto tensor<T,E,L,O>::normalize(axis<Axes...>) const { return tny::normalize<Axes...>(*this); }
+template <class T,class E,class L,storage O> template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0), int>>
+_TNY_API auto & tensor<T,E,L,O>::normalize(into_t<D> out) const { return tny::normalize<Axes...>(*this, out); }
+template <class T,class E,class L,storage O> template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0), int>>
+_TNY_API auto & tensor<T,E,L,O>::normalize(axis<Axes...>, into_t<D> out) const { return tny::normalize<Axes...>(*this, out); }
 template <class T,class E,class L,storage O> template <class Tb,class Eb,class Lb,storage Ob>
 _TNY_API auto tensor<T,E,L,O>::cross(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::cross(*this, b); }
 template <class T,class E,class L,storage O> template <class Tb,class Eb,class Lb,storage Ob, class D>

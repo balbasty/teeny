@@ -3,9 +3,10 @@
 These return **views** (no copy) that rearrange, reshape, or iterate a tensor.
 Axis template arguments are signed — **negatives count from the back**.
 
-The axis-**list** ops — `permute`, `squeeze`, `unsqueeze` — take an `axis<...>{}`
+The axis-**list** ops — `permute`, `flip`, `squeeze`, `unsqueeze` — take an `axis<...>{}`
 tag (a compile-time axis list, sibling of `shape<...>`, the same one
 `peel`/`slice_along`/the reductions use): `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`,
+`t.flip(axis<0,2>{})` == `t.flip<0,2>()`,
 `t.permute(axis<2,0,1>{})` == `t.permute<2,0,1>()`. Being a single distinct-typed
 argument, it needs no `.template` on a dependent receiver — reach for this spelling
 first.
@@ -24,7 +25,9 @@ template form.
     ```cpp
     t.permute(axis<2,0,1>{});    // reorder axes (a permutation of 0..N-1)
     t.permute(axis<-1,0,1>{});   // negatives count from the back
-    // flip is single-axis, not an axis-list op — use the Int<k>()/template form below
+    t.flip(axis<1>{});           // reverse an axis (a negative-stride view; needs a
+                                 //   signed index type, which shape<...> is)
+    t.flip(axis<0,2>{});         // reverse SEVERAL axes at once (numpy flip(a, axis=(0,2)))
     ```
 
 === "value form"
@@ -42,6 +45,7 @@ template form.
     t.permute<2,0,1>();               // reorder axes (a permutation of 0..N-1)
     t.permute<-1,0,1>();              // negatives count from the back
     t.flip<1>();                      // reverse an axis (a negative-stride view)
+    t.flip<0,2>();                    // reverse SEVERAL axes at once
     ```
 
 ## Add / drop / reshape
@@ -83,12 +87,13 @@ template form.
 
 ## Multiple axes at once
 
-`squeeze`/`unsqueeze` also take **several** axes in one call, inserting or
-dropping them all at once instead of chaining single-axis calls:
+`squeeze`/`unsqueeze`/`flip` also take **several** axes in one call, inserting,
+dropping or reversing them all at once instead of chaining single-axis calls:
 
 ```cpp
 (h,w).unsqueeze<1,3>();          // (H,W) -> (H,1,W,1)
 (1,h,1,w)_view.squeeze<0,2>();   // (1,H,1,W) -> (H,W)
+t.flip<0,2>();                   // reverse axes 0 and 2 (numpy flip(a, axis=(0,2)))
 ```
 
 The tricky part — axis positions shift as siblings get inserted or dropped — is
@@ -101,12 +106,21 @@ insert lands left of what's left to do), `squeeze` largest-first (each drop
 never shifts an earlier position) — sorting the axes into that order at compile
 time first, so you don't need to think about it or list them ascending yourself.
 
+`flip` has none of that trickiness: reversing one axis never disturbs another, so
+its axis list is simply a **set** — distinct axes, any order, and `t.flip<0,2>()`,
+`t.flip<2,0>()` and `t.flip<0>().flip<2>()` are the very same view (same type, same
+elements). It builds that view in one pass rather than a chain: each named axis
+gets its stride negated and the base pointer moved to its last element along that
+axis, and every stride the source knows at compile time stays compile-time known
+(negated).
+
 A single axis (or none, for `squeeze`) still means the one-axis form above —
 arity alone picks the multi-axis overload.
 
 ### An empty axis list is a no-op
 
-`axis<>{}` names *no* axis, so `t.squeeze(axis<>{})` and `t.unsqueeze(axis<>{})`
+`axis<>{}` names *no* axis, so `t.squeeze(axis<>{})`, `t.unsqueeze(axis<>{})` and
+`t.flip(axis<>{})`
 hand back the same shape and strides — the same rule numpy gives an empty axis
 tuple (`np.squeeze(a, axis=())` and `np.expand_dims(a, axis=())` both leave the
 shape alone). That matters for generic code that *computes* the axis list: when
@@ -117,13 +131,16 @@ restructuring the tensor.
 auto t = wrap(buf, shape<1,2,1,3>{});
 t.squeeze(axis<>{});      // (1,2,1,3) -- unchanged, singleton axes kept
 t.unsqueeze(axis<>{});    // (1,2,1,3) -- unchanged, nothing inserted
+t.flip(axis<>{});         // (1,2,1,3) -- unchanged, no axis reversed
 t.squeeze();              // (2,3)     -- the NO-ARGUMENT form still drops every singleton
 t.unsqueeze();            // (1,1,2,1,3) -- ...and still inserts at axis 0
+t.flip();                 // reversed along axis 0 -- ...and still defaults to axis 0
 ```
 
-The last two lines are the contrast worth remembering: **an empty axis *list* is
+The last three lines are the contrast worth remembering: **an empty axis *list* is
 not the same as *no argument at all*.** `squeeze()` (drop every statically-size-1
-axis) and `unsqueeze()` (insert at axis 0) keep their own meanings; only the
+axis), `unsqueeze()` (insert at axis 0) and `flip()` (reverse axis 0) keep their
+own meanings; only the
 `axis<...>{}` spelling reads an empty list as "no axes named".
 
 `permute` needs a *full* permutation of `rank()` axes, so `axis<>{}` is accepted
