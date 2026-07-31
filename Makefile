@@ -90,6 +90,7 @@ TESTS = \
 	$(BUILDDIR)/test_wrap \
 	$(BUILDDIR)/test_slice \
 	$(BUILDDIR)/test_newaxis \
+	$(BUILDDIR)/test_index_pack \
 	$(BUILDDIR)/test_unchecked \
 	$(BUILDDIR)/test_assign \
 	$(BUILDDIR)/test_subscript \

@@ -148,6 +148,13 @@ slice(start, stop);  slice(start, stop, step);  // half-open range, optional (ne
 none;  all;                     // open slice end (== python None); keep-axis marker
 x(none, all, all);  x(0, newaxis, all);   // BARE none/newaxis arg -> insert a size-1
                     //   axis (== unsqueeze at that position); newaxis is an alias of none
+x(m);  x.at(m);  x.uget(m);  x.uat(m);    // TUPLE-UNPACK: ONE tuple-like arg (cs::array /
+                    //   cs::tuple) carrying the WHOLE index list -- numpy's x[(a,b,c)] == x[a,b,c].
+                    //   Elements may be anything the variadic call takes (ints/Int<>/all/slice/
+                    //   none/one ellipsis), and the result type is identical. Single-arg only
+                    //   (never mixed with other positional args); C++23 x[m] forwards too.
+                    //   Closes the loop with peel(...).enumerate(), whose m IS a cs::array:
+                    //   for (auto [m, cell] : peel(a, axis<0,1,2>{}).enumerate()) b(m) = f(cell);
 x.slice_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest -> a VIEW
                     //   (pytorch select/narrow over several axes). NOT numpy take_along_axis /
                     //   pytorch take_along_dim -- that index-TENSOR gather is index_select below
@@ -352,6 +359,9 @@ allclose(a, b, dtype<float>{});  allclose(a, b, rtol, atol, into(cell));  // sam
 //   param in C++17) — everything past it (axis<...>/dtype/keepdims/into) is a generic bag.
 sum<Axes...>(a); prod<...>(a); max<...>(a); min<...>(a); mean<...>(a);  // sum<Acc,Axes...>(a)
 sum(a, axis<0,2>{}); mean(a, axis<-1>{}); sum<double>(a, axis<0>{});    // numpy `axis=` value form
+sum<2,0>(a);          // axes may be listed in ANY order, but must be DISTINCT: sum<0,0>(a) /
+                      //   sum(a, axis<0,0>{}) is a COMPILE ERROR, not a dropped duplicate (#433).
+                      //   Negatives normalise first, so mean<1,-2>(a) at rank 3 is caught too.
 sum<0>(a, into(buf)); mean(a, axis<1>{}, into(buf));  // into(dest) -> copies lower-rank result
 sum<0>(a, keepdims);  sum(a, axis<0>{}, keepdims);    // keepdims: reduced axis stays size-1 (numpy
                       //   keepdims=True) -> broadcasts back over a. Every axis reduction.

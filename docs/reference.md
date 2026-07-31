@@ -145,6 +145,7 @@ Negative integer indices wrap (count from the back).
 | `t.at(i, j, k)` (all integers) | rank-0 view | scalar-like: converts to/from `T`, `.item()`, has `atomic_add_` |
 | `t(0, all, slice(1,4))` (any slice arg) | → view | lower-/same-rank |
 | `t(1, ellipsis, 2)` | → view or `T&` | `ellipsis` = `rank − #other args` copies of `all` (≤1 per call) |
+| `t(m)` / `t.at(m)` / `t.uget(m)` / `t.uat(m)` | same as the unpacked call | **tuple-unpack**: ONE tuple-like argument (`cuda::std::array` / `cuda::std::tuple`) carrying the whole index list — numpy's `x[(a,b,c)] == x[a,b,c]`. Elements may be anything the variadic call accepts (int, `Int<k>()`, `all`, `slice(...)`, `none`, one `ellipsis`); result type is identical. Single-argument only (never mixed with other positional args); C++23 `t[m]` forwards too. Pairs with `peel(...).enumerate()`, whose multi-index *is* a `cuda::std::array`: `for (auto [m, cell] : peel(a, axis<0,1,2>{}).enumerate()) b(m) = f(cell);` |
 | `t.slice_along<Axes...>(args...)` | → view | bind named axes only, keep the rest — pytorch `select`/`narrow` over several axes at once. NOT numpy's `take_along_axis`/pytorch's `take_along_dim` (an index-tensor gather; that's `index_select`) |
 | `t.slice_along(axis<Axes...>{}, args...)` | → view | value form — `axis<...>` selector (numpy-like), no `.template` on a dependent receiver |
 | `t.subsample<Axes...>(k, starts...)` | → view | coloured/strided sub-lattice — sugar for `slice_along` + `slice(start,none,k)` per named axis, one shared step `k`; `k`/`starts` accept runtime or `Int<>` (folds static) |
@@ -478,7 +479,10 @@ Axis reductions: a fully static result → stack (host+device); any dynamic resu
 → heap (host only). `keepdims` applies to `sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`.
 Axis lists must be **distinct** but may be given in **any order** — with or without
 `keepdims` (`sum<2,0>(a, keepdims)` == `sum<0,2>(a, keepdims)`), like every other
-axis-list op.
+axis-list op. A repeated axis is a **compile error** in every spelling —
+`sum<0,0>(a)`, `sum(a, axis<0,0>{})`, `a.sum<0,0>()`, `mean<1,-2>(a)` on a rank-3
+tensor (negatives are normalised before the check) — not a silently dropped
+duplicate.
 The explicit `<Acc, Axes...>` template split stays (C++17 has no universal template
 parameter to unify "leading type = accumulator" vs "leading int = axis"), but past
 that split every TRAILING keyword — `dtype<Acc>{}`, `axis<...>{}`, `keepdims`,

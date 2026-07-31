@@ -45,10 +45,31 @@ args are fixed-arity so *their* tag is trailing, see table); a keyword tag is
 are fixed-arity, so the rule predicts trailing) — it is not undocumented
 (`CLAUDE.md`/`docs/structure.md` both show the leading form as-shipped, they
 just don't call out that it breaks the rule), but nothing rationalizes the
-deviation itself. This, plus a second sub-finding (`index_select`/`scan_` use
-the axis-**list** vocabulary `axis<Axis>{}` for a single axis, where CLAUDE.md's
-own stated taxonomy says a single-selector op should use `Int<k>()`, not the
-list tag), are **filed as #348**.
+deviation itself. Both this placement gap and a second sub-finding
+(`index_select`/`scan_` use `axis<Axis>{}` for a single axis, where CLAUDE.md's
+*then*-stated taxonomy scoped `axis<...>` to axis-**list** ops only) were
+**filed as #348**.
+
+**Update: the vocabulary sub-finding is now fixed (docs-only); the placement
+gap is still open.** Re-reading the taxonomy claim against the library's own
+flagship keyword family shows CLAUDE.md's wording, not `index_select`/`scan_`'s
+spelling, was what was wrong: the reductions already used `axis<...>` as a
+singleton (`sum(a, axis<0>{})`) before this review was even written, so "list
+tag" was never an accurate description of `axis<...>`'s actual scope.
+CLAUDE.md's "Static vs runtime values" section now states the restated rule
+directly: `axis<...>` marks any named-axis argument — list or singleton — in a
+call that *also* carries another value-form argument, so the selector stays
+visually/typewise distinct from a positional integer or an arbitrary value it
+sits next to (`scan_`'s `init` is exactly such a value; `Int<k>()` converts
+implicitly to a runtime integer and would blend in where `axis<0>{}`, a
+non-converting distinct type, cannot); `Int<k>()` is reserved for pure
+single-selector ops where the selector is the *only* value-form argument in the
+call. Under that rule, `index_select(idx, axis<Axis>{})` and `scan_(t,
+axis<0>{}, init, f)` were consistent all along — **no code change needed**, the
+vocabulary half of #348 is resolved by the CLAUDE.md wording fix alone. The
+**placement** half (leading vs. trailing on `scan_`) is unaffected by this and
+remains open: it is a breaking argument-order change to a shipped API and
+needs a maintainer decision before it's made, so #348 stays open for it.
 
 `unfold(Int<Axis>(), size, step)` was initially flagged as a second violation
 but doesn't hold up: `Int<Axis>()` is a single-axis **selector** (like
@@ -88,12 +109,17 @@ was a factual contradiction across docs, not an open design question.
 
 ## Summary
 
-Of the concrete gaps found, three needed new code and are filed as sub-issues
-of #336: **#348** (axis-tag placement on `scan_` + the `index_select`/`scan_`
-vocabulary split — `unfold` was initially suspected but turned out not to be
-an instance, see above), **#349** (`flip` multi-axis form), **#350** (`allclose`
-method form + keyword composition). One needed a documentation decision and is
-filed as **#351** (`wrap`/`as_tensor` naming rationale). Two findings
+Of the concrete gaps found, three were filed as sub-issues of #336: **#348**
+(axis-tag placement on `scan_` + the `index_select`/`scan_` vocabulary split —
+`unfold` was initially suspected but turned out not to be an instance, see
+above), **#349** (`flip` multi-axis form), **#350** (`allclose` method form +
+keyword composition). Of #348's two sub-findings, the vocabulary split turned
+out to be a CLAUDE.md wording bug rather than a code defect and is now fixed by
+restating the taxonomy (no code change); the placement gap (`scan_`'s tag is
+leading, not trailing) is a breaking argument-order change still awaiting a
+maintainer decision, so #348 stays open for that alone. One needed a
+documentation decision and is filed as **#351** (`wrap`/`as_tensor` naming
+rationale). Two findings
 (`clamp`/`clip`, `sqnorm`/`sqdist`) feed the already-open naming-policy
 question in **#337** rather than standing alone. One documentation bug
 (`docs/indexing.md`'s backwards claim about `index_select`'s tag placement)

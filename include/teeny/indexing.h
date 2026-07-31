@@ -12,6 +12,7 @@
 #include <cuda/std/limits>
 #include <cuda/std/cstdint>
 #include <cuda/std/array>
+#include <cuda/std/tuple>
 #include <teeny/defines.h>
 #include <teeny/layout.h>
 
@@ -203,6 +204,41 @@ template <class S> _TNY_API constexpr bool _step1() {
 // (keeps the whole axis, folds, preserves static extents). `all == slice(none,none)`.
 template <class Arg> struct _is_full_slice : cs::false_type {};
 template <class S> struct _is_full_slice<_slice_spec<none_t,none_t,S>> : cs::integral_constant<bool, _step1<S>()> {};
+
+// ---- tuple-unpack indexing (#338) ------------------------------------------
+// numpy's `x[(a, b, c)] == x[a, b, c]`: ONE tuple-like argument may carry the whole
+// index list, which `operator()`/`at`/`uget`/`uat` unpack and re-dispatch through
+// their ordinary variadic entry points. `_is_index_arg` is what one element of such
+// a pack may be — exactly what the variadic call already accepts: an integer or
+// `Int<>`, `all` (`full_extent`), a `slice(...)`, a bare `none` (newaxis), or an
+// `ellipsis`/`etc`.
+template <class A> struct _is_index_arg
+    : cs::integral_constant<bool, _is_index<A>::value || _is_slice_spec<A>::value ||
+                                  cs::is_same<A, cs::full_extent_t>::value ||
+                                  _is_newaxis<A>::value || _is_ellipsis<A>::value> {};
+
+// The carriers: `cs::array<I, N>` — homogeneous, and exactly what a peel range's
+// `enumerate()` / `it.index()` hands back — and `cs::tuple<...>`, which may mix
+// integers, `Int<>`s, slices, `all`, `none` and an `ellipsis`.
+template <class P> struct _is_index_pack : cs::false_type {};
+template <class I, cs::size_t N> struct _is_index_pack<cs::array<I, N>> : _is_index_arg<I> {};
+template <class... As> struct _is_index_pack<cs::tuple<As...>>
+    : cs::integral_constant<bool, (_is_index_arg<As>::value && ...)> {};
+
+// "This call is a pack call": EXACTLY ONE argument, and it is such a carrier. The
+// variadic SLICING overloads (the `!_all_index && !_has_ellipsis` gate, which a pack
+// type would otherwise satisfy) exclude it, so the two overload sets are DISJOINT by
+// construction rather than by partial ordering. Partial ordering does prefer the
+// single-parameter pack overload on clang/gcc, but leaning on that would be a silent
+// trap: an argument the gather does not recognise falls through its per-axis dispatch
+// as an `all`, so were the variadic ever chosen, `t(m)` would quietly yield a full
+// view instead of an element rather than failing to compile (cf. #268's MSVC
+// overload-partitioning trouble — be explicit here). Pack indexing is single-argument
+// ONLY (the pack IS the whole index list), so any call with a second argument is not
+// a pack call and keeps today's behaviour untouched.
+template <class... Args> struct _is_pack_call : cs::false_type {};
+template <class A> struct _is_pack_call<A>
+    : _is_index_pack<cs::remove_cv_t<cs::remove_reference_t<A>>> {};
 
 // ---- output STATIC STRIDES for the gather (companion to _compact) ----------
 // A gathered view's layout is teeny's strides<...>, folding each kept axis to a

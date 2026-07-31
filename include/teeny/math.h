@@ -1208,7 +1208,11 @@ _TNY_API auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
         // index, output offset folds. A bigger static shape takes the decode path below.
         reduce_axes_static_<Axes...>(out, a, init, op, cs::make_index_sequence<_static_numel<E>()>{});
     } else {
-        bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
+        // Array size floored to 1 (rank-0 `a` -> zero-length `red[]` is a GCC/Clang
+        // extension, not portable to MSVC; #437). The loop bounds below still key
+        // on `E::rank()`, not the floored size, so a rank-0 source still does zero
+        // real iterations over `red` — the pad slot is never touched.
+        bool red[E::rank() ? E::rank() : 1] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
         reduce_axes_<R>(out, a, init, op, red, cs::make_index_sequence<E::rank()>{});
     }
     return out;
@@ -1219,7 +1223,9 @@ template <long... Axes, class R, class Op, class T,class E,class L,storage O,
 _TNY_HOST auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
     static_assert((_axis_in_range(Axes, E::rank()) && ...), "reduction axis out of range");
     using I = typename E::index_type;
-    bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
+    // Array size floored to 1 (rank-0 `a` -> zero-length `red[]` is a GCC/Clang
+    // extension, not portable to MSVC; #437). See the static-path twin above.
+    bool red[E::rank() ? E::rank() : 1] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
     cs::array<I, OE::rank()> ke{}; cs::size_t oi = 0;
     for (cs::size_t d = 0; d < E::rank(); ++d) if (!red[d]) ke[oi++] = static_cast<I>(a.extent(d));
     OE oe(ke);
@@ -1677,6 +1683,26 @@ template <class T,class E,class L,storage O> _TNY_API bool tensor<T,E,L,O>::any(
 // type (`double`) is the accumulator. Each splits static (stack, host+device) /
 // dynamic (heap, host-only) to match `axreduce`; the result is accumulated in `R`
 // then cast to the public element type by `reduce_to`.
+// The ONE axis-list distinctness guard of the reduction family, so that the check
+// and its wording live in a single place (#433). A repeated axis is a caller
+// mistake with no useful meaning — the engine simply marks that axis reduced
+// twice, i.e. `sum<0,0>(a)` silently computed `sum<0>(a)` before #433 — so it is a
+// hard error everywhere, `keepdims` or not. Two call sites use it: the axis
+// reduction core (`_TNY_RED_AXIS_ONE` below, which every one of
+// sum/prod/max/min/sqnorm/mean/norm is stamped from, and which the `axis<...>`
+// value-tag entry points dispatch into) and the keepdim fold just below (still its
+// own check, since `normalize<Axes...>` reaches that one directly without going
+// through a reduction core).
+// `WHAT` names the call site, `HINT` is an optional trailing parenthetical (`""`
+// for none), and the trailing argument is the axis expression to expand over the
+// enclosing `Axes...` pack — a VARIADIC macro argument because that expression
+// itself contains a comma (`_norm_axis(Axes, Rank)`). The axes must ALREADY be
+// normalised against the source rank, so a duplicate spelled two different ways
+// (`sum<0,-3>` on a rank-3 tensor) is caught as the duplicate it is.
+#define _TNY_AXES_DISTINCT(WHAT, HINT, ...)                                                              \
+    static_assert(_all_distinct<static_cast<cs::size_t>(__VA_ARGS__)...>(),                              \
+                  WHAT ": axes must be distinct" HINT)
+
 // keepdim view fold: insert a size-1 axis at each (already-normalised) position —
 // used by both the generic "finish" step below and axis `normalize`. This is
 // exactly `unsqueeze<Axes...>` (tensor.h): the reduced tensor's rank plus the
@@ -1689,7 +1715,7 @@ template <class T,class E,class L,storage O> _TNY_API bool tensor<T,E,L,O>::any(
 // NB the EMPTY pack is NOT `unsqueeze<>()` (that would insert an axis at 0, see
 // #369): an empty keepdim list is a no-op, hence its own branch.
 template <long... Axes, class Tn> _TNY_API auto _keepdims(const Tn & t) {
-    static_assert(_all_distinct<static_cast<cs::size_t>(Axes)...>(), "keepdim fold: axes must be distinct (keepdims / normalize<Axes...>)");
+    _TNY_AXES_DISTINCT("keepdim fold", " (keepdims / normalize<Axes...>)", Axes);
     if constexpr (sizeof...(Axes) == 0) return t;
     else                                return t.template unsqueeze<Axes...>();
 }
@@ -1789,7 +1815,13 @@ _TNY_API auto _red_sqrt(R && r) {
 // `accepts` guard below can safely reject it instead of silently ignoring it.
 // ONE axis-reduction overload — the single place the shape lives: the
 // `(sizeof...(Axes) > 0)` + static/dynamic SFINAE key, the `_TNY_API`/`_TNY_HOST`
-// split, the keyword guards, and the `_red_finish_*` tail. What varies per
+// split, the keyword guards, and the `_red_finish_*` tail. It is also where the
+// shared `_TNY_AXES_DISTINCT` guard sits (#433): the axes must be distinct whether
+// or not `keepdims` is given, and this is the one place BOTH the explicit
+// `NAME<Axes...>` calls and the `axis<...>` value-tag ones pass through (the
+// latter via `_TNY_RED_TAGGED`'s `_NAME_axed` helper). Before #433 only the
+// keepdims path checked (through `_keepdims`), so `sum<0,0>(a)` compiled and
+// silently meant `sum<0>(a)` while `sum<0,0>(a, keepdims)` did not. What varies per
 // reduction is only `EXPR`: an expression, in terms of the source tensor `a` and
 // the local accumulator alias `R`, producing the REDUCED tensor that the finish
 // step then applies `keepdims`/`into` to. Argument notes:
@@ -1807,6 +1839,8 @@ template <__VA_ARGS__, class T,class E,class L,storage O, class... Tags,        
                           _md::reduced_extents<E,Axes...>::rank_dynamic() CMP 0, int> = 0>              \
 API decltype(auto) NAME(const tensor<T,E,L,O> & a, Tags... tags) {                                      \
     _TNY_KW_CHECK(#NAME, "keepdims or into(dest)", (_is_into_tag, _is_keepdims_tag), Tags...);           \
+    _TNY_AXES_DISTINCT(#NAME, " -- each axis may be reduced only once",                                 \
+                       _norm_axis(Axes, E::rank()));                                                    \
     using R [[maybe_unused]] = RTYPE;                                                                   \
     return _md::_red_finish_##FIN<(long)E::rank(), Axes...>(EXPR, tags...); }
 // The four-overload axis-reduction shape (`<Axes...>` × static/dynamic,

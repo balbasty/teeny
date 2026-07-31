@@ -4472,7 +4472,7 @@ A distinct empty-tag type, like `all`/`none`, so it never collides with another 
 struct none_t
 ```
 
-Defined in include/teeny/indexing.h:116
+Defined in include/teeny/indexing.h:117
 
 Open-ended slice sentinel — teeny's `None` (python `a[:n]` / `a[m:]`).
 
@@ -6421,6 +6421,14 @@ The layout / extents / offset mapping is delegated to `cuda::std::mdspan` (the m
 | [`uat`](#uat-1) | `function` | Declared here |
 | [`operator()`](#operator-30) | `function` | Declared here |
 | [`operator()`](#operator-31) | `function` | Declared here |
+| [`operator()`](#operator-32) | `function` | Declared here |
+| [`operator()`](#operator-33) | `function` | Declared here |
+| [`at`](#at-2) | `function` | Declared here |
+| [`at`](#at-3) | `function` | Declared here |
+| [`uget`](#uget-6) | `function` | Declared here |
+| [`uget`](#uget-7) | `function` | Declared here |
+| [`uat`](#uat-2) | `function` | Declared here |
+| [`uat`](#uat-3) | `function` | Declared here |
 | [`operator T`](#operatort) | `function` | Declared here |
 | [`item`](#item-2) | `function` | Declared here |
 | [`slice_along`](#slice_along) | `function` | Declared here |
@@ -6510,10 +6518,10 @@ The layout / extents / offset mapping is delegated to `cuda::std::mdspan` (the m
 | [`atomic_sub_`](#atomic_sub_) | `function` | Declared here |
 | [`atomic_add_`](#atomic_add_-1) | `function` | Declared here |
 | [`atomic_sub_`](#atomic_sub_-1) | `function` | Declared here |
-| [`operator+=`](#operator-32) | `function` | Declared here |
-| [`operator-=`](#operator-33) | `function` | Declared here |
-| [`operator*=`](#operator-34) | `function` | Declared here |
-| [`operator/=`](#operator-35) | `function` | Declared here |
+| [`operator+=`](#operator-34) | `function` | Declared here |
+| [`operator-=`](#operator-35) | `function` | Declared here |
+| [`operator*=`](#operator-36) | `function` | Declared here |
+| [`operator/=`](#operator-37) | `function` | Declared here |
 | [`copy_`](#copy_) | `function` | Declared here |
 | [`fill_`](#fill_) | `function` | Declared here |
 | [`zero_`](#zero_) | `function` | Declared here |
@@ -6583,10 +6591,10 @@ The layout / extents / offset mapping is delegated to `cuda::std::mdspan` (the m
 | [`normalize_`](#normalize_) | `function` | Declared here |
 | [`normalize_`](#normalize_-1) | `function` | Declared here |
 | [`cross_`](#cross_) | `function` | Declared here |
-| [`operator++`](#operator-36) | `function` | Declared here |
-| [`operator--`](#operator-37) | `function` | Declared here |
 | [`operator++`](#operator-38) | `function` | Declared here |
 | [`operator--`](#operator-39) | `function` | Declared here |
+| [`operator++`](#operator-40) | `function` | Declared here |
+| [`operator--`](#operator-41) | `function` | Declared here |
 | [`add_`](#add_-3) | `function` | Declared here |
 | [`sub_`](#sub_-3) | `function` | Declared here |
 | [`mul_`](#mul_-2) | `function` | Declared here |
@@ -6691,6 +6699,14 @@ Defined in include/teeny/tensor.h:371
 | `auto` | [`uat`](#uat-1) `const` `inline` `noexcept` |  |
 | `decltype(auto)` | [`operator()`](#operator-30) `inline` `noexcept` | Ellipsis form: exactly one `ellipsis` in the args expands to `rank - (#other args)` copies of `all`, then the call re-runs — so `t(1, ellipsis, 2)` on rank 5 is `t(1, all, all, all, 2)`. |
 | `decltype(auto)` | [`operator()`](#operator-31) `const` `inline` `noexcept` |  |
+| `decltype(auto)` | [`operator()`](#operator-32) `inline` `noexcept` | **Tuple-unpack form** — `t(m)` where `m` is a single tuple-like index pack (a `cuda::std::array` or `cuda::std::tuple`) holding the WHOLE index list: exactly numpy's `x[(a, b, c)] == x[a, b, c]`. |
+| `decltype(auto)` | [`operator()`](#operator-33) `const` `inline` `noexcept` |  |
+| `decltype(auto)` | [`at`](#at-2) `inline` `noexcept` | Tuple-unpack `at`: `t.at(m)` == `t.at(m[0], m[1], ...)` — the element as a rank-0 VIEW. |
+| `decltype(auto)` | [`at`](#at-3) `const` `inline` `noexcept` |  |
+| `decltype(auto)` | [`uget`](#uget-6) `inline` `noexcept` | Tuple-unpack `uget` / `uat`: the unchecked twins (no negative-index wrap), same unpack, same result types as the checked forms. |
+| `decltype(auto)` | [`uget`](#uget-7) `const` `inline` `noexcept` |  |
+| `decltype(auto)` | [`uat`](#uat-2) `inline` `noexcept` |  |
+| `decltype(auto)` | [`uat`](#uat-3) `const` `inline` `noexcept` |  |
 |  | [`operator T`](#operatort) `const` `inline` `noexcept` |  |
 | `T` | [`item`](#item-2) `const` `inline` `noexcept` | The single element of a rank-0 tensor (explicit reader). |
 | `auto` | [`slice_along`](#slice_along) `inline` `noexcept` | Index/slice one or more named axes; other axes are kept. |
@@ -6780,10 +6796,10 @@ Defined in include/teeny/tensor.h:371
 | `tensor &` | [`atomic_sub_`](#atomic_sub_)  |  |
 | `tensor &` | [`atomic_add_`](#atomic_add_-1)  |  |
 | `tensor &` | [`atomic_sub_`](#atomic_sub_-1)  |  |
-| `tensor &` | [`operator+=`](#operator-32) `inline` |  |
-| `tensor &` | [`operator-=`](#operator-33) `inline` |  |
-| `tensor &` | [`operator*=`](#operator-34) `inline` |  |
-| `tensor &` | [`operator/=`](#operator-35) `inline` |  |
+| `tensor &` | [`operator+=`](#operator-34) `inline` |  |
+| `tensor &` | [`operator-=`](#operator-35) `inline` |  |
+| `tensor &` | [`operator*=`](#operator-36) `inline` |  |
+| `tensor &` | [`operator/=`](#operator-37) `inline` |  |
 | `tensor &` | [`copy_`](#copy_)  |  |
 | `tensor &` | [`fill_`](#fill_)  |  |
 | `tensor &` | [`zero_`](#zero_)  |  |
@@ -6853,10 +6869,10 @@ Defined in include/teeny/tensor.h:371
 | `tensor &` | [`normalize_`](#normalize_)  |  |
 | `tensor &` | [`normalize_`](#normalize_-1)  |  |
 | `tensor &` | [`cross_`](#cross_)  |  |
-| `tensor &` | [`operator++`](#operator-36) `inline` |  |
-| `tensor &` | [`operator--`](#operator-37) `inline` |  |
-| `tensor< T, Shape, ccontiguous, storage::stack >` | [`operator++`](#operator-38) `inline` |  |
-| `tensor< T, Shape, ccontiguous, storage::stack >` | [`operator--`](#operator-39) `inline` |  |
+| `tensor &` | [`operator++`](#operator-38) `inline` |  |
+| `tensor &` | [`operator--`](#operator-39) `inline` |  |
+| `tensor< T, Shape, ccontiguous, storage::stack >` | [`operator++`](#operator-40) `inline` |  |
+| `tensor< T, Shape, ccontiguous, storage::stack >` | [`operator--`](#operator-41) `inline` |  |
 | `tensor< T, E, L, O > &` | [`add_`](#add_-3)  |  |
 | `tensor< T, E, L, O > &` | [`sub_`](#sub_-3)  |  |
 | `tensor< T, E, L, O > &` | [`mul_`](#mul_-2)  |  |
@@ -7314,7 +7330,7 @@ Defined in include/teeny/tensor.h:564
 template<class... Args, enable_if_t< _all_index< Args... >::value, int > = 0> inline T & operator()(Args... a) noexcept
 ```
 
-Defined in include/teeny/tensor.h:749
+Defined in include/teeny/tensor.h:774
 
 Element access when every argument is an integer (negatives wrap).
 
@@ -7328,7 +7344,7 @@ Element access when every argument is an integer (negatives wrap).
 template<class... Args, enable_if_t< _all_index< Args... >::value, int > = 0> inline const T & operator()(Args... a) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:752
+Defined in include/teeny/tensor.h:777
 
 ---
 
@@ -7340,7 +7356,7 @@ Defined in include/teeny/tensor.h:752
 template<class... Args, enable_if_t< _all_index< Args... >::value, int > = 0> inline auto at(Args... a) noexcept
 ```
 
-Defined in include/teeny/tensor.h:762
+Defined in include/teeny/tensor.h:787
 
 `at(i...)` — a single element as a **rank-0 VIEW** (all-integer args; negatives wrap).
 
@@ -7356,7 +7372,7 @@ Unlike `operator()`, which returns a plain `T&`, this is a view, so the whole te
 template<class... Args, enable_if_t< _all_index< Args... >::value, int > = 0> inline auto at(Args... a) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:767
+Defined in include/teeny/tensor.h:792
 
 ---
 
@@ -7365,10 +7381,10 @@ Defined in include/teeny/tensor.h:767
 `inline` `noexcept`
 
 ```cpp
-template<class... Args, enable_if_t<!_all_index< Args... >::value &&!_has_ellipsis< Args... >::value, int > = 0> inline auto operator()(Args... a) noexcept
+template<class... Args, enable_if_t<!_all_index< Args... >::value &&!_has_ellipsis< Args... >::value &&!_is_pack_call< Args... >::value, int > = 0> inline auto operator()(Args... a) noexcept
 ```
 
-Defined in include/teeny/tensor.h:779
+Defined in include/teeny/tensor.h:805
 
 Sub-view when any argument is a slice (`all`, `slice(a,b[,step])`) or a bare `none` (numpy `newaxis`).
 
@@ -7381,10 +7397,10 @@ Integer args drop their axis, `all` keeps it, a range keeps a strided window, an
 `const` `inline` `noexcept`
 
 ```cpp
-template<class... Args, enable_if_t<!_all_index< Args... >::value &&!_has_ellipsis< Args... >::value, int > = 0> inline auto operator()(Args... a) const noexcept
+template<class... Args, enable_if_t<!_all_index< Args... >::value &&!_has_ellipsis< Args... >::value &&!_is_pack_call< Args... >::value, int > = 0> inline auto operator()(Args... a) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:782
+Defined in include/teeny/tensor.h:809
 
 ---
 
@@ -7396,7 +7412,7 @@ Defined in include/teeny/tensor.h:782
 template<class... Args, enable_if_t< _all_index< Args... >::value, int > = 0> inline T & uget(Args... a) noexcept
 ```
 
-Defined in include/teeny/tensor.h:807
+Defined in include/teeny/tensor.h:834
 
 ---
 
@@ -7408,7 +7424,7 @@ Defined in include/teeny/tensor.h:807
 template<class... Args, enable_if_t< _all_index< Args... >::value, int > = 0> inline const T & uget(Args... a) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:810
+Defined in include/teeny/tensor.h:837
 
 ---
 
@@ -7417,10 +7433,10 @@ Defined in include/teeny/tensor.h:810
 `inline` `noexcept`
 
 ```cpp
-template<class... Args, enable_if_t<!_all_index< Args... >::value &&!_has_ellipsis< Args... >::value, int > = 0> inline auto uget(Args... a) noexcept
+template<class... Args, enable_if_t<!_all_index< Args... >::value &&!_has_ellipsis< Args... >::value &&!_is_pack_call< Args... >::value, int > = 0> inline auto uget(Args... a) noexcept
 ```
 
-Defined in include/teeny/tensor.h:815
+Defined in include/teeny/tensor.h:843
 
 ---
 
@@ -7429,10 +7445,10 @@ Defined in include/teeny/tensor.h:815
 `const` `inline` `noexcept`
 
 ```cpp
-template<class... Args, enable_if_t<!_all_index< Args... >::value &&!_has_ellipsis< Args... >::value, int > = 0> inline auto uget(Args... a) const noexcept
+template<class... Args, enable_if_t<!_all_index< Args... >::value &&!_has_ellipsis< Args... >::value &&!_is_pack_call< Args... >::value, int > = 0> inline auto uget(Args... a) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:818
+Defined in include/teeny/tensor.h:847
 
 ---
 
@@ -7444,7 +7460,7 @@ Defined in include/teeny/tensor.h:818
 template<class... Args, enable_if_t< _has_ellipsis< Args... >::value, int > = 0> inline decltype(auto) uget(Args... a) noexcept
 ```
 
-Defined in include/teeny/tensor.h:823
+Defined in include/teeny/tensor.h:852
 
 ---
 
@@ -7456,7 +7472,7 @@ Defined in include/teeny/tensor.h:823
 template<class... Args, enable_if_t< _has_ellipsis< Args... >::value, int > = 0> inline decltype(auto) uget(Args... a) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:826
+Defined in include/teeny/tensor.h:855
 
 ---
 
@@ -7468,7 +7484,7 @@ Defined in include/teeny/tensor.h:826
 template<class... Args, enable_if_t< _all_index< Args... >::value, int > = 0> inline auto uat(Args... a) noexcept
 ```
 
-Defined in include/teeny/tensor.h:831
+Defined in include/teeny/tensor.h:860
 
 Unchecked `at`: a single element as a rank-0 VIEW, no negative wrap.
 
@@ -7482,7 +7498,7 @@ Unchecked `at`: a single element as a rank-0 VIEW, no negative wrap.
 template<class... Args, enable_if_t< _all_index< Args... >::value, int > = 0> inline auto uat(Args... a) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:836
+Defined in include/teeny/tensor.h:865
 
 ---
 
@@ -7494,7 +7510,7 @@ Defined in include/teeny/tensor.h:836
 template<class... Args, enable_if_t< _has_ellipsis< Args... >::value, int > = 0> inline decltype(auto) operator()(Args... a) noexcept
 ```
 
-Defined in include/teeny/tensor.h:846
+Defined in include/teeny/tensor.h:875
 
 Ellipsis form: exactly one `ellipsis` in the args expands to `rank - (#other args)` copies of `all`, then the call re-runs — so `t(1, ellipsis, 2)` on rank 5 is `t(1, all, all, all, 2)`.
 
@@ -7510,7 +7526,115 @@ What remains decides the result (all integers -> element, else view).
 template<class... Args, enable_if_t< _has_ellipsis< Args... >::value, int > = 0> inline decltype(auto) operator()(Args... a) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:849
+Defined in include/teeny/tensor.h:878
+
+---
+
+#### operator()
+
+`inline` `noexcept`
+
+```cpp
+template<class P, enable_if_t< _is_index_pack< P >::value, int > = 0> inline decltype(auto) operator()(const P & p) noexcept
+```
+
+Defined in include/teeny/tensor.h:898
+
+**Tuple-unpack form** — `t(m)` where `m` is a single tuple-like index pack (a `cuda::std::array` or `cuda::std::tuple`) holding the WHOLE index list: exactly numpy's `x[(a, b, c)] == x[a, b, c]`.
+
+The pack is unpacked and re-dispatched through the ordinary variadic call, so everything that call does still applies: its elements may be integers/`Int<>`, `all`, `slice(...)`, a bare `none` (newaxis) or one `ellipsis`, and the result is an element (`T&`) or a view exactly as if they had been written out. Arity and validity are diagnosed by that call's own `static_assert`s.
+
+This is pure packing sugar and is **single-argument only** — the pack IS the index list, and is never mixed with other positional arguments. It closes the loop with a peel range's `enumerate()` / `it.index()`, whose multi-index is a `cuda::std::array`: `for (auto [m, cell] : peel(t, axis<0,1>{}).enumerate()) out(m) = f(cell);`. Also available on `at`/`uget`/`uat` (and, on C++23, `t[m]`).
+
+---
+
+#### operator()
+
+`const` `inline` `noexcept`
+
+```cpp
+template<class P, enable_if_t< _is_index_pack< P >::value, int > = 0> inline decltype(auto) operator()(const P & p) const noexcept
+```
+
+Defined in include/teeny/tensor.h:900
+
+---
+
+#### at
+
+`inline` `noexcept`
+
+```cpp
+template<class P, enable_if_t< _is_index_pack< P >::value, int > = 0> inline decltype(auto) at(const P & p) noexcept
+```
+
+Defined in include/teeny/tensor.h:905
+
+Tuple-unpack `at`: `t.at(m)` == `t.at(m[0], m[1], ...)` — the element as a rank-0 VIEW.
+
+All-integer packs only (as with variadic `at`).
+
+---
+
+#### at
+
+`const` `inline` `noexcept`
+
+```cpp
+template<class P, enable_if_t< _is_index_pack< P >::value, int > = 0> inline decltype(auto) at(const P & p) const noexcept
+```
+
+Defined in include/teeny/tensor.h:907
+
+---
+
+#### uget
+
+`inline` `noexcept`
+
+```cpp
+template<class P, enable_if_t< _is_index_pack< P >::value, int > = 0> inline decltype(auto) uget(const P & p) noexcept
+```
+
+Defined in include/teeny/tensor.h:912
+
+Tuple-unpack `uget` / `uat`: the unchecked twins (no negative-index wrap), same unpack, same result types as the checked forms.
+
+---
+
+#### uget
+
+`const` `inline` `noexcept`
+
+```cpp
+template<class P, enable_if_t< _is_index_pack< P >::value, int > = 0> inline decltype(auto) uget(const P & p) const noexcept
+```
+
+Defined in include/teeny/tensor.h:914
+
+---
+
+#### uat
+
+`inline` `noexcept`
+
+```cpp
+template<class P, enable_if_t< _is_index_pack< P >::value, int > = 0> inline decltype(auto) uat(const P & p) noexcept
+```
+
+Defined in include/teeny/tensor.h:916
+
+---
+
+#### uat
+
+`const` `inline` `noexcept`
+
+```cpp
+template<class P, enable_if_t< _is_index_pack< P >::value, int > = 0> inline decltype(auto) uat(const P & p) const noexcept
+```
+
+Defined in include/teeny/tensor.h:918
 
 ---
 
@@ -7522,7 +7646,7 @@ Defined in include/teeny/tensor.h:849
 template<size_t R = rank(), enable_if_t< R==0, int > = 0> inline operator T() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:869
+Defined in include/teeny/tensor.h:937
 
 ---
 
@@ -7534,7 +7658,7 @@ Defined in include/teeny/tensor.h:869
 template<size_t R = rank(), enable_if_t< R==0, int > = 0> inline T item() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:874
+Defined in include/teeny/tensor.h:942
 
 The single element of a rank-0 tensor (explicit reader).
 
@@ -7548,7 +7672,7 @@ The single element of a rank-0 tensor (explicit reader).
 template<long... Axes, class... Args> inline auto slice_along(Args... args) noexcept
 ```
 
-Defined in include/teeny/tensor.h:928
+Defined in include/teeny/tensor.h:996
 
 Index/slice one or more named axes; other axes are kept.
 
@@ -7566,7 +7690,7 @@ NB this is NOT numpy's `take_along_axis` / pytorch's `take_along_dim` (a data-de
 template<long... Axes, class... Args> inline auto slice_along(Args... args) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:935
+Defined in include/teeny/tensor.h:1003
 
 ---
 
@@ -7578,7 +7702,7 @@ Defined in include/teeny/tensor.h:935
 template<long... Axes, class... Args> inline auto slice_along(axis< Axes... >, Args... args) noexcept
 ```
 
-Defined in include/teeny/tensor.h:946
+Defined in include/teeny/tensor.h:1014
 
 Value form: `t.slice_along(axis<0,2>{}, i, slice(1,4))` == `t.slice_along<0,2>(i, slice(1,4))`.
 
@@ -7594,7 +7718,7 @@ The leading `axis<...>` selector is a single distinct-typed argument, so it need
 template<long... Axes, class... Args> inline auto slice_along(axis< Axes... >, Args... args) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:948
+Defined in include/teeny/tensor.h:1016
 
 ---
 
@@ -7606,7 +7730,7 @@ Defined in include/teeny/tensor.h:948
 template<long... Axes, class K, class... Starts> inline auto subsample(K k, Starts... starts) noexcept
 ```
 
-Defined in include/teeny/tensor.h:965
+Defined in include/teeny/tensor.h:1033
 
 Subsample a coloured/strided sub-lattice: bind named axes to a `slice(start,none,k)` each, sharing one STEP `k` across all of them but taking a separate START per axis — sugar for `slice_along` (#258), for the "every `k`-th voxel, offset per
        axis" pattern coloured Gauss-Seidel relaxation needs (`loc[d] % k == digit_d(n)`).
@@ -7623,7 +7747,7 @@ Pure sugar, no new addressing power: `t.subsample<0,1>(k, s0, s1)` == `t.slice_a
 template<long... Axes, class K, class... Starts> inline auto subsample(K k, Starts... starts) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:970
+Defined in include/teeny/tensor.h:1038
 
 ---
 
@@ -7635,7 +7759,7 @@ Defined in include/teeny/tensor.h:970
 template<long... Axes, class K, class... Starts> inline auto subsample(axis< Axes... >, K k, Starts... starts) noexcept
 ```
 
-Defined in include/teeny/tensor.h:980
+Defined in include/teeny/tensor.h:1048
 
 Value form: `t.subsample(axis<0,1>{}, k, s0, s1)` == `t.subsample<0,1>(k, s0, s1)` — leading `axis<...>` selector, same placement as `slice_along`'s own value form (a second variadic pack, the starts, needs the disambiguating tag up front rather than trailing).
 
@@ -7649,7 +7773,7 @@ Value form: `t.subsample(axis<0,1>{}, k, s0, s1)` == `t.subsample<0,1>(k, s0, s1
 template<long... Axes, class K, class... Starts> inline auto subsample(axis< Axes... >, K k, Starts... starts) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:982
+Defined in include/teeny/tensor.h:1050
 
 ---
 
@@ -7661,7 +7785,7 @@ Defined in include/teeny/tensor.h:982
 template<long Axis, class Sz, class St = integral_constant<long,1>> inline auto unfold(Sz size, St step = St{}) noexcept
 ```
 
-Defined in include/teeny/tensor.h:1010
+Defined in include/teeny/tensor.h:1078
 
 Sliding/strided window along axis `Axis` (pytorch `Tensor.unfold`): appends a NEW trailing axis of width `size`, stepped by `step` along `Axis` -> a rank-(N+1) view.
 
@@ -7677,7 +7801,7 @@ Sliding/strided window along axis `Axis` (pytorch `Tensor.unfold`): appends a NE
 template<long Axis, class Sz, class St = integral_constant<long,1>> inline auto unfold(Sz size, St step = St{}) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1022
+Defined in include/teeny/tensor.h:1090
 
 ---
 
@@ -7689,7 +7813,7 @@ Defined in include/teeny/tensor.h:1022
 template<class I, class Sz, class St = integral_constant<long,1>, enable_if_t< _is_ic< I >::value, int > = 0> inline auto unfold(I, Sz size, St step = St{}) noexcept
 ```
 
-Defined in include/teeny/tensor.h:1038
+Defined in include/teeny/tensor.h:1106
 
 Value form: `t.unfold(Int<0>(), K, s)` == `t.unfold<0>(K, s)` — a single-axis selector (like `flip`/`squeeze`/`unsqueeze`'s own `Int<k>()` twin), so no `.template` is needed on a dependent receiver.
 
@@ -7703,7 +7827,7 @@ Value form: `t.unfold(Int<0>(), K, s)` == `t.unfold<0>(K, s)` — a single-axis 
 template<class I, class Sz, class St = integral_constant<long,1>, enable_if_t< _is_ic< I >::value, int > = 0> inline auto unfold(I, Sz size, St step = St{}) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1040
+Defined in include/teeny/tensor.h:1108
 
 ---
 
@@ -7715,7 +7839,7 @@ Defined in include/teeny/tensor.h:1040
 template<long Axis, class Ti, class Ei, class Li, storage Oi, enable_if_t< _md::index_select_extents< Shape, _norm_axis(Axis, rank()), _shape_static_extent< Ei >(0)>::rank_dynamic() !=0, int > = 0> inline auto index_select(const tensor< Ti, Ei, Li, Oi > & idx, const tensor< Ti, Ei, Li, Oi > & idx) const
 ```
 
-Defined in include/teeny/tensor.h:1093
+Defined in include/teeny/tensor.h:1161
 
 ---
 
@@ -7727,7 +7851,7 @@ Defined in include/teeny/tensor.h:1093
 template<class Ti, class Ei, class Li, storage Oi, long Axis, enable_if_t< _md::index_select_extents< Shape, _norm_axis(Axis, rank()), _shape_static_extent< Ei >(0)>::rank_dynamic() !=0, int > = 0> inline auto index_select(const tensor< Ti, Ei, Li, Oi > & idx, axis< Axis >, const tensor< Ti, Ei, Li, Oi > & idx, axis< Axis >) const
 ```
 
-Defined in include/teeny/tensor.h:1122
+Defined in include/teeny/tensor.h:1190
 
 ---
 
@@ -7739,7 +7863,7 @@ Defined in include/teeny/tensor.h:1122
 template<class Ti, class Ei, class Li, storage Oi, long Axis, class D> inline auto & index_select(const tensor< Ti, Ei, Li, Oi > & idx, axis< Axis >, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1124
+Defined in include/teeny/tensor.h:1192
 
 ---
 
@@ -7751,7 +7875,7 @@ Defined in include/teeny/tensor.h:1124
 template<long Axis, class Ti, class Ei, class Li, storage Oi, class D> inline auto & index_select(const tensor< Ti, Ei, Li, Oi > & idx, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1135
+Defined in include/teeny/tensor.h:1203
 
 `into(dest)` form: writes the gather straight into `dest` — one pass, no allocation, `_TNY_API` (device-safe).
 
@@ -7767,7 +7891,7 @@ Returns `dest&`. `dest`'s extents must match (axis `Axis` == `idx.numel()`, chec
 template<long... Perm> inline auto permute() noexcept
 ```
 
-Defined in include/teeny/tensor.h:1159
+Defined in include/teeny/tensor.h:1227
 
 Reorder the axes (a permutation of 0..N-1; negatives wrap) -> a rank-N view.
 
@@ -7781,7 +7905,7 @@ Reorder the axes (a permutation of 0..N-1; negatives wrap) -> a rank-N view.
 template<long... Perm> inline auto permute() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1162
+Defined in include/teeny/tensor.h:1230
 
 ---
 
@@ -7793,11 +7917,13 @@ Defined in include/teeny/tensor.h:1162
 template<long Ax = 0> inline auto flip() noexcept
 ```
 
-Defined in include/teeny/tensor.h:1168
+Defined in include/teeny/tensor.h:1240
 
 Reverse axis `Ax` (negatives wrap) -> a view (numpy `flip`).
 
 Uses a negative stride, so the index type must be signed (`shape<...>` is).
+
+An EMPTY tensor (`[numel()](#numel) == 0`) flips to a view over the *same* base pointer: there is no last element to move the origin to, so `[data()](#data-6)` is left exactly where it was.
 
 ---
 
@@ -7809,7 +7935,7 @@ Uses a negative stride, so the index type must be signed (`shape<...>` is).
 template<long Ax = 0> inline auto flip() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1171
+Defined in include/teeny/tensor.h:1243
 
 ---
 
@@ -7821,11 +7947,13 @@ Defined in include/teeny/tensor.h:1171
 template<long Ax0, long Ax1, long... Rest> inline auto flip() noexcept
 ```
 
-Defined in include/teeny/tensor.h:1184
+Defined in include/teeny/tensor.h:1260
 
 Reverse SEVERAL axes at once (numpy `flip(a, axis=(...))`) -> a rank-N view.
 
 The axes are relative to the source rank (negatives count from the back) and must be distinct, in ANY order — flipping axes commutes, so `t.flip<0,2>()`, `t.flip<2,0>()` and `t.flip<0>().flip<2>()` are the same view (same type, same elements). Each named axis gets its stride negated and the base pointer moved to its last element, all in ONE view — no chain of intermediates. Arity picks this overload; one axis (or none) still means `flip<Ax>()` above.
+
+As for the single-axis form, an EMPTY tensor keeps its base pointer (`[data()](#data-6)` unchanged) — even when only *one* axis is empty and the others are flipped.
 
 ---
 
@@ -7837,7 +7965,7 @@ The axes are relative to the source rank (negatives count from the back) and mus
 template<long Ax0, long Ax1, long... Rest> inline auto flip() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1194
+Defined in include/teeny/tensor.h:1270
 
 ---
 
@@ -7849,7 +7977,7 @@ Defined in include/teeny/tensor.h:1194
 template<bool S = is_static, enable_if_t<!S, int > = 0> inline auto clone() const
 ```
 
-Defined in include/teeny/tensor.h:1215
+Defined in include/teeny/tensor.h:1291
 
 ---
 
@@ -7861,7 +7989,7 @@ Defined in include/teeny/tensor.h:1215
 template<class T2 = element_type, bool Force = false, enable_if_t<!Force &&is_same< T2, element_type >::value, int > = 0> inline auto to() const &
 ```
 
-Defined in include/teeny/tensor.h:1252
+Defined in include/teeny/tensor.h:1328
 
 pytorch-like `.to<T2>()`: convert the element type to `T2`.
 
@@ -7881,7 +8009,7 @@ When a conversion IS needed (`T2` differs, or `Force`), the result is a dense, r
 template<class T2 = element_type, bool Force = false, bool S = is_static, enable_if_t<(Force||!is_same< T2, element_type >::value) &&!S, int > = 0> inline auto to() const &
 ```
 
-Defined in include/teeny/tensor.h:1260
+Defined in include/teeny/tensor.h:1336
 
 ---
 
@@ -7893,7 +8021,7 @@ Defined in include/teeny/tensor.h:1260
 template<class T2 = element_type, bool Force = false, enable_if_t< storage_is_view(O) &&!Force &&is_same< T2, element_type >::value, int > = 0> inline auto to() const &&
 ```
 
-Defined in include/teeny/tensor.h:1279
+Defined in include/teeny/tensor.h:1355
 
 ---
 
@@ -7905,7 +8033,7 @@ Defined in include/teeny/tensor.h:1279
 template<class T2 = element_type, bool Force = false, bool S = is_static, enable_if_t<!(storage_is_view(O) &&!Force &&is_same< T2, element_type >::value) &&!S, int > = 0> inline auto to() const &&
 ```
 
-Defined in include/teeny/tensor.h:1287
+Defined in include/teeny/tensor.h:1363
 
 ---
 
@@ -7917,7 +8045,7 @@ Defined in include/teeny/tensor.h:1287
 template<bool Force = false, class T2, bool S = is_static, enable_if_t<!(S||(!Force &&is_same< T2, element_type >::value)), int > = 0> inline auto to(dtype< T2 >, dtype< T2 >) const &
 ```
 
-Defined in include/teeny/tensor.h:1308
+Defined in include/teeny/tensor.h:1384
 
 ---
 
@@ -7929,7 +8057,7 @@ Defined in include/teeny/tensor.h:1308
 template<bool Force = false, class T2, bool S = is_static, enable_if_t<!(S||(storage_is_view(O) &&!Force &&is_same< T2, element_type >::value)), int > = 0> inline auto to(dtype< T2 >, dtype< T2 >) const &&
 ```
 
-Defined in include/teeny/tensor.h:1314
+Defined in include/teeny/tensor.h:1390
 
 ---
 
@@ -7941,7 +8069,7 @@ Defined in include/teeny/tensor.h:1314
 template<long... NewExt> inline auto reshape() noexcept
 ```
 
-Defined in include/teeny/tensor.h:1414
+Defined in include/teeny/tensor.h:1490
 
 View this tensor as a new shape — numpy semantics: a **VIEW** whenever the layout can be regrouped without a copy (not only when C-contiguous; a strided/permuted source often still views — split a contiguous axis, merge a contiguous run).
 
@@ -7957,7 +8085,7 @@ The output is a folded `strides<...>` view (compile-time strides when the source
 template<long... NewExt> inline auto reshape() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1415
+Defined in include/teeny/tensor.h:1491
 
 ---
 
@@ -7969,7 +8097,7 @@ Defined in include/teeny/tensor.h:1415
 template<long... NewExt> inline bool can_reshape_without_copy() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1424
+Defined in include/teeny/tensor.h:1500
 
 Whether `reshape<NewExt...>()` can produce a VIEW (no copy) of this tensor's actual layout — numpy's rule: not just C-contiguity, but any stride-compatible regrouping (splitting an axis, merging a contiguous run).
 
@@ -7985,7 +8113,7 @@ One `-1` may be inferred. `false` -> the reshape needs a `[clone()](#clone)`. (T
 template<class NewShape, class NewLayout = keep_strides> inline auto recast()
 ```
 
-Defined in include/teeny/tensor.h:1496
+Defined in include/teeny/tensor.h:1572
 
 Reinterpret with a MORE-STATIC extents type of the same rank — recover statically-known inner dims at the dynamic (ndarray) boundary: a runtime `(n,3,3)` view -> `.recast<shape<-1,3,3>>()` so the `3`s (extents) fold.
 
@@ -8009,7 +8137,7 @@ Each static dim of `NewShape` is validated against the actual extent. Functional
 template<class NewShape, class NewLayout = keep_strides> inline auto recast() const
 ```
 
-Defined in include/teeny/tensor.h:1498
+Defined in include/teeny/tensor.h:1574
 
 ---
 
@@ -8021,7 +8149,7 @@ Defined in include/teeny/tensor.h:1498
 template<class Idx2> inline bool index_fits() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1507
+Defined in include/teeny/tensor.h:1583
 
 Does every element offset of this view fit the index type `Idx2`? Computes the SIGNED reach directly (teeny has negative-stride views, so `required_span_size`'s non-negative assumption doesn't apply): `max = Σ_{s>0}(e−1)·s`, `min = Σ_{s<0}(e−1)·s`; fits ⟺ `min..max` ⊆ `Idx2`.
 
@@ -8037,7 +8165,7 @@ Accumulates in a wide type; a broadcast (stride-0) axis adds 0. The precondition
 template<class Idx2> inline auto reindex()
 ```
 
-Defined in include/teeny/tensor.h:1528
+Defined in include/teeny/tensor.h:1604
 
 No-copy, **layout-preserving** retype of the offset index width to `Idx2`: same pointer, same layout KIND, the extents' `index_type` and any dynamic strides narrowed to `Idx2` (a `strides<...>` literal pack is unchanged).
 
@@ -8053,7 +8181,7 @@ Narrowing the boundary view to `shape32` halves the by-value footprint and runs 
 template<class Idx2> inline auto reindex() const
 ```
 
-Defined in include/teeny/tensor.h:1533
+Defined in include/teeny/tensor.h:1609
 
 ---
 
@@ -8065,7 +8193,7 @@ Defined in include/teeny/tensor.h:1533
 inline auto flatten() noexcept
 ```
 
-Defined in include/teeny/tensor.h:1542
+Defined in include/teeny/tensor.h:1618
 
 View as 1-D (`ravel`) — a VIEW whenever the layout is mergeable into a single contiguous run without a copy (numpy semantics; `[clone()](#clone)` first otherwise).
 
@@ -8081,7 +8209,7 @@ Just `reshape<-1>()` (one inferred dim), spelled out for discoverability.
 inline auto flatten() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1543
+Defined in include/teeny/tensor.h:1619
 
 ---
 
@@ -8093,7 +8221,7 @@ Defined in include/teeny/tensor.h:1543
 template<long Ax = 0> inline auto unsqueeze() noexcept
 ```
 
-Defined in include/teeny/tensor.h:1549
+Defined in include/teeny/tensor.h:1625
 
 Insert a size-1 axis at position `Ax` (numpy `newaxis`/`unsqueeze`) -> a rank-(N+1) view.
 
@@ -8109,7 +8237,7 @@ Negative `Ax` counts from the back, so `.unsqueeze<-1>()` appends a trailing axi
 template<long Ax = 0> inline auto unsqueeze() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1552
+Defined in include/teeny/tensor.h:1628
 
 ---
 
@@ -8121,7 +8249,7 @@ Defined in include/teeny/tensor.h:1552
 template<long Ax0, long Ax1, long... Rest> inline auto unsqueeze() noexcept
 ```
 
-Defined in include/teeny/tensor.h:1563
+Defined in include/teeny/tensor.h:1639
 
 Insert size-1 axes at SEVERAL positions at once (numpy `expand_dims(a, axis=(...))`) -> a rank-(N+k) view.
 
@@ -8137,7 +8265,7 @@ The positions are relative to the **final** rank `N + k` (negatives count from t
 template<long Ax0, long Ax1, long... Rest> inline auto unsqueeze() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1573
+Defined in include/teeny/tensor.h:1649
 
 ---
 
@@ -8149,7 +8277,7 @@ Defined in include/teeny/tensor.h:1573
 template<long Ax = _ax_all> inline auto squeeze() noexcept
 ```
 
-Defined in include/teeny/tensor.h:1605
+Defined in include/teeny/tensor.h:1681
 
 Drop a size-1 axis `Ax` (negatives wrap) -> a rank-(N-1) view.
 
@@ -8165,7 +8293,7 @@ Drop a size-1 axis `Ax` (negatives wrap) -> a rank-(N-1) view.
 template<long Ax = _ax_all> inline auto squeeze() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1614
+Defined in include/teeny/tensor.h:1690
 
 ---
 
@@ -8177,7 +8305,7 @@ Defined in include/teeny/tensor.h:1614
 template<long Ax0, long Ax1, long... Rest> inline auto squeeze() noexcept
 ```
 
-Defined in include/teeny/tensor.h:1632
+Defined in include/teeny/tensor.h:1708
 
 Drop SEVERAL size-1 axes at once (numpy `squeeze(axis=(...))`) -> a rank-(N-k) view.
 
@@ -8193,7 +8321,7 @@ The positions are relative to the **source** rank (negatives count from the back
 template<long Ax0, long Ax1, long... Rest> inline auto squeeze() const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1643
+Defined in include/teeny/tensor.h:1719
 
 ---
 
@@ -8205,7 +8333,7 @@ Defined in include/teeny/tensor.h:1643
 template<class I, enable_if_t< _is_ic< I >::value, int > = 0> inline auto flip(I) noexcept
 ```
 
-Defined in include/teeny/tensor.h:1658
+Defined in include/teeny/tensor.h:1734
 
 ---
 
@@ -8217,7 +8345,7 @@ Defined in include/teeny/tensor.h:1658
 template<class I, enable_if_t< _is_ic< I >::value, int > = 0> inline auto flip(I) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1659
+Defined in include/teeny/tensor.h:1735
 
 ---
 
@@ -8229,7 +8357,7 @@ Defined in include/teeny/tensor.h:1659
 template<class I, enable_if_t< _is_ic< I >::value, int > = 0> inline auto squeeze(I) noexcept
 ```
 
-Defined in include/teeny/tensor.h:1660
+Defined in include/teeny/tensor.h:1736
 
 ---
 
@@ -8241,7 +8369,7 @@ Defined in include/teeny/tensor.h:1660
 template<class I, enable_if_t< _is_ic< I >::value, int > = 0> inline auto squeeze(I) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1661
+Defined in include/teeny/tensor.h:1737
 
 ---
 
@@ -8253,7 +8381,7 @@ Defined in include/teeny/tensor.h:1661
 template<class I, enable_if_t< _is_ic< I >::value, int > = 0> inline auto unsqueeze(I) noexcept
 ```
 
-Defined in include/teeny/tensor.h:1662
+Defined in include/teeny/tensor.h:1738
 
 ---
 
@@ -8265,7 +8393,7 @@ Defined in include/teeny/tensor.h:1662
 template<class I, enable_if_t< _is_ic< I >::value, int > = 0> inline auto unsqueeze(I) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1663
+Defined in include/teeny/tensor.h:1739
 
 ---
 
@@ -8277,7 +8405,7 @@ Defined in include/teeny/tensor.h:1663
 template<class... I, enable_if_t<(sizeof...(I) > 0) &&_all_ic< I... >::value, int > = 0> inline auto permute(I...) noexcept
 ```
 
-Defined in include/teeny/tensor.h:1664
+Defined in include/teeny/tensor.h:1740
 
 ---
 
@@ -8289,7 +8417,7 @@ Defined in include/teeny/tensor.h:1664
 template<class... I, enable_if_t<(sizeof...(I) > 0) &&_all_ic< I... >::value, int > = 0> inline auto permute(I...) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1665
+Defined in include/teeny/tensor.h:1741
 
 ---
 
@@ -8301,7 +8429,7 @@ Defined in include/teeny/tensor.h:1665
 template<long... Axes> inline auto squeeze(axis< Axes... >) noexcept
 ```
 
-Defined in include/teeny/tensor.h:1689
+Defined in include/teeny/tensor.h:1765
 
 Value form: `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise `unsqueeze`/`flip`/`permute`.
 
@@ -8321,7 +8449,7 @@ An EMPTY list — `axis<>{}` — names no axis, so it is a **no-op**: the same s
 template<long... Axes> inline auto squeeze(axis< Axes... >) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1691
+Defined in include/teeny/tensor.h:1767
 
 ---
 
@@ -8333,7 +8461,7 @@ Defined in include/teeny/tensor.h:1691
 template<long... Axes> inline auto unsqueeze(axis< Axes... >) noexcept
 ```
 
-Defined in include/teeny/tensor.h:1693
+Defined in include/teeny/tensor.h:1769
 
 ---
 
@@ -8345,7 +8473,7 @@ Defined in include/teeny/tensor.h:1693
 template<long... Axes> inline auto unsqueeze(axis< Axes... >) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1695
+Defined in include/teeny/tensor.h:1771
 
 ---
 
@@ -8357,7 +8485,7 @@ Defined in include/teeny/tensor.h:1695
 template<long... Axes> inline auto flip(axis< Axes... >) noexcept
 ```
 
-Defined in include/teeny/tensor.h:1697
+Defined in include/teeny/tensor.h:1773
 
 ---
 
@@ -8369,7 +8497,7 @@ Defined in include/teeny/tensor.h:1697
 template<long... Axes> inline auto flip(axis< Axes... >) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1699
+Defined in include/teeny/tensor.h:1775
 
 ---
 
@@ -8381,7 +8509,7 @@ Defined in include/teeny/tensor.h:1699
 template<long... Axes> inline auto permute(axis< Axes... >) noexcept
 ```
 
-Defined in include/teeny/tensor.h:1701
+Defined in include/teeny/tensor.h:1777
 
 ---
 
@@ -8393,7 +8521,7 @@ Defined in include/teeny/tensor.h:1701
 template<long... Axes> inline auto permute(axis< Axes... >) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1702
+Defined in include/teeny/tensor.h:1778
 
 ---
 
@@ -8405,7 +8533,7 @@ Defined in include/teeny/tensor.h:1702
 template<class... I, enable_if_t<(sizeof...(I) > 0) &&_all_ic< I... >::value, int > = 0> inline auto reshape(I...) noexcept
 ```
 
-Defined in include/teeny/tensor.h:1703
+Defined in include/teeny/tensor.h:1779
 
 ---
 
@@ -8417,7 +8545,7 @@ Defined in include/teeny/tensor.h:1703
 template<class... I, enable_if_t<(sizeof...(I) > 0) &&_all_ic< I... >::value, int > = 0> inline auto reshape(I...) const noexcept
 ```
 
-Defined in include/teeny/tensor.h:1704
+Defined in include/teeny/tensor.h:1780
 
 ---
 
@@ -8429,7 +8557,7 @@ Defined in include/teeny/tensor.h:1704
 template<class NewE> inline auto recast(NewE)
 ```
 
-Defined in include/teeny/tensor.h:1705
+Defined in include/teeny/tensor.h:1781
 
 ---
 
@@ -8441,7 +8569,7 @@ Defined in include/teeny/tensor.h:1705
 template<class NewE> inline auto recast(NewE) const
 ```
 
-Defined in include/teeny/tensor.h:1706
+Defined in include/teeny/tensor.h:1782
 
 ---
 
@@ -8453,7 +8581,7 @@ Defined in include/teeny/tensor.h:1706
 template<class NewE, class NewL> inline auto recast(NewE, NewL)
 ```
 
-Defined in include/teeny/tensor.h:1711
+Defined in include/teeny/tensor.h:1787
 
 ---
 
@@ -8465,7 +8593,7 @@ Defined in include/teeny/tensor.h:1711
 template<class NewE, class NewL> inline auto recast(NewE, NewL) const
 ```
 
-Defined in include/teeny/tensor.h:1712
+Defined in include/teeny/tensor.h:1788
 
 ---
 
@@ -8475,7 +8603,7 @@ Defined in include/teeny/tensor.h:1712
 template<bool Atomic = false, class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & add_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1719
+Defined in include/teeny/tensor.h:1795
 
 ---
 
@@ -8485,7 +8613,7 @@ Defined in include/teeny/tensor.h:1719
 template<bool Atomic = false, class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & sub_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1720
+Defined in include/teeny/tensor.h:1796
 
 ---
 
@@ -8495,7 +8623,7 @@ Defined in include/teeny/tensor.h:1720
 template<class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & mul_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1721
+Defined in include/teeny/tensor.h:1797
 
 ---
 
@@ -8505,7 +8633,7 @@ Defined in include/teeny/tensor.h:1721
 template<class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & div_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1722
+Defined in include/teeny/tensor.h:1798
 
 ---
 
@@ -8515,7 +8643,7 @@ Defined in include/teeny/tensor.h:1722
 template<bool Atomic = false> tensor & add_(T s)
 ```
 
-Defined in include/teeny/tensor.h:1723
+Defined in include/teeny/tensor.h:1799
 
 ---
 
@@ -8525,7 +8653,7 @@ Defined in include/teeny/tensor.h:1723
 template<bool Atomic = false> tensor & sub_(T s)
 ```
 
-Defined in include/teeny/tensor.h:1724
+Defined in include/teeny/tensor.h:1800
 
 ---
 
@@ -8535,7 +8663,7 @@ Defined in include/teeny/tensor.h:1724
 tensor & mul_(T s)
 ```
 
-Defined in include/teeny/tensor.h:1725
+Defined in include/teeny/tensor.h:1801
 
 ---
 
@@ -8545,7 +8673,7 @@ Defined in include/teeny/tensor.h:1725
 tensor & div_(T s)
 ```
 
-Defined in include/teeny/tensor.h:1726
+Defined in include/teeny/tensor.h:1802
 
 ---
 
@@ -8555,7 +8683,7 @@ Defined in include/teeny/tensor.h:1726
 template<class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & minimum_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1732
+Defined in include/teeny/tensor.h:1808
 
 ---
 
@@ -8565,7 +8693,7 @@ Defined in include/teeny/tensor.h:1732
 template<class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & maximum_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1733
+Defined in include/teeny/tensor.h:1809
 
 ---
 
@@ -8575,7 +8703,7 @@ Defined in include/teeny/tensor.h:1733
 tensor & minimum_(T s)
 ```
 
-Defined in include/teeny/tensor.h:1734
+Defined in include/teeny/tensor.h:1810
 
 ---
 
@@ -8585,7 +8713,7 @@ Defined in include/teeny/tensor.h:1734
 tensor & maximum_(T s)
 ```
 
-Defined in include/teeny/tensor.h:1735
+Defined in include/teeny/tensor.h:1811
 
 ---
 
@@ -8595,7 +8723,7 @@ Defined in include/teeny/tensor.h:1735
 template<class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & add_(const B & b, T alpha)
 ```
 
-Defined in include/teeny/tensor.h:1740
+Defined in include/teeny/tensor.h:1816
 
 ---
 
@@ -8605,7 +8733,7 @@ Defined in include/teeny/tensor.h:1740
 template<class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & sub_(const B & b, T alpha)
 ```
 
-Defined in include/teeny/tensor.h:1741
+Defined in include/teeny/tensor.h:1817
 
 ---
 
@@ -8615,7 +8743,7 @@ Defined in include/teeny/tensor.h:1741
 template<class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & atomic_add_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1750
+Defined in include/teeny/tensor.h:1826
 
 ---
 
@@ -8625,7 +8753,7 @@ Defined in include/teeny/tensor.h:1750
 template<class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> tensor & atomic_sub_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1751
+Defined in include/teeny/tensor.h:1827
 
 ---
 
@@ -8635,7 +8763,7 @@ Defined in include/teeny/tensor.h:1751
 tensor & atomic_add_(T s)
 ```
 
-Defined in include/teeny/tensor.h:1752
+Defined in include/teeny/tensor.h:1828
 
 ---
 
@@ -8645,7 +8773,7 @@ Defined in include/teeny/tensor.h:1752
 tensor & atomic_sub_(T s)
 ```
 
-Defined in include/teeny/tensor.h:1753
+Defined in include/teeny/tensor.h:1829
 
 ---
 
@@ -8657,7 +8785,7 @@ Defined in include/teeny/tensor.h:1753
 template<class B> inline tensor & operator+=(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1757
+Defined in include/teeny/tensor.h:1833
 
 ---
 
@@ -8669,7 +8797,7 @@ Defined in include/teeny/tensor.h:1757
 template<class B> inline tensor & operator-=(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1758
+Defined in include/teeny/tensor.h:1834
 
 ---
 
@@ -8681,7 +8809,7 @@ Defined in include/teeny/tensor.h:1758
 template<class B> inline tensor & operator*=(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1759
+Defined in include/teeny/tensor.h:1835
 
 ---
 
@@ -8693,7 +8821,7 @@ Defined in include/teeny/tensor.h:1759
 template<class B> inline tensor & operator/=(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1760
+Defined in include/teeny/tensor.h:1836
 
 ---
 
@@ -8703,7 +8831,7 @@ Defined in include/teeny/tensor.h:1760
 template<class B> tensor & copy_(const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1763
+Defined in include/teeny/tensor.h:1839
 
 ---
 
@@ -8713,7 +8841,7 @@ Defined in include/teeny/tensor.h:1763
 tensor & fill_(T s)
 ```
 
-Defined in include/teeny/tensor.h:1764
+Defined in include/teeny/tensor.h:1840
 
 ---
 
@@ -8723,7 +8851,7 @@ Defined in include/teeny/tensor.h:1764
 tensor & zero_()
 ```
 
-Defined in include/teeny/tensor.h:1765
+Defined in include/teeny/tensor.h:1841
 
 ---
 
@@ -8733,7 +8861,7 @@ Defined in include/teeny/tensor.h:1765
 tensor & iota_(T start = T(0), T step = T(1))
 ```
 
-Defined in include/teeny/tensor.h:1766
+Defined in include/teeny/tensor.h:1842
 
 ---
 
@@ -8745,7 +8873,7 @@ Defined in include/teeny/tensor.h:1766
 template<class B> auto add(const B & b) const
 ```
 
-Defined in include/teeny/tensor.h:1769
+Defined in include/teeny/tensor.h:1845
 
 ---
 
@@ -8757,7 +8885,7 @@ Defined in include/teeny/tensor.h:1769
 template<class B> auto sub(const B & b) const
 ```
 
-Defined in include/teeny/tensor.h:1770
+Defined in include/teeny/tensor.h:1846
 
 ---
 
@@ -8769,7 +8897,7 @@ Defined in include/teeny/tensor.h:1770
 template<class B> auto mul(const B & b) const
 ```
 
-Defined in include/teeny/tensor.h:1771
+Defined in include/teeny/tensor.h:1847
 
 ---
 
@@ -8781,7 +8909,7 @@ Defined in include/teeny/tensor.h:1771
 template<class B> auto div(const B & b) const
 ```
 
-Defined in include/teeny/tensor.h:1772
+Defined in include/teeny/tensor.h:1848
 
 ---
 
@@ -8793,7 +8921,7 @@ Defined in include/teeny/tensor.h:1772
 template<class B> auto pow(const B & b) const
 ```
 
-Defined in include/teeny/tensor.h:1773
+Defined in include/teeny/tensor.h:1849
 
 ---
 
@@ -8805,7 +8933,7 @@ Defined in include/teeny/tensor.h:1773
 template<class B, class D> auto & add(const B & b, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1775
+Defined in include/teeny/tensor.h:1851
 
 ---
 
@@ -8817,7 +8945,7 @@ Defined in include/teeny/tensor.h:1775
 template<class B, class D> auto & sub(const B & b, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1776
+Defined in include/teeny/tensor.h:1852
 
 ---
 
@@ -8829,7 +8957,7 @@ Defined in include/teeny/tensor.h:1776
 template<class B, class D> auto & mul(const B & b, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1777
+Defined in include/teeny/tensor.h:1853
 
 ---
 
@@ -8841,7 +8969,7 @@ Defined in include/teeny/tensor.h:1777
 template<class B, class D> auto & div(const B & b, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1778
+Defined in include/teeny/tensor.h:1854
 
 ---
 
@@ -8853,7 +8981,7 @@ Defined in include/teeny/tensor.h:1778
 template<class B, class D> auto & pow(const B & b, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1779
+Defined in include/teeny/tensor.h:1855
 
 ---
 
@@ -8865,7 +8993,7 @@ Defined in include/teeny/tensor.h:1779
 template<class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> auto add(const B & b, T alpha) const
 ```
 
-Defined in include/teeny/tensor.h:1783
+Defined in include/teeny/tensor.h:1859
 
 ---
 
@@ -8877,7 +9005,7 @@ Defined in include/teeny/tensor.h:1783
 template<class B, enable_if_t<!is_arithmetic< B >::value, int > = 0> auto sub(const B & b, T alpha) const
 ```
 
-Defined in include/teeny/tensor.h:1784
+Defined in include/teeny/tensor.h:1860
 
 ---
 
@@ -8889,7 +9017,7 @@ Defined in include/teeny/tensor.h:1784
 template<class B, class D, enable_if_t<!is_arithmetic< B >::value, int > = 0> auto & add(const B & b, T alpha, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1785
+Defined in include/teeny/tensor.h:1861
 
 ---
 
@@ -8901,7 +9029,7 @@ Defined in include/teeny/tensor.h:1785
 template<class B, class D, enable_if_t<!is_arithmetic< B >::value, int > = 0> auto & sub(const B & b, T alpha, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1786
+Defined in include/teeny/tensor.h:1862
 
 ---
 
@@ -8913,7 +9041,7 @@ Defined in include/teeny/tensor.h:1786
 template<class B> auto maximum(const B & b) const
 ```
 
-Defined in include/teeny/tensor.h:1803
+Defined in include/teeny/tensor.h:1879
 
 ---
 
@@ -8925,7 +9053,7 @@ Defined in include/teeny/tensor.h:1803
 template<class B, class D> auto & minimum(const B & b, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1804
+Defined in include/teeny/tensor.h:1880
 
 ---
 
@@ -8937,7 +9065,7 @@ Defined in include/teeny/tensor.h:1804
 template<class B, class D> auto & maximum(const B & b, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1805
+Defined in include/teeny/tensor.h:1881
 
 ---
 
@@ -8949,7 +9077,7 @@ Defined in include/teeny/tensor.h:1805
 auto clamp(T lo, T hi) const
 ```
 
-Defined in include/teeny/tensor.h:1806
+Defined in include/teeny/tensor.h:1882
 
 ---
 
@@ -8961,7 +9089,7 @@ Defined in include/teeny/tensor.h:1806
 template<class D> auto & clamp(T lo, T hi, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1807
+Defined in include/teeny/tensor.h:1883
 
 ---
 
@@ -8973,7 +9101,7 @@ Defined in include/teeny/tensor.h:1807
 auto normalize() const
 ```
 
-Defined in include/teeny/tensor.h:1808
+Defined in include/teeny/tensor.h:1884
 
 ---
 
@@ -8985,7 +9113,7 @@ Defined in include/teeny/tensor.h:1808
 template<class D> auto & normalize(into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1809
+Defined in include/teeny/tensor.h:1885
 
 ---
 
@@ -8997,7 +9125,7 @@ Defined in include/teeny/tensor.h:1809
 template<long... Axes, enable_if_t<(sizeof...(Axes) > 0) &&_md::_nrm_out_api< Shape, Axes... >::value, int > = 0> auto normalize() const
 ```
 
-Defined in include/teeny/tensor.h:1817
+Defined in include/teeny/tensor.h:1893
 
 ---
 
@@ -9009,7 +9137,7 @@ Defined in include/teeny/tensor.h:1817
 template<long... Axes, enable_if_t<(sizeof...(Axes) > 0) &&_md::_nrm_out_host< Shape, Axes... >::value, int > = 0> auto normalize() const
 ```
 
-Defined in include/teeny/tensor.h:1819
+Defined in include/teeny/tensor.h:1895
 
 ---
 
@@ -9021,7 +9149,7 @@ Defined in include/teeny/tensor.h:1819
 template<long... Axes, enable_if_t<(sizeof...(Axes) > 0) &&_md::_nrm_out_api< Shape, Axes... >::value, int > = 0> auto normalize(axis< Axes... >) const
 ```
 
-Defined in include/teeny/tensor.h:1821
+Defined in include/teeny/tensor.h:1897
 
 ---
 
@@ -9033,7 +9161,7 @@ Defined in include/teeny/tensor.h:1821
 template<long... Axes, enable_if_t<(sizeof...(Axes) > 0) &&_md::_nrm_out_host< Shape, Axes... >::value, int > = 0> auto normalize(axis< Axes... >) const
 ```
 
-Defined in include/teeny/tensor.h:1823
+Defined in include/teeny/tensor.h:1899
 
 ---
 
@@ -9045,7 +9173,7 @@ Defined in include/teeny/tensor.h:1823
 template<long... Axes, class D, enable_if_t<(sizeof...(Axes) > 0) &&_md::_nrm_kept_api< Shape, Axes... >::value, int > = 0> auto & normalize(into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1825
+Defined in include/teeny/tensor.h:1901
 
 ---
 
@@ -9057,7 +9185,7 @@ Defined in include/teeny/tensor.h:1825
 template<long... Axes, class D, enable_if_t<(sizeof...(Axes) > 0) &&_md::_nrm_kept_host< Shape, Axes... >::value, int > = 0> auto & normalize(into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1827
+Defined in include/teeny/tensor.h:1903
 
 ---
 
@@ -9069,7 +9197,7 @@ Defined in include/teeny/tensor.h:1827
 template<long... Axes, class D, enable_if_t<(sizeof...(Axes) > 0) &&_md::_nrm_kept_api< Shape, Axes... >::value, int > = 0> auto & normalize(axis< Axes... >, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1829
+Defined in include/teeny/tensor.h:1905
 
 ---
 
@@ -9081,7 +9209,7 @@ Defined in include/teeny/tensor.h:1829
 template<long... Axes, class D, enable_if_t<(sizeof...(Axes) > 0) &&_md::_nrm_kept_host< Shape, Axes... >::value, int > = 0> auto & normalize(axis< Axes... >, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1831
+Defined in include/teeny/tensor.h:1907
 
 ---
 
@@ -9093,7 +9221,7 @@ Defined in include/teeny/tensor.h:1831
 template<class Tb, class Eb, class Lb, storage Ob> auto cross(const tensor< Tb, Eb, Lb, Ob > & b) const
 ```
 
-Defined in include/teeny/tensor.h:1832
+Defined in include/teeny/tensor.h:1908
 
 ---
 
@@ -9105,7 +9233,7 @@ Defined in include/teeny/tensor.h:1832
 template<class Tb, class Eb, class Lb, storage Ob, class D> auto & cross(const tensor< Tb, Eb, Lb, Ob > & b, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1833
+Defined in include/teeny/tensor.h:1909
 
 ---
 
@@ -9115,7 +9243,7 @@ Defined in include/teeny/tensor.h:1833
 template<class F> tensor & map_(F f)
 ```
 
-Defined in include/teeny/tensor.h:1839
+Defined in include/teeny/tensor.h:1915
 
 ---
 
@@ -9125,7 +9253,7 @@ Defined in include/teeny/tensor.h:1839
 template<class G, class B> tensor & zip_with_(G g, const B & b)
 ```
 
-Defined in include/teeny/tensor.h:1840
+Defined in include/teeny/tensor.h:1916
 
 ---
 
@@ -9137,7 +9265,7 @@ Defined in include/teeny/tensor.h:1840
 template<class F> auto map(F f) const
 ```
 
-Defined in include/teeny/tensor.h:1841
+Defined in include/teeny/tensor.h:1917
 
 ---
 
@@ -9149,7 +9277,7 @@ Defined in include/teeny/tensor.h:1841
 template<class F, class D> auto & map(F f, into_t< D > out) const
 ```
 
-Defined in include/teeny/tensor.h:1842
+Defined in include/teeny/tensor.h:1918
 
 ---
 
@@ -9161,7 +9289,7 @@ Defined in include/teeny/tensor.h:1842
 bool all() const
 ```
 
-Defined in include/teeny/tensor.h:1846
+Defined in include/teeny/tensor.h:1922
 
 ---
 
@@ -9173,7 +9301,7 @@ Defined in include/teeny/tensor.h:1846
 bool any() const
 ```
 
-Defined in include/teeny/tensor.h:1847
+Defined in include/teeny/tensor.h:1923
 
 ---
 
@@ -9185,7 +9313,7 @@ Defined in include/teeny/tensor.h:1847
 class Eb class Lb storage Ob auto dot(const tensor< Tb, Eb, Lb, Ob > & b) const
 ```
 
-Defined in include/teeny/tensor.h:1894
+Defined in include/teeny/tensor.h:1970
 
 ---
 
@@ -9197,7 +9325,7 @@ Defined in include/teeny/tensor.h:1894
 template<class Acc = void, class Tb, class Eb, class Lb, storage Ob, class Tag0, class... Tags> decltype(auto) dot(const tensor< Tb, Eb, Lb, Ob > & b, Tag0 tag0, Tags... tags) const
 ```
 
-Defined in include/teeny/tensor.h:1896
+Defined in include/teeny/tensor.h:1972
 
 ---
 
@@ -9209,7 +9337,7 @@ Defined in include/teeny/tensor.h:1896
 template<class Acc = void, class Tb, class Eb, class Lb, storage Ob> auto sqdist(const tensor< Tb, Eb, Lb, Ob > & b) const
 ```
 
-Defined in include/teeny/tensor.h:1899
+Defined in include/teeny/tensor.h:1975
 
 ---
 
@@ -9221,7 +9349,7 @@ Defined in include/teeny/tensor.h:1899
 template<class Acc = void, class Tb, class Eb, class Lb, storage Ob, class Tag0, class... Tags> decltype(auto) sqdist(const tensor< Tb, Eb, Lb, Ob > & b, Tag0 tag0, Tags... tags) const
 ```
 
-Defined in include/teeny/tensor.h:1901
+Defined in include/teeny/tensor.h:1977
 
 ---
 
@@ -9233,7 +9361,7 @@ Defined in include/teeny/tensor.h:1901
 template<class Acc = void, class Tb, class Eb, class Lb, storage Ob> auto dist(const tensor< Tb, Eb, Lb, Ob > & b) const
 ```
 
-Defined in include/teeny/tensor.h:1903
+Defined in include/teeny/tensor.h:1979
 
 ---
 
@@ -9245,7 +9373,7 @@ Defined in include/teeny/tensor.h:1903
 template<class Acc = void, class Tb, class Eb, class Lb, storage Ob, class Tag0, class... Tags> decltype(auto) dist(const tensor< Tb, Eb, Lb, Ob > & b, Tag0 tag0, Tags... tags) const
 ```
 
-Defined in include/teeny/tensor.h:1905
+Defined in include/teeny/tensor.h:1981
 
 ---
 
@@ -9257,7 +9385,7 @@ Defined in include/teeny/tensor.h:1905
 template<class Acc = void, class Tb, class Eb, class Lb, storage Ob> bool allclose(const tensor< Tb, Eb, Lb, Ob > & b, double rtol = _allclose_rtol(), double atol = _allclose_atol()) const
 ```
 
-Defined in include/teeny/tensor.h:1913
+Defined in include/teeny/tensor.h:1989
 
 ---
 
@@ -9269,7 +9397,7 @@ Defined in include/teeny/tensor.h:1913
 template<class Acc = void, class Tb, class Eb, class Lb, storage Ob, class Tag0, class... Tags, enable_if_t< _kw::is_keyword< Tag0 >::value, int > = 0> decltype(auto) allclose(const tensor< Tb, Eb, Lb, Ob > & b, Tag0 tag0, Tags... tags) const
 ```
 
-Defined in include/teeny/tensor.h:1917
+Defined in include/teeny/tensor.h:1993
 
 ---
 
@@ -9281,7 +9409,7 @@ Defined in include/teeny/tensor.h:1917
 template<class Acc = void, class Tb, class Eb, class Lb, storage Ob, class Tag0, class... Tags, enable_if_t< _kw::is_keyword< Tag0 >::value, int > = 0> decltype(auto) allclose(const tensor< Tb, Eb, Lb, Ob > & b, double rtol, Tag0 tag0, Tags... tags) const
 ```
 
-Defined in include/teeny/tensor.h:1920
+Defined in include/teeny/tensor.h:1996
 
 ---
 
@@ -9293,7 +9421,7 @@ Defined in include/teeny/tensor.h:1920
 template<class Acc = void, class Tb, class Eb, class Lb, storage Ob, class Tag0, class... Tags, enable_if_t< _kw::is_keyword< Tag0 >::value, int > = 0> decltype(auto) allclose(const tensor< Tb, Eb, Lb, Ob > & b, double rtol, double atol, Tag0 tag0, Tags... tags) const
 ```
 
-Defined in include/teeny/tensor.h:1924
+Defined in include/teeny/tensor.h:2000
 
 ---
 
@@ -9303,7 +9431,7 @@ Defined in include/teeny/tensor.h:1924
 tensor & neg_()
 ```
 
-Defined in include/teeny/tensor.h:1928
+Defined in include/teeny/tensor.h:2004
 
 ---
 
@@ -9313,7 +9441,7 @@ Defined in include/teeny/tensor.h:1928
 tensor & abs_()
 ```
 
-Defined in include/teeny/tensor.h:1929
+Defined in include/teeny/tensor.h:2005
 
 ---
 
@@ -9323,7 +9451,7 @@ Defined in include/teeny/tensor.h:1929
 tensor & exp_()
 ```
 
-Defined in include/teeny/tensor.h:1930
+Defined in include/teeny/tensor.h:2006
 
 ---
 
@@ -9333,7 +9461,7 @@ Defined in include/teeny/tensor.h:1930
 tensor & log_()
 ```
 
-Defined in include/teeny/tensor.h:1931
+Defined in include/teeny/tensor.h:2007
 
 ---
 
@@ -9343,7 +9471,7 @@ Defined in include/teeny/tensor.h:1931
 tensor & sin_()
 ```
 
-Defined in include/teeny/tensor.h:1932
+Defined in include/teeny/tensor.h:2008
 
 ---
 
@@ -9353,7 +9481,7 @@ Defined in include/teeny/tensor.h:1932
 tensor & cos_()
 ```
 
-Defined in include/teeny/tensor.h:1933
+Defined in include/teeny/tensor.h:2009
 
 ---
 
@@ -9363,7 +9491,7 @@ Defined in include/teeny/tensor.h:1933
 tensor & sqrt_()
 ```
 
-Defined in include/teeny/tensor.h:1934
+Defined in include/teeny/tensor.h:2010
 
 ---
 
@@ -9373,7 +9501,7 @@ Defined in include/teeny/tensor.h:1934
 tensor & tanh_()
 ```
 
-Defined in include/teeny/tensor.h:1935
+Defined in include/teeny/tensor.h:2011
 
 ---
 
@@ -9383,7 +9511,7 @@ Defined in include/teeny/tensor.h:1935
 tensor & floor_()
 ```
 
-Defined in include/teeny/tensor.h:1936
+Defined in include/teeny/tensor.h:2012
 
 ---
 
@@ -9393,7 +9521,7 @@ Defined in include/teeny/tensor.h:1936
 tensor & ceil_()
 ```
 
-Defined in include/teeny/tensor.h:1937
+Defined in include/teeny/tensor.h:2013
 
 ---
 
@@ -9403,7 +9531,7 @@ Defined in include/teeny/tensor.h:1937
 tensor & round_()
 ```
 
-Defined in include/teeny/tensor.h:1938
+Defined in include/teeny/tensor.h:2014
 
 ---
 
@@ -9413,7 +9541,7 @@ Defined in include/teeny/tensor.h:1938
 tensor & trunc_()
 ```
 
-Defined in include/teeny/tensor.h:1939
+Defined in include/teeny/tensor.h:2015
 
 ---
 
@@ -9423,7 +9551,7 @@ Defined in include/teeny/tensor.h:1939
 tensor & sign_()
 ```
 
-Defined in include/teeny/tensor.h:1940
+Defined in include/teeny/tensor.h:2016
 
 ---
 
@@ -9433,7 +9561,7 @@ Defined in include/teeny/tensor.h:1940
 tensor & pow_(T e)
 ```
 
-Defined in include/teeny/tensor.h:1941
+Defined in include/teeny/tensor.h:2017
 
 ---
 
@@ -9443,7 +9571,7 @@ Defined in include/teeny/tensor.h:1941
 tensor & clamp_(T lo, T hi)
 ```
 
-Defined in include/teeny/tensor.h:1942
+Defined in include/teeny/tensor.h:2018
 
 ---
 
@@ -9453,7 +9581,7 @@ Defined in include/teeny/tensor.h:1942
 tensor & normalize_()
 ```
 
-Defined in include/teeny/tensor.h:1943
+Defined in include/teeny/tensor.h:2019
 
 ---
 
@@ -9463,7 +9591,7 @@ Defined in include/teeny/tensor.h:1943
 template<long... Axes, enable_if_t< _md::_nrm_kept_host< Shape, Axes... >::value, int > = 0> tensor & normalize_()
 ```
 
-Defined in include/teeny/tensor.h:1949
+Defined in include/teeny/tensor.h:2025
 
 ---
 
@@ -9473,7 +9601,7 @@ Defined in include/teeny/tensor.h:1949
 template<class Tb, class Eb, class Lb, storage Ob> tensor & cross_(const tensor< Tb, Eb, Lb, Ob > & b)
 ```
 
-Defined in include/teeny/tensor.h:1951
+Defined in include/teeny/tensor.h:2027
 
 ---
 
@@ -9485,7 +9613,7 @@ Defined in include/teeny/tensor.h:1951
 inline tensor & operator++()
 ```
 
-Defined in include/teeny/tensor.h:1957
+Defined in include/teeny/tensor.h:2033
 
 ---
 
@@ -9497,7 +9625,7 @@ Defined in include/teeny/tensor.h:1957
 inline tensor & operator--()
 ```
 
-Defined in include/teeny/tensor.h:1958
+Defined in include/teeny/tensor.h:2034
 
 ---
 
@@ -9509,7 +9637,7 @@ Defined in include/teeny/tensor.h:1958
 template<bool S = is_static, enable_if_t< S, int > = 0> inline tensor< T, Shape, ccontiguous, storage::stack > operator++(int)
 ```
 
-Defined in include/teeny/tensor.h:1960
+Defined in include/teeny/tensor.h:2036
 
 ---
 
@@ -9521,7 +9649,7 @@ Defined in include/teeny/tensor.h:1960
 template<bool S = is_static, enable_if_t< S, int > = 0> inline tensor< T, Shape, ccontiguous, storage::stack > operator--(int)
 ```
 
-Defined in include/teeny/tensor.h:1962
+Defined in include/teeny/tensor.h:2038
 
 ---
 
@@ -9531,7 +9659,7 @@ Defined in include/teeny/tensor.h:1962
 template<bool Atomic, class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & add_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1325
+Defined in include/teeny/math.h:1331
 
 ---
 
@@ -9541,7 +9669,7 @@ Defined in include/teeny/math.h:1325
 template<bool Atomic, class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & sub_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1331
+Defined in include/teeny/math.h:1337
 
 ---
 
@@ -9551,7 +9679,7 @@ Defined in include/teeny/math.h:1331
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & mul_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1337
+Defined in include/teeny/math.h:1343
 
 ---
 
@@ -9561,7 +9689,7 @@ Defined in include/teeny/math.h:1337
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & div_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1339
+Defined in include/teeny/math.h:1345
 
 ---
 
@@ -9571,7 +9699,7 @@ Defined in include/teeny/math.h:1339
 template<bool Atomic> tensor< T, E, L, O > & add_(T s)
 ```
 
-Defined in include/teeny/math.h:1341
+Defined in include/teeny/math.h:1347
 
 ---
 
@@ -9581,7 +9709,7 @@ Defined in include/teeny/math.h:1341
 template<bool Atomic> tensor< T, E, L, O > & sub_(T s)
 ```
 
-Defined in include/teeny/math.h:1347
+Defined in include/teeny/math.h:1353
 
 ---
 
@@ -9591,7 +9719,7 @@ Defined in include/teeny/math.h:1347
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & minimum_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1356
+Defined in include/teeny/math.h:1362
 
 ---
 
@@ -9601,7 +9729,7 @@ Defined in include/teeny/math.h:1356
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & maximum_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1358
+Defined in include/teeny/math.h:1364
 
 ---
 
@@ -9611,7 +9739,7 @@ Defined in include/teeny/math.h:1358
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & add_(const B & b, T alpha)
 ```
 
-Defined in include/teeny/math.h:1363
+Defined in include/teeny/math.h:1369
 
 ---
 
@@ -9621,7 +9749,7 @@ Defined in include/teeny/math.h:1363
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & sub_(const B & b, T alpha)
 ```
 
-Defined in include/teeny/math.h:1365
+Defined in include/teeny/math.h:1371
 
 ---
 
@@ -9631,7 +9759,7 @@ Defined in include/teeny/math.h:1365
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & atomic_add_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1369
+Defined in include/teeny/math.h:1375
 
 ---
 
@@ -9641,7 +9769,7 @@ Defined in include/teeny/math.h:1369
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & atomic_sub_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1371
+Defined in include/teeny/math.h:1377
 
 ---
 
@@ -9651,7 +9779,7 @@ Defined in include/teeny/math.h:1371
 template<class B> tensor< T, E, L, O > & copy_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1375
+Defined in include/teeny/math.h:1381
 
 ---
 
@@ -9661,7 +9789,7 @@ Defined in include/teeny/math.h:1375
 template<class F> tensor< T, E, L, O > & map_(F f)
 ```
 
-Defined in include/teeny/math.h:1525
+Defined in include/teeny/math.h:1531
 
 ---
 
@@ -9671,7 +9799,7 @@ Defined in include/teeny/math.h:1525
 template<class G, class B> tensor< T, E, L, O > & zip_with_(G g, const B & b)
 ```
 
-Defined in include/teeny/math.h:1527
+Defined in include/teeny/math.h:1533
 
 ---
 
@@ -9681,7 +9809,7 @@ Defined in include/teeny/math.h:1527
 template<class Tb, class Eb, class Lb, storage Ob> tensor< T, E, L, O > & cross_(const tensor< Tb, Eb, Lb, Ob > & b)
 ```
 
-Defined in include/teeny/math.h:2298
+Defined in include/teeny/math.h:2332
 
 ---
 
@@ -9691,7 +9819,7 @@ Defined in include/teeny/math.h:2298
 template<long... Axes, enable_if_t< _md::_nrm_kept_api< E, Axes... >::value, int >> tensor< T, E, L, O > & normalize_()
 ```
 
-Defined in include/teeny/math.h:2321
+Defined in include/teeny/math.h:2355
 
 ---
 
@@ -9703,7 +9831,7 @@ Defined in include/teeny/math.h:2321
 template<class B> u_abs u_log u_cos u_tanh u_ceil u_trunc auto minimum(const B & b) const
 ```
 
-Defined in include/teeny/math.h:2556
+Defined in include/teeny/math.h:2590
 
 ### Public Static Attributes
 

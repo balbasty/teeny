@@ -173,6 +173,52 @@ you want the extent to keep folding:
     t(0, slice<Int<1>, Int<4>>());   // type form (the only way to bake `none`)
     ```
 
+## Indexing with a tuple — `t(m)`
+
+In NumPy `x[a, b, c]` and `x[(a, b, c)]` are the same thing: indexing with a
+tuple is indexing with its unpacked elements. teeny does the same — a **single**
+tuple-like argument (a `cuda::std::array` or `cuda::std::tuple`) carries the
+whole index list, and the call behaves exactly as if you had written the
+elements out:
+
+```cpp
+cs::array<long, 2> m{ 1, 2 };
+t(m);            // == t(1, 2)      -> T&
+t.at(m);         // == t.at(1, 2)   -> rank-0 view
+t.uget(m);       // == t.uget(1, 2) (unchecked twin)
+t.uat(m);        // == t.uat(1, 2)
+t[m];            // C++23: operator[] forwards, so it takes a pack too
+```
+
+The elements may be anything the ordinary call accepts — integers, `Int<k>()`,
+`all`, `slice(...)`, a bare `none`, one `ellipsis` — so a `cuda::std::tuple`
+slices just as well as it indexes, and the result type is identical (static
+extents and strides still fold):
+
+```cpp
+t(cs::make_tuple(1L, all));            // == t(1, all)            -> a row view
+t(cs::make_tuple(all, slice<1,4>()));  // == t(all, slice<1,4>()) -> static extent 3
+t(cs::make_tuple(none, ellipsis));     // == t(none, ellipsis)
+```
+
+This is packing sugar only: the tuple **is** the whole index list, so it is
+always the single argument (never mixed with other positional ones), and too
+few or too many elements is the same compile error as writing them out.
+
+Where it earns its keep is with a multi-index you already have in hand — most
+of all the one a [peel range's `enumerate()`](structure.md#nd-peel-iterate-a-subset-of-axes) hands you, which is
+a `cuda::std::array`. Before, that multi-index could only be read one
+coordinate at a time; now it feeds straight back into another tensor for a
+write-by-coordinate:
+
+```cpp
+for (auto [m, cell] : peel(a, axis<0,1,2>{}).enumerate())
+    b(m) = f(cell);                  // m is the array of peeled coordinates
+
+for (auto [m, row] : peel(a, axis<0,1>{}).enumerate())
+    b(cs::make_tuple(m[0], m[1], all)).copy_(row);   // ... or address a whole row
+```
+
 ## `slice_along<Axes...>` — bind named axes
 
 `operator()` is positional. To name only the axes you touch and keep the rest,
