@@ -201,11 +201,12 @@ template args are signed (negatives count from the back). Each `<Ax>` op also ha
 a **value form** — pass `Int<Ax>()` in place of the template argument
 (`t.squeeze(Int<1>()) == t.squeeze<1>()`, likewise `permute`/`flip`/`unsqueeze`/
 `reshape`/`recast`); the value spelling is the preferred one. The axis-**list**
-ops — `permute`, `squeeze`, `unsqueeze` — additionally take an `axis<...>{}` tag
-(`t.squeeze(axis<0,2>{}) == t.squeeze<0,2>()`), the same one `peel`/`slice_along`/
+ops — `permute`, `flip`, `squeeze`, `unsqueeze` — additionally take an `axis<...>{}` tag
+(`t.squeeze(axis<0,2>{}) == t.squeeze<0,2>()`, `t.flip(axis<0,2>{}) == t.flip<0,2>()`),
+the same one `peel`/`slice_along`/
 the reductions use. An **empty** list, `axis<>{}`, names no axis and is therefore a
-**no-op** for `squeeze`/`unsqueeze` (numpy's `axis=()` rule) — distinct from the
-no-argument `squeeze()`/`unsqueeze()`, which keep their own meanings; `permute`
+**no-op** for `squeeze`/`unsqueeze`/`flip` (numpy's `axis=()` rule) — distinct from the
+no-argument `squeeze()`/`unsqueeze()`/`flip()`, which keep their own meanings; `permute`
 accepts it only at rank 0. The **reductions** read it the same way — `sum(a,
 axis<>{})` reduces over no axis and keeps `a`'s shape, where the plain `sum(a)`
 (no axis argument at all) reduces over every axis, see
@@ -238,6 +239,7 @@ Worked input→output shapes (`E` = source extents):
 |---|---|---|
 | `t.permute<Perm...>()` | → view | reorder axes (a permutation of `0..N-1`) |
 | `t.flip<Ax>()` | → view | reverse an axis (negative-stride) |
+| `t.flip<Ax0,Ax1,...>()` | → view | reverse **several** axes at once (numpy `flip(a, axis=(0,2))`); distinct, any order — flips commute, so `flip<0,2>` == `flip<2,0>` == `flip<0>().flip<2>()`, built in one pass (#349) |
 | `t.unsqueeze<Ax>()` | → view, rank+1 | insert a size-1 axis |
 | `t.unsqueeze<Ax0,Ax1,...>()` | → view, rank+k | insert **several** size-1 axes at once; positions are relative to the *final* rank, distinct, any order (#275) |
 | `t.squeeze<Ax>()` / `t.squeeze()` | → view, rank−1 / − all size-1 | drop size-1 axis / axes |

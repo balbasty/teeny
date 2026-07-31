@@ -331,19 +331,24 @@ t.index_select<Axis>(idx);         // gather along Axis by a rank-1 integer inde
                       //   not an open pack, so a trailing tag is unambiguous and deducible)
 t.permute<2,0,1>();   // reorder axes (a permutation of 0..N-1) -> view
 t.flip<1>();          // reverse an axis (negative-stride view; needs signed index)
+t.flip<0,2>();        // reverse SEVERAL at once (numpy flip(a, axis=(0,2))): distinct axes in
+                      //   ANY order -- flips COMMUTE, so flip<0,2> == flip<2,0> == flip<0>().flip<2>()
+                      //   (same view TYPE + elements), built in ONE pass, folding each named
+                      //   axis's static stride to its negation (#349)
 t.unsqueeze<2>();     // insert size-1 axis at pos 2 (numpy newaxis) -> rank+1 view
 t.squeeze<3>();       // drop a size-1 axis -> rank-1 view
 t.unsqueeze<1,3>();   // insert SEVERAL at once: positions relative to the FINAL rank,
                       //   must be distinct, in ANY order (sorted internally, #275) -> rank+k view
 t.squeeze<0,2>();     // drop SEVERAL at once: positions relative to the SOURCE rank,
                       //   must be distinct, in ANY order (sorted internally, #275) -> rank-k view
-t.squeeze(axis<0,2>{});  t.unsqueeze(axis<1,3>{});  t.permute(axis<2,0,1>{});  // axis<...>
-                      //   value form (== the <...> template form) for these axis-LIST ops
-t.squeeze(axis<>{});  t.unsqueeze(axis<>{});  // an EMPTY axis LIST names no axis -> a NO-OP:
+t.squeeze(axis<0,2>{});  t.unsqueeze(axis<1,3>{});  t.flip(axis<0,2>{});  t.permute(axis<2,0,1>{});
+                      //   axis<...> value form (== the <...> template form) for these axis-LIST ops
+t.squeeze(axis<>{});  t.unsqueeze(axis<>{});  t.flip(axis<>{});  // an EMPTY axis LIST names no axis -> a NO-OP:
                       //   same shape+strides back, as a view (numpy's axis=() rule, #369; the
                       //   same identity slice_along(axis<>{}) / peel(t,axis<>{}) already have).
                       //   NOT the no-ARGUMENT forms: t.squeeze() still drops EVERY static
-                      //   singleton and t.unsqueeze() still inserts at axis 0 -- an empty
+                      //   singleton, t.unsqueeze() still inserts at axis 0 and t.flip() still
+                      //   reverses axis 0 -- an empty
                       //   LIST and no argument at all are different things. permute needs a
                       //   FULL permutation, so permute(axis<>{}) is a no-op at rank 0 only
                       //   and a compile error otherwise (never silent).
@@ -702,14 +707,14 @@ does). Three selector vocabularies:
   value tag sibling to `shape<...>` (in `alias.h`). For the axis-LIST ops:
   `peel(t, axis<0,1>{})` == `peel<0,1>(t)`, `peel_at(t, i, axis<0,1>{})`,
   `t.slice_along(axis<0,2>{}, i, slice(1,4))` == `t.slice_along<0,2>(...)`,
-  `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise `unsqueeze`/`permute`.
+  `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise `unsqueeze`/`flip`/`permute`.
   Being a single distinct-typed arg it also disambiguates `slice_along`'s two packs.
   An EMPTY list `axis<>{}` names no axis, so every axis-list op treats it as the
-  IDENTITY (numpy's `axis=()`): `squeeze`/`unsqueeze` return the same shape as a
+  IDENTITY (numpy's `axis=()`): `squeeze`/`unsqueeze`/`flip` return the same shape as a
   view (#369 — they used to fall through to the DEFAULTED single-axis form and
   silently drop every singleton / insert at axis 0), matching what
   `slice_along(axis<>{})`, `peel(t, axis<>{})` and `_keepdims<>` already did. The
-  no-ARGUMENT `squeeze()`/`unsqueeze()` are a DIFFERENT thing and keep their own
+  no-ARGUMENT `squeeze()`/`unsqueeze()`/`flip()` are a DIFFERENT thing and keep their own
   meanings — an empty template pack can't be told from a defaulted one in C++, so
   only the `axis<...>` spelling can carry "zero axes named". `permute` needs a full
   permutation and so already rejected it above rank 0. The REDUCTIONS follow the

@@ -187,15 +187,19 @@ See [Indexing & slicing](indexing.md).
 ```cpp
 x.permute<Perm...>();                 // reorder axes
 x.flip<Ax>();                         // reverse an axis (negative-stride view)
+x.flip<Ax0,Ax1,...>();  x.flip(axis<0,2>{});  // reverse SEVERAL axes at once (numpy flip(a,axis=(0,2))):
+                                      //   distinct axes, ANY order — flips commute, so flip<0,2> ==
+                                      //   flip<2,0> == flip<0>().flip<2>(), built in ONE pass
 x.unsqueeze<Ax>();  x.squeeze<Ax>();  // insert / drop a size-1 axis
 x.unsqueeze<Ax0,Ax1,...>();  x.squeeze<Ax0,Ax1,...>();  // insert/drop SEVERAL at once (arity picks this
                                       //   overload); axes must be DISTINCT but may be listed in ANY order —
                                       //   unsqueeze positions are relative to the FINAL rank, squeeze to the
                                       //   SOURCE rank (the fold direction is an implementation detail)
-x.unsqueeze(axis<>{});  x.squeeze(axis<>{});  // an EMPTY axis LIST names no axis -> a NO-OP (numpy's
-                                      //   axis=() rule): same shape/strides back. NOT the same as the
-                                      //   no-argument x.squeeze() (drop EVERY static singleton) /
-                                      //   x.unsqueeze() (insert at axis 0), which keep their meanings
+x.unsqueeze(axis<>{});  x.squeeze(axis<>{});  x.flip(axis<>{});  // an EMPTY axis LIST names no axis -> a
+                                      //   NO-OP (numpy's axis=() rule): same shape/strides back. NOT the
+                                      //   same as the no-argument x.squeeze() (drop EVERY static singleton)
+                                      //   / x.unsqueeze() (insert at axis 0) / x.flip() (reverse axis 0),
+                                      //   which keep their meanings
 x.reshape<NewExt...>();               // contiguous-view reshape (one -1 inferred)
 x.flatten();                          // 1-D contiguous view
 x.clone();                            // dense row-major OWNING copy (copies on the HOST; a gpu/gpu_view
