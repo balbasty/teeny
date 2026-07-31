@@ -17,8 +17,8 @@ accident of whichever call site was written first.
 |---|---|---|
 | F1-a | `into(dest)` has no numpy/pytorch lexical match. Of the **seven** registered keyword kinds (`tny::_kw::is_keyword`: `axis`, `dtype`, `keepdims`, `ccontiguous`/`fcontiguous`, `storage_c`, `into_t`), only `axis`/`dtype`/`keepdims` reuse numpy's own spelling verbatim; `storage_c` has no numpy/pytorch match either (closest is torch's `device=`), and the layout tags don't match numpy's `order='C'` spelling. | **Intentional.** Rationale: pytorch's closest analog to `into` is the positional `out=` kwarg, which reads as ordinary keyword syntax in python; teeny has no keyword syntax, so a same-named `out(dest)` would still be a bare positional call, no clearer than `into(dest)` — and `into` reads better as English at a C++ call site (`a.add(b, into(y))` vs `a.add(b, out(y))`). `storage_c`/the layout tags diverge from numpy for a different, unrelated reason (numpy has no separate memory-space/layout-tag concept to match at all — see F1-e for the same "no applicable prior art" shape). No action needed for any of the three. |
 | F1-b | `wrap()` and `as_tensor()` are two public names that, for the `wrap(any_mdspan)` overload specifically, are extremely close in behavior — the default (no-tag) call is still codegen-identical to `as_tensor(md)` (`-O2` instruction streams match byte-for-byte; g++ even tail-calls one into the other), though since #370/#393 `wrap(md, tags...)` is no longer a literal one-line forwarder in source (it now carries the same `storage_view_of`/keyword-bag machinery as `wrap`'s pointer-form siblings). | **Filed as #351** (documentation). A rationale *is* already stated in passing (`tensor.h`'s doc-comment and `docs/reference.md`/`docs/tensors.md` both note "`as_tensor` is what teeny's own view-producing ops call internally"; `docs/cheatsheet.md` only notes "same thing," without that detail) — but that only explains why `as_tensor` exists as an internal name, not why it's *also* public and behaviorally identical to `wrap` in the default case. #351 asks for either a real public-facing rationale (the two do diverge on other overloads — `wrap` takes a raw pointer + extents/layout/storage tags, `as_tensor` only takes an already-built `cs::mdspan`/`submdspan` result) or, if the `any_mdspan` overload really is fully redundant, deprecating `wrap(any_mdspan)` in favor of calling `as_tensor` directly there. Filed rather than fixed here since it needs a decision from the library owner. |
-| F1-c | `clamp` matches pytorch's name, not numpy's `clip`; `minimum`/`maximum`/`allclose` happen to match both. No stated policy on which prior art teeny defaults to when the two disagree. | Tracked under **#337** (naming policy) — this is a second concrete instance of the question #337 already raises, not a new issue. |
-| F1-d | `sqnorm`/`sqdist` have no numpy/pytorch/xtensor precedent (neither library spells "squared norm" as one word), unlike their siblings `norm`/`dist`/`cross`/`normalize` in the same doc section, which all do. | Tracked under **#337** — same pattern as F1-c: a teeny-invented name sitting beside prior-art-modeled siblings. |
+| F1-c | `clamp` matches pytorch's name, not numpy's `clip`; `minimum`/`maximum`/`allclose` happen to match both. No stated policy on which prior art teeny defaults to when the two disagree. | **Resolved by #337.** `CLAUDE.md`'s new "Naming policy" section states the rule: op names prefer the closest pytorch name when a direct analog exists — `clamp` is now the documented precedent for that rule, not an unexplained divergence. |
+| F1-d | `sqnorm`/`sqdist` have no numpy/pytorch/xtensor precedent (neither library spells "squared norm" as one word), unlike their siblings `norm`/`dist`/`cross`/`normalize` in the same doc section, which all do. | **Resolved by #337.** Covered by the same "Naming policy" section: an invented name is allowed when no prior art exists and it doesn't collide with an existing numpy/pytorch name that means something different — `sqnorm`/`sqdist` satisfy both, so they stay as documented, deliberate exceptions rather than an oversight. |
 | F1-e | `recast`/`reindex` are teeny-invented, sitting beside pytorch-modeled `to<T2>()` in the same "Structure" doc section. | **Intentional, not filed.** Neither operation (retype static extents in place / narrow the offset-index width, both no-copy) has a numpy/pytorch/xtensor equivalent — those libraries don't expose a static/dynamic shape distinction or an index-width choice at all, so there is no prior art to diverge from. Noted here for completeness per #336's own instruction to record the "no applicable prior art" case, not left silent. |
 | F1-f | `subsample` (built on `slice_along` + `slice`) is a second teeny-invented name in the same indexing section that also contains `unfold`/`index_select`. | **Intentional, low severity.** `subsample` is pure sugar (a fixed composition of `slice_along`+`slice`, #258) with no single-call numpy/pytorch equivalent to name it after (numpy's strided-slice spelling, `a[::k]`, isn't a named function). No action needed. |
 | F1-h | The view op that binds named axes to a scalar index or a slice was called `take_along` — one underscore away from numpy's `take_along_axis` / pytorch's `take_along_dim`, which name a data-dependent gather driven by an index *array*. Same-family prior art already exists in teeny under the right name (`index_select`, mirroring `torch.index_select`), so the old name pointed a numpy/pytorch reader at the wrong operation. | **Renamed to `slice_along` in #423** (clean rename, no compatibility alias — teeny is pre-1.0 and has no deprecation convention). `slice_along` says what it does (bind axes by index/slice, always an affine view) and matches its real prior art, pytorch's `select`/`narrow` generalised to several axes. The `take_along*` name is now left free for the gather family it belongs to. |
@@ -39,37 +39,39 @@ args are fixed-arity so *their* tag is trailing, see table); a keyword tag is
 | `subsample(axis<...>{}, k, starts...)` | open pack (`starts...`) | leading | leading | yes |
 | `index_select(idx, axis<Axis>{})` | fixed (`idx`) | trailing | trailing | yes |
 | `peel_zip(x, y, axis<0>{})` | fixed (tensor operands) | trailing | trailing | yes |
-| `scan_(t, axis<0>{}, init, f)` | fixed (`init`, `f`) | trailing | **leading** | **no** |
+| `scan_(t, init, f, axis<0>{})` | fixed (`init`, `f`) | trailing | trailing | yes (**fixed in #348**) |
 
-`scan_`'s leading placement is a real deviation from the stated rule (`init`/`f`
-are fixed-arity, so the rule predicts trailing) — it is not undocumented
-(`CLAUDE.md`/`docs/structure.md` both show the leading form as-shipped, they
-just don't call out that it breaks the rule), but nothing rationalizes the
-deviation itself. Both this placement gap and a second sub-finding
+`scan_` used to lead with its tag (`scan_(t, axis<0>{}, init, f)`), a real
+deviation from the stated rule — `init`/`f` are fixed-arity, so the rule
+predicts trailing — that nothing rationalized. That, plus a second sub-finding
 (`index_select`/`scan_` use `axis<Axis>{}` for a single axis, where CLAUDE.md's
-*then*-stated taxonomy scoped `axis<...>` to axis-**list** ops only) were
-**filed as #348**.
+*then*-stated taxonomy scoped `axis<...>` to axis-**list** ops only), were
+**filed as #348**. **Both halves are now fixed:**
 
-**Update: the vocabulary sub-finding is now fixed (docs-only); the placement
-gap is still open.** Re-reading the taxonomy claim against the library's own
-flagship keyword family shows CLAUDE.md's wording, not `index_select`/`scan_`'s
-spelling, was what was wrong: the reductions already used `axis<...>` as a
-singleton (`sum(a, axis<0>{})`) before this review was even written, so "list
-tag" was never an accurate description of `axis<...>`'s actual scope.
-CLAUDE.md's "Static vs runtime values" section now states the restated rule
-directly: `axis<...>` marks any named-axis argument — list or singleton — in a
-call that *also* carries another value-form argument, so the selector stays
-visually/typewise distinct from a positional integer or an arbitrary value it
-sits next to (`scan_`'s `init` is exactly such a value; `Int<k>()` converts
-implicitly to a runtime integer and would blend in where `axis<0>{}`, a
-non-converting distinct type, cannot); `Int<k>()` is reserved for pure
-single-selector ops where the selector is the *only* value-form argument in the
-call. Under that rule, `index_select(idx, axis<Axis>{})` and `scan_(t,
-axis<0>{}, init, f)` were consistent all along — **no code change needed**, the
-vocabulary half of #348 is resolved by the CLAUDE.md wording fix alone. The
-**placement** half (leading vs. trailing on `scan_`) is unaffected by this and
-remains open: it is a breaking argument-order change to a shipped API and
-needs a maintainer decision before it's made, so #348 stays open for it.
+- The **vocabulary** sub-finding turned out to be a documentation bug, not a
+  code defect. Re-reading the taxonomy claim against the library's own flagship
+  keyword family shows CLAUDE.md's wording, not `index_select`/`scan_`'s
+  spelling, was what was wrong: the reductions already used `axis<...>` as a
+  singleton (`sum(a, axis<0>{})`) before this review was even written, so "list
+  tag" was never an accurate description of `axis<...>`'s actual scope.
+  CLAUDE.md's "Static vs runtime values" section now states the restated rule
+  directly: `axis<...>` marks any named-axis argument — list or singleton — in
+  a call that *also* carries another value-form argument, so the selector stays
+  visually/typewise distinct from a positional integer or an arbitrary value it
+  sits next to (`scan_`'s `init` is exactly such a value; `Int<k>()` converts
+  implicitly to a runtime integer and would blend in where `axis<0>{}`, a
+  non-converting distinct type, cannot); `Int<k>()` is reserved for pure
+  single-selector ops where the selector is the *only* value-form argument in
+  the call. Under that rule `index_select` was consistent all along and needed
+  **no code change**.
+- The **placement** sub-finding was fixed by moving `scan_`/`scan`'s tag to
+  trailing, so the table row above now reads "yes". It is a **breaking
+  argument-order change** to a shipped API, taken (with the maintainer's
+  sign-off) as a clean break: there is no deprecated leading-form alias, and a
+  call that still passes the tag leading fails on a `static_assert` naming the
+  new order. While there, `scan`'s two trailing keywords (`axis<...>{}` and
+  `into(dest)`) were put on the generic keyword bag (`_kw`), so they compose in
+  any subset and any order exactly like the reduction family's do.
 
 `unfold(Int<Axis>(), size, step)` was initially flagged as a second violation
 but doesn't hold up: `Int<Axis>()` is a single-axis **selector** (like
@@ -113,13 +115,13 @@ Of the concrete gaps found, three were filed as sub-issues of #336: **#348**
 (axis-tag placement on `scan_` + the `index_select`/`scan_` vocabulary split —
 `unfold` was initially suspected but turned out not to be an instance, see
 above), **#349** (`flip` multi-axis form), **#350** (`allclose` method form +
-keyword composition). Of #348's two sub-findings, the vocabulary split turned
-out to be a CLAUDE.md wording bug rather than a code defect and is now fixed by
-restating the taxonomy (no code change); the placement gap (`scan_`'s tag is
-leading, not trailing) is a breaking argument-order change still awaiting a
-maintainer decision, so #348 stays open for that alone. One needed a
-documentation decision and is filed as **#351** (`wrap`/`as_tensor` naming
-rationale). Two findings
+keyword composition). Both of #348's sub-findings are now fixed: the vocabulary
+split turned out to be a CLAUDE.md wording bug rather than a code defect and was
+fixed by restating the taxonomy (no code change), and the placement gap
+(`scan_`'s tag was leading, not trailing) was closed by moving `scan_`/`scan`'s
+tag to trailing — a breaking argument-order change, taken as a clean break with
+no deprecated alias. One needed a documentation decision and is filed as
+**#351** (`wrap`/`as_tensor` naming rationale). Two findings
 (`clamp`/`clip`, `sqnorm`/`sqdist`) feed the already-open naming-policy
 question in **#337** rather than standing alone. One documentation bug
 (`docs/indexing.md`'s backwards claim about `index_select`'s tag placement)

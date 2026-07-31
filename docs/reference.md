@@ -307,9 +307,10 @@ free **`to<Space>(t)`** (`cuda.h`) above, which is device-aware.
 | `peel_zip<Axes...>(a, b[, c]).enumerate()` | a range of `{index, tuple}` | same shape as `peel(...).enumerate()` |
 | `peel_zip<Axes...>(a, b[, c]).subrange(lo,hi)` | a `[lo,hi)` sub-range | same shape as `peel(...).subrange()` |
 | `scan_<Axis>(t, init, f)` | `void` (in-place) | sequential fold along `Axis` — `carry=init`, then `carry=f(carry,x); x=carry` for each element (increasing order), batched (peeled) over every other axis; `f` is a device-safe functor (like `map_`'s own convention). Reverse sweep: `scan_<Axis>(t.flip<Axis>(), init, f)` (a temporary view binds fine — `scan_` has lvalue and rvalue overloads) |
-| `scan_(t, axis<Axis>{}, init, f)` | same | value form — `axis<Axis>{}` right after `t`, single-axis selector |
+| `scan_(t, init, f, axis<Axis>{})` | same | value form — the axis tag is **trailing**, like `index_select`'s and the reduction family's (#348). The leading spelling `scan_(t, axis<Axis>{}, init, f)` was **removed**, with no deprecated alias |
 | `scan<Axis>(t, init, f)` | → new tensor | out-of-place: fresh dense copy, scanned (static→stack, dynamic→heap host-only, built on `clone()`); `t` itself untouched |
 | `scan<Axis>(t, init, f, into(dest))` | `dest&` | no fresh allocation beyond the copy into `dest`; `dest`'s shape must match `t`'s EXACTLY (checked — `static_assert` when both are static, `_TNY_CHECK` otherwise), unlike `copy_`'s own broadcast rule, since `scan_` then walks `dest`'s own axis numbering |
+| `scan(t, init, f, axis<Axis>{}[, into(dest)])` | → new tensor / `dest&` | value form — `scan`'s two trailing keywords ride the generic keyword bag, so `axis<...>{}` and `into(dest)` compose in **any subset, any order** (`scan(t, init, f, into(dest), axis<0>{})` is the same call) |
 
 **Input → output type — peel cell.** Each yielded cell is a **view**
 (`storage_view_of(O)` — `gpu`/`gpu_view` source → `gpu_view`), element type `T`
@@ -364,7 +365,7 @@ one — see [Mixing widths](shapes-strides.md#mixing-widths-in-a-broadcast).
 | `2.0 * a`, `2.0 - a`, `1.0 / a`, `-a` | scalar–tensor / unary minus |
 | `a.pow(b)` | element-wise power |
 | `neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign(a)` | unary free functions — **also methods** (`a.exp()`, …) |
-| `minimum(a,b)` `maximum(a,s)` `clamp(a,lo,hi)` | elementwise min/max/clamp — **also methods** (`a.minimum(b)`, …) |
+| `minimum(a,b)` `maximum(a,s)` `clamp(a,lo,hi)` | elementwise min/max/clamp — **also methods** (`a.minimum(b)`, …). `clamp` follows pytorch's name over numpy's `clip` — see `CLAUDE.md`'s "Naming policy" |
 | `normalize(a)` `cross(a,b)` | unit vector / 3D cross — **also methods** (`a.normalize()`, `a.cross(b)`) |
 | `normalize<Axes...>(a)` / `normalize(a, axis<...>{})` | unit vectors over the named axes — **also methods** (`a.normalize<1>()`, `a.normalize(axis<1>{})`) |
 | `a.add(b, alpha)` `a.sub(b, alpha)` | fused out-of-place axpy: `a ± alpha*b` (b broadcasts); the in-place twin is `add_(b, alpha)` |
@@ -509,7 +510,7 @@ optimisation — those stay out of teeny).
 
 | Call | Returns | Notes |
 |---|---|---|
-| `sqnorm(a)` | `T` (accumulated wide) | Σ aᵢ² over all axes; == `dot(a, a)`. `sqnorm<Acc>` forces accumulator+result |
+| `sqnorm(a)` | `T` (accumulated wide) | Σ aᵢ² over all axes; == `dot(a, a)`. `sqnorm<Acc>` forces accumulator+result. `sqnorm`/`sqdist` are deliberately invented names — no numpy/pytorch precedent to diverge from (`CLAUDE.md`'s "Naming policy") |
 | `sqnorm<Axes...>(a)` / `sqnorm(a, axis<...>{})` | lower-rank tensor | Σ aᵢ² over the named axes (reduction API, like `sum`); `sqnorm<Acc,Axes...>` |
 | `norm(a)` | floating (`T` for float `T`, **`double`** for integer `T`) | √Σ aᵢ² (L2 / Frobenius over all axes); `norm<Acc>` forces accumulator+result |
 | `norm<Axes...>(a)` / `norm(a, axis<...>{})` | lower-rank tensor (floating) | √Σ aᵢ² over the named axes; `norm<Acc,Axes...>` |

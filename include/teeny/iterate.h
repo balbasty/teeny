@@ -720,6 +720,14 @@ _TNY_API constexpr cs::array<long, Rank - 1> scan_complement() {
 template <cs::size_t Rank, cs::size_t Axis> struct scan_complement_t
 { static constexpr cs::array<long, Rank - 1> value = scan_complement<Rank, Axis>(); };
 
+/* The ONE axis a scan walks, unwrapped from the trailing `axis<A>{}` keyword.
+ * `ok` is false for anything else -- no axis keyword at all (`_kw::unset`) or a
+ * multi-axis list (`axis<0,1>`) -- so the tagged entry points below can turn
+ * that into ONE named `static_assert` instead of an incomplete-type error, and
+ * still substitute a dummy axis so the rest of the body doesn't cascade. */
+template <class AxisTag> struct scan_axis { static constexpr long value = 0; static constexpr bool ok = false; };
+template <long A>        struct scan_axis<axis<A>> { static constexpr long value = A; static constexpr bool ok = true; };
+
 // Walk every peeled line (one per batch cell), threading `carry` through
 // `f` in increasing order along the kept axis: `carry = f(carry, line(i))`,
 // `line(i) = carry` (the new carry doubles as the new element -- a running
@@ -751,7 +759,10 @@ _TNY_API void scan_lines(Tn & t, Carry init, F f, cs::index_sequence<I...>) {
  *         `scan_<Axis>(t.flip<Axis>(), init, f)` (an rvalue view binds fine --
  *         `scan_` has both lvalue and rvalue overloads, unlike `peel` this
  *         doesn't need a named temporary first).
- *         `scan_<Axis>(t, init, f)` == `scan_(t, axis<Axis>{}, init, f)`. */
+ *         `scan_<Axis>(t, init, f)` == `scan_(t, init, f, axis<Axis>{})` -- the
+ *         axis keyword is TRAILING, like `index_select`'s and the reductions'
+ *         (#348). It used to LEAD (`scan_(t, axis<Axis>{}, init, f)`); that
+ *         spelling was REMOVED outright, with no deprecated alias. */
 template <long Axis, class T, class E, class L, storage O, class Carry, class F>
 _TNY_API void scan_(tensor<T,E,L,O> & t, Carry init, F f) {
     static_assert(tensor<T,E,L,O>::rank() >= 1, "scan_: needs rank >= 1");
@@ -764,10 +775,39 @@ _TNY_API void scan_(tensor<T,E,L,O> & t, Carry init, F f) {
 // temporary, the data it points at is not. Forwards to the lvalue overload.
 template <long Axis, class T, class E, class L, storage O, class Carry, class F>
 _TNY_API void scan_(tensor<T,E,L,O> && t, Carry init, F f) { scan_<Axis>(t, init, f); }
-template <long Axis, class T, class E, class L, storage O, class Carry, class F>
-_TNY_API void scan_(tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) { scan_<Axis>(t, init, f); }
-template <long Axis, class T, class E, class L, storage O, class Carry, class F>
-_TNY_API void scan_(tensor<T,E,L,O> && t, axis<Axis>, Carry init, F f) { scan_<Axis>(t, init, f); }
+
+/* The migration diagnostic for the argument order this file used to accept
+ * (`scan_(t, axis<A>{}, init, f)`, removed in #348): a keyword landing in the
+ * `init`/`f` slots is caught by name, instead of the caller getting a wall of
+ * overload-resolution noise or -- worse -- a `Carry` deduced as `axis<A>`.
+ * Same trick `full(Shape, V value, Tags...)` uses for its own unconstrained
+ * positional (see `_kw::is_keyword`, kwargs.h). */
+#define _TNY_SCAN_POSITIONAL_CHECK(SITE)                                                       \
+    static_assert(!_kw::is_keyword<Carry>::value && !_kw::is_keyword<F>::value,                \
+        SITE ": keyword tags are TRAILING -- " SITE "(t, init, f, axis<A>{}). The leading "    \
+        "form " SITE "(t, axis<A>{}, init, f) was REMOVED in #348 (no deprecated alias)")
+
+/** @brief Value form + trailing keyword bag: `scan_(t, init, f, axis<Axis>{})`
+ *         == `scan_<Axis>(t, init, f)`. The keyword is TRAILING, matching
+ *         `index_select(idx, axis<A>{})` and the reduction family (#348) --
+ *         and it rides the generic `_kw` bag (`kwargs.h`), so `axis<A>{}` is
+ *         validated by name and a future keyword drops in without touching
+ *         this signature. `scan_` recognises exactly one keyword (`axis`);
+ *         its out-of-place twin `scan` below adds `into(dest)`, and those two
+ *         compose in either order. Both an lvalue and an rvalue overload, so
+ *         `scan_(t.flip<A>(), init, f, axis<A>{})` needs no named temporary. */
+template <class T, class E, class L, storage O, class Carry, class F, class Tag0, class... Tags>
+_TNY_API void scan_(tensor<T,E,L,O> & t, Carry init, F f, Tag0, Tags...) {
+    _TNY_SCAN_POSITIONAL_CHECK("scan_");
+    _TNY_KW_CHECK("scan_", "axis<A>{}", (_is_axis_tag), Tag0, Tags...);
+    using AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>;
+    static_assert(_md::scan_axis<AxisTag>::ok,
+                  "scan_: needs exactly ONE axis -- scan_(t, init, f, axis<A>{})");
+    scan_<_md::scan_axis<AxisTag>::value>(t, init, f);
+}
+template <class T, class E, class L, storage O, class Carry, class F, class Tag0, class... Tags>
+_TNY_API void scan_(tensor<T,E,L,O> && t, Carry init, F f, Tag0 tag0, Tags... tags)
+{ scan_(t, init, f, tag0, tags...); }
 
 /** @brief Out-of-place twin of `scan_`: a fresh dense copy of `t`, scanned.
  *         Static shape -> stack (host+device); dynamic -> heap (host only,
@@ -786,19 +826,6 @@ _TNY_HOST auto scan(const tensor<T,E,L,O> & t, Carry init, F f) {
     scan_<Axis>(out, init, f);
     return out;
 }
-/** @brief Value form: `scan(t, axis<Axis>{}, init, f)` == `scan<Axis>(t, init, f)`.
- *         SPLIT IN TWO on the same `is_static` key as the `<Axis>` pair it forwards
- *         to (#375): a static shape yields a stack result (host+device) so the
- *         forwarder is `_TNY_API`; a dynamic shape yields a heap result (host only,
- *         via `clone()`) so it is `_TNY_HOST` — else nvcc's device pass would see a
- *         `_TNY_API` forwarder call a `__host__` allocator. */
-template <long Axis, class T, class E, class L, storage O, class Carry, class F,
-          cs::enable_if_t<tensor<T,E,L,O>::is_static, int> = 0>
-_TNY_API auto scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) { return scan<Axis>(t, init, f); }
-template <long Axis, class T, class E, class L, storage O, class Carry, class F,
-          cs::enable_if_t<!tensor<T,E,L,O>::is_static, int> = 0>
-_TNY_HOST auto scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f) { return scan<Axis>(t, init, f); }
-
 /** @brief `into(dest)` form: write the scanned result into a preallocated
  *         `dest` (a shape matching `t`'s EXACTLY, checked -- a `static_assert`
  *         when both are static, `_TNY_CHECK` otherwise; unlike `copy_`'s own
@@ -839,9 +866,45 @@ _TNY_API auto & scan(const tensor<T,E,L,O> & t, Carry init, F f, into_t<D> out) 
     scan_<Axis>(out.dest, init, f);
     return out.dest;
 }
-template <long Axis, class T, class E, class L, storage O, class Carry, class F, class D>
-_TNY_API auto & scan(const tensor<T,E,L,O> & t, axis<Axis>, Carry init, F f, into_t<D> out)
-{ return scan<Axis>(t, init, f, out); }
+
+/** @brief Value form + trailing keyword bag: `scan(t, init, f, axis<Axis>{})` ==
+ *         `scan<Axis>(t, init, f)`, and `scan(t, init, f, axis<Axis>{}, into(dest))`
+ *         == `scan<Axis>(t, init, f, into(dest))`. Both keywords ride the generic
+ *         `_kw` bag (`kwargs.h`), so they compose in ANY subset and ANY order —
+ *         `scan(t, init, f, into(dest), axis<0>{})` is the same call — exactly
+ *         like the reduction family's `dtype`/`axis`/`keepdims`/`into` bag (#348).
+ *
+ *         SPLIT IN TWO on the allocation key, like the `<Axis>` overloads it
+ *         forwards to (#375): a call that allocates its result (dynamic shape, no
+ *         `into`) yields a heap tensor via `clone()` and is `_TNY_HOST`; a static
+ *         shape (stack result) or ANY `into(dest)` call (no allocation at all)
+ *         stays `_TNY_API` — else nvcc's device pass would see a `_TNY_API`
+ *         forwarder call a `__host__` allocator. */
+template <class T, class E, class L, storage O, class Carry, class F, class Tag0, class... Tags,
+          cs::enable_if_t<tensor<T,E,L,O>::is_static || _kw::has<_is_into_tag, Tag0, Tags...>(), int> = 0>
+_TNY_API decltype(auto) scan(const tensor<T,E,L,O> & t, Carry init, F f, Tag0 tag0, Tags... tags) {
+    _TNY_SCAN_POSITIONAL_CHECK("scan");
+    _TNY_KW_CHECK("scan", "axis<A>{} or into(dest)", (_is_axis_tag, _is_into_tag), Tag0, Tags...);
+    using AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>;
+    static_assert(_md::scan_axis<AxisTag>::ok,
+                  "scan: needs exactly ONE axis -- scan(t, init, f, axis<A>{})");
+    constexpr long A = _md::scan_axis<AxisTag>::value;
+    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
+    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) return scan<A>(t, init, f, out);
+    else                                                          return scan<A>(t, init, f);
+}
+template <class T, class E, class L, storage O, class Carry, class F, class Tag0, class... Tags,
+          cs::enable_if_t<!(tensor<T,E,L,O>::is_static || _kw::has<_is_into_tag, Tag0, Tags...>()), int> = 0>
+_TNY_HOST decltype(auto) scan(const tensor<T,E,L,O> & t, Carry init, F f, Tag0 tag0, Tags... tags) {
+    _TNY_SCAN_POSITIONAL_CHECK("scan");
+    _TNY_KW_CHECK("scan", "axis<A>{} or into(dest)", (_is_axis_tag, _is_into_tag), Tag0, Tags...);
+    using AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>;
+    static_assert(_md::scan_axis<AxisTag>::ok,
+                  "scan: needs exactly ONE axis -- scan(t, init, f, axis<A>{})");
+    (void) tag0;
+    return scan<_md::scan_axis<AxisTag>::value>(t, init, f);
+}
+#undef _TNY_SCAN_POSITIONAL_CHECK
 
 _TNY_NAMESPACE_END(tny)
 

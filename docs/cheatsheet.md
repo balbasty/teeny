@@ -274,7 +274,8 @@ scan_<Axis>(x, init, f);            // sequential fold along Axis, batched (peel
                                     //   rest: carry=init, then carry=f(carry,elem); elem=carry
                                     //   for each element (increasing order). f is a device-safe
                                     //   functor (like map_'s convention). Value form: scan_(x,
-                                    //   axis<Axis>{}, init, f) -- single-axis tag right after x.
+                                    //   init, f, axis<Axis>{}) -- the axis tag is TRAILING, like
+                                    //   index_select's and the reductions' (#348).
                                     //   Reverse sweep: scan_<Axis>(x.flip<Axis>(), init, f) -- a
                                     //   temporary view binds fine (lvalue + rvalue overloads).
 auto y = scan<Axis>(x, init, f);    // out-of-place: fresh dense copy, scanned (static->stack,
@@ -282,6 +283,9 @@ auto y = scan<Axis>(x, init, f);    // out-of-place: fresh dense copy, scanned (
 scan<Axis>(x, init, f, into(dest)); // no fresh allocation beyond the copy into dest; returns dest&.
                                     //   dest must match x's shape EXACTLY (checked -- unlike
                                     //   copy_'s own broadcast, since scan_ walks dest's own axes)
+scan(x, init, f, axis<Axis>{}, into(dest));  // scan's two trailing keywords ride the generic
+                                    //   keyword bag: any subset, any order -- scan(x, init, f,
+                                    //   into(dest), axis<Axis>{}) is the same call.
 ```
 
 See [Views & structure](structure.md#nd-peel-iterate-a-subset-of-axes).

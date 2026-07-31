@@ -633,20 +633,21 @@ scan_<0>(t, 0.0, sum_op{});           // carry=init, then carry=f(carry,x); x=ca
                       //   scan_<0>(t.flip<0>(), init, f); (scan_ has both lvalue and rvalue
                       //   overloads, so a temporary flip() view binds fine -- it mutates the
                       //   same underlying storage as a named view would).
-                      //   Value form: scan_(t, axis<0>{}, init, f) — single-axis tag right
-                      //   after t (matches the issue's own free-function sketch), not trailing
-                      //   like peel_zip's (scan_'s only other args, init/f, are fixed-arity).
-                      //   This LEADING placement is a known, still-open deviation from the
-                      //   trailing-bag rule (see "Keyword arguments" below), tracked as an
-                      //   open question in #348 -- NOT changed here. The axis<...> vs Int<k>()
-                      //   VOCABULARY choice is unaffected and settled (see "Static vs runtime
-                      //   values" above): a singleton axis<...> tag is correct here because
-                      //   init is itself an arbitrary Carry value it must stay distinct from.
+scan_(t, 0.0, sum_op{}, axis<0>{});   // value form: == scan_<0>(t, 0.0, sum_op{}). The axis tag is
+                      //   TRAILING, like index_select's and the reduction family's (#348 — it used
+                      //   to LEAD, scan_(t, axis<0>{}, init, f); that spelling is GONE, no alias).
+                      //   The axis<...> vs Int<k>() VOCABULARY choice is settled and unaffected
+                      //   (see "Static vs runtime values" above): a singleton axis<...> tag is
+                      //   right here because init is an arbitrary Carry value it must stay
+                      //   distinct from.
 auto y = scan<0>(x, 0.0, sum_op{});   // out-of-place: fresh dense copy, scanned (static->stack,
                       //   dynamic->heap host-only, built on clone()); x itself untouched.
 scan<0>(x, 0.0, sum_op{}, into(dest)); // into(dest): no fresh allocation beyond the copy; dest&.
                       //   dest must match x's shape EXACTLY (checked -- unlike copy_'s own
                       //   broadcast rule, since scan_ then walks dest's own axis numbering).
+scan(x, 0.0, sum_op{}, axis<0>{}, into(dest));  // scan's two trailing keywords (axis/into) ride the
+                      //   generic kwargs bag (kwargs.h), so ANY subset in ANY order is the same
+                      //   call — scan(x, 0.0, sum_op{}, into(dest), axis<0>{}) too.
 
 // --- nd-peel: peel the FIRST N axes (arbitrary batch rank) ---
 for (auto v : peel_front<N>(t)) f(v);      // v is (*spatial, C); N = #batch dims. Incremental (as above);
@@ -757,7 +758,7 @@ does). Three selector vocabularies:
   `peel<0,1>(t)`, `peel_at(t, i, axis<0,1>{})`, `t.slice_along(axis<0,2>{}, i,
   slice(1,4))` == `t.slice_along<0,2>(...)`, `t.squeeze(axis<0,2>{})` ==
   `t.squeeze<0,2>()`, likewise `unsqueeze`/`flip`/`permute`. SINGLETON example:
-  `t.index_select(idx, axis<Axis>{})` and `scan_(t, axis<0>{}, init, f)` each
+  `t.index_select(idx, axis<Axis>{})` and `scan_(t, init, f, axis<0>{})` each
   name exactly one axis, but still reach for `axis<...>`, not `Int<k>()` —
   `idx`/`init` are themselves arbitrary values (an index tensor, an
   application-defined `Carry`) that a bare `Int<k>()` (which converts
@@ -845,13 +846,13 @@ is generic.
 
 This trailing-placement rule is orthogonal to the `axis<...>` vs `Int<k>()`
 vocabulary choice described above — one governs WHERE a tag goes, the other
-WHICH tag to use. `scan_`/`scan` are the one shipped exception to the
-placement rule: `scan_(t, axis<0>{}, init, f)` puts its `axis<...>` tag
-LEADING, not trailing, even though `init`/`f` are fixed-arity like
-`index_select`'s `idx`. That placement question is still open, tracked in
-`#348` — it is a breaking argument-order change to a shipped API and needs a
-maintainer decision, unlike the vocabulary question above (already settled by
-this paragraph's restated rule, no code change required).
+WHICH tag to use. Every keyword-accepting call site now follows it: `scan_`/
+`scan` were the last exception (their `axis<...>` tag used to LEAD, right after
+the tensor, even though `init`/`f` are fixed-arity like `index_select`'s `idx`)
+and `#348` moved it to trailing — `scan_(t, init, f, axis<0>{})`. That was a
+BREAKING argument-order change to a shipped API, taken as a clean break: there
+is no deprecated leading-form alias, and a call that still passes the tag
+leading fails on a `static_assert` naming the new order.
 
 ## How the hard parts work (so you don't re-derive them)
 
@@ -1231,6 +1232,42 @@ this paragraph's restated rule, no code change required).
    `CLAUDE.md` cheat-sheet. Updating only `CLAUDE.md` is not enough — the docs site
    is separate and drifts silently.
 7. Commit with a focused message.
+
+## Naming policy
+
+teeny mixes torch-alike and numpy-alike vocabulary on purpose, not by
+accident — but that mix needs a rule so it reads as *deliberate* rather than
+inconsistent (#337, following on from the `take_along` → `slice_along` rename
+in #423, itself resolving F1-h in `docs/api-ux-review.md`):
+
+1. **Op names prefer the closest pytorch name when a direct analog exists.**
+   `clamp` is the precedent: it matches `torch.clamp`, not numpy's `clip`,
+   because pytorch is teeny's nearer neighbor (tensor-shaped, kernel-facing
+   API) even where the two libraries disagree (`minimum`/`maximum`/`allclose`
+   happen to match both, so they don't test the rule either way). When
+   pytorch and numpy agree, or only one of them has the op at all, there is no
+   conflict to resolve, and the shared/only name is simply used.
+2. **Keyword vocabulary stays numpy-style regardless of the op it decorates**
+   — `axis=`, `dtype=`, `keepdims=` (`tny::_kw`'s `axis<...>`/`dtype<T>`/
+   `keepdims` tags) read as numpy's spelling even on an otherwise
+   pytorch-named op (`sum(a, axis<0>{})`, not a `dim=` tag). Keyword naming
+   and op naming are independent choices — don't let one drag the other along.
+3. **An invented name is allowed only when no prior art exists, and it must
+   not collide with an existing numpy/pytorch name that means something
+   different.** `sqnorm`/`sqdist` are the kept examples: neither numpy nor
+   pytorch spells "squared norm"/"squared distance" as a single name, so
+   there is nothing to diverge from or collide with (F1-d, `docs/api-ux-review.md`
+   — resolved by this policy, no rename needed). Contrast the old
+   `take_along`: it looked invented but actually collided with numpy's
+   `take_along_axis`/pytorch's `take_along_dim`, which name a *different*,
+   data-dependent index-tensor gather (that operation is teeny's
+   `index_select`, already modeled on `torch.index_select`) — teeny's op was
+   an affine axis-binding view, so it was renamed to `slice_along` (#423)
+   rather than kept under the collision.
+
+Applying this rule to an existing name is not, by itself, a reason to rename
+it — a rename is its own scoped issue/PR (as `slice_along` was), never a
+drive-by edit bundled with an unrelated change.
 
 ## Documentation style
 
