@@ -154,10 +154,19 @@ cxx23:
 	$(MAKE) clean
 	$(MAKE) CXXFLAGS='$(CXXFLAGS) -std=c++23' run-test
 
+# No-negative-index build: compile out the python-style negative-index wrap in
+# `operator()`, the "my indices are already non-negative" build. The suite must
+# pass under it too — a test that quietly relies on the wrap (or a gather whose
+# compile-time fold disagrees with the runtime path once the wrap is gone) is a
+# real defect, and nothing else in CI would catch it (#446, #455).
+negindex:
+	$(MAKE) clean
+	$(MAKE) CXXFLAGS='$(CXXFLAGS) -O2 -DTNY_NO_NEGATIVE_INDEX' run-test
+
 clean:
 	$(DEL) $(TESTS) $(EXAMPLES)
 
-.PHONY: all test run-test examples run-examples release hardened cxx23 clean
+.PHONY: all test run-test examples run-examples release hardened cxx23 negindex clean
 
 ########################################################################
 # 	Rules

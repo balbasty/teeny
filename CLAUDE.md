@@ -1330,6 +1330,18 @@ Tests return non-zero on failure (the return code is the failing check number).
 kernels and validate them numerically against hand-written references — when you
 change math or layout code, these are the ones that catch regressions.
 
+**Build variants.** Each `make` variant target cleans, then rebuilds and runs the
+WHOLE suite under one set of flags: `negindex` (`-DTNY_NO_NEGATIVE_INDEX`),
+`hardened` (`-DTNY_HARDENED`), `release` (`-O2 -DNDEBUG`), `cxx23`
+(`-std=c++23`). Only `negindex` is in CI so far — as `tests-negindex` in
+`test-on-push.yaml`, the same both-compiler fan-out as the plain `tests` job
+(the reusable `test.yaml`/`test-matrix.yaml` take a `target` input, defaulting
+to `run-test`, so wiring another variant up is one job block). It earned the job
+because the flag changes real codegen — `operator()`'s negative-index wrap
+disappears — and five tests had silently come to depend on the wrap without
+anything catching it (#446, #455). Run it before every commit that touches
+slicing / broadcasting / layout folds, on both compilers.
+
 **Never commit build output.** `make` writes compiled binaries into `BUILDDIR`
 (default `./build`; a second-compiler run is usually `make BUILDDIR=./build-clang`
 or similar). `.gitignore` ignores `build*/`, so every conventional build dir is

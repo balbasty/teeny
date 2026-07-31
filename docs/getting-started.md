@@ -61,6 +61,11 @@ make run-examples    # build + run the standalone example algorithms
 make CXX=clang++ run-test    # pick a compiler
 ```
 
+The suite also has one target per build variant, each of which cleans first and
+rebuilds everything under its own flags: `make negindex`
+(`-DTNY_NO_NEGATIVE_INDEX`), `make hardened` (`-DTNY_HARDENED`), `make release`
+(`-O2 -DNDEBUG`), `make cxx23` (`-std=c++23`).
+
 ## One include, one namespace
 
 ```cpp

@@ -9,7 +9,7 @@
 - [ ] `make CXX=g++ run-test` and `make CXX=clang++ run-test` — all PASS
 - [ ] new/affected `tests/test_*.cpp` added or updated
 - [ ] ASan+UBSan clean on the affected host-path tests
-- [ ] (slicing / broadcasting / layout folds) also built with `-DTNY_NO_NEGATIVE_INDEX`
+- [ ] (slicing / broadcasting / layout folds) `make negindex` — the suite under `-DTNY_NO_NEGATIVE_INDEX` (CI runs it too)
 - [ ] (core-path change) element-identity vs previous behaviour checked
 
 ## Notes
