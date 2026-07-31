@@ -27,9 +27,13 @@ int main() {
     auto s4 = t.subsample<1>(3, 0);   // axis 1: step 3, start 0; axis 0 untouched
     for (long i=0;i<10;++i) for (long j=0;j<4;++j) if (s4(i,j) != t(i, j*3)) return 4;
 
-    // negative start wraps (built on slice(), which already wraps)
+    // negative start wraps (built on slice(), which already wraps) — a RUNTIME
+    // start, so only when the build wraps at all: -DTNY_NO_NEGATIVE_INDEX drops
+    // the wrap, and a negative runtime start is then undefined behaviour.
+#ifndef TNY_NO_NEGATIVE_INDEX
     auto s5 = t.subsample<0>(2, -2);   // start -2 == 8 (last-but-one row)
     for (long j=0;j<10;++j) if (s5(0,j) != t(8,j)) return 5;
+#endif
 
     // const overload
     const auto & ct = t;

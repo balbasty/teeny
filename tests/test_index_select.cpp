@@ -47,11 +47,15 @@ int main() {
         if (sel(2,j) != verts(4,j)) return 3;
     }
 
-    // negative idx values wrap (built on slice_along, which already wraps).
+    // negative idx values wrap (built on slice_along, which already wraps) — the
+    // index values are RUNTIME, so only when the build wraps at all:
+    // -DTNY_NO_NEGATIVE_INDEX drops the wrap and a negative index is then UB.
+#ifndef TNY_NO_NEGATIVE_INDEX
     auto idxn = local<long, shape<2>>(); idxn(0)=-1; idxn(1)=-5;
     auto seln = verts.index_select<0>(idxn);
     if (seln(0,0) != verts(4,0)) return 4;   // -1 -> last row (4)
     if (seln(1,0) != verts(0,0)) return 5;   // -5 -> row 0
+#endif
 
     // dynamic idx shape -> heap result.
     auto idxd = owned<long, shape<-1>>(shape<-1>{2}); idxd(0)=1; idxd(1)=3;
@@ -99,6 +103,8 @@ int main() {
     // negative idx values must still wrap when *this's own index_type is UNSIGNED
     // (#332 review: a naive cast of idx(j) straight to index_type reinterprets a
     // negative value as a huge unsigned one on such a tensor -- regression guard).
+    // (again a RUNTIME negative index, so guarded like the block above)
+#ifndef TNY_NO_NEGATIVE_INDEX
     double ubuf[15]; for (long i=0;i<15;++i) ubuf[i] = i;
     auto uverts = wrap(ubuf, cs::extents<unsigned,5,3>{});
     auto idxun = local<long, shape<2>>(); idxun(0)=-1; idxun(1)=-5;
@@ -108,6 +114,7 @@ int main() {
     auto destu = local<double, shape<2,3>>();
     uverts.index_select<0>(idxun, into(destu));
     if (destu(0,0) != uverts(4,0) || destu(1,0) != uverts(0,0)) return 21;
+#endif
 
     // #375: the axis<> value form is SPLIT into an _TNY_API (static result ->
     // stack) and a _TNY_HOST (dynamic result -> heap) forwarder, so nvcc's

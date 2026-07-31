@@ -12,9 +12,13 @@ int main() {
     if (t(1,2,3) != 1*12+2*4+3) return 1;
     static_assert(cs::is_same<decltype(t(0,0,0)), double&>(), "int... -> element");
 
-    // negative indices wrap python-style
+    // negative indices wrap python-style (only meaningful when the build wraps at
+    // all — -DTNY_NO_NEGATIVE_INDEX drops the wrap, so a negative RUNTIME index is
+    // undefined behaviour there; the static/`none` folds below are unaffected)
+#ifndef TNY_NO_NEGATIVE_INDEX
     if (t(-1,-1,-1) != t(1,2,3)) return 2;
     if (t(-2,0,0)  != t(0,0,0)) return 3;
+#endif
 
     // static index (Int<>) as an element index
     if (t(Int<1>(), 2, 3) != t(1,2,3)) return 4;
@@ -51,9 +55,12 @@ int main() {
     static_assert(decltype(c)::extents_type::static_extent(0) == 3, "slice(none,none)==all folds");
     if (c.extent(0) != 3 || c(1,2) != t(0,1,2)) return 12;
 
-    // negative bounds wrap (count from the back)
+    // negative bounds wrap (count from the back) — a RUNTIME bound, so likewise
+    // only when the build wraps (-DTNY_NO_NEGATIVE_INDEX takes -2 literally)
+#ifndef TNY_NO_NEGATIVE_INDEX
     auto d = t(0, slice(-2, none), all);              // last two of axis1 -> [1,3)
     if (d.extent(0) != 2 || d(0,0) != t(0,1,0) || d(1,0) != t(0,2,0)) return 13;
+#endif
 
     // step: every other element along the last axis (0,2) of 4 -> length 2
     auto e = t(0, 0, slice(0, 4, Int<2>()));
@@ -96,9 +103,11 @@ int main() {
     // (the wrap is done in a signed domain, not after casting to index_type).
     auto u = wrap(buf, cs::extents<cs::size_t,2,3,4>{});
     static_assert(cs::is_unsigned<decltype(u)::index_type>::value, "unsigned index_type");
+#ifndef TNY_NO_NEGATIVE_INDEX
     if (u(-1,-1,-1) != u(1,2,3)) return 17;           // negative element index wraps
     auto us = u(0, slice(-2, none), all);             // negative slice bound wraps
     if (us.extent(0) != 2 || us(0,0) != u(0,1,0)) return 18;
+#endif
 
     // ---- negative step (python a[::-1], a[5:0:-1], strided reverse) ------
     auto line = wrap(buf, shape<4>{});                // signed index for reverse
