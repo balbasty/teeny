@@ -47,8 +47,20 @@ Factories:
 | `wrap(ptr, shape, strides<Sx,Sy,...>{})` | view with compile-time strides (may be negative) |
 | `wrap(ptr, shape, {s0,s1,...})` | view with runtime strides (`dynamic_strides`) |
 | `wrap<S...>(ptr, shape, {dyn...})` | mixed static/runtime strides (`dynamic_stride` slots) |
-| `as_tensor(any_mdspan)` / `wrap(any_mdspan)` | wrap a raw `mdspan`/`submdspan` result as a view — both spellings, same result; `as_tensor` is what teeny's own view-producing ops (`permute`/`flip`/…) call internally. Extents and layout come from the mdspan; a trailing `storage_v<storage::gpu>` names the memory space, exactly as on the pointer forms |
+| `as_tensor(any_mdspan)` / `wrap(any_mdspan)` | wrap a raw `mdspan`/`submdspan` result as a view — both spellings, same result (deliberately: see below). Extents and layout come from the mdspan; a trailing `storage_v<storage::gpu>` names the memory space, exactly as on the pointer forms |
 | `make_view(ptr, shape)` / `make_view(ptr, shape, fcontiguous{})` | an alias of `wrap` in the `make_*` family (same result, same layout + storage spellings — not the stride-tag rows above) |
+
+`wrap(any_mdspan)` and `as_tensor(any_mdspan)` are both public on purpose — they
+are two layers, not an accidental duplicate. `wrap` is the one factory name for
+"view existing memory, whatever you hold" — a pointer plus a shape, a pointer plus
+strides, or an already-built mdspan — so you never have to switch names based on
+what you start from, and every form takes the same trailing keyword tags.
+`as_tensor` is the narrower primitive underneath: it adapts exactly one thing (an
+mdspan) and nothing else. It is the spelling the
+[mdspan interop page](mdspan-vs-teeny.md) teaches, and the one teeny's own
+view-producing ops (`permute`/`flip`/…) call internally. Use `wrap` when you think
+of it as "make me a view"; use `as_tensor` when you think of it as "adapt this
+mdspan" — same view either way.
 
 `wrap` already deduces the shape type from its argument, so `make_view` is a plain
 synonym that exists for symmetry with `make_local` / `make_heap` / `make_gpu`. Use
@@ -173,6 +185,21 @@ This is the same **keyword-argument design rule** used by [reductions](math.md#k
 (`sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf))`): keywords are
 trailing, order-free among themselves, and one of each kind per call —
 `tny::_kw` (`kwargs.h`) is the shared primitive behind both.
+
+You can also mix the two styles. Naming the **backend** as a leading explicit
+template argument leaves the whole keyword bag available behind it, in any
+subset and any order:
+
+```cpp
+auto p1 = zeros<storage::pinned>(shape<3,3>{});                             // no keyword at all
+auto p2 = zeros<storage::pinned>(shape<3,3>{}, fcontiguous{});              // a layout keyword
+auto p3 = zeros<storage::pinned>(shape<3,3>{}, dtype<double>{}, fcontiguous{});
+auto p4 = zeros<storage::pinned>(shape<3,3>{}, fcontiguous{}, dtype<double>{});   // same thing
+```
+
+The one keyword that spelling will not take is `storage_c<...>{}` — that *is*
+the backend, so naming it twice is a "pick one" error rather than a silent
+winner.
 
 ## Getting a view from an owning tensor
 

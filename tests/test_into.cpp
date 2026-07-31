@@ -8,6 +8,18 @@ namespace cs = cuda::std;
 
 static bool close(double a, double b) { return std::fabs(a - b) < 1e-9; }
 
+// user functor for `map` / `map(f, into(dest))` (a struct, not a lambda — the
+// engines must instantiate under nvcc without --extended-lambda)
+struct _sq { _TNY_API double operator()(double x) const { return x * x; } };
+
+// The cast a reduction's `into(dest)` must perform, spelled out by hand (#406):
+// a 16-bit float converts only TO `float` and only FROM an arithmetic type, so
+// `half` -> `bfloat16` has to stop there on the way. This is the reference the
+// reduction block at the bottom checks against — `dest.fill_(sum(a))`, the twin
+// used everywhere else in this file, cannot serve as one here: `fill_` takes the
+// tensor's OWN element type, so spelling the twin already needs this same cast.
+template <class To, class From> static To via_float(From v) { return static_cast<To>(static_cast<float>(v)); }
+
 int main() {
     auto a = local<double, shape<3>>(); a(0)=1; a(1)=2; a(2)=3;
     auto b = local<double, shape<3>>(); b(0)=10; b(1)=20; b(2)=30;
@@ -218,6 +230,83 @@ int main() {
     a.mul(2.0, into(fi2));  if (!close(fi2(0), 2.0) || !close(fi2(2), 6.0)) return 74;
     neg(a, into(fi2));      if (!close(fi2(2), -3.0))                       return 75;
 
+    // ====== TENSOR-RHS into(dest) SHAPE VALIDATION, at COMPILE TIME (#361) ======
+    // The broadcasting producer's own compile-time gate only ever compared the two
+    // OPERANDS with each other, so a static, provably-mismatched dest compiled and
+    // was left to the debug-only runtime check — which `-DNDEBUG` removes, at which
+    // point a dest LARGER than an operand reads that operand past its end (the loop
+    // bounds come from the dest, the operand offsets from its own strides).
+    //
+    // The rule is ASYMMETRIC, and that is the whole subtlety: an OPERAND axis of
+    // extent 1 stretches (stride 0), a DEST axis of extent 1 does not. So (1,3) into
+    // (2,3) is legal as an operand and illegal as a dest. `bc_static_ok_dest` is the
+    // predicate the two static_asserts in the engine ask; exercising it directly is
+    // the only compile-time check this runtime suite can actually run — a firing
+    // static_assert is a hard error, and there is no compile-fail harness here (same
+    // convention as the #357 repros above and the ones commented out below).
+    {
+        using E22 = shape<2,2>; using E88 = shape<8,8>; using E23 = shape<2,3>;
+        using E13 = shape<1,3>; using E3  = shape<3>;   using Edd = shape<-1,-1>;
+        constexpr auto ix2 = cs::make_index_sequence<2>{};
+        // the issue's own repro: an (8,8) operand into a (2,2) dest -> ill-formed
+        static_assert(!_md::bc_static_ok_dest<E88, E22, 2>(ix2),
+                      "#361: a static (8,8) operand into a static (2,2) dest must be rejected");
+        // ...and the other direction, the one that reads OOB under -DNDEBUG
+        static_assert(!_md::bc_static_ok_dest<E22, E88, 2>(ix2),
+                      "#361: a dest LARGER than the operand must be rejected too");
+        // a size-1 OPERAND axis stretches to the dest -> fine
+        static_assert(_md::bc_static_ok_dest<E13, E23, 2>(ix2),
+                      "#361: an extent-1 operand axis broadcasts into the dest");
+        // ...but a size-1 DEST axis does NOT stretch to the operand
+        static_assert(!_md::bc_static_ok_dest<E23, E13, 2>(ix2),
+                      "#361: an extent-1 DEST axis is a real extent, not a stretch");
+        // a SHORTER operand right-aligns; its missing leading axes are extent 1 -> fine
+        static_assert(_md::bc_static_ok_dest<E3, E23, 2>(ix2),
+                      "#361: a shorter operand's padded leading axes are extent 1");
+        // matching shapes, and anything dynamic on either side, stay for the runtime check
+        static_assert(_md::bc_static_ok_dest<E23, E23, 2>(ix2),
+                      "#361: matching static shapes are accepted");
+        static_assert(_md::bc_static_ok_dest<Edd, E22, 2>(ix2) &&
+                      _md::bc_static_ok_dest<E88, Edd, 2>(ix2),
+                      "#361: a dynamic extent on either side is unknowable here -> runtime check");
+    }
+
+    // What must keep working: every CORRECTLY-shaped tensor-rhs into(dest) call.
+    auto bd = local<double, shape<2,3>>(); bd.iota_(1.0, 1.0);      // 1..6
+    auto bcol = local<double, shape<2,1>>(); bcol(0,0)=10; bcol(1,0)=20;
+    auto out23 = local<double, shape<2,3>>();
+    bd.add(bcol, into(out23));                     // (2,1) rhs stretches over (2,3)
+    if (out23(0,0)!=11 || out23(1,2)!=26)    return 116;
+    auto v3 = local<double, shape<3>>(); v3(0)=100; v3(1)=200; v3(2)=300;
+    bd.add(v3, into(out23));                      // SHORTER rhs, right-aligned
+    if (out23(0,0)!=101 || out23(1,2)!=306)  return 117;
+    // ...and a comparison, which drives the same engine directly (bypassing the
+    // wrapper the old operand-vs-operand gate lived in)
+    auto cmask = bd > v3;                         // all false: 1..6 < 100..300
+    if (cmask(0,0) || cmask(1,2))            return 118;
+    // dynamic shapes still go to the runtime check and must pass when they match
+    auto ddyn = zeros<double>(shape<-1,-1>{2,3}); ddyn.iota_(1.0, 1.0);
+    auto odyn = zeros<double>(shape<-1,-1>{2,3});
+    ddyn.add(ddyn, into(odyn));
+    if (odyn(0,0)!=2 || odyn(1,2)!=12)       return 119;
+    // a MIXED static/dynamic pair: the static axis folds, the dynamic one defers
+    auto dmix = zeros<double>(shape<-1,3>{2,3}); dmix.iota_(1.0, 1.0);
+    auto omix = zeros<double>(shape<-1,3>{2,3});
+    dmix.add(dmix, into(omix));
+    if (omix(0,0)!=2 || omix(1,2)!=12)       return 120;
+
+    // The mis-shaped calls are now COMPILE errors, so they cannot live in a running
+    // test — same commented-out convention as the #357 repros above; verified by hand:
+    //   auto a8 = zeros<double>(shape<8,8>{}); auto y2 = zeros<double>(shape<2,2>{});
+    //   a8.add(a8, into(y2));     // static: compile error (was: debug-only _TNY_CHECK)
+    //   y2.add(y2, into(a8));     // static: compile error (was: OOB read under -DNDEBUG)
+    //   auto r23 = zeros<double>(shape<2,3>{}); auto r13 = zeros<double>(shape<1,3>{});
+    //   r23.add(r23, into(r13));  // static: compile error (a dest axis does not stretch)
+    //   auto ad = zeros<double>(shape<-1,-1>{8,8}); auto yd = zeros<double>(shape<-1,-1>{2,2});
+    //   ad.add(ad, into(yd));     // dynamic: _TNY_CHECK fires (unchanged)
+    //   auto a13 = zeros<double>(shape<1,3>{}); auto b23 = zeros<double>(shape<2,3>{});
+    //   a13.add_(b23);            // in-place static rhs mismatch: compile error too (was: debug-only _TNY_CHECK)
+
     // ========= dest's dtype casts the RESULT, not the arithmetic (#379) =========
     // `into(dest)` is the one path where the caller picks the destination's element
     // type, and what that type does is receive the CAST result: the computation
@@ -266,7 +355,7 @@ int main() {
     // The dest's STRIDES don't change the rule: a non-contiguous int dest takes the
     // per-element decode path instead of the linear fast path, and must agree.
     auto pad = local<int, shape<3,2>>(); pad.zero_();
-    auto icol = pad.take_along<1>(0);
+    auto icol = pad.slice_along<1>(0);
     d3.mul(0.5, into(icol));
     if (pad(0,0)!=0 || pad(1,0)!=1 || pad(2,0)!=1) return 90;
     if (pad(0,1)!=0 || pad(1,1)!=0 || pad(2,1)!=0) return 91;   // gaps untouched
@@ -491,6 +580,139 @@ int main() {
     bb.add(hh, into(mh_into));
     mh_twin.copy_(bb.add(hh));
     for (long i = 0; i < 3; ++i) if (!(mh_into(i) == mh_twin(i))) return 115;
+
+    // ---- REDUCTIONS into the OTHER 16-bit float (#406) ------------------
+    // Same non-conversion as the block above, in the other family: a FULL
+    // reduction returns a SCALAR of the tensor's element type and used to
+    // `static_cast` it straight to the destination cell's, which no more compiles
+    // for `half` -> `bfloat16` than the elementwise store did. The cast now stops
+    // at `float` on the way, so each of these lands on exactly the bits the
+    // hand-written two-hop cast gives — and, above all, COMPILES.
+    auto rb = local<bfloat16, shape<>>{};
+    sum(hh, into(rb));     if (!(rb.item() == via_float<bfloat16>(sum(hh))))    return 116;
+    prod(hh, into(rb));    if (!(rb.item() == via_float<bfloat16>(prod(hh))))   return 117;
+    max(hh, into(rb));     if (!(rb.item() == via_float<bfloat16>(max(hh))))    return 118;
+    min(hh, into(rb));     if (!(rb.item() == via_float<bfloat16>(min(hh))))    return 119;
+    mean(hh, into(rb));    if (!(rb.item() == via_float<bfloat16>(mean(hh))))   return 120;
+    sqnorm(hh, into(rb));  if (!(rb.item() == via_float<bfloat16>(sqnorm(hh)))) return 121;
+    norm(hh, into(rb));    if (!(rb.item() == via_float<bfloat16>(norm(hh))))   return 122;
+    dot(hh, hh2, into(rb));    if (!(rb.item() == via_float<bfloat16>(dot(hh, hh2))))    return 123;
+    sqdist(hh, hh2, into(rb)); if (!(rb.item() == via_float<bfloat16>(sqdist(hh, hh2)))) return 124;
+    dist(hh, hh2, into(rb));   if (!(rb.item() == via_float<bfloat16>(dist(hh, hh2))))   return 125;
+
+    // ...and the reverse direction: bfloat16 sources into a `half` cell.
+    auto rh = local<half, shape<>>{};
+    sum(bb, into(rh));      if (!(rh.item() == via_float<half>(sum(bb))))       return 126;
+    max(bb, into(rh));      if (!(rh.item() == via_float<half>(max(bb))))       return 127;
+    norm(bb, into(rh));     if (!(rh.item() == via_float<half>(norm(bb))))      return 128;
+    dot(bb, bb2, into(rh)); if (!(rh.item() == via_float<half>(dot(bb, bb2))))  return 129;
+
+    // Same-type (half -> half) and widening/narrowing sanity: the added stop is an
+    // exact widening of an already-rounded value, so none of these moved a bit.
+    auto rhh = local<half, shape<>>{};
+    sum(hh, into(rhh));
+    if (!(rhh.item() == sum(hh)))                                  return 130;
+    auto rd = local<double, shape<>>{};
+    sum(hh, into(rd));
+    if (!(rd.item() == static_cast<double>(sum(hh))))              return 131;
+    auto rdh = local<half, shape<>>{};
+    sum(a, into(rdh));                                    // double source -> half cell
+    if (!(rdh.item() == static_cast<half>(sum(a))))                return 132;
+
+    // A named accumulator makes the reduction's result `Acc` (here `float`), so the
+    // scalar reaching the cell is no longer a 16-bit float at all — the other half
+    // of the matrix, and it must keep landing on the same bits.
+    sum<float>(hh, into(rb));
+    if (!(rb.item() == static_cast<bfloat16>(sum<float>(hh))))     return 133;
+    sum(hh, dtype<float>{}, into(rb));                    // value-tag spelling of the same
+    if (!(rb.item() == static_cast<bfloat16>(sum<float>(hh))))     return 134;
+
+    // The AXIS reductions reach their destination through `copy_` (which widens to
+    // the dest's compute type like `fill_` does), so they were never broken — pin
+    // them anyway, so the two halves of the family stay tested together.
+    auto hm = local<half, shape<2,3>>();
+    for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j) hm(i,j) = static_cast<half>(1 + 3*i + j);
+    auto rowb = local<bfloat16, shape<2>>(), rowb_twin = local<bfloat16, shape<2>>();
+    sum<1>(hm, into(rowb));  rowb_twin.copy_(sum<1>(hm));
+    for (long i = 0; i < 2; ++i) if (!(rowb(i) == rowb_twin(i))) return 135;
+    norm(hm, axis<1>{}, into(rowb));  rowb_twin.copy_(norm<1>(hm));
+    for (long i = 0; i < 2; ++i) if (!(rowb(i) == rowb_twin(i))) return 136;
+
+    // ============ parity gaps closed by #381 ===========================
+    // AXIS normalize: the method twins of the free `normalize<Axes...>(a)` /
+    // `normalize(a, axis<Axes...>{})`, plus `into(dest)` on all four spellings.
+    // Rows of `an` are (3,4) and (6,8) -> each unit row is (0.6,0.8).
+    auto an = local<double, shape<2,2>>();
+    an(0,0)=3; an(0,1)=4; an(1,0)=6; an(1,1)=8;
+
+    auto ar = normalize<1>(an);                                   // the free reference
+    if (!close(ar(0,0),0.6) || !close(ar(0,1),0.8)) return 137;
+    if (!close(ar(1,0),0.6) || !close(ar(1,1),0.8)) return 138;
+
+    auto am1 = an.normalize<1>();                                 // a.normalize<Axes...>()
+    if (!close(am1(0,0),0.6) || !close(am1(1,1),0.8)) return 139;
+    auto am2 = an.normalize(axis<1>{});                           // a.normalize(axis<...>{})
+    if (!close(am2(0,0),0.6) || !close(am2(1,1),0.8)) return 140;
+    static_assert(decltype(am1)::is_static, "axis normalize of a static tensor -> stack");
+
+    auto ny = local<double, shape<2,2>>();
+    auto & nr = normalize<1>(an, into(ny));                       // free, explicit axes
+    if (!close(ny(0,0),0.6) || !close(ny(1,1),0.8)) return 141;
+    if (&nr != &ny)                                 return 142;   // returns the dest by reference
+    ny.zero_();
+    normalize(an, axis<1>{}, into(ny));                           // free, value form
+    if (!close(ny(0,1),0.8) || !close(ny(1,0),0.6)) return 143;
+    ny.zero_();
+    an.normalize<1>(into(ny));                                    // method, explicit axes
+    if (!close(ny(0,0),0.6) || !close(ny(1,1),0.8)) return 144;
+    ny.zero_();
+    an.normalize(axis<1>{}, into(ny));                            // method, value form
+    if (!close(ny(0,0),0.6) || !close(ny(1,1),0.8)) return 145;
+    if (an(0,0)!=3 || an(1,1)!=8)                   return 146;   // source untouched
+
+    // the OTHER axis, to confirm the axis is really honoured (columns (3,6),(4,8))
+    auto ny0 = local<double, shape<2,2>>();
+    an.normalize(axis<0>{}, into(ny0));
+    if (!close(ny0(0,0), 3.0/std::sqrt(45.0)))      return 147;
+    if (!close(ny0(1,1), 8.0/std::sqrt(80.0)))      return 148;
+
+    // ...and the full-tensor forms still resolve (the empty pack is SFINAE'd out)
+    auto vfull = local<double, shape<3>>(); vfull(0)=3; vfull(1)=0; vfull(2)=4;
+    if (!close(vfull.normalize()(2), 0.8))          return 149;
+    auto ufull = local<double, shape<3>>(); vfull.normalize(into(ufull));
+    if (!close(ufull(0), 0.6))                      return 150;
+
+    // dynamic (heap) source: same four spellings, allocating path
+    auto dn = owned<double, shape<-1,-1>>(shape<-1,-1>{2,2});
+    dn(0,0)=3; dn(0,1)=4; dn(1,0)=6; dn(1,1)=8;
+    auto dr = dn.normalize(axis<1>{});
+    if (!close(dr(0,0),0.6) || !close(dr(1,1),0.8)) return 151;
+    auto dy = owned<double, shape<-1,-1>>(shape<-1,-1>{2,2});
+    dn.normalize<1>(into(dy));
+    if (!close(dy(0,0),0.6) || !close(dy(1,1),0.8)) return 152;
+
+    // `into(dest)` may have a DIFFERENT element type (result cast on store)
+    auto nf = local<float, shape<2,2>>();
+    an.normalize(axis<1>{}, into(nf));
+    if (std::fabs(double(nf(0,0)) - 0.6) > 1e-6)    return 153;
+
+    // ---- map(f, into(dest)) : the out-of-place user-functor destination ----
+    auto ms = local<double, shape<3>>(); ms(0)=2; ms(1)=3; ms(2)=4;
+    auto mout = local<double, shape<3>>();
+    auto & mr = ms.map(_sq{}, into(mout));
+    if (!close(mout(0),4.0) || !close(mout(2),16.0)) return 154;
+    if (&mr != &mout)                                return 155;   // returns the dest by reference
+    if (ms(0)!=2)                                    return 156;   // source untouched
+    // identical to the allocating twin, element for element
+    auto mtwin = ms.map(_sq{});
+    for (long i = 0; i < 3; ++i) if (!close(mout(i), mtwin(i))) return 157;
+    // a narrower dest is cast on store, like every other producer's into form
+    auto mi = local<int, shape<3>>();
+    ms.map(_sq{}, into(mi));
+    if (mi(0)!=4 || mi(1)!=9 || mi(2)!=16)           return 158;
+    // aliasing the source is fine for a unary map (one read, one write per element)
+    ms.map(_sq{}, into(ms));
+    if (!close(ms(0),4.0) || !close(ms(2),16.0))     return 159;
 
     return 0;
 }

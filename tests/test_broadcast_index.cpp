@@ -17,6 +17,13 @@
 // instead of stepping backwards. So a MIXED-signedness set decodes in a signed type
 // wide enough for both sides; all-signed and all-unsigned sets keep the width pick.
 //
+// Checks 26+ close the loop: the RESULT's own index type (checks 1-6) follows that same
+// signedness-aware rule too (#347), where it used to be a pure `sizeof` pick. A width-only
+// pick handed back an UNSIGNED-indexed result whenever the unsigned operand happened to be
+// the wider one (breaking teeny's signed-index contract for a result built from a signed
+// operand), and at EQUAL width kept the FIRST — an int32/uint32 pair resolving to int32,
+// which cannot represent the uint32 operand's upper half.
+//
 // Checks 18+ carry the SAME rule (width and signedness both) through the three sibling
 // engines that had the same defect (#353): a scalar-rhs op (`a.mul(2.0, into(y))`), a
 // unary op (`neg(a, into(y))`), and `allclose(a, b)`. The first two truncated a
@@ -417,6 +424,123 @@ int main() {
         if (pv[0] != -1 || pv[1] != -2 || pv[2] != -3 || pv[3] != -4) return 57;
         if (!allclose(s64, s16)) return 58;
         if (!allclose(su, du.mul(-1.0))) return 59;
+    }
+
+    /* ---- the RESULT's own index type across signedness (#347) ------------------- *
+     * Checks 1-6 pinned the WIDTH half of the broadcast result's index type. The pick
+     * was `sizeof`-only, which is not the "holds every value either operand can name"
+     * rule it is supposed to state once the two disagree in signedness — so the result
+     * follows the same signedness-aware rule the engines decode in: the plain widest
+     * for a same-signedness pair (checks 1-6 unmoved), a SIGNED type wide enough for
+     * both ranges for a mixed one. */
+
+    // (26) signed-narrow + UNSIGNED-WIDER (the reported pair): int16 + uint32. The width
+    //      pick resolved to `unsigned int` — an unsigned-indexed result handed back from
+    //      a signed operand. It must resolve to a SIGNED type holding the uint32 range.
+    {
+        auto s16 = wrap(buf, shape_as<short,2,3>{});
+        auto u32 = wrap(buf, shape_as<unsigned int,2,3>{});
+        static_assert(cs::is_same<idx_of<decltype(s16)>, short>::value, "lhs int16-indexed");
+        static_assert(cs::is_same<idx_of<decltype(u32)>, unsigned int>::value, "rhs uint32-indexed");
+        auto c = s16 + u32;
+        static_assert(cs::is_signed<idx_of<decltype(c)>>::value, "int16+uint32 -> SIGNED result");
+        static_assert(cs::is_same<idx_of<decltype(c)>, cs::int64_t>::value,
+                      "...and wide enough for the uint32 range");
+        for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j)
+            if (c(i,j) != s16(i,j) + u32(i,j)) return 60;
+        // the other operand order resolves the same way (the rule is symmetric).
+        auto c2 = u32 + s16;
+        static_assert(cs::is_same<idx_of<decltype(c2)>, cs::int64_t>::value, "uint32+int16 -> int64");
+        for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j)
+            if (c2(i,j) != c(i,j)) return 61;
+    }
+
+    // (27) EQUAL width, disagreeing signedness — the case the `sizeof` tie-break could
+    //      not express at all: int32+uint32 kept the FIRST (int32), which cannot hold the
+    //      uint32 operand's upper half. Both orders now step up to a signed 64-bit index.
+    {
+        auto i32 = wrap(buf, shape32<2,3>{});
+        auto u32 = wrap(buf, shape_as<unsigned int,2,3>{});
+        auto c = i32 + u32;
+        static_assert(cs::is_same<idx_of<decltype(c)>, cs::int64_t>::value, "int32+uint32 -> int64");
+        auto c2 = u32 + i32;
+        static_assert(cs::is_same<idx_of<decltype(c2)>, cs::int64_t>::value, "uint32+int32 -> int64");
+        for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j)
+            if (c(i,j) != i32(i,j) + u32(i,j) || c2(i,j) != c(i,j)) return 62;
+        // same at the narrow end: int16+uint16 steps up to int32, not "the first one".
+        auto s16 = wrap(buf, shape_as<short,2,3>{});
+        auto w16 = wrap(buf, shape_as<unsigned short,2,3>{});
+        static_assert(cs::is_same<idx_of<decltype(s16 + w16)>, cs::int32_t>::value,
+                      "int16+uint16 -> int32");
+        static_assert(cs::is_same<idx_of<decltype(w16 + s16)>, cs::int32_t>::value,
+                      "uint16+int16 -> int32");
+    }
+
+    // (28) UNSIGNED-narrow + signed-wider needs no step up — the signed wide type already
+    //      holds the narrow unsigned range — so it keeps the plain widest, unchanged.
+    {
+        auto u16 = wrap(buf, shape_as<unsigned short,2,3>{});
+        auto i32 = wrap(buf, shape32<2,3>{});
+        static_assert(cs::is_same<idx_of<decltype(u16 + i32)>, cs::int32_t>::value,
+                      "uint16+int32 stays int32");
+        static_assert(cs::is_same<idx_of<decltype(i32 + u16)>, cs::int32_t>::value,
+                      "int32+uint16 stays int32");
+        auto u32 = wrap(buf, shape_as<unsigned int,2,3>{});
+        auto i64 = wrap(buf, shape<2,3>{});
+        static_assert(cs::is_same<idx_of<decltype(u32 + i64)>, cs::int64_t>::value,
+                      "uint32+int64 stays int64");
+        auto c = u16 + i32;
+        for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j)
+            if (c(i,j) != u16(i,j) + i32(i,j)) return 63;
+    }
+
+    // (29) the same-signedness controls, including the `sizeof` tie-breaks-to-the-first
+    //      case checks 1-6 rely on: all-signed and all-unsigned pairs must not move.
+    {
+        auto u16 = wrap(buf, shape_as<unsigned short,2,3>{});
+        auto u32 = wrap(buf, shape_as<unsigned int,2,3>{});
+        static_assert(cs::is_same<idx_of<decltype(u16 + u32)>, unsigned int>::value,
+                      "all-unsigned mixed width -> the wider, unsigned");
+        static_assert(cs::is_same<idx_of<decltype(u32 + u16)>, unsigned int>::value,
+                      "...either order");
+        static_assert(cs::is_same<idx_of<decltype(u32 + u32)>, unsigned int>::value,
+                      "all-unsigned same width unchanged");
+        auto s16 = wrap(buf, shape_as<short,2,3>{});
+        auto i32 = wrap(buf, shape32<2,3>{});
+        static_assert(cs::is_same<idx_of<decltype(s16 + i32)>, cs::int32_t>::value,
+                      "all-signed mixed width -> the wider");
+        static_assert(cs::is_same<idx_of<decltype(i32 + i32)>, cs::int32_t>::value,
+                      "int32+int32 tie keeps int32");
+        static_assert(cs::is_same<idx_of<decltype(s16 + s16)>, short>::value,
+                      "int16+int16 tie keeps int16");
+        // a comparison result and a dynamic (heap) result follow the mixed rule too.
+        static_assert(cs::is_same<idx_of<decltype(s16 < u32)>, cs::int64_t>::value,
+                      "compare result follows the same rule");
+        auto ds = wrap(buf, shape_as<short,-1,-1>{2,3});
+        auto du = wrap(buf, shape_as<unsigned int,-1,-1>{2,3});
+        auto cd = ds + du;
+        static_assert(cs::is_same<idx_of<decltype(cd)>, cs::int64_t>::value,
+                      "dynamic mixed-signedness result -> int64");
+        for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j)
+            if (cd(i,j) != ds(i,j) + du(i,j)) return 64;
+    }
+
+    // (30) the payoff, end to end: because the mixed result is SIGNED, it is a first-class
+    //      teeny tensor — `flip()` and a negative-step slice (both of which `static_assert`
+    //      a signed index type) still apply to it. With the unsigned result the width pick
+    //      produced, neither compiled.
+    {
+        auto s16 = wrap(buf, shape_as<short,2,3>{});          // buf(i,j) == 3i + j
+        auto u32 = wrap(buf, shape_as<unsigned int,2,3>{});
+        auto c   = s16 + u32;                                  // c(i,j) == 2*(3i + j)
+        auto r   = c.flip<1>();                                // columns reversed
+        for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j)
+            if (r(i,j) != c(i,2-j)) return 65;
+        auto rev = c(all, slice(none,none,-1));                // the a[:, ::-1] spelling
+        for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j)
+            if (rev(i,j) != c(i,2-j)) return 66;
+        static_assert(cs::is_signed<idx_of<decltype(rev)>>::value, "the reversed view stays signed");
+        if (c(1,2) != 2*5.0) return 67;
     }
 
     return 0;
