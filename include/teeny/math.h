@@ -558,9 +558,12 @@ _TNY_API constexpr bool ext_eq(ext_cmp_t a, ext_cmp_t b) { return a == b; }
 // when both shapes are fully static, so the documented repro is a COMPILE error,
 // not a debug-only trip), and the per-axis runtime `_TNY_CHECK` for anything
 // dynamic. Used by `scalo_`, `unaryo_` and `scan`'s `into(dest)` form — the three
-// spellings #363 folded together.
+// spellings #363 folded together — plus the axis-scoped `normalize<Axes...>(a,
+// into(y))` (#434), which is not an engine call site at all: it states the rule at
+// the PUBLIC function because the engine it forwards to is the broadcasting one
+// (see there).
 //
-// Those producers take their loop BOUNDS from the source and their strides from
+// The engine callers take their loop BOUNDS from the source and their strides from
 // the destination, so a destination shorter in any axis is written past its end
 // (#357): `a.mul(2.0, into(y))` with an 8x8 `a` and a 2x2 `y` stored 64 elements
 // through a 4-element buffer. Their allocating producers (`oops`/`uop_out`) build
@@ -579,8 +582,9 @@ _TNY_API void check_into_same_shape(const C & c, const A & a, cs::index_sequence
                       cs::index_sequence<D...>{}),
                   "into(dest): dest's shape must match the source's exactly (no broadcast)");
     ( _TNY_CHECK(ext_eq(c.extent(D), a.extent(D)),
-        "into(dest): dest's shape must match the source's exactly (no broadcast here — a "
-        "scalar-rhs or unary op has nothing to stretch); a shorter dest is written past its end."), ... );
+        "into(dest): dest's shape must match the source's exactly (no broadcast here — this "
+        "producer's result IS the source's shape, so there is nothing to stretch); a shorter "
+        "dest is written past its end, a longer one silently replicates."), ... );
 }
 // `Restrict` defaults to false so every IN-PLACE caller (add_/sub_/.../copy_,
 // where `c` IS the destination and may alias the rhs) takes the safe decode path
@@ -2213,14 +2217,42 @@ template <long... Axes, class T, class E, class L, storage O,
 _TNY_API auto normalize(const tensor<T,E,L,O> & a, axis<Axes...>) { return normalize<Axes...>(a); }
 
 /** @brief `normalize<Axes...>(a, into(y))` — the axis-scoped unit vectors into a
- *         caller buffer `y` (same shape as `a`, since only the DIVISOR is reduced).
- *         Same one-line forward to `.div(..., out)` as the full-tensor form; the
+ *         caller buffer `y`, whose shape must match `a`'s EXACTLY (only the DIVISOR
+ *         is reduced, so the result keeps the source's full shape). A statically
+ *         wrong `y` is a COMPILE error when both shapes are static, a `_TNY_CHECK`
+ *         otherwise — the same guarantee as the whole-tensor `normalize(a, into(y))`
+ *         (#434). Same one-line forward to `.div(..., out)` as that form; the
  *         reduced norm itself is still materialised (it is a tensor, not a scalar).
  *         Axes distinct, in any order — same rule as the allocating form (`_keepdims`
  *         asserts distinctness and sorts). */
 template <long... Axes, class T, class E, class L, storage O, class D,
           cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
 _TNY_API auto & normalize(const tensor<T,E,L,O> & a, into_t<D> out) {
+    // EXACT dest-shape guard, stated HERE rather than left to the engine (#434).
+    //
+    // The whole-tensor `normalize(a, into(y))` divides by a SCALAR, so it lands on
+    // `scalo_`, whose `check_into_same_shape` is exact: equal rank, equal extents,
+    // compile-time when both shapes are static. The axis form divides by a keepdim
+    // TENSOR, so it lands on the BROADCASTING `bzip_` instead, and that engine's
+    // dest gate (`bc_static_ok_dest`, #361) asks the broadcast question — "each
+    // operand axis equals the dest's extent OR IS 1" — which is strictly weaker
+    // than what this producer promises. Two mis-shaped `y`s slipped through it,
+    // neither statically nor at run time (`bzip_`'s runtime check is
+    // broadcast-aware too, so `-DNDEBUG` was not even needed to miss them):
+    //   - a source axis of extent 1 against a LARGER dest axis — `a` shape (1,3)
+    //     into a (5,3) `y` replicated the single normalised row five times, and
+    //     `y` is not the shape the caller's `a` has;
+    //   - a dest of HIGHER rank than `a` (`bzip_` only requires operand rank <=
+    //     dest rank) — (1,3) into a (2,1,3) `y`, same silent replication.
+    // Both are plain mistakes for this producer: the axis form's result IS `a`'s
+    // shape, and there is nothing here that a caller could want stretched.
+    //
+    // `check_into_same_shape` is the single-source `into(dest)` guard #363 already
+    // consolidated (rank `static_assert` + static extent gate + per-axis
+    // `_TNY_CHECK`), so this is that same rule applied one call earlier — before
+    // the divisor is even computed, so a bad `y` is diagnosed at the spelling the
+    // caller wrote rather than deep inside the broadcast engine.
+    _md::check_into_same_shape(out.dest, a, cs::make_index_sequence<E::rank()>{});
     auto n = norm<Axes...>(a);                                               // reduced norm (floating tensor)
     return a.div(_keepdims<_norm_axis(Axes, (long)E::rank())...>(n), out);   // .div's into overload writes out & returns out.dest
 }
