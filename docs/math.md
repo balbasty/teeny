@@ -90,6 +90,8 @@ grow the destination.) A size-1 axis stretches over its partner as usual;
 If the two operands have different offset [index widths](shapes-strides.md#mixing-widths-in-a-broadcast)
 (e.g. an `int32`-indexed view and an `int64`-indexed one), the result takes the
 **wider** of the two — lossless, and it never truncates the wide operand's strides.
+(Should the two also disagree in *signedness*, the result steps up to a signed type
+wide enough for both ranges, for the same reason the in-place offset math below does.)
 In place (`a.add_(b)`) and into a caller-supplied `into(dest)` there is no new
 result to widen, so the offset math itself runs in a type that covers every tensor in
 play while each keeps its own: a narrow-indexed destination never truncates a
@@ -116,6 +118,7 @@ a.iota_(start, step);                 // start, start+step, … (row-major)
 a.map_(f);                            // *this = f(*this)      (user functor)
 a.zip_with_(g, b);                    // *this = g(*this, b)   (broadcasts)
 auto c = a.map(f);                    // out-of-place variant
+a.map(f, into(y));                    // ...into a preallocated buffer -> y& (no allocation)
 a.at(i, j).atomic_add_(v);            // scatter: a(i,j) += v — ATOMIC on host and device
 ```
 
@@ -150,9 +153,9 @@ auto cl = clamp(a, lo, hi);                            // elementwise clamp
 
 Every out-of-place producer is **also a method**, for parity with `a.add(b)` and
 for chaining — `a.exp()`, `a.sqrt()`, `a.minimum(b)`, `a.clamp(lo, hi)`,
-`a.normalize()`, `a.cross(b)`, … — and each takes the same optional `into(y)`
-(`a.exp(into(y))`). The free forms (`exp(a)`) and the in-place `_` forms
-(`a.exp_()`) still exist; pick whichever reads best.
+`a.normalize()`, `a.normalize(axis<1>{})`, `a.cross(b)`, `a.map(f)`, … — and each
+takes the same optional `into(y)` (`a.exp(into(y))`). The free forms (`exp(a)`)
+and the in-place `_` forms (`a.exp_()`) still exist; pick whichever reads best.
 
 ### Writing into a preallocated destination — `into(dest)`
 
@@ -168,11 +171,13 @@ a.add(2.0, into(y));          // scalar rhs works too
 exp(a, into(y));  sqrt(a, into(y));  neg(a, into(y));   // every unary
 minimum(a, b, into(y));  maximum(a, s, into(y));  clamp(a, lo, hi, into(y));
 normalize(a, into(y));
+normalize(a, axis<1>{}, into(y));   // the axis form too (y keeps `a`'s full shape)
+a.map(f, into(y));             // the user-functor producer
 cross(a, b, into(N(i, all)));  // 3D cross straight into row i of a matrix ("crossto")
 ```
 
 **The destination may be a slice, written in place.** Every view-producing op —
-slicing, `at`, `permute`, `unsqueeze`, `take_along`, … — hands back its view *by
+slicing, `at`, `permute`, `unsqueeze`, `slice_along`, … — hands back its view *by
 value*, and `into()` takes one of those directly, so a slot of a bigger output
 needs no named intermediate. The write goes through to the storage the slice
 refers to:
@@ -243,16 +248,28 @@ n.div(d, into(f));            // f = {3, 4}  — integer division, == f.copy_(n.
 allocated: the source's own shape for a unary or scalar-rhs op, the broadcast shape
 for a tensor-rhs one. Only the *operands* broadcast — the destination never
 stretches, so a `y` that is smaller in any axis is an error, not a repeated write.
-For a unary or scalar-rhs op it is caught at **compile time** when both shapes are
-fully static, and by a debug-time check (an `assert`, compiled out under
-`-DNDEBUG`) when either is dynamic; the broadcasting tensor-rhs form uses the
-debug-time check in both cases:
+It is caught at **compile time** whenever the extents in play are static, and by a
+debug-time check (an `assert`, compiled out under `-DNDEBUG`) when any of them is
+dynamic — for every producer alike, broadcasting or not:
 
 ```cpp
 auto a = zeros(shape<8,8>{});
 auto y = zeros(shape<2,2>{});
 a.mul(2.0, into(y));          // compile error: dest's shape must match the source's
 exp(a, into(y));              // same
+a.add(a, into(y));            // same, for the broadcasting tensor-rhs form
+```
+
+The two rules differ only in what counts as a match. A unary or scalar-rhs op wants
+**exact** equality — it has nothing to stretch. A tensor-rhs op broadcasts, so each
+*operand* axis must either equal `y`'s or be 1 (an extent-1 operand axis stretches
+over `y`). `y`'s own axes never stretch in either case:
+
+```cpp
+auto row = zeros(shape<1,3>{});
+auto out = zeros(shape<2,3>{});
+out.add(row, into(out));      // fine: the (1,3) operand stretches over (2,3)
+out.add(out, into(row));      // compile error: a (1,3) DEST does not stretch
 ```
 
 `y` must also not **self-overlap** — no `extent > 1` axis with stride 0. Such a `y`
@@ -278,7 +295,10 @@ a `static_assert`, so forgetting the `<axes>` fails to compile rather than silen
 splatting the grand total); an axis reduction's dest is **broadcast-compatible**
 with the reduced shape (it goes through `copy_`). As elsewhere, `dest`'s dtype need
 not match — the accumulation runs in the reduction's own accumulator type and only
-the final result is cast — and the destination is returned by reference.
+the final result is cast — and the destination is returned by reference. **Every**
+pair of dtypes works here, the two 16-bit floats included: `sum(half_a,
+into(bfloat16_cell))` accumulates as any other `half` reduction does and converts
+the scalar to `bfloat16` on the way out, exactly like a wider destination.
 
 ### Type promotion
 
@@ -358,6 +378,38 @@ A fully-static result is stack-owned (host and device); any dynamic extent makes
 it heap-owned (host only — it allocates, so it is not callable on the device
 path). Reducing over every axis is the scalar form above.
 
+### An empty axis list reduces over *no* axis
+
+`axis<>{}` names no axis, so `sum(a, axis<>{})` reduces over none of them: each
+output cell aggregates the single element at its own index, and the result keeps
+`a`'s shape. That is numpy's rule for an empty axis tuple (`np.sum(a, axis=())`
+hands `a` back unchanged), and the same "an empty axis list asks for nothing" the
+rest of teeny's axis-list ops follow (`t.squeeze(axis<>{})`, `peel(t, axis<>{})`).
+
+```cpp
+auto a = ...            // (2,3), values [[0,1,2],[3,4,5]]
+sum(a, axis<>{});       // (2,3) [[0,1,2],[3,4,5]] — a copy; nothing was summed
+sum(a);                 // 15 — NO axis argument still means EVERY axis
+```
+
+The second line is the contrast worth remembering: **an empty axis list and no
+axis argument at all are different requests.** Leaving the keyword out is the
+documented full reduction (every axis, giving a scalar); passing an empty list
+asks to reduce over zero axes. So generic code that *computes* an axis list stays
+correct when the computed list comes out empty, instead of silently collapsing the
+whole tensor to a single number.
+
+`sqnorm` and `norm` follow the same rule rather than coming out as plain copies,
+because they are Σaᵢ² and √Σaᵢ² *over the named axes*: with no axis named, each
+cell's sum runs over its own element alone, so `sqnorm(a, axis<>{})` is the
+elementwise `a²` and `norm(a, axis<>{})` the elementwise `|a|`.
+`sum`/`prod`/`max`/`min`/`mean` all come out as a copy of `a` in the result type.
+
+The result is an owned tensor, exactly like any other axis reduction, and the
+other keywords compose as usual — `dtype<Acc>{}` sets the result type, `into(dest)`
+writes into a destination with `a`'s shape, and `keepdims` has no reduced axis to
+keep, so it changes nothing.
+
 ### `keepdims` — keep the reduced axes as size-1
 
 Pass `keepdims` (any subset, any order, alongside `dtype<Acc>{}`/`axis<...>{}`/
@@ -374,7 +426,9 @@ sum<0>(a, keepdims, into(dest));  // and with into(dest) — dest matches the ke
 
 Applies to every axis reduction (`sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`).
 `keepdims` is a distinct empty-tag value (like `all`/`none`), so it never collides
-with another argument.
+with another argument. The axes must be **distinct**, but — as everywhere else in
+teeny — you may list them in **any order**: `sum<2,0>(a, keepdims)` ==
+`sum<0,2>(a, keepdims)`, kept axes and all.
 
 ### Accumulator type vs result type
 
@@ -433,6 +487,8 @@ sqdist(a, b, dtype<double>{}, into(cell));   // dtype/into compose, same trailin
 a.normalize_();       // in place: a /= norm(a)   (floating element types)
 auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, dynamic->heap)
 a.normalize_<1>();  normalize<-1>(a);  normalize(a, axis<1>{});   // OVER NAMED AXES (keepdim broadcast)
+a.normalize(axis<1>{});  a.normalize<1>();                        // ...as a METHOD, either spelling
+normalize(a, axis<1>{}, into(y));  a.normalize<1>(into(y));       // ...and each takes into(y)
 
 auto c = cross(a, b);       // 3D cross product a × b -> new stack 3-vector (rank-1, length 3)
 a.cross_(b);                // in place: a becomes a × b (mirrors add_/mul_; aliasing-safe)
@@ -451,7 +507,8 @@ narrow element type `sqdist(a,b)` can be *more* accurate than the un-fused
 the two are only guaranteed bit-identical for `double` operands.
 `normalize`/`normalize_` mirror `sqnorm`/`norm`: with
 `<Axes...>` each sub-vector is divided by its norm over those axes (the reduced axes
-are kept as size-1 so the norm broadcasts back). Axes must be distinct and ascending.
+are kept as size-1 so the norm broadcasts back). Axes must be distinct, but may be
+listed in any order (`normalize<2,0>(a)` == `normalize<0,2>(a)`).
 `normalize` of a zero vector yields NaNs — this is exact math with no epsilon; add
 one at the call site if you need it. `cross` is defined only for rank-1, length-3
 operands (a `static_assert` catches a wrong static length; a runtime length is

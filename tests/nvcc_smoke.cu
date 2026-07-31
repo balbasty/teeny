@@ -18,7 +18,7 @@ __global__ void axpy_kernel(V y, V x, float a) {
     }
 }
 
-// #389: a `strides<...>`-layout view -- what EVERY slice / take_along / peel /
+// #389: a `strides<...>`-layout view -- what EVERY slice / slice_along / peel /
 // index_select / scan yields -- used from DEVICE code, reading a stride at a
 // RUNTIME rank. `mapping::stride(rank_type)` takes its rank at run time, so while
 // the static stride pack lived in a host `static constexpr` array data member
@@ -37,7 +37,7 @@ __global__ void strided_kernel(V v) {
     long r = (long) threadIdx.x % (long) V::extents_type::rank();
     if (v.extent(0) > 0 && v.extent(1) > 0) {
         v(0, 0) += (float) v.stride((int) r);   // runtime-rank stride() + strided access
-        auto row = v.take_along(axis<0>{}, 0);  // gather a NEW strides<...> view on device
+        auto row = v.slice_along(axis<0>{}, 0);  // gather a NEW strides<...> view on device
         row(0) += 1.f;
     }
 }

@@ -205,7 +205,7 @@ template <auto... Es> struct _is_anyshape<anyshape<Es...>> : cs::true_type {};
  *  spelled by VALUE (deducing the axes from the argument type) instead of an
  *  explicit template list, so on a type-dependent receiver they need no
  *  `.template`: `peel(t, axis<0,1>{})` == `peel<0,1>(t)`,
- *  `t.take_along(axis<0,2>{}, i, slice(1,4))` == `t.take_along<0,2>(i, slice(1,4))`.
+ *  `t.slice_along(axis<0,2>{}, i, slice(1,4))` == `t.slice_along<0,2>(i, slice(1,4))`.
  *
  *  Like numpy's `axis: int | list[int]`, one variadic tag covers both a single
  *  axis (`axis<0>{}`) and a list (`axis<0,2>{}`); axes are **signed** (negatives
@@ -217,6 +217,15 @@ namespace _kw { template <long... Axes> struct is_keyword<axis<Axes...>> : cs::t
  *  `dtype<...>`/`into_t<...>`/`keepdims_t`/... siblings. */
 template <class> struct _is_axis_tag : cs::false_type {};
 template <long... Axes> struct _is_axis_tag<axis<Axes...>> : cs::true_type {};
+/** @brief `_is_empty_axis<X>::value` is true iff `X` is the EXPLICITLY EMPTY axis
+ *  list `axis<>` — "over NO axis", which every axis-list op treats as the identity
+ *  (numpy's `axis=()`). It is a REQUEST, and a different one from "no axis keyword
+ *  was supplied at all" (a call site spells that absence with `_kw::unset`, whose
+ *  meaning is that call site's own default — all axes, for a reduction). Using one
+ *  type for both is exactly what made `sum(a, axis<>{})` silently reduce over
+ *  everything (#398), so keep the two apart wherever an axis tag is optional. */
+template <class> struct _is_empty_axis : cs::false_type {};
+template <> struct _is_empty_axis<axis<>> : cs::true_type {};
 
 /** @brief Compile-time **element-type tag** — a value carrier for `T`, the
  *  sibling of `axis<...>` for the dtype argument. It lets a type-parameterised
@@ -236,21 +245,15 @@ namespace _kw { template <class T> struct is_keyword<dtype<T>> : cs::true_type {
 
 // dtype_arg_t<Expl, Dflt, Tags...>: the element/accumulator type a call site should
 // use -- an explicit template argument (Expl != void) wins, else a dtype<T>{} tag
-// found in Tags..., else the library default Dflt. static_assert (in a class
-// template body, not the alias itself, so it actually fires) if BOTH an explicit
-// Expl and a dtype<...> tag were supplied -- ambiguous, and worth a clear message
-// rather than silently preferring one.
+// found in Tags..., else the library default Dflt; supplying BOTH an explicit Expl
+// and a dtype<...> tag is a static_assert. That precedence rule (and its wording)
+// lives ONCE, in `_kw::resolve` (kwargs.h) -- shared with `storage_arg`/`layout_arg_t`.
+// The only dtype-specific part is the unwrap step below: read the `T` out of the
+// `dtype<T>` tag that was found (and fall back to `Dflt` when there was none).
 template <class X, class D> struct _dtype_arg             { using type = D; };
 template <class T, class D> struct _dtype_arg<dtype<T>, D> { using type = T; };
 template <class Expl, class Dflt, class... Tags>
-struct _dtype_resolve {
-    static_assert(cs::is_same<Expl, void>::value || !_kw::has<_is_dtype, Tags...>(),
-        "dtype given both as an explicit template argument (T) and as a dtype<T>{} tag -- pick one");
-    using type = cs::conditional_t<!cs::is_same<Expl, void>::value, Expl,
-        typename _dtype_arg<_kw::find_t<_is_dtype, _kw::unset, Tags...>, Dflt>::type>;
-};
-template <class Expl, class Dflt, class... Tags>
-using dtype_arg_t = typename _dtype_resolve<Expl, Dflt, Tags...>::type;
+using dtype_arg_t = _kw::resolve_t<_dtype_arg, Expl, void, _is_dtype, Dflt, Tags...>;
 
 /** @brief Keep-this-axis marker for slicing (an alias of `full_extent`). */
 constexpr cs::full_extent_t all{};

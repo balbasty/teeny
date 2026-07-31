@@ -55,6 +55,9 @@ empty(shape, dtype<T>{});            // value-tag ELEMENT-TYPE form: deduces T, 
 empty(shape, fcontiguous{}, dtype<double>{});   // a layout tag composes with dtype/storage_c, any
                                                  //   order/subset (also zeros/ones/full; arange has no
                                                  //   layout keyword, #277-#281)
+empty<storage::gpu>(shape, fcontiguous{}, dtype<double>{});   // ...and the leading backend arg takes
+                                                 //   that SAME bag, any subset/order (#373) — dtype
+                                                 //   and/or a layout tag, or nothing at all
 make_local<T>(shape);  make_heap<T>(shape);            // thin spellings of empty<T,storage::stack/heap>
 make_gpu<T>(shape); make_pinned<T>(shape); make_mapped<T>(shape);   // empty<T,storage::gpu/...>; T defaults to float
 
@@ -143,11 +146,13 @@ slice(start, stop);  slice(start, stop, step);  // half-open range, optional (ne
 none;  all;                     // open slice end (== python None); keep-axis marker
 x(none, all, all);  x(0, newaxis, all);   // BARE none/newaxis arg -> insert a size-1
                     //   axis (== unsqueeze at that position); newaxis is an alias of none
-x.take_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest
-x.subsample<Axes...>(k, starts...);  // coloured/strided sub-lattice: take_along + slice(start,
+x.slice_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest -> a VIEW
+                    //   (pytorch select/narrow over several axes). NOT numpy take_along_axis /
+                    //   pytorch take_along_dim -- that index-TENSOR gather is index_select below
+x.subsample<Axes...>(k, starts...);  // coloured/strided sub-lattice: slice_along + slice(start,
                     //   none,k) per named axis, one shared step k, per-axis start; k/starts
                     //   accept runtime or Int<> (folds static). Value form: x.subsample(
-                    //   axis<Axes...>{}, k, starts...) -- same LEADING placement as take_along's
+                    //   axis<Axes...>{}, k, starts...) -- same LEADING placement as slice_along's
 x.unfold<Axis>(size, step);  x.unfold<Axis>(size);  // pytorch Tensor.unfold: appends a NEW
                     //   trailing axis of width `size` stepped by `step` along Axis (step
                     //   defaults to 1); Axis's own extent shrinks to the window COUNT
@@ -157,13 +162,14 @@ x.unfold<Axis>(size, step);  x.unfold<Axis>(size);  // pytorch Tensor.unfold: ap
                     //   Value form: x.unfold(Int<Axis>(), size, step) -- single-axis Int<k>()
                     //   selector (like flip/squeeze), not an axis<...> list (only ONE axis binds).
 x.index_select<Axis>(idx);       // gather along Axis by a rank-1 integer index TENSOR
-                    //   (runtime data, unlike take_along); idx values wrap negative;
-                    //   static idx shape -> stack result, else heap (source must be
-                    //   host-accessible). into(dest) form too: x.index_select<Axis>(idx,
+                    //   (runtime data, unlike slice_along); idx values wrap negative;
+                    //   static idx shape -> stack result (host+device, like clone()),
+                    //   else heap (host only, source must be host-accessible).
+                    //   into(dest) form too: x.index_select<Axis>(idx,
                     //   into(dest)) (no alloc, device-safe; dest's axis-Axis extent must
                     //   match idx's, checked; dest must not alias x). Value form takes a
                     //   TRAILING axis<...>{} (no .template on a dependent receiver -- unlike
-                    //   take_along/subsample's LEADING tag): x.index_select(idx, axis<Axis>{})
+                    //   slice_along/subsample's LEADING tag): x.index_select(idx, axis<Axis>{})
 x.uget(i, j, k);  x.uget(0, slice(1,4));  x.uget(1, ellipsis);  x.uat(i...);
                     // uget = unchecked twin of operator() (element/slice/ellipsis,
                     // one entry point); uat = unchecked at. Skip the negative-index
@@ -181,15 +187,19 @@ See [Indexing & slicing](indexing.md).
 ```cpp
 x.permute<Perm...>();                 // reorder axes
 x.flip<Ax>();                         // reverse an axis (negative-stride view)
+x.flip<Ax0,Ax1,...>();  x.flip(axis<0,2>{});  // reverse SEVERAL axes at once (numpy flip(a,axis=(0,2))):
+                                      //   distinct axes, ANY order — flips commute, so flip<0,2> ==
+                                      //   flip<2,0> == flip<0>().flip<2>(), built in ONE pass
 x.unsqueeze<Ax>();  x.squeeze<Ax>();  // insert / drop a size-1 axis
 x.unsqueeze<Ax0,Ax1,...>();  x.squeeze<Ax0,Ax1,...>();  // insert/drop SEVERAL at once (arity picks this
                                       //   overload); axes must be DISTINCT but may be listed in ANY order —
                                       //   unsqueeze positions are relative to the FINAL rank, squeeze to the
                                       //   SOURCE rank (the fold direction is an implementation detail)
-x.unsqueeze(axis<>{});  x.squeeze(axis<>{});  // an EMPTY axis LIST names no axis -> a NO-OP (numpy's
-                                      //   axis=() rule): same shape/strides back. NOT the same as the
-                                      //   no-argument x.squeeze() (drop EVERY static singleton) /
-                                      //   x.unsqueeze() (insert at axis 0), which keep their meanings
+x.unsqueeze(axis<>{});  x.squeeze(axis<>{});  x.flip(axis<>{});  // an EMPTY axis LIST names no axis -> a
+                                      //   NO-OP (numpy's axis=() rule): same shape/strides back. NOT the
+                                      //   same as the no-argument x.squeeze() (drop EVERY static singleton)
+                                      //   / x.unsqueeze() (insert at axis 0) / x.flip() (reverse axis 0),
+                                      //   which keep their meanings
 x.reshape<NewExt...>();               // contiguous-view reshape (one -1 inferred)
 x.flatten();                          // 1-D contiguous view
 x.clone();                            // dense row-major OWNING copy (copies on the HOST; a gpu/gpu_view
@@ -207,15 +217,15 @@ to<storage::gpu>(x);                      // memory-space move: to<Space,ET,Forc
 Axis template arguments are signed (negatives count from the back); each `<Ax>` op
 also has a **value form** — `t.permute(Int<2>(),Int<0>(),Int<1>())` == `t.permute<2,0,1>()`,
 `t.recast(shape<-1,3,3>{})` == `t.recast<shape<-1,3,3>>()`. The axis-**list** ops —
-`permute`/`squeeze`/`unsqueeze` **and** `peel`/`peel_at`/`take_along`/the reductions —
+`permute`/`squeeze`/`unsqueeze` **and** `peel`/`peel_at`/`slice_along`/the reductions —
 take an `axis<...>{}` selector (a compile-time axis list, sibling of `shape<...>`,
 like numpy's `axis: int | list[int]`) — reach for this spelling first:
 `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, `t.permute(axis<2,0,1>{})` ==
 `t.permute<2,0,1>()`, `peel(t, axis<0,1>{})` == `peel<0,1>(t)`,
-`t.take_along(axis<0,2>{}, i, slice(1,4))`.
+`t.slice_along(axis<0,2>{}, i, slice(1,4))`.
 Value forms are deduced, so a type-dependent receiver needs no `.template`.
 **Every** view op —
-`operator()`/`take_along`/`peel` **and** `permute`/`flip`/`unsqueeze`/`squeeze` —
+`operator()`/`slice_along`/`peel` **and** `permute`/`flip`/`unsqueeze`/`squeeze` —
 folds its output strides into a static `strides<...>` (compile-time where the
 source strides are static), on any source layout. See [Views & structure](structure.md).
 
@@ -247,7 +257,7 @@ for (auto [a,b,c] : peel_zip<Axes...>(x,y,z)) ...;  // zip-peel 2 or 3 tensors i
                                                  //   every operand, so a flipped operand zipped with
                                                  //   an unsigned-indexed one still steps backwards.
 peel_zip(x, y, axis<Axes...>{});                 // value form: axis<...> TRAILING (after every
-                                                 //   positional tensor -- unlike take_along/peel_at's
+                                                 //   positional tensor -- unlike slice_along/peel_at's
                                                  //   leading tag)
 peel_zip<Axes...>(x,y).enumerate();  peel_zip<Axes...>(x,y).subrange(lo,hi);  // same shape as peel's
 
@@ -283,7 +293,7 @@ a.neg_(); a.abs_(); a.exp_(); a.log_(); a.sin_(); a.cos_(); a.sqrt_(); a.tanh_()
 a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_(); a.pow_(e); a.clamp_(lo, hi);
 a & b; a | b; a ^ b; ~a; a &= b; a |= s;  // bitwise (INTEGER element types only)
 a.fill_(v); a.zero_(); a.copy_(b); a.iota_(start, step);
-a.map_(f); a.zip_with_(g, b);  auto c = a.map(f);  // user functor (device-safe)
+a.map_(f); a.zip_with_(g, b);  auto c = a.map(f);  a.map(f, into(y));  // user functor (device-safe)
 a.at(i...).atomic_add_(v);                         // scatter-accumulate (atomic, host and device)
 
 // out-of-place -> new tensor (promotes types; static->stack, dyn->heap)
@@ -296,16 +306,17 @@ auto c = a.add(b, alpha);  a.sub(b, alpha);  // fused out-of-place axpy: a +/- a
 // ...or write into a preallocated dest (one fused pass, no alloc) -> dest&: `into(y)` last.
 //   y's SHAPE is checked against the result -- the source's own shape for a scalar-rhs or
 //   unary op, the broadcast shape for a tensor rhs (only operands broadcast, never the
-//   dest). Scalar-rhs/unary: a compile error when both shapes are static, a debug-time
-//   check otherwise; tensor rhs: the debug-time check. y's dtype may differ: the math runs
+//   dest). Every producer alike: a compile error when the extents in play are static, a
+//   debug-time check otherwise. y's dtype may differ: the math runs
 //   in the OPERANDS' precision (scalar rhs / axpy alpha too) and only the RESULT is cast to
 //   y, so a.op(b, into(y)) == y.copy_(a.op(b)) numerically, minus the temporary (holds for
 //   half/bfloat16 operands too: into(y) rounds through the twin's own promote_t first).
 a.add(b, into(y));  a.mul(b, into(y));  a.add(2.0, into(y));  a.add(b, alpha, into(y));
 exp(a, into(y)); sqrt(a, into(y)); minimum(a, b, into(y)); clamp(a, lo, hi, into(y));
-normalize(a, into(y));  cross(a, b, into(N(i, all)));  // cross into row i of a matrix ("crossto")
+normalize(a, into(y));  normalize(a, axis<1>{}, into(y));  a.map(f, into(y));
+cross(a, b, into(N(i, all)));                          // cross into row i of a matrix ("crossto")
                       //   The dest may be a TEMPORARY VIEW: every view-producing op (slicing,
-                      //   at, permute, take_along, ...) returns by value, and into() takes one
+                      //   at, permute, slice_along, ...) returns by value, and into() takes one
                       //   directly -- no named intermediate for "a slot of a bigger output".
                       //   sum(a, into(cells.at(i,j))); sum(m, axis<0>{}, into(rows(j, all)));
                       //   Use the call for its EFFECT; the returned dest& dangles past the
@@ -337,6 +348,10 @@ sum<0>(a, keepdims);  sum(a, axis<0>{}, keepdims);    // keepdims: reduced axis 
                       //   keepdims=True) -> broadcasts back over a. Every axis reduction.
 sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf));  // ...and it ALL composes, any subset/order:
                       //   dtype x axis x keepdims x into == sum<double,0>(a, keepdims, into(buf))
+sum(a, axis<>{});     // an EMPTY axis list reduces over NO axis (numpy's axis=()): each cell
+                      //   aggregates its OWN element alone -> a's shape back, as an owned copy.
+                      //   NOT sum(a) (no axis argument at all = EVERY axis -> a scalar). sqnorm/
+                      //   norm follow the same rule, so they are the elementwise a² / |a| there.
 
 // vector algebra & geometry (contained exact math; on views, host+device)
 sqnorm(a);            // Σaᵢ² over all axes (== dot(a,a)); sqnorm<Acc> forces acc+result
@@ -345,6 +360,9 @@ sqdist(a,b); dist(a,b);// Σ(aᵢ-bᵢ)² / √Σ(aᵢ-bᵢ)² (one fused pass, 
                       //   only (no axis form, like dot); sqdist<Acc>/dist<Acc>, dtype<Acc>{}/into
 a.normalize_();       // in place a /= norm(a) (floating types); zero vector -> NaN
 auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, dyn->heap)
+a.normalize_<1>();  normalize<-1>(a);  a.normalize(axis<1>{});   // OVER NAMED AXES (keepdim
+                      //   broadcast) — free or method, either spelling, each taking into(y):
+                      //   normalize(a, axis<1>{}, into(y));  a.normalize<1>(into(y));
 auto c = cross(a, b);  a.cross_(b);          // 3D cross (rank-1 length-3): new / in place (a = a×b)
                                              //   into a slot: cross(a, b, into(N(i, all)))
 ```
