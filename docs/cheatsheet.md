@@ -327,6 +327,9 @@ auto c = a.add(b, alpha);  a.sub(b, alpha);  // fused out-of-place axpy: a +/- a
 a.add(b, into(y));  a.mul(b, into(y));  a.add(2.0, into(y));  a.add(b, alpha, into(y));
 exp(a, into(y)); sqrt(a, into(y)); minimum(a, b, into(y)); clamp(a, lo, hi, into(y));
 normalize(a, into(y));  normalize(a, axis<1>{}, into(y));  a.map(f, into(y));
+                      //   normalize's y matches a's shape EXACTLY, axis form included (the
+                      //   result is a element-for-element; the reduced divisor is not an
+                      //   operand you pick, so no broadcast leeway) — compile error when static.
 cross(a, b, into(N(i, all)));                          // cross into row i of a matrix ("crossto")
                       //   The dest may be a TEMPORARY VIEW: every view-producing op (slicing,
                       //   at, permute, slice_along, ...) returns by value, and into() takes one
@@ -363,6 +366,9 @@ allclose(a, b, dtype<float>{});  allclose(a, b, rtol, atol, into(cell));  // sam
 //   param in C++17) — everything past it (axis<...>/dtype/keepdims/into) is a generic bag.
 sum<Axes...>(a); prod<...>(a); max<...>(a); min<...>(a); mean<...>(a);  // sum<Acc,Axes...>(a)
 sum(a, axis<0,2>{}); mean(a, axis<-1>{}); sum<double>(a, axis<0>{});    // numpy `axis=` value form
+sum<2,0>(a);          // axes may be listed in ANY order, but must be DISTINCT: sum<0,0>(a) /
+                      //   sum(a, axis<0,0>{}) is a COMPILE ERROR, not a dropped duplicate (#433).
+                      //   Negatives normalise first, so mean<1,-2>(a) at rank 3 is caught too.
 sum<0>(a, into(buf)); mean(a, axis<1>{}, into(buf));  // into(dest) -> copies lower-rank result
 sum<0>(a, keepdims);  sum(a, axis<0>{}, keepdims);    // keepdims: reduced axis stays size-1 (numpy
                       //   keepdims=True) -> broadcasts back over a. Every axis reduction.
@@ -383,6 +389,8 @@ auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, 
 a.normalize_<1>();  normalize<-1>(a);  a.normalize(axis<1>{});   // OVER NAMED AXES (keepdim
                       //   broadcast) — free or method, either spelling, each taking into(y):
                       //   normalize(a, axis<1>{}, into(y));  a.normalize<1>(into(y));
+                      //   y matches a's shape EXACTLY (not broadcast-compatible), same as the
+                      //   whole-tensor form — a static mismatch is a compile error
 auto c = cross(a, b);  a.cross_(b);          // 3D cross (rank-1 length-3): new / in place (a = a×b)
                                              //   into a slot: cross(a, b, into(N(i, all)))
 ```

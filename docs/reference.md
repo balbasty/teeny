@@ -435,7 +435,7 @@ width and in signedness alike, and `y` keeps its own type; see
 | `a.add(b, alpha, into(y))` `a.sub(b, alpha, into(y))` | `y&` (fused axpy into `y`) |
 | `exp(a, into(y))` … (every unary) | `y&` |
 | `minimum(a,b,into(y))` `maximum(a,s,into(y))` `clamp(a,lo,hi,into(y))` | `y&` |
-| `normalize(a, into(y))` `normalize<1>(a, into(y))` `normalize(a, axis<1>{}, into(y))` | `y&` (`y` keeps `a`'s full shape — only the divisor is reduced) |
+| `normalize(a, into(y))` `normalize<1>(a, into(y))` `normalize(a, axis<1>{}, into(y))` | `y&` (`y` must match `a`'s full shape **exactly** — only the divisor is reduced; no broadcasting leeway for the axis form either) |
 | `a.map(f, into(y))` | `y&` (user functor, one fused pass) |
 | `cross(a,b,into(y))` `cross(a,b,into(N(i,all)))` | `y&` / the slice's `dest&` |
 | `sum(a, into(cell))` … `dot(a,b,into(cell))` `sqdist(a,b,into(cell))` | `cell&` (full reduction → **rank-0** dest) |
@@ -480,7 +480,10 @@ Axis reductions: a fully static result → stack (host+device); any dynamic resu
 → heap (host only). `keepdims` applies to `sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`.
 Axis lists must be **distinct** but may be given in **any order** — with or without
 `keepdims` (`sum<2,0>(a, keepdims)` == `sum<0,2>(a, keepdims)`), like every other
-axis-list op.
+axis-list op. A repeated axis is a **compile error** in every spelling —
+`sum<0,0>(a)`, `sum(a, axis<0,0>{})`, `a.sum<0,0>()`, `mean<1,-2>(a)` on a rank-3
+tensor (negatives are normalised before the check) — not a silently dropped
+duplicate.
 The explicit `<Acc, Axes...>` template split stays (C++17 has no universal template
 parameter to unify "leading type = accumulator" vs "leading int = axis"), but past
 that split every TRAILING keyword — `dtype<Acc>{}`, `axis<...>{}`, `keepdims`,

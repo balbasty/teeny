@@ -171,7 +171,7 @@ a.add(2.0, into(y));          // scalar rhs works too
 exp(a, into(y));  sqrt(a, into(y));  neg(a, into(y));   // every unary
 minimum(a, b, into(y));  maximum(a, s, into(y));  clamp(a, lo, hi, into(y));
 normalize(a, into(y));
-normalize(a, axis<1>{}, into(y));   // the axis form too (y keeps `a`'s full shape)
+normalize(a, axis<1>{}, into(y));   // the axis form too (y matches `a`'s full shape exactly)
 a.map(f, into(y));             // the user-functor producer
 cross(a, b, into(N(i, all)));  // 3D cross straight into row i of a matrix ("crossto")
 ```
@@ -270,6 +270,22 @@ auto row = zeros(shape<1,3>{});
 auto out = zeros(shape<2,3>{});
 out.add(row, into(out));      // fine: the (1,3) operand stretches over (2,3)
 out.add(out, into(row));      // compile error: a (1,3) DEST does not stretch
+```
+
+Which rule a producer uses follows from the *result it promises*, not from how it
+happens to be computed. `normalize(a, into(y))` is the case worth spelling out:
+whether you normalize the whole tensor or only along named axes, the result is `a`
+element for element, so **`y` must match `a` exactly** — for both spellings. The
+axis form divides by a reduced-then-keepdim tensor internally, but that divisor is
+not an operand you get to pick, so none of the broadcasting leeway above applies to
+`y`:
+
+```cpp
+auto a = zeros(shape<1,3>{});
+normalize<1>(a, into(zeros(shape<1,3>{})));   // fine: y has a's shape
+normalize<1>(a, into(zeros(shape<5,3>{})));   // compile error: y is not a's shape
+                                              //   (a's extent-1 axis does NOT stretch here)
+normalize<1>(a, into(zeros(shape<2,1,3>{}))); // compile error: y's rank is not a's
 ```
 
 `y` must also not **self-overlap** — no `extent > 1` axis with stride 0. Such a `y`
@@ -379,6 +395,14 @@ A fully-static result is stack-owned (host and device); any dynamic extent makes
 it heap-owned (host only — it allocates, so it is not callable on the device
 path). Reducing over every axis is the scalar form above.
 
+The axes must be **distinct**. You may list them in any order (`sum<2,0>(a)` ==
+`sum<0,2>(a)`), but naming one twice is a **compile error** rather than a silently
+dropped duplicate — `sum<0,0>(a)` and `sum(a, axis<0,0>{})` both fail with
+*"sum: axes must be distinct — each axis may be reduced only once"*. Negative axes
+are normalised first, so a duplicate spelled two different ways is caught too
+(`mean<1,-2>(a)` on a rank-3 tensor). The rule is the same with and without
+`keepdims`.
+
 ### An empty axis list reduces over *no* axis
 
 `axis<>{}` names no axis, so `sum(a, axis<>{})` reduces over none of them: each
@@ -427,9 +451,10 @@ sum<0>(a, keepdims, into(dest));  // and with into(dest) — dest matches the ke
 
 Applies to every axis reduction (`sum`/`prod`/`max`/`min`/`mean`/`sqnorm`/`norm`).
 `keepdims` is a distinct empty-tag value (like `all`/`none`), so it never collides
-with another argument. The axes must be **distinct**, but — as everywhere else in
-teeny — you may list them in **any order**: `sum<2,0>(a, keepdims)` ==
-`sum<0,2>(a, keepdims)`, kept axes and all.
+with another argument. The axes must be **distinct** (a repeat is a compile error),
+but — as everywhere else in teeny — you may list them in **any order**:
+`sum<2,0>(a, keepdims)` == `sum<0,2>(a, keepdims)`, kept axes and all. Both rules
+hold identically with and without `keepdims`.
 
 ### Accumulator type vs result type
 

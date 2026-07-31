@@ -468,7 +468,13 @@ auto c = a.add(b,alpha); a.sub(b,alpha);  // FUSED out-of-place axpy: a +/- alph
 //   CHECKED against the result — the source's own shape for a scalar-rhs/unary op (only
 //   operands broadcast, never the dest), the broadcast shape for a tensor rhs. Scalar-rhs/
 //   unary: compile error when both shapes are static, debug-time _TNY_CHECK otherwise
-//   (#357); tensor rhs: the _TNY_CHECK (its static gate compares the two OPERANDS, not y).
+//   (#357); tensor rhs: a compile error too when static (#361's bc_static_ok_dest gate),
+//   but in the BROADCAST sense — each OPERAND axis == y's or 1 — else the _TNY_CHECK.
+//   normalize(a,into(y)) wants EXACT equality on BOTH forms: the axis form's result is `a`
+//   element-for-element, and its reduced keepdim divisor is not an operand the caller picks,
+//   so it states that rule itself (check_into_same_shape) instead of inheriting the
+//   broadcast engine's weaker one — a (1,3) source into a (5,3)/(2,1,3) y used to compile
+//   AND pass the runtime check, silently replicating (#434).
 //   y must also NOT SELF-OVERLAP (no extent>1 axis with stride 0): it would take many
 //   results into one element and keep the last. Debug-checked for EVERY producer since
 //   #364 (before that only the tensor-rhs one — check_dest_no_overlap was missing from
@@ -538,7 +544,9 @@ a.normalize_();  auto u = normalize(a);// in place a/=norm(a) (floating) / out-o
                       //   normalize static->stack, dynamic->heap; zero vector -> NaN (no epsilon)
 a.normalize_<1>(); normalize<-1>(a);   // ...over NAMED AXES (keepdim broadcast); axes distinct, ANY order
 a.normalize(axis<1>{}); a.normalize<1>();  // ...as a METHOD too (either spelling), and every
-                      //   spelling takes into(y): normalize(a,axis<1>{},into(y)); a.normalize<1>(into(y))
+                      //   spelling takes into(y): normalize(a,axis<1>{},into(y)); a.normalize<1>(into(y)).
+                      //   y matches a's shape EXACTLY on every spelling (no broadcast leeway):
+                      //   static mismatch = compile error, dynamic = _TNY_CHECK (#434)
 auto c = cross(a,b);  a.cross_(b);     // 3D cross product (rank-1, length 3): new / in place (a=a×b).
                       //   Into a separate slot: cross(a,b,into(slot)) -- the slot may be a slice
                       //   of a bigger array, cross(a,b,into(N(i,all))). (no crossto_ spelling.)
@@ -551,6 +559,9 @@ sum<0>(a); mean<0,2>(a); max<1>(a); min<-1>(a); prod<0>(a); sum<double,0>(a);
 //   VALUE FORM (numpy `axis=`): sum(a, axis<0,2>{}) == sum<0,2>(a); sum<double>(a, axis<0>{})
 //   == sum<double,0>(a). Deduced -> no `.template` on a dependent receiver.
 //   static result -> stack (host+device); any dynamic -> heap (HOST ONLY: allocates)
+//   AXES MUST BE DISTINCT, in ANY order: sum<0,0>(a) / sum(a, axis<0,0>{}) is a COMPILE
+//   ERROR, not a silently dropped duplicate (#433) -- negatives are normalised first, so
+//   mean<1,-2>(a) at rank 3 is caught too. Same rule with and without keepdims.
 sum<0>(a, into(buf)); mean(a, axis<1>{}, into(buf));  // into(dest) too -> copies the lower-rank
                       //   result into buf (any spelling: <Axes>, <Acc,Axes>, or the axis<...> value form)
 sum<0>(a, keepdims); sum(a, axis<0>{}, keepdims);  // keepdims: reduced axis kept as size-1 (numpy
