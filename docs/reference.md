@@ -433,7 +433,7 @@ width and in signedness alike, and `y` keeps its own type; see
 | `a.add(b, alpha, into(y))` `a.sub(b, alpha, into(y))` | `y&` (fused axpy into `y`) |
 | `exp(a, into(y))` … (every unary) | `y&` |
 | `minimum(a,b,into(y))` `maximum(a,s,into(y))` `clamp(a,lo,hi,into(y))` | `y&` |
-| `normalize(a, into(y))` `normalize<1>(a, into(y))` `normalize(a, axis<1>{}, into(y))` | `y&` (`y` keeps `a`'s full shape — only the divisor is reduced) |
+| `normalize(a, into(y))` `normalize<1>(a, into(y))` `normalize(a, axis<1>{}, into(y))` | `y&` (`y` must match `a`'s full shape **exactly** — only the divisor is reduced; no broadcasting leeway for the axis form either) |
 | `a.map(f, into(y))` | `y&` (user functor, one fused pass) |
 | `cross(a,b,into(y))` `cross(a,b,into(N(i,all)))` | `y&` / the slice's `dest&` |
 | `sum(a, into(cell))` … `dot(a,b,into(cell))` `sqdist(a,b,into(cell))` | `cell&` (full reduction → **rank-0** dest) |
