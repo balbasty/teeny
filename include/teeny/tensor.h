@@ -140,6 +140,44 @@ template <class E> struct _red_dyn<E, axis<>> { static constexpr cs::size_t valu
 template <class E, long A0, long... Rest> struct _red_dyn<E, axis<A0, Rest...>> {
     static constexpr auto value = _red_dyn_value<E, A0, Rest...>();
 };
+
+/* --- axis-scoped `normalize`'s host/device split (#435) --------------------- *
+ * `normalize<Axes...>` divides by `norm<Axes...>(a)`, and that reduced norm is a
+ * TENSOR: `norm`'s own static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split
+ * therefore decides whether the enclosing `normalize` can call a host-only
+ * overload. A single `_TNY_API` `normalize` would be a `__host__ __device__`
+ * function resolving to a `__host__` allocator on the dynamic path — what golden
+ * rule 4 forbids — so each axis-scoped form is TWO overloads, exactly like
+ * `index_select` (#377) and every axis reduction.
+ *
+ * The two FAMILIES key on different extents, because they allocate different
+ * things:
+ *   - `_nrm_kept_*` — the forms whose only allocation is that reduced norm:
+ *     in-place `normalize_<Axes...>()` and `normalize<Axes...>(a, into(y))`
+ *     (the division writes into an existing buffer, `div_`/`div(..., into)`
+ *     being unconditionally `_TNY_API`). Static REDUCED extents are the whole
+ *     precondition — `normalize_<0>()` on a `shape<-1,3>` tensor reduces to a
+ *     `shape<3>` stack norm and stays device-callable.
+ *   - `_nrm_out_*` — the ALLOCATING forms (`normalize<Axes...>(a)` and the
+ *     `a.normalize<Axes...>()` methods), which additionally materialise a
+ *     source-shaped result. Broadcasting `a` against the keepdim'd norm
+ *     reproduces `a`'s own extents, so that result is stack-owned exactly when
+ *     the SOURCE is fully static — a strictly stronger key, which also implies
+ *     the reduced extents are static. Gating there means the `_TNY_API` half
+ *     provably reaches neither `norm`'s nor the out-of-place engine's host half.
+ *
+ * Named traits, one per HALF, rather than the condition written inline in
+ * `enable_if_t<...>`: `/permissive-` MSVC cannot tell two parameter lists apart
+ * when they differ only by an inline pack-dependent condition and merges them
+ * (see CLAUDE.md's MSVC traps, and `_fac_storage`/`_fac_on_stack` below). */
+template <class E, long... Axes> struct _nrm_kept_api  { static constexpr bool value = _red_dyn_value<E, Axes...>() == 0; };
+template <class E, long... Axes> struct _nrm_kept_host { static constexpr bool value = _red_dyn_value<E, Axes...>() != 0; };
+// `Axes...` is unused here (the result carries the SOURCE's extents) but kept in
+// the parameter list so the template-id stays DEPENDENT on the member template's
+// own pack — an `enable_if_t` over a non-dependent condition would be evaluated
+// (and hard-error) when the enclosing `tensor` is instantiated, not per call.
+template <class E, long... Axes> struct _nrm_out_api  { static constexpr bool value = E::rank_dynamic() == 0; };
+template <class E, long... Axes> struct _nrm_out_host { static constexpr bool value = E::rank_dynamic() != 0; };
 }  // namespace _md
 
 /* --- shared axis dispatch: a STATIC index (`Int<k>()`) folds to an
@@ -1849,14 +1887,24 @@ public:
     // `normalize<Axes...>(a)` / `normalize(a, axis<Axes...>{})` and with the in-place
     // `normalize_<Axes...>()`. The empty pack is SFINAE'd out, so `a.normalize()` and
     // `a.normalize(into(y))` still resolve to the full-tensor forms just above.
-    template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
-    _TNY_API auto normalize() const;                                                      // a.normalize<0>()
-    template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
-    _TNY_API auto normalize(axis<Axes...>) const;                                         // a.normalize(axis<0>{})
-    template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
-    _TNY_API auto & normalize(into_t<D> out) const;                                       // a.normalize<0>(into(y))
-    template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
-    _TNY_API auto & normalize(axis<Axes...>, into_t<D> out) const;                        // a.normalize(axis<0>{}, into(y))
+    // Each is a PAIR (#435): `_TNY_API` when the result is stack-owned / the reduced
+    // norm is, `_TNY_HOST` when it allocates — see `_md::_nrm_out_*`/`_nrm_kept_*`.
+    template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_out_api<Shape, Axes...>::value, int> = 0>
+    _TNY_API  auto normalize() const;                                                     // a.normalize<0>()
+    template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_out_host<Shape, Axes...>::value, int> = 0>
+    _TNY_HOST auto normalize() const;
+    template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_out_api<Shape, Axes...>::value, int> = 0>
+    _TNY_API  auto normalize(axis<Axes...>) const;                                        // a.normalize(axis<0>{})
+    template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_out_host<Shape, Axes...>::value, int> = 0>
+    _TNY_HOST auto normalize(axis<Axes...>) const;
+    template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_kept_api<Shape, Axes...>::value, int> = 0>
+    _TNY_API  auto & normalize(into_t<D> out) const;                                      // a.normalize<0>(into(y))
+    template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_kept_host<Shape, Axes...>::value, int> = 0>
+    _TNY_HOST auto & normalize(into_t<D> out) const;
+    template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_kept_api<Shape, Axes...>::value, int> = 0>
+    _TNY_API  auto & normalize(axis<Axes...>, into_t<D> out) const;                       // a.normalize(axis<0>{}, into(y))
+    template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_kept_host<Shape, Axes...>::value, int> = 0>
+    _TNY_HOST auto & normalize(axis<Axes...>, into_t<D> out) const;
     template <class Tb,class Eb,class Lb,storage Ob> _TNY_API auto cross(const tensor<Tb,Eb,Lb,Ob> & b) const;   // 3D (a.cross_(b) is in place)
     template <class Tb,class Eb,class Lb,storage Ob, class D> _TNY_API auto & cross(const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) const;
 
@@ -1969,7 +2017,12 @@ public:
     _TNY_API tensor & pow_(T e);
     _TNY_API tensor & clamp_(T lo, T hi);      // clamp each element to [lo, hi]
     _TNY_API tensor & normalize_();            // *this /= norm(*this)  (L2; floating element types)
-    template <long... Axes> _TNY_API tensor & normalize_();   // ...over the named axes (keepdim); axes distinct, any order
+    // ...over the named axes (keepdim); axes distinct, any order. A PAIR (#435): the
+    // reduced norm it divides by is stack-owned (device-safe) or heap-owned (host).
+    template <long... Axes, cs::enable_if_t<_md::_nrm_kept_api<Shape, Axes...>::value, int> = 0>
+    _TNY_API  tensor & normalize_();
+    template <long... Axes, cs::enable_if_t<_md::_nrm_kept_host<Shape, Axes...>::value, int> = 0>
+    _TNY_HOST tensor & normalize_();
     template <class Tb, class Eb, class Lb, storage Ob>
     _TNY_API tensor & cross_(const tensor<Tb,Eb,Lb,Ob> & b);   // *this = (*this) × b  (3D; rank-1, length 3)
 

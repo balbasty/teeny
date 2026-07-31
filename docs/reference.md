@@ -517,9 +517,9 @@ optimisation — those stay out of teeny).
 | `sqdist(a, b)` | `promote(Ta,Tb)` (accumulated wide) | Σ(aᵢ-bᵢ)²; mathematically `sqnorm(a-b)`, one fused pass (bit-exact only for `double` operands). Binary only (no axis form, like `dot`); `sqdist<Acc>` forces accumulator+result |
 | `dist(a, b)` | floating (`double` for integer operands) | √Σ(aᵢ-bᵢ)²; mathematically `norm(a-b)`, one fused pass (bit-exact only for `double` operands); `dist<Acc>` forces accumulator+result |
 | `a.normalize_()` | `tensor&` | in place `a /= norm(a)`; floating element types only; zero vector → NaN |
-| `a.normalize_<Axes...>()` | `tensor&` | in place, over the named axes (keepdim broadcast); axes distinct, any order |
+| `a.normalize_<Axes...>()` | `tensor&` | in place, over the named axes (keepdim broadcast); axes distinct, any order. Allocates only the reduced norm, so it stays device-callable whenever the **reduced** extents are static |
 | `normalize(a)` | new tensor (floating; integer → `double`) | out-of-place unit vector; static → stack, dynamic → heap |
-| `normalize<Axes...>(a)` / `normalize(a, axis<...>{})` | new tensor (floating) | out-of-place, over the named axes (keepdim). Also methods (`a.normalize<1>()`, `a.normalize(axis<1>{})`), and every spelling takes `into(y)` |
+| `normalize<Axes...>(a)` / `normalize(a, axis<...>{})` | new tensor (floating) | out-of-place, over the named axes (keepdim). Also methods (`a.normalize<1>()`, `a.normalize(axis<1>{})`), and every spelling takes `into(y)`. The allocating forms are host+device for a fully static source; `into(y)` follows `normalize_`'s weaker rule |
 | `cross(a, b)` | new stack 3-vector `promote(Ta,Tb)` | 3D cross product; operands rank-1, length 3 |
 | `a.cross_(b)` | `tensor&` | in place: `a` becomes `a × b` (rank-1, length 3; aliasing-safe). Into a separate slot: `slot.copy_(cross(a,b))` |
 

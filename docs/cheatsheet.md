@@ -390,7 +390,10 @@ a.normalize_<1>();  normalize<-1>(a);  a.normalize(axis<1>{});   // OVER NAMED A
                       //   broadcast) — free or method, either spelling, each taking into(y):
                       //   normalize(a, axis<1>{}, into(y));  a.normalize<1>(into(y));
                       //   y matches a's shape EXACTLY (not broadcast-compatible), same as the
-                      //   whole-tensor form — a static mismatch is a compile error
+                      //   whole-tensor form — a static mismatch is a compile error.
+                      //   Device-callable when the ALLOCATING forms' source is fully static; the
+                      //   into(y)/in-place ones whenever the REDUCED extents are (they allocate
+                      //   only the norm) — normalize_<0>() on shape<-1,3> works in a kernel
 auto c = cross(a, b);  a.cross_(b);          // 3D cross (rank-1 length-3): new / in place (a = a×b)
                                              //   into a slot: cross(a, b, into(N(i, all)))
 ```

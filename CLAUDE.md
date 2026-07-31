@@ -547,6 +547,11 @@ a.normalize(axis<1>{}); a.normalize<1>();  // ...as a METHOD too (either spellin
                       //   spelling takes into(y): normalize(a,axis<1>{},into(y)); a.normalize<1>(into(y)).
                       //   y matches a's shape EXACTLY on every spelling (no broadcast leeway):
                       //   static mismatch = compile error, dynamic = _TNY_CHECK (#434)
+                      //   Every AXIS-scoped spelling is an _TNY_API/_TNY_HOST PAIR (#435), since the
+                      //   reduced norm it divides by is itself one: the ALLOCATING forms are
+                      //   host+device only for a fully STATIC source (the result carries the source's
+                      //   shape), the into(y)/in-place ones whenever the REDUCED extents are static
+                      //   (normalize_<0>() on shape<-1,3> reduces to a stack norm -> still device-callable)
 auto c = cross(a,b);  a.cross_(b);     // 3D cross product (rank-1, length 3): new / in place (a=a×b).
                       //   Into a separate slot: cross(a,b,into(slot)) -- the slot may be a slice
                       //   of a bigger array, cross(a,b,into(N(i,all))). (no crossto_ spelling.)

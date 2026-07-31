@@ -58,6 +58,32 @@ __global__ void strided_cell_kernel(AR at) {
     if (cell.extent(0) > 0 && cell.extent(1) > 0) cell(0, 0) += 1.f;
 }
 
+// #435: axis-scoped `normalize` / `normalize_` FROM DEVICE CODE. Both divide by
+// `norm<Axes...>(v)`, which is a static(stack, _TNY_API) / dynamic(heap, _TNY_HOST)
+// overload pair — so each axis-scoped normalize is split the same way, and only its
+// `_TNY_API` half may appear here. A fully static source keeps every allocation on
+// the stack: the reduced norm AND the source-shaped result.
+template <class V>
+__global__ void normalize_kernel(V v) {
+    v.template normalize_<0>();                 // in place (divides by a stack norm)
+    auto u = tny::normalize<0>(v);              // allocating -> a STACK result
+    auto w = v.template normalize<1>();         // ...the method spelling
+    v(0, 0) += u(0, 0) + w(0, 0);
+    tny::normalize<1>(v, tny::into(u));         // into(dest): no allocation but the norm
+}
+
+// ...and the case that tells the two split KEYS apart: a source with a DYNAMIC axis,
+// reduced over exactly that axis. The reduced norm is a static `shape<3>` stack
+// tensor, so the in-place / into(dest) forms stay device-callable even though the
+// ALLOCATING form on this same source would be host-only (its result is
+// source-shaped, hence heap). Keying those two families identically would make this
+// kernel fail to compile.
+template <class V>
+__global__ void normalize_dyn_kernel(V v) {
+    v.template normalize_<0>();
+    if (v.extent(0) > 0) v(0, 0) += 1.f;
+}
+
 // A device-safe functor for `scan`/`scan_` (lambda-free, per teeny's convention).
 struct scan_sum { _TNY_API float operator()(float carry, float x) const { return carry + x; } };
 
@@ -148,6 +174,19 @@ void smoke() {
     (void) isel_s;
     auto scanned_s = scan(isel_ssrc, 0.f, scan_sum{}, axis<1>{});  // -> _TNY_API arm
     (void) scanned_s;
+
+    // #435: the two axis-scoped normalize kernels above, plus the HOST-side calls
+    // that pick the `_TNY_HOST` halves. As with index_select/scan, a host compiler
+    // cannot see any of this (both annotations expand to nothing without __CUDACC__),
+    // so an unsplit `_TNY_API` normalize only fails HERE.
+    normalize_kernel<<<1, 1>>>(wrap(dx, shape<3,4>{}));
+    normalize_dyn_kernel<<<1, 1>>>(wrap(dx, shape<-1,3>{2, 3}));
+    auto nrm_dyn = wrap(hp, shape<-1,-1>{2, 3});
+    auto nrm_u  = tny::normalize<1>(nrm_dyn);              // -> _TNY_HOST arm (heap result)
+    auto nrm_u2 = nrm_dyn.normalize(axis<1>{});            // -> _TNY_HOST arm (method, value form)
+    tny::normalize<1>(nrm_dyn, tny::into(nrm_u));          // -> _TNY_HOST into arm
+    nrm_dyn.normalize_<1>();                               // -> _TNY_HOST in-place arm
+    (void) nrm_u2;
 
     // int32 offset dispatch (#115): the narrowed (shape32) view must stay a POD,
     // device-passable view. dispatch_index instantiates the kernel for both widths;
