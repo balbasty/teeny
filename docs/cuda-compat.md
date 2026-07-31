@@ -135,6 +135,24 @@ teeny defect, and isn't something `__declspec(empty_bases)` can fix (it only
 folds bases that are already empty). `tests/test_tensor.cpp`'s affected
 `sizeof` assertions are `#if`'d out on real MSVC for this reason.
 
+**One call-site spelling to avoid on MSVC.** With `using namespace tny`, prefer
+the keyword spelling
+
+```cpp
+auto g = empty<float>(shape<2,3>{}, storage_c<storage::gpu>{});   // portable
+```
+
+over `empty<float, storage::gpu>(shape<2,3>{})`. Because the shape argument
+comes from `cuda::std`, argument-dependent lookup also considers
+`cuda::std::empty(const T (&)[N])`, and that overload takes exactly two template
+parameters — so the two-argument spelling matches its shape. Every other
+compiler simply drops the candidate (a `storage` value cannot be an array
+bound); MSVC in conformance mode reports an error instead. The keyword spelling
+passes only one explicit template argument and is unaffected, and the qualified
+`tny::empty<float, storage::gpu>(shape<2,3>{})` — no argument-dependent lookup —
+works as well. Nothing else in the factory family is affected: `zeros`, `ones`,
+`full`, and `arange` have no `cuda::std` namesake.
+
 ## Choosing a toolkit for your target hardware
 
 For CUDA wheels, `nvcc`'s version — *not* CCCL — sets the reachable GPU

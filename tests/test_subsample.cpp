@@ -1,4 +1,4 @@
-// subsample (#258): coloured/strided sub-lattice sugar on top of take_along +
+// subsample (#258): coloured/strided sub-lattice sugar on top of slice_along +
 // slice — bind named axes to a shared step k, each with its own start.
 #include <teeny/teeny.h>
 #include <cuda/std/type_traits>

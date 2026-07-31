@@ -92,11 +92,14 @@ using mapped = tensor<T, Shape, Layout, storage::mapped>;
  *     `storage_c` — the backend is fixed by the function name), matching
  *     `make_local`/`make_heap`'s doc comment. --- */
 template <class T = void, class Layout = void, class Shape, class... Tags>
-_TNY_HOST auto make_gpu(Shape e, Tags... tags)    { return empty<T, storage::gpu,    Layout>(e, tags...); }
+_TNY_HOST auto make_gpu(Shape e, Tags... tags)
+    { _TNY_KW_NO_STORAGE_TAG("make_gpu()", Tags...);    return empty<T, storage::gpu,    Layout>(e, tags...); }
 template <class T = void, class Layout = void, class Shape, class... Tags>
-_TNY_HOST auto make_pinned(Shape e, Tags... tags) { return empty<T, storage::pinned, Layout>(e, tags...); }
+_TNY_HOST auto make_pinned(Shape e, Tags... tags)
+    { _TNY_KW_NO_STORAGE_TAG("make_pinned()", Tags...); return empty<T, storage::pinned, Layout>(e, tags...); }
 template <class T = void, class Layout = void, class Shape, class... Tags>
-_TNY_HOST auto make_mapped(Shape e, Tags... tags) { return empty<T, storage::mapped, Layout>(e, tags...); }
+_TNY_HOST auto make_mapped(Shape e, Tags... tags)
+    { _TNY_KW_NO_STORAGE_TAG("make_mapped()", Tags...); return empty<T, storage::mapped, Layout>(e, tags...); }
 
 /* ------------------------------------------------------------------ *
  *     Memory-backend `to` — the CUDA half of pytorch's `.to`         *

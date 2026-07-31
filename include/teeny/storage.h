@@ -85,13 +85,18 @@ namespace _kw { template <storage O> struct is_keyword<storage_c<O>> : cs::true_
  *         an explicit template argument (Oexpl != storage_deduce) wins, else a
  *         storage_c<O>{} tag found in Tags..., else the library default Dflt
  *         (typically storage_deduce itself, resolved later from the shape by
- *         storage_resolve). static_assert if BOTH an explicit Oexpl and a tag
- *         were supplied for the same keyword. */
+ *         storage_resolve); supplying BOTH an explicit Oexpl and a tag is a
+ *         static_assert. That precedence rule (and its wording) lives ONCE, in
+ *         `_kw::resolve` (kwargs.h) -- shared with `dtype_arg_t`/`layout_arg_t`.
+ *         The only storage-specific part is the currency: this keyword's explicit
+ *         form and its answer are a `storage` VALUE, not a type, so both travel
+ *         through `resolve` inside their own `storage_c<O>` carrier -- which IS the
+ *         value tag, hence `keep_tag` as the unwrap step -- and are read back out
+ *         with `::value` here. */
 template <storage Oexpl, storage Dflt, class... Tags>
 _TNY_API constexpr storage storage_arg() {
-    static_assert(Oexpl == storage_deduce || !_kw::has<_is_storage_tag, Tags...>(),
-        "storage given both as an explicit template argument and as a storage_c<...>{} tag -- pick one");
-    return Oexpl != storage_deduce ? Oexpl : _kw::find_t<_is_storage_tag, storage_c<Dflt>, Tags...>::value;
+    return _kw::resolve_t<_kw::keep_tag, storage_c<Oexpl>, storage_c<storage_deduce>,
+                          _is_storage_tag, storage_c<Dflt>, Tags...>::value;
 }
 /** @brief Resolve a factory's ownership: an explicitly named mode passes through,
  *         `storage_deduce` becomes `stack` for a static shape / `heap` for a dynamic one. */

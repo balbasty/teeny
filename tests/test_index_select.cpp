@@ -1,5 +1,5 @@
 // index_select (#326): gather along one axis using an arbitrary integer index
-// TENSOR (runtime data, not compile-time indices/ranges like take_along).
+// TENSOR (runtime data, not compile-time indices/ranges like slice_along).
 #include <teeny/teeny.h>
 #include <cuda/std/type_traits>
 using namespace tny;
@@ -47,7 +47,7 @@ int main() {
         if (sel(2,j) != verts(4,j)) return 3;
     }
 
-    // negative idx values wrap (built on take_along, which already wraps).
+    // negative idx values wrap (built on slice_along, which already wraps).
     auto idxn = local<long, shape<2>>(); idxn(0)=-1; idxn(1)=-5;
     auto seln = verts.index_select<0>(idxn);
     if (seln(0,0) != verts(4,0)) return 4;   // -1 -> last row (4)
