@@ -244,13 +244,14 @@ auto f = local<double, shape<2>>();
 n.div(d, into(f));            // f = {3, 4}  — integer division, == f.copy_(n.div(d))
 ```
 
-**`y`'s shape is checked**, against the result the producer would otherwise have
-allocated: the source's own shape for a unary or scalar-rhs op, the broadcast shape
-for a tensor-rhs one. Only the *operands* broadcast — the destination never
-stretches, so a `y` that is smaller in any axis is an error, not a repeated write.
-It is caught at **compile time** whenever the extents in play are static, and by a
-debug-time check (an `assert`, compiled out under `-DNDEBUG`) when any of them is
-dynamic — for every producer alike, broadcasting or not:
+**`y`'s shape is checked**: against the source's own shape for a unary or
+scalar-rhs op, and axis by axis against `y` itself for a tensor-rhs one — each
+operand must broadcast into the `y` you passed. Only the *operands* broadcast —
+the destination never stretches, so a `y` that is smaller in any axis is an
+error, not a repeated write. A mismatch is caught at **compile time** whenever
+the extents in play are static, and by a debug-time check (an `assert`, compiled
+out under `-DNDEBUG`) when any of them is dynamic — for every producer alike,
+broadcasting or not:
 
 ```cpp
 auto a = zeros(shape<8,8>{});
@@ -272,6 +273,29 @@ out.add(row, into(out));      // fine: the (1,3) operand stretches over (2,3)
 out.add(out, into(row));      // compile error: a (1,3) DEST does not stretch
 ```
 
+**A tensor-rhs `y` may be bigger than the natural result — deliberately.** Read
+`a.add(b, into(y))` as "`y` = `a + b`, minus the allocation and the copy": `y` is
+the result shape *you* chose, and the operands broadcast into it exactly as they
+would into the left-hand side of `y.copy_(a + b)`. So a `y` that is larger — or
+of higher rank — than the tensor `a + b` alone would have returned is legal
+whenever every operand still stretches into it, and the smaller natural result
+fills all of `y`:
+
+```cpp
+auto u = zeros(shape<1,3>{});  auto w = zeros(shape<1,3>{});
+auto big = zeros(shape<5,3>{});
+u.add(w, into(big));          // u + w alone is (1,3); here it fills all 5 rows
+auto batch = zeros(shape<2,1,3>{});
+u.add(w, into(batch));        // higher rank too: operands right-align and stretch
+```
+
+This is the same broadcasting the non-`into` spelling applies, pointed at the
+destination you supplied — handy for filling a batch axis of a preallocated
+buffer in one pass. What stays rejected is any axis where an operand can neither
+match `y` nor stretch (its extent is neither `y`'s nor 1) — the smaller-`y` cases
+above included. If you want the exact natural-result shape enforced, size `y`
+that way: the check pins every operand against the `y` you pass.
+
 Which rule a producer uses follows from the *result it promises*, not from how it
 happens to be computed. `normalize(a, into(y))` is the case worth spelling out:
 whether you normalize the whole tensor or only along named axes, the result is `a`
@@ -287,6 +311,12 @@ normalize<1>(a, into(zeros(shape<5,3>{})));   // compile error: y is not a's sha
                                               //   (a's extent-1 axis does NOT stretch here)
 normalize<1>(a, into(zeros(shape<2,1,3>{}))); // compile error: y's rank is not a's
 ```
+
+The two contracts are not an inconsistency. A tensor-rhs op hands you the result
+shape to choose because both of its operands legitimately broadcast; `normalize` —
+like every unary and scalar-rhs producer — promises a result congruent with `a`,
+so a bigger `y` could only ever hold replicas. If replicas are really what you
+want, say so: `y.copy_(normalize(a))`.
 
 `y` must also not **self-overlap** — no `extent > 1` axis with stride 0. Such a `y`
 would take many results into one element and keep only the last; a debug-time check
