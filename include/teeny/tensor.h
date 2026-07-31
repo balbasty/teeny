@@ -2042,6 +2042,15 @@ public:
  *         an out-of-place math producer (`a.add(b, into(y))`, `cross(a,b,into(y))`,
  *         `exp(a, into(y))`, …) to write the result into `y` (one fused pass, no
  *         allocation) and get `y&` back, instead of a freshly allocated result.
+ *         `y`'s SHAPE follows the producer's own rule: a tensor-rhs (broadcasting)
+ *         producer checks each OPERAND against the `y` you pass (equal extent or 1),
+ *         so `y` may deliberately be LARGER or higher-rank than the operands' own
+ *         broadcast result — `a.add(b, into(y))` is "`y` = `a + b`" minus the
+ *         allocation and the copy, and the operands stretch to fill `y` (#444) —
+ *         while a unary or scalar-rhs producer requires `y` to match the source
+ *         EXACTLY (it has nothing to stretch). Only the operands ever broadcast,
+ *         never `y`: a `y` smaller in any axis is an error (compile-time when the
+ *         extents are static, a debug-time check otherwise).
  *         `y`'s dtype need not match: the arithmetic runs in the OPERANDS' own
  *         precision (a scalar rhs and the fused `alpha` included) and only the
  *         RESULT is cast to `y`, so `a.op(b, into(y))` gives exactly the numbers

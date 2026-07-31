@@ -317,10 +317,12 @@ auto c = minimum(a, b); maximum(a, s); clamp(a, lo, hi);
 auto c = a.add(b, alpha);  a.sub(b, alpha);  // fused out-of-place axpy: a +/- alpha*b (b broadcasts)
 
 // ...or write into a preallocated dest (one fused pass, no alloc) -> dest&: `into(y)` last.
-//   y's SHAPE is checked against the result -- the source's own shape for a scalar-rhs or
-//   unary op, the broadcast shape for a tensor rhs (only operands broadcast, never the
-//   dest). Every producer alike: a compile error when the extents in play are static, a
-//   debug-time check otherwise. y's dtype may differ: the math runs
+//   y's SHAPE is checked -- a scalar-rhs or unary op wants the source's shape EXACTLY; a
+//   tensor rhs checks each OPERAND against the y you pass (== y's extent or 1), so y may
+//   deliberately be LARGER/higher-rank than the natural result and the operands stretch to
+//   fill it: a.add(b, into(y)) is "y = a + b" minus the alloc+copy. Only operands broadcast,
+//   never the dest -- a smaller y is an error. Every producer alike: a compile error when
+//   the extents in play are static, a debug-time check otherwise. y's dtype may differ: the math runs
 //   in the OPERANDS' precision (scalar rhs / axpy alpha too) and only the RESULT is cast to
 //   y, so a.op(b, into(y)) == y.copy_(a.op(b)) numerically, minus the temporary (holds for
 //   half/bfloat16 operands too: into(y) rounds through the twin's own promote_t first).

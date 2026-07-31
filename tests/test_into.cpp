@@ -295,6 +295,38 @@ int main() {
     dmix.add(dmix, into(omix));
     if (omix(0,0)!=2 || omix(1,2)!=12)       return 120;
 
+    // ====== dest LARGER than the natural result: INTENTIONAL (#444) ======
+    // The tensor-rhs guard above pins each OPERAND against the dest ("equal or
+    // 1"), never the dest against the operands' own broadcast result — so a dest
+    // that is bigger (or of higher rank) than what the allocating form would
+    // return is LEGAL, and the operands stretch to fill it. That is the decided
+    // contract, not a hole (#444, owner-decided): `a.add(b, into(y))` is
+    // `y(etc) = a + b` minus the allocation and the copy — y is the result shape
+    // the CALLER picks, and the write is exactly what y.copy_(a + b) would store
+    // (e.g. filling a batch axis of a preallocated buffer in one pass). Do NOT
+    // "tighten" this to exact equality against the natural result.
+    auto nat  = local<double, shape<1,3>>(); nat(0,0)=1; nat(0,1)=2; nat(0,2)=3;
+    auto tenb = local<double, shape<1,3>>(); tenb.fill_(10.0);
+    auto big  = local<double, shape<4,3>>(); big.fill_(-1.0);
+    nat.add(tenb, into(big));                     // natural result (1,3) fills (4,3)
+    for (int r = 0; r < 4; ++r)
+        if (big(r,0)!=11 || big(r,1)!=12 || big(r,2)!=13) return 160;
+    // ...and the reference identity the framing promises: == copy_ of the twin
+    auto bigref = local<double, shape<4,3>>(); bigref.copy_(nat.add(tenb));
+    for (int r = 0; r < 4; ++r)
+        if (big(r,0)!=bigref(r,0) || big(r,2)!=bigref(r,2)) return 161;
+    // a HIGHER-RANK dest right-aligns the operands (padded axes stretch) — legal too
+    auto big3 = local<double, shape<2,1,3>>(); big3.fill_(-1.0);
+    nat.add(tenb, into(big3));
+    if (big3(0,0,0)!=11 || big3(1,0,2)!=13)  return 162;
+    // a DYNAMIC dest reaches the same affordance through the runtime _TNY_CHECK
+    auto bigd = zeros<double>(shape<-1,-1>{4,3});
+    nat.add(tenb, into(bigd));
+    if (bigd(0,0)!=11 || bigd(3,2)!=13)      return 163;
+    // the free binary producers drive the same engine, so the affordance holds there
+    minimum(nat, tenb, into(big));
+    if (big(0,0)!=1 || big(3,2)!=3)          return 164;
+
     // The mis-shaped calls are now COMPILE errors, so they cannot live in a running
     // test — same commented-out convention as the #357 repros above; verified by hand:
     //   auto a8 = zeros<double>(shape<8,8>{}); auto y2 = zeros<double>(shape<2,2>{});
