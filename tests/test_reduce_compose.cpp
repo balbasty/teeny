@@ -207,5 +207,26 @@ int main() {
     if (ns(0,0)!=0.0 || ns(0,1)!=2.0 || ns(1,0)!=3.0 || ns(1,1)!=5.0) return 50;
     if (!ns.is_contiguous()) return 51;                  // gathered into a dense block
 
+    // ---- rank-0 SOURCE through the empty-axis-pack path (#437) -----------------
+    // `squeeze<0>()` of a size-1 axis yields a rank-0 VIEW whose layout is teeny's
+    // `strides<>` (every squeeze/permute/flip/unsqueeze output is, even when the
+    // result happens to be trivially contiguous) -- a DIFFERENT type from
+    // `ccontiguous`, so `axreduce<>`'s unrolled fast path (gated on `L ==
+    // ccontiguous`) is skipped and the DECODE branch runs instead, with its local
+    // `red[E::rank()]` array. `E::rank()` is 0 here, so this pins the fix: before
+    // #437 that was a zero-length array (a GCC/Clang extension, not portable to
+    // MSVC); the array is now floored to size 1, with the loop bound left on the
+    // real `E::rank()` so a rank-0 source still runs zero iterations over it.
+    auto scal_src = local<double, shape<1>>(); scal_src(0) = 5.0;
+    auto r0 = scal_src.squeeze<0>();
+    static_assert(decltype(r0)::rank() == 0, "squeeze<0>() of a size-1 axis -> rank 0");
+    static_assert(!cs::is_same<typename decltype(r0)::layout_type, ccontiguous>::value,
+                  "squeeze's layout is teeny's strides<>, not ccontiguous -- exercises axreduce's decode path");
+    auto z0 = sum(r0, axis<>{});               // empty axis list -> axreduce<>() with E::rank()==0
+    static_assert(decltype(z0)::rank() == 0, "empty axis list keeps the source's (rank-0) shape");
+    if (z0.item() != 5.0) return 52;
+    if (prod(r0, axis<>{}).item() != 5.0 || max(r0, axis<>{}).item() != 5.0) return 53;
+    if (min(r0, axis<>{}).item() != 5.0 || mean(r0, axis<>{}).item() != 5.0) return 54;
+
     return 0;
 }

@@ -1208,7 +1208,11 @@ _TNY_API auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
         // index, output offset folds. A bigger static shape takes the decode path below.
         reduce_axes_static_<Axes...>(out, a, init, op, cs::make_index_sequence<_static_numel<E>()>{});
     } else {
-        bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
+        // Array size floored to 1 (rank-0 `a` -> zero-length `red[]` is a GCC/Clang
+        // extension, not portable to MSVC; #437). The loop bounds below still key
+        // on `E::rank()`, not the floored size, so a rank-0 source still does zero
+        // real iterations over `red` — the pad slot is never touched.
+        bool red[E::rank() ? E::rank() : 1] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
         reduce_axes_<R>(out, a, init, op, red, cs::make_index_sequence<E::rank()>{});
     }
     return out;
@@ -1219,7 +1223,9 @@ template <long... Axes, class R, class Op, class T,class E,class L,storage O,
 _TNY_HOST auto axreduce(const tensor<T,E,L,O> & a, R init, Op op) {
     static_assert((_axis_in_range(Axes, E::rank()) && ...), "reduction axis out of range");
     using I = typename E::index_type;
-    bool red[E::rank()] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
+    // Array size floored to 1 (rank-0 `a` -> zero-length `red[]` is a GCC/Clang
+    // extension, not portable to MSVC; #437). See the static-path twin above.
+    bool red[E::rank() ? E::rank() : 1] = {}; ( (red[_norm_axis(Axes, E::rank())] = true), ... );
     cs::array<I, OE::rank()> ke{}; cs::size_t oi = 0;
     for (cs::size_t d = 0; d < E::rank(); ++d) if (!red[d]) ke[oi++] = static_cast<I>(a.extent(d));
     OE oe(ke);
