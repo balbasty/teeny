@@ -318,7 +318,7 @@ Vendor teeny (`include/teeny/` + `examples/fastfields/{bounds,spline}.hpp`) into
   `stride(Int<d>())`.
 - Replace the `has_atomic_add` fork with `fetch_add` (atomic on device via
   `atomicAdd`, and atomic on the host too via `cuda::std::atomic_ref` for
-  arithmetic element types, #257) — keep the batch-parallel/spatial-sequential
+  arithmetic element types) — keep the batch-parallel/spatial-sequential
   path only for the non-arithmetic (`half`/`bfloat16`) element types that have
   no atomic representation to route through.
 - Keep the giant order/bound/rank switches only at the **dispatch boundary**

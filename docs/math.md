@@ -22,7 +22,7 @@ a += b;  a -= 2.0;  a *= b;  a /= 2.0;  // compound-assign (scalar or tensor rhs
 auto old = a++;                         // postfix: pre-value as a stack copy
                                         //   (STATIC shape only)
 
-a.minimum_(b);  a.maximum_(2.0);        // running min/max update (#325): *this =
+a.minimum_(b);  a.maximum_(2.0);        // running min/max update: *this =
                                         //   min/max(*this, b); tensor rhs broadcasts,
                                         //   scalar rhs applies to all — the running-
                                         //   nearest-distance idiom: best.minimum_(candidate)
@@ -69,7 +69,8 @@ a.clamp_(lo, hi);                                          // clamp to [lo,hi]
 
 An in-place op with a **scalar** rhs (`a *= 2`, `a.add_(1)`) or a **unary** op
 (`a.exp_()`), plus `iota_`/`fill_`/`zero_`, is a single-array read-modify-write and
-**auto-vectorizes** (one pointer, nothing to alias — see [Performance](performance.md#open-work)).
+**auto-vectorizes** (one pointer, nothing to alias — see
+[Performance](performance.md#vectorized-elementwise-ops)).
 The scalar/unary ones apply over any **dense** view (even transposed); only an in-place
 op with a *tensor* rhs (`a.add_(b)`) can't, since `b` may overlap `a`.
 
@@ -134,8 +135,8 @@ outputs is race-free on the host too.
 `dot` return a new tensor. A fully-static result is stack-owned (host and
 device); a dynamic result is heap-owned (host only). When every operand is
 C-contiguous and the same shape as the result (no broadcast), these ops take a
-`__restrict__` linear fast path over the fresh result and **auto-vectorize**
-(#161); a broadcast or strided operand falls back to the general decode.
+`__restrict__` linear fast path over the fresh result and **auto-vectorize**;
+a broadcast or strided operand falls back to the general decode.
 
 ```cpp
 auto c = a + b;    auto d = a.add(b);  // tensor+tensor (broadcasts) or +scalar

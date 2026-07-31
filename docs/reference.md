@@ -92,7 +92,7 @@ stack (host+device), dynamic shape → heap (host only):
 | `make_local<T>(shape)` | `local<T,E>` | `T` (=`float`); = `empty<T,storage::stack>` |
 | `make_heap<T>(shape)` | `owned<T,E>` | `T` (=`float`); = `empty<T,storage::heap>` |
 | `make_gpu<T>(shape)` / `make_pinned<T>` / `make_mapped<T>` | CUDA owner | `T` (=`float`); = `empty<T,storage::gpu/…>` |
-| `make_local`/`make_heap`/`make_gpu`/`make_pinned`/`make_mapped(shape, dtype<T>{}/layout tag)` | same, T/layout as given | `make_*` also forwards a trailing `dtype`/layout tag bag to `empty` (#282) — `make_heap(shape, dtype<double>{}, fcontiguous{})` |
+| `make_local`/`make_heap`/`make_gpu`/`make_pinned`/`make_mapped(shape, dtype<T>{}/layout tag)` | same, T/layout as given | `make_*` also forwards a trailing `dtype`/layout tag bag to `empty` — `make_heap(shape, dtype<double>{}, fcontiguous{})` |
 | `zeros<T>(shape)` / `ones<T>(shape)` | stack or heap | `T` (=`float`) |
 | `full(shape, v)` | stack or heap | **the value's type** (`full<T>(…)` to force) |
 | `arange<T>(n)` | `owned<T, shape<-1>>` | `T` (=`int64_t`); 1-D `[0,n)` |
@@ -100,8 +100,8 @@ stack (host+device), dynamic shape → heap (host only):
 | `zeros<T, storage::S>(shape)` (also `ones`/`full`/`arange`) | owner in space `S` | host-accessible backend (`stack`/`heap`/`pinned`/`mapped`); `storage::gpu` `static_assert`s → `to<storage::gpu>(zeros<T>(shape))`. Value-tag: `zeros<T>(shape, storage_c<storage::S>{})` |
 | `empty(shape, dtype<T>{})` (also `zeros`/`ones`/`full`/`arange`) | same as `<T>` | value-tag element-type form — deduces `T` from the tag instead of an explicit `<T>` template argument, so a type-dependent receiver needs no `.template`. A backend override stays a *leading* explicit template arg since `T` is now deduced: `empty<storage::gpu>(shape, dtype<T>{})` |
 | `empty(shape, dtype<T>{}, storage_c<S>{})` / `empty(shape, storage_c<S>{}, dtype<T>{})` (also `zeros`/`ones`/`full`/`arange`) | same as `<T,S>` | **both** value tags at once, either order — no explicit template argument needed at all |
-| `empty(shape, ccontiguous{}/fcontiguous{})`, composed with `dtype<T>{}`/`storage_c<S>{}` in ANY order/subset (also `zeros`/`ones`/`full`/`arange`, except `arange` has no layout) | same, layout as given | the generic keyword mechanism (#277-#281): a bare layout tag, alone or alongside `dtype`/`storage_c` in any order — `empty(shape, fcontiguous{}, dtype<double>{})`, `zeros(shape, storage_c<storage::heap>{}, fcontiguous{}, dtype<double>{})`, `arange(n, storage_c<storage::pinned>{}, dtype<double>{})`. `wrap` (#282) is on the same mechanism for its `storage_c` tag, but has no `dtype` keyword (`T` is deduced from the pointer) and keeps `Layout` as a distinct positional slot (a 3rd-argument value tag or template arg), not a composable keyword |
-| `empty<storage::S>(shape, …keywords…)` (also `zeros`/`ones`/`full`/`arange`) | owner in space `S` | the **leading backend** spelling takes that *same* keyword bag — any subset, any order (#373): `zeros<storage::pinned>(shape)`, `zeros<storage::pinned>(shape, fcontiguous{})`, `empty<storage::gpu>(shape, dtype<double>{}, fcontiguous{})`. The one keyword it rejects is `storage_c<…>{}` — that *is* the backend, so naming it twice is a "pick one" `static_assert` |
+| `empty(shape, ccontiguous{}/fcontiguous{})`, composed with `dtype<T>{}`/`storage_c<S>{}` in ANY order/subset (also `zeros`/`ones`/`full`/`arange`, except `arange` has no layout) | same, layout as given | the generic keyword mechanism: a bare layout tag, alone or alongside `dtype`/`storage_c` in any order — `empty(shape, fcontiguous{}, dtype<double>{})`, `zeros(shape, storage_c<storage::heap>{}, fcontiguous{}, dtype<double>{})`, `arange(n, storage_c<storage::pinned>{}, dtype<double>{})`. `wrap` is on the same mechanism for its `storage_c` tag, but has no `dtype` keyword (`T` is deduced from the pointer) and keeps `Layout` as a distinct positional slot (a 3rd-argument value tag or template arg), not a composable keyword |
+| `empty<storage::S>(shape, …keywords…)` (also `zeros`/`ones`/`full`/`arange`) | owner in space `S` | the **leading backend** spelling takes that *same* keyword bag — any subset, any order: `zeros<storage::pinned>(shape)`, `zeros<storage::pinned>(shape, fcontiguous{})`, `empty<storage::gpu>(shape, dtype<double>{}, fcontiguous{})`. The one keyword it rejects is `storage_c<…>{}` — that *is* the backend, so naming it twice is a "pick one" `static_assert` |
 
 ---
 
@@ -245,11 +245,11 @@ Worked input→output shapes (`E` = source extents):
 |---|---|---|
 | `t.permute<Perm...>()` | → view | reorder axes (a permutation of `0..N-1`) |
 | `t.flip<Ax>()` | → view | reverse an axis (negative-stride) |
-| `t.flip<Ax0,Ax1,...>()` | → view | reverse **several** axes at once (numpy `flip(a, axis=(0,2))`); distinct, any order — flips commute, so `flip<0,2>` == `flip<2,0>` == `flip<0>().flip<2>()`, built in one pass (#349) |
+| `t.flip<Ax0,Ax1,...>()` | → view | reverse **several** axes at once (numpy `flip(a, axis=(0,2))`); distinct, any order — flips commute, so `flip<0,2>` == `flip<2,0>` == `flip<0>().flip<2>()`, built in one pass |
 | `t.unsqueeze<Ax>()` | → view, rank+1 | insert a size-1 axis |
-| `t.unsqueeze<Ax0,Ax1,...>()` | → view, rank+k | insert **several** size-1 axes at once; positions are relative to the *final* rank, distinct, any order (#275) |
+| `t.unsqueeze<Ax0,Ax1,...>()` | → view, rank+k | insert **several** size-1 axes at once; positions are relative to the *final* rank, distinct, any order |
 | `t.squeeze<Ax>()` / `t.squeeze()` | → view, rank−1 / − all size-1 | drop size-1 axis / axes |
-| `t.squeeze<Ax0,Ax1,...>()` | → view, rank−k | drop **several** size-1 axes at once; positions are relative to the *source* rank, distinct, any order (#275) |
+| `t.squeeze<Ax0,Ax1,...>()` | → view, rank−k | drop **several** size-1 axes at once; positions are relative to the *source* rank, distinct, any order |
 | `t.reshape<NewExt...>()` | → view | contiguous reshape (one `-1` inferred) |
 | `t.flatten()` | → 1-D view | ravel; needs C-contiguous |
 | `t.recast<NewShape[, NewLayout]>()` | → view | reinterpret with a more-static same-rank extents; **`NewLayout` defaults to `keep_strides`** (preserve the source strides AND layout type, any layout, no copy). `ccontiguous`/`fcontiguous` = reinterpret AS that order (derive+fold the strides — the "I promise it's contiguous" form; a **debug build verifies** the imposed strides match the source's and aborts a false promise, symmetric with the extent check — UB only under `-DNDEBUG`); `strides<S...>` = impose them. Functional form `t.recast(shape{…}, layout{…})` |
@@ -312,7 +312,7 @@ free **`to<Space>(t)`** (`cuda.h`) above, which is device-aware.
 | `peel_zip<Axes...>(a, b[, c]).enumerate()` | a range of `{index, tuple}` | same shape as `peel(...).enumerate()` |
 | `peel_zip<Axes...>(a, b[, c]).subrange(lo,hi)` | a `[lo,hi)` sub-range | same shape as `peel(...).subrange()` |
 | `scan_<Axis>(t, init, f)` | `void` (in-place) | sequential fold along `Axis` — `carry=init`, then `carry=f(carry,x); x=carry` for each element (increasing order), batched (peeled) over every other axis; `f` is a device-safe functor (like `map_`'s own convention). Reverse sweep: `scan_<Axis>(t.flip<Axis>(), init, f)` (a temporary view binds fine — `scan_` has lvalue and rvalue overloads) |
-| `scan_(t, init, f, axis<Axis>{})` | same | value form — the axis tag is **trailing**, like `index_select`'s and the reduction family's (#348). The leading spelling `scan_(t, axis<Axis>{}, init, f)` was **removed**, with no deprecated alias |
+| `scan_(t, init, f, axis<Axis>{})` | same | value form — the axis tag is **trailing**, like `index_select`'s and the reduction family's. A *leading* tag — `scan_(t, axis<Axis>{}, init, f)` — is a compile error, with no alias |
 | `scan<Axis>(t, init, f)` | → new tensor | out-of-place: fresh dense copy, scanned (static→stack, dynamic→heap host-only, built on `clone()`); `t` itself untouched |
 | `scan<Axis>(t, init, f, into(dest))` | `dest&` | no fresh allocation beyond the copy into `dest`; `dest`'s shape must match `t`'s EXACTLY (checked — `static_assert` when both are static, `_TNY_CHECK` otherwise), unlike `copy_`'s own broadcast rule, since `scan_` then walks `dest`'s own axis numbering |
 | `scan(t, init, f, axis<Axis>{}[, into(dest)])` | → new tensor / `dest&` | value form — `scan`'s two trailing keywords ride the generic keyword bag, so `axis<...>{}` and `into(dest)` compose in **any subset, any order** (`scan(t, init, f, into(dest), axis<0>{})` is the same call) |
@@ -349,7 +349,7 @@ one — see [Mixing widths](shapes-strides.md#mixing-widths-in-a-broadcast).
 | Call | Notes |
 |---|---|
 | `a.add_(x)` `a.sub_(x)` `a.mul_(x)` `a.div_(x)` | `x` = tensor (broadcasts) or scalar |
-| `a.minimum_(x)` `a.maximum_(x)` | running min/max update (#325): `*this = min/max(*this, x)`, `x` = tensor (broadcasts) or scalar — the running-nearest-distance idiom `best.minimum_(candidate)` |
+| `a.minimum_(x)` `a.maximum_(x)` | running min/max update: `*this = min/max(*this, x)`, `x` = tensor (broadcasts) or scalar — the running-nearest-distance idiom `best.minimum_(candidate)` |
 | `y.add_(x, alpha)` `y.sub_(x, alpha)` | fused scaled accumulate (BLAS axpy): `y ± alpha*x`, `x` broadcasts; scaled copy `y = alpha*x` is `y.zero_().add_(x, alpha)` |
 | `a.atomic_add_(x)` `a.atomic_sub_(x)` | atomic accumulate, host and device (`x` = tensor or scalar); underlying form is `add_<Atomic>`/`sub_<Atomic>` |
 | `a += x` `a -= x` `a *= x` `a /= x` | compound-assign sugar |

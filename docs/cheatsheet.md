@@ -56,9 +56,9 @@ empty(shape, dtype<T>{});            // value-tag ELEMENT-TYPE form: deduces T, 
                                      //   O stays a leading explicit template arg: empty<storage::gpu>(shape, dtype<T>{})
 empty(shape, fcontiguous{}, dtype<double>{});   // a layout tag composes with dtype/storage_c, any
                                                  //   order/subset (also zeros/ones/full; arange has no
-                                                 //   layout keyword, #277-#281)
+                                                 //   layout keyword)
 empty<storage::gpu>(shape, fcontiguous{}, dtype<double>{});   // ...and the leading backend arg takes
-                                                 //   that SAME bag, any subset/order (#373) — dtype
+                                                 //   that SAME bag, any subset/order — dtype
                                                  //   and/or a layout tag, or nothing at all
 make_local<T>(shape);  make_heap<T>(shape);            // thin spellings of empty<T,storage::stack/heap>
 make_gpu<T>(shape); make_pinned<T>(shape); make_mapped<T>(shape);   // empty<T,storage::gpu/...>; T defaults to float
@@ -280,7 +280,7 @@ scan_<Axis>(x, init, f);            // sequential fold along Axis, batched (peel
                                     //   for each element (increasing order). f is a device-safe
                                     //   functor (like map_'s convention). Value form: scan_(x,
                                     //   init, f, axis<Axis>{}) -- the axis tag is TRAILING, like
-                                    //   index_select's and the reductions' (#348).
+                                    //   index_select's and the reductions'.
                                     //   Reverse sweep: scan_<Axis>(x.flip<Axis>(), init, f) -- a
                                     //   temporary view binds fine (lvalue + rvalue overloads).
 auto y = scan<Axis>(x, init, f);    // out-of-place: fresh dense copy, scanned (static->stack,
@@ -374,7 +374,7 @@ allclose(a, b, dtype<float>{});  allclose(a, b, rtol, atol, into(cell));  // sam
 sum<Axes...>(a); prod<...>(a); max<...>(a); min<...>(a); mean<...>(a);  // sum<Acc,Axes...>(a)
 sum(a, axis<0,2>{}); mean(a, axis<-1>{}); sum<double>(a, axis<0>{});    // numpy `axis=` value form
 sum<2,0>(a);          // axes may be listed in ANY order, but must be DISTINCT: sum<0,0>(a) /
-                      //   sum(a, axis<0,0>{}) is a COMPILE ERROR, not a dropped duplicate (#433).
+                      //   sum(a, axis<0,0>{}) is a COMPILE ERROR, not a dropped duplicate.
                       //   Negatives normalise first, so mean<1,-2>(a) at rank 3 is caught too.
 sum<0>(a, into(buf)); mean(a, axis<1>{}, into(buf));  // into(dest) -> copies lower-rank result
 sum<0>(a, keepdims);  sum(a, axis<0>{}, keepdims);    // keepdims: reduced axis stays size-1 (numpy

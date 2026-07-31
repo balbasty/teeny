@@ -138,7 +138,8 @@ a.add_(b);          // IN-PLACE TENSOR rhs: `b` may overlap `a`, so this stays s
   `b` may overlap the destination, so the compiler must assume aliasing.
 
 A broadcast or a strided operand also falls back to the decode (correct, just not
-vectorized). Mechanism and codegen: [Performance](performance.md#open-work).
+vectorized). Mechanism and codegen:
+[Performance](performance.md#vectorized-elementwise-ops).
 
 ## 6. Compute wide, store narrow
 

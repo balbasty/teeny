@@ -58,10 +58,11 @@ dynamic strides cost nothing per element.**
 ## Where dynamic strides *genuinely* cost
 
 1. **Register pressure / GPU occupancy** — the footprint above. The real, measurable
-   cost, and the reason to prefer static strides and (soon) 32-bit indexing.
+   cost, and the reason to prefer static strides and 32-bit indexing
+   ([below](#32-bit-offset-math)).
 2. **Vectorization** — an unknown stride can never be proven contiguous, so it can't
    SIMD. For *contiguous* ops teeny takes a linear fast path that auto-vectorizes in
-   every case except one (#161, *Open work* below): an **out-of-place** op writes a
+   every case except one ([below](#vectorized-elementwise-ops)): an **out-of-place** op writes a
    fresh, non-aliasing result (`__restrict__` destination), and an **in-place scalar
    or unary** op (`a *= 2`, `a.exp_()`) is a single-array read-modify-write with no
    second pointer — so both vectorize. The lone exception is an **in-place op with a
@@ -76,7 +77,9 @@ dynamic strides cost nothing per element.**
    multiply-adds per gather; with **static** strides they fold to compile-time constants. Keep the
    spatial strides static (below) and the gather folds.
 4. **Index width** — dynamic offset math in `int64` is slower and uses more registers
-   than `int32`, especially on the device. Addressed by #115.
+   than `int32`, especially on the device. `reindex`/`dispatch_index` narrow a
+   boundary view to 32-bit wherever that is lossless
+   ([below](#32-bit-offset-math)).
 
 ## How to keep it fast — the fold in practice
 
@@ -104,63 +107,81 @@ strides are static** (or contiguous). If it doesn't, `recast` / `dispatch` at th
 launch boundary until it does; carry the dynamic strides only in the outer/batch
 loop, where they hoist for free.
 
-## Open work
+## The fast paths in detail
 
-- **32-bit offset dispatch (#115) — landed.** `t.reindex<int32_t>()` (→ `shape32`) is
-  the no-copy, layout-preserving retype; narrowing a dynamic boundary view halves its
-  footprint (rank-2: 40→24 B) and runs offset math in 32-bit — the biggest device win.
-  `dispatch_index(v, f)` instantiates the kernel for both widths and picks `reindex`
-  when `v.index_fits<int32_t>()`; `dispatch_rank<narrow_index>(at, f)` fuses it into the
-  anyrank rank dispatch. Opt in per launch site. Cross-width broadcasting (#167) is
-  resolved by **broadening** — a mixed-width `a + b` takes the wider operand's index
-  type, which is lossless and avoids truncating the wide operand's strides (and, if the
-  two also disagree in signedness, a signed type wide enough for both, #347).
-- **`restrict`/no-alias fast path (#161, #175) — landed.** Contiguous elementwise ops
-  now take a **linear fast path** in place of the per-element mixed-radix decode, which
-  auto-vectorizes. Two flavours, by whether a second array is in play:
-  - **Out-of-place** (`a + b`, `a * 2`, `exp(a)`, `a < b`) writes a **freshly
-      allocated** result, so the engines (`bzip_`/`scalo_`/`unaryo_`) run a flat
-      `for (i) cp[i] = op(ap[i], …)` with the destination `cp` marked `__restrict__`
-      (`_TNY_RESTRICT`, defines.h). UB-free *because* the destination is fresh; the
-      sources are left un-`restrict`ed so `a + a` stays correct.
-  - **In-place scalar / unary / iota / fill** (`a *= 2`, `a.add_(1)`, `a.exp_()`,
-      `a.iota_(…)`) is a **single-array** read-modify-write — one pointer, so it
-      vectorizes with **no `__restrict__` at all** (nothing to alias). The scalar and
-      unary ops are order-independent, so they take the fast path over **any dense
-      view** (`is_dense()` — C/F/permuted; a *transposed* in-place op vectorizes too);
-      `iota_` is order-dependent so it keeps the exact-C-contiguous gate. `scal_`'s
-      fast path is gated to the plain store `w_set`, so an atomic scalar
-      (`a.atomic_add_`) keeps the decode path.
-  The one case that stays scalar is an **in-place op with a tensor rhs** (`a.add_(b)`):
-  `b` may alias/overlap the destination, so neither a `restrict` (UB) nor a plain loop
-  (the compiler assumes overlap) can safely vectorize it. Codegen proof (`-O3 -S`): the
-  write loops that emitted scalar `addsd` on both g++ and clang++ now emit packed
-  `addpd`; a broadcast or strided operand falls back to the unchanged decode.
-- **`dot`/`sqdist` static unroll (#255) — landed.** When BOTH operands are
-  static-shaped (their extents already match exactly at compile time — `dot`/`sqdist`
-  each `static_assert` that) **and** both C-contiguous, the shared linear index
-  addresses the same logical element in both directly — no per-step mixed-radix
-  decode. Unrolling over the (static) element count then emits straight-line code
-  with no loop back-edge, mirroring the axis-reduction static fast path (#218): a
-  small, fully-static dot (a posdef cross-channel dot, a fixed-size stencil tap
-  accumulation) no longer pays loop overhead it doesn't need. Falls back to the
-  unchanged decode the moment either operand is dynamic, non-C-contiguous (a
-  strided/permuted view, teeny's own `strides<...>` layout), or the two disagree
-  in layout — a strided-vs-contiguous pair still computes the correct result, just
-  without the unroll.
-- **The static unroll is for SMALL fixed shapes — and is capped (#343).** Both
-  unrolled paths above (the axis reduction and `dot`/`sqdist`) emit **one unrolled
-  step per element**, so they only pay off for the shapes they were written for: a
-  3-element cross-channel dot, a fixed-size stencil tap accumulation. Left uncapped
-  they scale terribly in *compile* time — clang refuses outright past 256 elements
-  ("instantiating fold expression … exceeded expression nesting limit of 256", its
-  default `-fbracket-depth`), and g++ took ~1 minute on a `shape<64,64>` reduction;
-  a `shape<128,128>` one was not attempted. So a fully-static shape of more than
-  **`TNY_MAX_STATIC_UNROLL` (256) elements takes the ordinary runtime-decode path**,
-  exactly as a dynamic one does. Same results either way — the cap is a pure
-  compile-time/binary-size guard on an optimisation that was never meant for large
-  shapes. `-DTNY_MAX_STATIC_UNROLL=64` trades more of the unroll away for faster
-  compiles; **raising it past 256 breaks clang**.
+Three optimizations do most of the work behind the advice above. Each is described
+here as it behaves today — including where it deliberately stops.
+
+### 32-bit offset math
+
+`t.reindex<int32_t>()` (giving a `shape32` view) is a no-copy, layout-preserving
+retype of the offset **index width**: same pointer, same layout kind, extents and
+dynamic strides narrowed. Narrowing a dynamic boundary view halves its by-value
+footprint (rank-2: 40 → 24 B) and runs its offset arithmetic in 32-bit — the biggest
+single device win on this page.
+
+`dispatch_index(v, f)` is the launch-site spelling: it instantiates the kernel for
+both widths and picks the narrowed one when `v.index_fits<int32_t>()`.
+`dispatch_rank<narrow_index>(at, f)` fuses that choice into the anyrank rank
+dispatch. Both are opt-in per launch site — narrowing doubles the instantiations, so
+teeny never does it behind your back.
+
+Mixed-width operands **broaden** rather than narrow: `a + b` over an `int32`-indexed
+and an `int64`-indexed view takes the wider operand's index type (and, where the two
+also disagree in signedness, a signed type wide enough for both). That is lossless,
+and it avoids truncating the wide operand's strides down to a narrow result width.
+
+### Vectorized elementwise ops
+
+Contiguous elementwise ops take a **linear fast path** in place of the per-element
+mixed-radix decode, and that flat loop auto-vectorizes. Two flavours, by whether a
+second array is in play:
+
+- **Out-of-place** (`a + b`, `a * 2`, `exp(a)`, `a < b`) writes a **freshly
+  allocated** result, so the flat `for (i) c[i] = op(a[i], …)` marks the destination
+  `__restrict__`. That is safe precisely *because* the destination is fresh; the
+  sources are left un-`restrict`ed, so `a + a` stays correct.
+- **In-place scalar / unary / `iota_` / `fill_`** (`a *= 2`, `a.add_(1)`,
+  `a.exp_()`, `a.iota_(…)`) is a **single-array** read-modify-write — one pointer,
+  nothing to alias, so it vectorizes with **no `__restrict__` at all**. The scalar
+  and unary ops are order-independent, so they take the fast path over **any dense
+  view** (`is_dense()` — C-order, F-order, or permuted; a *transposed* in-place op
+  vectorizes too); `iota_` is order-dependent and so needs exact C-contiguity. An
+  **atomic** scalar (`a.atomic_add_(x)`) keeps the general decode path.
+
+One case stays scalar by design: an **in-place op with a tensor rhs** (`a.add_(b)`).
+`b` may alias or overlap the destination — `a.add_(a)` is a legal call — so neither
+a `restrict` (undefined behaviour) nor a plain loop (where the compiler must assume
+overlap) can safely vectorize it. A broadcast or strided operand likewise falls back
+to the decode: correct, just not vectorized.
+
+Codegen check (`-O3 -S`, g++ and clang++): the fast-path write loops emit packed
+`addpd`, and the may-alias tensor case emits scalar `addsd`.
+
+### Unrolled small static shapes
+
+When both `dot`/`sqdist` operands are static-shaped (their extents match exactly at
+compile time — each `static_assert`s that) **and** both C-contiguous, one shared
+linear index addresses the same logical element in both, so there is no per-step
+decode at all. Unrolling over the compile-time element count then emits
+straight-line code with no loop back-edge. Axis reductions over a fully static shape
+take the same unrolled path. So a small fixed-size dot — a cross-channel dot in a
+positive-definite solve, a fixed-size stencil tap accumulation — pays no loop
+overhead it doesn't need.
+
+The unroll falls back to the ordinary decode as soon as either operand is dynamic,
+is not C-contiguous (a strided or permuted view, or teeny's own `strides<...>`
+layout), or the two disagree in layout. The results are identical either way.
+
+**A deliberate limit: the unroll is capped at small shapes.** Both unrolled paths
+emit one step per element, so a large static shape costs *compile* time rather than
+buying run time — clang refuses outright past 256 elements (its default
+`-fbracket-depth` expression-nesting limit), and g++ takes about a minute on a
+`shape<64,64>` reduction. A fully static shape of more than
+**`TNY_MAX_STATIC_UNROLL` (256) elements therefore takes the ordinary
+runtime-decode path**, exactly as a dynamic one does — same results, no unroll.
+`-DTNY_MAX_STATIC_UNROLL=64` trades more of the unroll away for faster compiles;
+**raising it past 256 breaks clang**.
 
 !!! note "Measurement over intuition"
     The numbers here (`sizeof`, loop bodies, SIMD) are from `g++ -O2/-O3` on the host.

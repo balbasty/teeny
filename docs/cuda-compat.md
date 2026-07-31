@@ -113,19 +113,16 @@ the exact per-toolkit host-compiler ranges.
 
 Linux, macOS, and Windows are all exercised in CI: Linux via `make` (g++/clang++),
 macOS and Windows via the CMake + CTest build (each `tests/test_*.cpp` is a CTest
-target). MSVC used to fail to compile teeny at all (a compiler-specific defect in
-`operator()`'s overload resolution, [#268](https://github.com/balbasty/teeny/issues/268),
-fixed). Fixing it let compilation get far enough to uncover further pre-existing,
-independent MSVC-only defects that #268 had been masking: empty-base-optimization
-not applying to a mapping with 2+ private empty bases ([#295](https://github.com/balbasty/teeny/issues/295),
-fixed — needed `__declspec(empty_bases)`, see the EBO note below) and some
-axis-reduction overloads failing to resolve ([#296](https://github.com/balbasty/teeny/issues/296),
-fixed). The Windows CI job is a required, blocking signal like Linux and macOS —
-all three are proven-portable today.
+target). The Windows job is a required, blocking signal exactly like the Linux and
+macOS ones, so all three platforms are proven-portable on every commit. MSVC needs
+a few compiler-specific workarounds inside teeny — notably `__declspec(empty_bases)`
+on a mapping that inherits two or more empty bases (see the EBO note below) — but
+they are internal: nothing about the public API changes on Windows, with the one
+call-site caveat noted further down.
 
-**A permanent, documented MSVC limitation from #295's investigation:** teeny's
-`sizeof`-exact guarantee (a fully-static view/stack tensor is exactly the size
-of its data) holds on every compiler for teeny's own `strides<...>` layout, but
+**A permanent MSVC limitation:** teeny's `sizeof`-exact guarantee (a fully-static
+view/stack tensor is exactly the size of its data) holds on every compiler for
+teeny's own `strides<...>` layout, but
 **not** on real MSVC for the `ccontiguous`/`fcontiguous` layouts — CCCL's own
 `layout_right`/`layout_left::mapping` stores extents as a member tagged
 `_CCCL_NO_UNIQUE_ADDRESS`, and CCCL deliberately disables that attribute on

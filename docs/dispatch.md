@@ -215,7 +215,7 @@ of cells: it seeds the cursor once at `lo`, then advances incrementally.
 
 Need the **batch coordinates** (a per-batch-axis table `param[d][m[d]]`)? `enumerate()`
 pairs each cell with the batch multi-index — opt-in, so the bare `peel_front<-Sr>()` cell
-stays lean (the tensor-side `peel` has the same `enumerate`, #213):
+stays lean (the tensor-side `peel` has the same `enumerate`):
 
 ```cpp
 for (auto [m, cell] : at.peel_front<-Sr>().enumerate())
