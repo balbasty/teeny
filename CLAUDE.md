@@ -531,7 +531,12 @@ a.normalize_();  auto u = normalize(a);// in place a/=norm(a) (floating) / out-o
                       //   normalize static->stack, dynamic->heap; zero vector -> NaN (no epsilon)
 a.normalize_<1>(); normalize<-1>(a);   // ...over NAMED AXES (keepdim broadcast); axes distinct, ANY order
 a.normalize(axis<1>{}); a.normalize<1>();  // ...as a METHOD too (either spelling), and every
-                      //   spelling takes into(y): normalize(a,axis<1>{},into(y)); a.normalize<1>(into(y))
+                      //   spelling takes into(y): normalize(a,axis<1>{},into(y)); a.normalize<1>(into(y)).
+                      //   Every AXIS-scoped spelling is an _TNY_API/_TNY_HOST PAIR (#435), since the
+                      //   reduced norm it divides by is itself one: the ALLOCATING forms are
+                      //   host+device only for a fully STATIC source (the result carries the source's
+                      //   shape), the into(y)/in-place ones whenever the REDUCED extents are static
+                      //   (normalize_<0>() on shape<-1,3> reduces to a stack norm -> still device-callable)
 auto c = cross(a,b);  a.cross_(b);     // 3D cross product (rank-1, length 3): new / in place (a=a×b).
                       //   Into a separate slot: cross(a,b,into(slot)) -- the slot may be a slice
                       //   of a bigger array, cross(a,b,into(N(i,all))). (no crossto_ spelling.)

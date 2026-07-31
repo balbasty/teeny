@@ -2164,36 +2164,67 @@ _TNY_API auto & normalize(const tensor<T,E,L,O> & a, into_t<D> out) {
  * `_keepdims` itself (used here and by the reduction `keepdims` overloads) lives
  * earlier in this file, right before the axis-reduction section that needs it first. */
 
+// Every axis-scoped form below is TWO overloads, not one (#435): the reduced norm
+// it divides by is a TENSOR, so `norm<Axes...>`'s own static(stack, `_TNY_API`) /
+// dynamic(heap, `_TNY_HOST`) split propagates outward — a single `_TNY_API`
+// spelling would be a `__host__ __device__` function that resolves to a `__host__`
+// allocator on the dynamic path (golden rule 4). The ALLOCATING forms key on
+// `_nrm_out_*` (the source fully static, since the result carries the source's
+// extents), the `into(dest)` forms on the weaker `_nrm_kept_*` (only the reduced
+// norm allocates). Both are NAMED traits (`tensor.h`, next to `_red_dyn`), never
+// an inline condition, so `/permissive-` MSVC can tell the two halves apart.
 /** @brief `normalize<Axes...>(a)` — unit vectors along the named axes: each element
  *         divided by the L2 norm over those axes (keepdim broadcast). Floating result
- *         (integer -> double). Axes distinct, in any order (numpy-normalised). */
+ *         (integer -> double). Axes distinct, in any order (numpy-normalised).
+ *         Static shape -> a stack result (host+device); dynamic -> heap (host only). */
 template <long... Axes, class T, class E, class L, storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_out_api<E, Axes...>::value, int> = 0>
 _TNY_API auto normalize(const tensor<T,E,L,O> & a) {
     auto n = norm<Axes...>(a);                                          // reduced norm (floating tensor)
     return a.div(_keepdims<_norm_axis(Axes, (long)E::rank())...>(n));   // broadcast-divide (keepdim)
 }
+template <long... Axes, class T, class E, class L, storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_out_host<E, Axes...>::value, int> = 0>
+_TNY_HOST auto normalize(const tensor<T,E,L,O> & a) {
+    auto n = norm<Axes...>(a);
+    return a.div(_keepdims<_norm_axis(Axes, (long)E::rank())...>(n));
+}
 // value form: normalize(a, axis<Axes...>{}) == normalize<Axes...>(a)
 template <long... Axes, class T, class E, class L, storage O,
-          cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_out_api<E, Axes...>::value, int> = 0>
 _TNY_API auto normalize(const tensor<T,E,L,O> & a, axis<Axes...>) { return normalize<Axes...>(a); }
+template <long... Axes, class T, class E, class L, storage O,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_out_host<E, Axes...>::value, int> = 0>
+_TNY_HOST auto normalize(const tensor<T,E,L,O> & a, axis<Axes...>) { return normalize<Axes...>(a); }
 
 /** @brief `normalize<Axes...>(a, into(y))` — the axis-scoped unit vectors into a
  *         caller buffer `y` (same shape as `a`, since only the DIVISOR is reduced).
  *         Same one-line forward to `.div(..., out)` as the full-tensor form; the
- *         reduced norm itself is still materialised (it is a tensor, not a scalar).
+ *         reduced norm itself is still materialised (it is a tensor, not a scalar) —
+ *         which is the ONLY allocation here, hence the weaker `_nrm_kept_*` key:
+ *         `normalize<0>(a, into(y))` on a `shape<-1,3>` source reduces to a
+ *         `shape<3>` stack norm and stays device-callable.
  *         Axes distinct, in any order — same rule as the allocating form (`_keepdims`
  *         asserts distinctness and sorts). */
 template <long... Axes, class T, class E, class L, storage O, class D,
-          cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_kept_api<E, Axes...>::value, int> = 0>
 _TNY_API auto & normalize(const tensor<T,E,L,O> & a, into_t<D> out) {
     auto n = norm<Axes...>(a);                                               // reduced norm (floating tensor)
     return a.div(_keepdims<_norm_axis(Axes, (long)E::rank())...>(n), out);   // .div's into overload writes out & returns out.dest
 }
+template <long... Axes, class T, class E, class L, storage O, class D,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_kept_host<E, Axes...>::value, int> = 0>
+_TNY_HOST auto & normalize(const tensor<T,E,L,O> & a, into_t<D> out) {
+    auto n = norm<Axes...>(a);
+    return a.div(_keepdims<_norm_axis(Axes, (long)E::rank())...>(n), out);
+}
 // value form: normalize(a, axis<Axes...>{}, into(y)) == normalize<Axes...>(a, into(y))
 template <long... Axes, class T, class E, class L, storage O, class D,
-          cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_kept_api<E, Axes...>::value, int> = 0>
 _TNY_API auto & normalize(const tensor<T,E,L,O> & a, axis<Axes...>, into_t<D> out) { return normalize<Axes...>(a, out); }
+template <long... Axes, class T, class E, class L, storage O, class D,
+          cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_kept_host<E, Axes...>::value, int> = 0>
+_TNY_HOST auto & normalize(const tensor<T,E,L,O> & a, axis<Axes...>, into_t<D> out) { return normalize<Axes...>(a, out); }
 
 // internal: 3D cross product a × b into `out` (all rank-1, length 3). Computes the
 // three components into temporaries FIRST, so `out` may alias `a` or `b` (this is
@@ -2280,13 +2311,28 @@ _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::normalize_() {
 }
 // in-place unit vectors along the named axes: *this /= norm(*this over Axes) (keepdim).
 // Axes distinct, in any order (`_keepdims` sorts them via `unsqueeze`).
-template <class T,class E,class L,storage O> template <long... Axes>
+// Two overloads (#435), keyed on whether the REDUCED norm this divides by is stack-
+// owned: `div_` never allocates, so a dynamic SOURCE with static reduced extents
+// (`normalize_<0>()` on a `shape<-1,3>` tensor) stays on the `_TNY_API` half. The
+// empty pack is deliberately NOT SFINAE'd out here — it still reaches the body's
+// static_assert rather than silently resolving to the full-tensor `normalize_()`.
+template <class T,class E,class L,storage O>
+template <long... Axes, cs::enable_if_t<_md::_nrm_kept_api<E, Axes...>::value, int>>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::normalize_() {
     static_assert(cs::is_floating_point<compute_type_t<T>>::value,
                   "normalize_: requires a floating-point element type (integer division would truncate)");
     static_assert(sizeof...(Axes) > 0, "normalize_<Axes...>: need at least one axis");
     auto n = tny::norm<Axes...>(*this);                                          // reduced norm (floating tensor)
     return div_(_keepdims<_norm_axis(Axes, (long)rank())...>(n));                // broadcast-divide (keepdim)
+}
+template <class T,class E,class L,storage O>
+template <long... Axes, cs::enable_if_t<_md::_nrm_kept_host<E, Axes...>::value, int>>
+_TNY_HOST tensor<T,E,L,O> & tensor<T,E,L,O>::normalize_() {
+    static_assert(cs::is_floating_point<compute_type_t<T>>::value,
+                  "normalize_: requires a floating-point element type (integer division would truncate)");
+    static_assert(sizeof...(Axes) > 0, "normalize_<Axes...>: need at least one axis");
+    auto n = tny::norm<Axes...>(*this);
+    return div_(_keepdims<_norm_axis(Axes, (long)rank())...>(n));
 }
 
 /** @brief True if every element satisfies `|a-b| <= atol + rtol*|b|` (numpy
@@ -2523,16 +2569,34 @@ _TNY_API auto tensor<T,E,L,O>::normalize() const { return tny::normalize(*this);
 template <class T,class E,class L,storage O> template <class D>
 _TNY_API auto & tensor<T,E,L,O>::normalize(into_t<D> out) const { return tny::normalize(*this, out); }
 // axis forms (both spellings x with/without into) — thin forwarders to the free
-// `normalize<Axes...>`. The enable_if key repeats the declaration's WITHOUT the
-// `= 0` default (an out-of-line definition may not restate a default template arg).
-template <class T,class E,class L,storage O> template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0), int>>
+// `normalize<Axes...>`, and, like it, SPLIT host/device (#435): a single _TNY_API
+// forwarder would be a __host__ __device__ method resolving to the __host__ half of
+// the free form. The enable_if key repeats the declaration's WITHOUT the `= 0`
+// default (an out-of-line definition may not restate a default template arg).
+template <class T,class E,class L,storage O>
+template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_out_api<E, Axes...>::value, int>>
 _TNY_API auto tensor<T,E,L,O>::normalize() const { return tny::normalize<Axes...>(*this); }
-template <class T,class E,class L,storage O> template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0), int>>
+template <class T,class E,class L,storage O>
+template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_out_host<E, Axes...>::value, int>>
+_TNY_HOST auto tensor<T,E,L,O>::normalize() const { return tny::normalize<Axes...>(*this); }
+template <class T,class E,class L,storage O>
+template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_out_api<E, Axes...>::value, int>>
 _TNY_API auto tensor<T,E,L,O>::normalize(axis<Axes...>) const { return tny::normalize<Axes...>(*this); }
-template <class T,class E,class L,storage O> template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0), int>>
+template <class T,class E,class L,storage O>
+template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_out_host<E, Axes...>::value, int>>
+_TNY_HOST auto tensor<T,E,L,O>::normalize(axis<Axes...>) const { return tny::normalize<Axes...>(*this); }
+template <class T,class E,class L,storage O>
+template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_kept_api<E, Axes...>::value, int>>
 _TNY_API auto & tensor<T,E,L,O>::normalize(into_t<D> out) const { return tny::normalize<Axes...>(*this, out); }
-template <class T,class E,class L,storage O> template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0), int>>
+template <class T,class E,class L,storage O>
+template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_kept_host<E, Axes...>::value, int>>
+_TNY_HOST auto & tensor<T,E,L,O>::normalize(into_t<D> out) const { return tny::normalize<Axes...>(*this, out); }
+template <class T,class E,class L,storage O>
+template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_kept_api<E, Axes...>::value, int>>
 _TNY_API auto & tensor<T,E,L,O>::normalize(axis<Axes...>, into_t<D> out) const { return tny::normalize<Axes...>(*this, out); }
+template <class T,class E,class L,storage O>
+template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0) && _md::_nrm_kept_host<E, Axes...>::value, int>>
+_TNY_HOST auto & tensor<T,E,L,O>::normalize(axis<Axes...>, into_t<D> out) const { return tny::normalize<Axes...>(*this, out); }
 template <class T,class E,class L,storage O> template <class Tb,class Eb,class Lb,storage Ob>
 _TNY_API auto tensor<T,E,L,O>::cross(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::cross(*this, b); }
 template <class T,class E,class L,storage O> template <class Tb,class Eb,class Lb,storage Ob, class D>

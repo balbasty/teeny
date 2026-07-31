@@ -322,5 +322,84 @@ int main() {
         if (sqdist(fs, p32) != 2630.0)                                 return 78;
     }
 
+    // ---- axis normalize: the _TNY_API / _TNY_HOST overload split (#435) ----
+    // `normalize<Axes...>` divides by `norm<Axes...>(a)`, which is itself an
+    // overload PAIR (static reduced extents -> stack, `_TNY_API`; dynamic -> heap,
+    // `_TNY_HOST`). A single `_TNY_API` normalize would therefore be a
+    // `__host__ __device__` function that resolves to a host-only allocator — so
+    // each axis-scoped form is split too. Which HALF a call lands on is invisible
+    // to a host compiler (both annotations expand to nothing without nvcc; the
+    // device-pass proof lives in tests/nvcc_smoke.cu), so pin the split KEYS
+    // directly and then check that both halves still compute the right answer.
+    //
+    // The two keys differ on purpose. The allocating forms materialise a
+    // SOURCE-shaped result, so they need the source fully static; the `into(dest)`
+    // and in-place forms only materialise the reduced norm, so static REDUCED
+    // extents are enough — `shape<-1,3>` normalized over axis 0 (which reduces AWAY
+    // the dynamic axis, leaving a `shape<3>` stack norm) is the case that tells them
+    // apart, and it must stay device-callable in place.
+    static_assert(_md::_nrm_out_api<shape<2,3>, 1>::value,   "static source -> allocating form is _TNY_API");
+    static_assert(_md::_nrm_kept_api<shape<2,3>, 1>::value,  "static source -> into/in-place form is _TNY_API");
+    static_assert(_md::_nrm_out_host<shape<-1,3>, 0>::value, "dynamic source -> allocating form is _TNY_HOST");
+    static_assert(_md::_nrm_kept_api<shape<-1,3>, 0>::value, "static reduced extents -> into/in-place stays _TNY_API");
+    static_assert(_md::_nrm_out_host<shape<-1,3>, 1>::value, "dynamic source -> allocating form is _TNY_HOST");
+    static_assert(_md::_nrm_kept_host<shape<-1,3>, 1>::value, "dynamic reduced extents -> into/in-place is _TNY_HOST");
+    // exactly one half of each pair is ever viable
+    static_assert(_md::_nrm_out_api<shape<2,3>,1>::value   != _md::_nrm_out_host<shape<2,3>,1>::value,   "out halves are complementary");
+    static_assert(_md::_nrm_kept_api<shape<-1,3>,1>::value != _md::_nrm_kept_host<shape<-1,3>,1>::value, "kept halves are complementary");
+
+    {
+        // (79) the _TNY_HOST half: a fully dynamic source -> heap result, same
+        //      numbers as the static M2 above (rows (3,0,4) and (0,6,8)).
+        auto Md = zeros<double>(shape<-1,-1>{2,3});
+        Md(0,0)=3; Md(0,2)=4; Md(1,1)=6; Md(1,2)=8;
+        auto ud = normalize<1>(Md);
+        static_assert(decltype(ud)::ownership == storage::heap, "dynamic axis normalize -> heap (the _TNY_HOST half)");
+        if (!close(ud(0,0),0.6) || !close(ud(0,2),0.8) || !close(ud(1,1),0.6)) return 79;
+        // ...and the value form / method spellings agree element for element
+        auto ud2 = normalize(Md, axis<1>{});
+        auto ud3 = Md.normalize<1>();
+        auto ud4 = Md.normalize(axis<1>{});
+        if (!close(ud2(1,2),0.8) || !close(ud3(1,2),0.8) || !close(ud4(1,2),0.8)) return 80;
+
+        // (81) into(dest) on the same dynamic source -> the `_nrm_kept_host` half
+        //      (the reduced norm is dynamic too), writing into a caller buffer.
+        auto yd = zeros<double>(shape<-1,-1>{2,3});
+        auto & rd = normalize<1>(Md, into(yd));
+        if (&rd != &yd)                                        return 81;
+        if (!close(yd(0,2),0.8) || !close(yd(1,1),0.6))        return 82;
+        yd.zero_(); normalize(Md, axis<1>{}, into(yd));
+        if (!close(yd(1,2),0.8))                               return 83;
+        yd.zero_(); Md.normalize<1>(into(yd)); if (!close(yd(0,0),0.6)) return 84;
+        yd.zero_(); Md.normalize(axis<1>{}, into(yd)); if (!close(yd(0,0),0.6)) return 85;
+
+        // (86) in place on the dynamic source (the `_nrm_kept_host` half again)
+        auto Mdi = zeros<double>(shape<-1,-1>{2,3});
+        Mdi(0,0)=3; Mdi(0,2)=4; Mdi(1,1)=6; Mdi(1,2)=8;
+        Mdi.normalize_<1>();
+        if (!close(Mdi(0,2),0.8) || !close(Mdi(1,2),0.8))      return 86;
+    }
+
+    {
+        // (87) the mixed case: reducing over axis 0 drops the DYNAMIC axis, so the
+        //      reduced norm is a static `shape<3>` stack tensor. The allocating form
+        //      still allocates a source-shaped heap result (host-only), but the
+        //      in-place and into(dest) forms stay on the device-safe half — and must
+        //      still be numerically right. Columns: (3,4)|5, (0,6)|6, (4,3)|5.
+        double mb[6] = {3,0,4, 4,6,3};
+        auto Mv = wrap(mb, shape<-1,3>{2,3});
+        static_assert(!decltype(Mv)::is_static, "source has a dynamic axis");
+        static_assert(decltype(norm<0>(Mv))::ownership == storage::stack, "the reduced norm is stack-owned");
+        auto um = normalize<0>(Mv);
+        static_assert(decltype(um)::ownership == storage::heap, "source-shaped result is heap-owned");
+        if (!close(um(0,0),0.6) || !close(um(1,0),0.8) || !close(um(1,2),0.6)) return 87;
+        double yb[6] = {};
+        auto Yv = wrap(yb, shape<-1,3>{2,3});
+        normalize<0>(Mv, into(Yv));
+        if (!close(Yv(0,2),0.8) || !close(Yv(1,1),1.0))        return 88;
+        Mv.normalize_<0>();
+        if (!close(Mv(0,0),0.6) || !close(Mv(1,2),0.6))        return 89;
+    }
+
     return 0;
 }

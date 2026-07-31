@@ -511,7 +511,21 @@ the two are only guaranteed bit-identical for `double` operands.
 are kept as size-1 so the norm broadcasts back). Axes must be distinct, but may be
 listed in any order (`normalize<2,0>(a)` == `normalize<0,2>(a)`).
 `normalize` of a zero vector yields NaNs — this is exact math with no epsilon; add
-one at the call site if you need it. `cross` is defined only for rank-1, length-3
+one at the call site if you need it.
+
+The axis-scoped spellings follow the same host/device rule as every other
+allocating op, with one useful wrinkle. `normalize<Axes...>` divides by
+`norm<Axes...>(a)`, and that reduced norm is itself a *tensor* — stack-owned (so
+usable on the device) when the reduced extents are static, heap-owned (host only)
+when they are not. So `normalize<1>(a)` and `a.normalize<1>()`, which additionally
+materialise a result the same shape as `a`, are device-callable when `a` is fully
+static; while `a.normalize_<1>()` and `normalize<1>(a, into(y))`, which allocate
+nothing but that norm, are device-callable whenever the *reduced* extents are
+static. Reducing a `shape<-1,3>` tensor over axis 0 leaves a `shape<3>` stack norm,
+so normalizing its columns in place works inside a kernel even though the source
+has a dynamic axis.
+
+`cross` is defined only for rank-1, length-3
 operands (a `static_assert` catches a wrong static length; a runtime length is
 debug-checked). Its in-place form is the member `a.cross_(b)` (`a = a × b`); to
 write into a *separate* buffer, pass a destination — `cross(a, b, into(slot))`,
