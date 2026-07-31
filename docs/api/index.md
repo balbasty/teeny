@@ -772,12 +772,11 @@ Use `owned<T,E>(extents)`.
 | `auto` | [`peel_zip`](#peel_zip-7)  |  |
 | `void` | [`scan_`](#scan_)  | In-place sequential fold ("scan") along axis `Axis`, batched over every other axis: `carry = init`, then for each element along `Axis` (in increasing order) `carry = f(carry, x)`, `x = carry`&ndash; the new carry doubles as the new element. |
 | `void` | [`scan_`](#scan_-1)  |  |
-| `void` | [`scan_`](#scan_-2)  |  |
+| `void` | [`scan_`](#scan_-2)  | Value form + trailing keyword bag: `scan_(t, init, f, axis<Axis>{})` == `scan_<Axis>(t, init, f)`. |
 | `void` | [`scan_`](#scan_-3)  |  |
 | `auto` | [`scan`](#scan)  | Out-of-place twin of `scan_`: a fresh dense copy of `t`, scanned. |
-| `auto` | [`scan`](#scan-1)  | Value form: `scan(t, axis<Axis>{}, init, f)` == `scan<Axis>(t, init, f)`. |
-| `auto &` | [`scan`](#scan-2)  | `into(dest)` form: write the scanned result into a preallocated `dest` (a shape matching `t`'s EXACTLY, checked &ndash; a `static_assert` when both are static, `_TNY_CHECK` otherwise; unlike `copy_`'s own numpy-style broadcast, `dest` must match rather than merely receive a broadcast copy, since `scan_` then walks `dest`'s own axis numbering) &ndash; one copy, no fresh allocation beyond that; device-safe. |
-| `auto &` | [`scan`](#scan-3)  |  |
+| `auto &` | [`scan`](#scan-1)  | `into(dest)` form: write the scanned result into a preallocated `dest` (a shape matching `t`'s EXACTLY, checked &ndash; a `static_assert` when both are static, `_TNY_CHECK` otherwise; unlike `copy_`'s own numpy-style broadcast, `dest` must match rather than merely receive a broadcast copy, since `scan_` then walks `dest`'s own axis numbering) &ndash; one copy, no fresh allocation beyond that; device-safe. |
+| `decltype(auto)` | [`scan`](#scan-2)  | Value form + trailing keyword bag: `scan(t, init, f, axis<Axis>{})` == `scan<Axis>(t, init, f)`, and `scan(t, init, f, axis<Axis>{}, into(dest))` == `scan<Axis>(t, init, f, into(dest))`. |
 | `auto` | [`operator+`](#operator)  |  |
 | `auto` | [`operator*`](#operator-1)  |  |
 | `auto` | [`operator-`](#operator-2)  |  |
@@ -1446,7 +1445,7 @@ template<long Axis, class T, class E, class L, storage O, class Carry, class F> 
 
 In-place sequential fold ("scan") along axis `Axis`, batched over every other axis: `carry = init`, then for each element along `Axis` (in increasing order) `carry = f(carry, x)`, `x = carry`&ndash; the new carry doubles as the new element.
 
-`f` is a device-safe functor (lambda-free engines, like `map_`/`zip_with_`): `Carry operator()(Carry carry, T x) const`. A reverse sweep composes with the existing negative-stride view, no separate "direction" flag: `scan_<Axis>(t.flip<Axis>(), init, f)` (an rvalue view binds fine &ndash;`scan_` has both lvalue and rvalue overloads, unlike `peel` this doesn't need a named temporary first). `scan_<Axis>(t, init, f)` == `scan_(t, axis<Axis>{}, init, f)`.
+`f` is a device-safe functor (lambda-free engines, like `map_`/`zip_with_`): `Carry operator()(Carry carry, T x) const`. A reverse sweep composes with the existing negative-stride view, no separate "direction" flag: `scan_<Axis>(t.flip<Axis>(), init, f)` (an rvalue view binds fine &ndash;`scan_` has both lvalue and rvalue overloads, unlike `peel` this doesn't need a named temporary first). `scan_<Axis>(t, init, f)` == `scan_(t, init, f, axis<Axis>{})`&ndash; the axis keyword is TRAILING, like `index_select`'s and the reductions' (#348). It used to LEAD (`scan_(t, axis<Axis>{}, init, f)`); that spelling was REMOVED outright, with no deprecated alias.
 
 ---
 
@@ -1461,15 +1460,19 @@ template<long Axis, class T, class E, class L, storage O, class Carry, class F> 
 ### scan_
 
 ```cpp
-template<long Axis, class T, class E, class L, storage O, class Carry, class F> void scan_(tensor< T, E, L, O > & t, axis< Axis >, Carry init, F f)
+template<class T, class E, class L, storage O, class Carry, class F, class Tag0, class... Tags> void scan_(tensor< T, E, L, O > & t, Carry init, F f, Tag0, Tags...)
 ```
+
+Value form + trailing keyword bag: `scan_(t, init, f, axis<Axis>{})` == `scan_<Axis>(t, init, f)`.
+
+The keyword is TRAILING, matching `index_select(idx, axis<A>{})` and the reduction family (#348) &ndash; and it rides the generic `_kw` bag (`[kwargs.h](#kwargsh)`), so `axis<A>{}` is validated by name and a future keyword drops in without touching this signature. `scan_` recognises exactly one keyword (`axis`); its out-of-place twin `scan` below adds `into(dest)`, and those two compose in either order. Both an lvalue and an rvalue overload, so `scan_(t.flip<A>(), init, f, axis<A>{})` needs no named temporary.
 
 ---
 
 ### scan_
 
 ```cpp
-template<long Axis, class T, class E, class L, storage O, class Carry, class F> void scan_(tensor< T, E, L, O > && t, axis< Axis >, Carry init, F f)
+template<class T, class E, class L, storage O, class Carry, class F, class Tag0, class... Tags> void scan_(tensor< T, E, L, O > && t, Carry init, F f, Tag0 tag0, Tags... tags)
 ```
 
 ---
@@ -1489,18 +1492,6 @@ Static shape -> stack (host+device); dynamic -> heap (host only, like `clone()`,
 ### scan
 
 ```cpp
-template<long Axis, class T, class E, class L, storage O, class Carry, class F, enable_if_t< tensor< T, E, L, O >::is_static, int > = 0> auto scan(const tensor< T, E, L, O > & t, axis< Axis >, Carry init, F f)
-```
-
-Value form: `scan(t, axis<Axis>{}, init, f)` == `scan<Axis>(t, init, f)`.
-
-SPLIT IN TWO on the same `is_static` key as the `<Axis>` pair it forwards to (#375): a static shape yields a stack result (host+device) so the forwarder is `_TNY_API`; a dynamic shape yields a heap result (host only, via `clone()`) so it is `_TNY_HOST` — else nvcc's device pass would see a `_TNY_API` forwarder call a `__host__` allocator.
-
----
-
-### scan
-
-```cpp
 template<long Axis, class T, class E, class L, storage O, class Carry, class F, class D> auto & scan(const tensor< T, E, L, O > & t, Carry init, F f, into_t< D > out)
 ```
 
@@ -1513,8 +1504,14 @@ template<long Axis, class T, class E, class L, storage O, class Carry, class F, 
 ### scan
 
 ```cpp
-template<long Axis, class T, class E, class L, storage O, class Carry, class F, class D> auto & scan(const tensor< T, E, L, O > & t, axis< Axis >, Carry init, F f, into_t< D > out)
+template<class T, class E, class L, storage O, class Carry, class F, class Tag0, class... Tags, enable_if_t< tensor< T, E, L, O >::is_static||_kw::has< _is_into_tag, Tag0, Tags... >(), int > = 0> decltype(auto) scan(const tensor< T, E, L, O > & t, Carry init, F f, Tag0 tag0, Tags... tags)
 ```
+
+Value form + trailing keyword bag: `scan(t, init, f, axis<Axis>{})` == `scan<Axis>(t, init, f)`, and `scan(t, init, f, axis<Axis>{}, into(dest))` == `scan<Axis>(t, init, f, into(dest))`.
+
+Both keywords ride the generic `_kw` bag (`[kwargs.h](#kwargsh)`), so they compose in ANY subset and ANY order — `scan(t, init, f, into(dest), axis<0>{})` is the same call — exactly like the reduction family's `dtype`/`axis`/`keepdims`/`into` bag (#348).
+
+SPLIT IN TWO on the allocation key, like the `<Axis>` overloads it forwards to (#375): a call that allocates its result (dynamic shape, no `into`) yields a heap tensor via `clone()` and is `_TNY_HOST`; a static shape (stack result) or ANY `into(dest)` call (no allocation at all) stays `_TNY_API` — else nvcc's device pass would see a `_TNY_API` forwarder call a `__host__` allocator.
 
 ---
 
@@ -9753,7 +9750,7 @@ Defined in include/teeny/math.h:1537
 template<class Tb, class Eb, class Lb, storage Ob> tensor< T, E, L, O > & cross_(const tensor< Tb, Eb, Lb, Ob > & b)
 ```
 
-Defined in include/teeny/math.h:2305
+Defined in include/teeny/math.h:2333
 
 ---
 
@@ -9763,7 +9760,7 @@ Defined in include/teeny/math.h:2305
 template<long... Axes> tensor< T, E, L, O > & normalize_()
 ```
 
-Defined in include/teeny/math.h:2322
+Defined in include/teeny/math.h:2350
 
 ---
 
@@ -9775,7 +9772,7 @@ Defined in include/teeny/math.h:2322
 template<class B> u_abs u_log u_cos u_tanh u_ceil u_trunc auto minimum(const B & b) const
 ```
 
-Defined in include/teeny/math.h:2548
+Defined in include/teeny/math.h:2576
 
 ### Public Static Attributes
 

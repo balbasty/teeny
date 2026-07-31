@@ -374,15 +374,16 @@ scan_<0>(t.flip<0>(), 0.0, sum_op{});   // a temporary flip() view binds fine (s
                                         // has both lvalue and rvalue overloads)
 ```
 
-Value form leads with `axis<Axis>{}` (single-axis selector, right after the
-tensor argument, matching the shape of the free-function sketch this issue was
-filed with): `scan_(t, axis<0>{}, 0.0, sum_op{})` == `scan_<0>(t, 0.0, sum_op{})`.
-Using `axis<...>` rather than `Int<k>()` here is correct and settled — `init`
-is itself an arbitrary `Carry` value the selector must stay visually/typewise
-distinct from (see [CLAUDE.md](../CLAUDE.md)'s restated selector-vocabulary
-rule, #348). The LEADING placement itself (as opposed to trailing, like
-`index_select`'s) is a separate, still-open question tracked in #348 pending a
-maintainer decision — not changed here.
+The value form puts `axis<Axis>{}` **last**, after every positional argument:
+`scan_(t, 0.0, sum_op{}, axis<0>{})` == `scan_<0>(t, 0.0, sum_op{})`. That is the
+library-wide keyword rule — keywords trail, and are order-free among themselves —
+and it matches `index_select(idx, axis<A>{})` and the reduction family.
+(Until #348 `scan_`'s tag led instead, right after the tensor; that spelling
+has been removed outright, with no deprecated alias, so a leading tag is now a
+compile error naming the new order.) Using `axis<...>` rather than `Int<k>()` here is
+correct and settled — `init` is itself an arbitrary `Carry` value the selector
+must stay visually and typewise distinct from (see [CLAUDE.md](../CLAUDE.md)'s
+restated selector-vocabulary rule, also #348).
 
 Out-of-place `scan<Axis>` is a fresh dense copy, scanned (static shape -> stack,
 dynamic -> heap, host-only, like `clone()` — which it's built on); `into(dest)`
@@ -394,4 +395,14 @@ otherwise), since `scan_` then walks `dest`'s own axis numbering:
 ```cpp
 auto out = scan<0>(t, 0.0, sum_op{});             // fresh tensor; t itself untouched
 scan<0>(t, 0.0, sum_op{}, into(dest));            // writes into dest, returns dest&
+```
+
+`scan` has two trailing keywords, `axis<Axis>{}` and `into(dest)`, and they ride
+the same generic keyword mechanism the factories and the reductions use — so any
+subset in any order is the same call:
+
+```cpp
+scan(t, 0.0, sum_op{}, axis<0>{});                // == scan<0>(t, 0.0, sum_op{})
+scan(t, 0.0, sum_op{}, axis<0>{}, into(dest));    // == scan<0>(t, 0.0, sum_op{}, into(dest))
+scan(t, 0.0, sum_op{}, into(dest), axis<0>{});    // ...and the keywords may be swapped
 ```
