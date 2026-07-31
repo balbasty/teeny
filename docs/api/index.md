@@ -799,7 +799,7 @@ Use `owned<T,E>(extents)`.
 | `auto &` | [`normalize`](#normalize-1)  | `normalize(a, into(y))` — the unit vector into a caller buffer `y`. |
 | `auto` | [`normalize`](#normalize-2)  | `normalize<Axes...>(a)` — unit vectors along the named axes: each element divided by the L2 norm over those axes (keepdim broadcast). |
 | `auto` | [`normalize`](#normalize-3)  |  |
-| `auto &` | [`normalize`](#normalize-4)  | `normalize<Axes...>(a, into(y))` — the axis-scoped unit vectors into a caller buffer `y` (same shape as `a`, since only the DIVISOR is reduced). |
+| `auto &` | [`normalize`](#normalize-4)  | `normalize<Axes...>(a, into(y))` — the axis-scoped unit vectors into a caller buffer `y`, whose shape must match `a`'s EXACTLY (only the DIVISOR is reduced, so the result keeps the source's full shape). |
 | `auto &` | [`normalize`](#normalize-5)  |  |
 | `auto` | [`cross`](#cross)  | 3D cross product `a × b` -> a NEW stack 3-vector of `promote(Ta,Tb)`. |
 | `auto &` | [`cross`](#cross-1)  | `cross(a, b, into(y))` — the cross product into a caller buffer `y` (rank-1, length 3); `y` may alias `a` or `b`. |
@@ -1738,9 +1738,9 @@ template<long... Axes, class T, class E, class L, storage O, enable_if_t<(sizeof
 template<long... Axes, class T, class E, class L, storage O, class D, enable_if_t<(sizeof...(Axes) > 0) &&_md::_nrm_kept_api< E, Axes... >::value, int > = 0> auto & normalize(const tensor< T, E, L, O > & a, into_t< D > out)
 ```
 
-`normalize<Axes...>(a, into(y))` — the axis-scoped unit vectors into a caller buffer `y` (same shape as `a`, since only the DIVISOR is reduced).
+`normalize<Axes...>(a, into(y))` — the axis-scoped unit vectors into a caller buffer `y`, whose shape must match `a`'s EXACTLY (only the DIVISOR is reduced, so the result keeps the source's full shape).
 
-Same one-line forward to `.div(..., out)` as the full-tensor form; the reduced norm itself is still materialised (it is a tensor, not a scalar) — which is the ONLY allocation here, hence the weaker `_nrm_kept_*` key: `normalize<0>(a, into(y))` on a `shape<-1,3>` source reduces to a `shape<3>` stack norm and stays device-callable. Axes distinct, in any order — same rule as the allocating form (`_keepdims` asserts distinctness and sorts).
+A statically wrong `y` is a COMPILE error when both shapes are static, a `_TNY_CHECK` otherwise — the same guarantee as the whole-tensor `normalize(a, into(y))` (#434). Same one-line forward to `.div(..., out)` as that form; the reduced norm itself is still materialised (it is a tensor, not a scalar) — which is the ONLY allocation here, hence the weaker `_nrm_kept_*` key: `normalize<0>(a, into(y))` on a `shape<-1,3>` source reduces to a `shape<3>` stack norm and stays device-callable. Axes distinct, in any order — same rule as the allocating form (`_keepdims` asserts distinctness and sorts).
 
 ---
 
@@ -9659,7 +9659,7 @@ Defined in include/teeny/tensor.h:2038
 template<bool Atomic, class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & add_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1331
+Defined in include/teeny/math.h:1335
 
 ---
 
@@ -9669,7 +9669,7 @@ Defined in include/teeny/math.h:1331
 template<bool Atomic, class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & sub_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1337
+Defined in include/teeny/math.h:1341
 
 ---
 
@@ -9679,7 +9679,7 @@ Defined in include/teeny/math.h:1337
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & mul_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1343
+Defined in include/teeny/math.h:1347
 
 ---
 
@@ -9689,7 +9689,7 @@ Defined in include/teeny/math.h:1343
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & div_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1345
+Defined in include/teeny/math.h:1349
 
 ---
 
@@ -9699,7 +9699,7 @@ Defined in include/teeny/math.h:1345
 template<bool Atomic> tensor< T, E, L, O > & add_(T s)
 ```
 
-Defined in include/teeny/math.h:1347
+Defined in include/teeny/math.h:1351
 
 ---
 
@@ -9709,7 +9709,7 @@ Defined in include/teeny/math.h:1347
 template<bool Atomic> tensor< T, E, L, O > & sub_(T s)
 ```
 
-Defined in include/teeny/math.h:1353
+Defined in include/teeny/math.h:1357
 
 ---
 
@@ -9719,7 +9719,7 @@ Defined in include/teeny/math.h:1353
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & minimum_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1362
+Defined in include/teeny/math.h:1366
 
 ---
 
@@ -9729,7 +9729,7 @@ Defined in include/teeny/math.h:1362
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & maximum_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1364
+Defined in include/teeny/math.h:1368
 
 ---
 
@@ -9739,7 +9739,7 @@ Defined in include/teeny/math.h:1364
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & add_(const B & b, T alpha)
 ```
 
-Defined in include/teeny/math.h:1369
+Defined in include/teeny/math.h:1373
 
 ---
 
@@ -9749,7 +9749,7 @@ Defined in include/teeny/math.h:1369
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & sub_(const B & b, T alpha)
 ```
 
-Defined in include/teeny/math.h:1371
+Defined in include/teeny/math.h:1375
 
 ---
 
@@ -9759,7 +9759,7 @@ Defined in include/teeny/math.h:1371
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & atomic_add_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1375
+Defined in include/teeny/math.h:1379
 
 ---
 
@@ -9769,7 +9769,7 @@ Defined in include/teeny/math.h:1375
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & atomic_sub_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1377
+Defined in include/teeny/math.h:1381
 
 ---
 
@@ -9779,7 +9779,7 @@ Defined in include/teeny/math.h:1377
 template<class B> tensor< T, E, L, O > & copy_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1381
+Defined in include/teeny/math.h:1385
 
 ---
 
@@ -9789,7 +9789,7 @@ Defined in include/teeny/math.h:1381
 template<class F> tensor< T, E, L, O > & map_(F f)
 ```
 
-Defined in include/teeny/math.h:1531
+Defined in include/teeny/math.h:1535
 
 ---
 
@@ -9799,7 +9799,7 @@ Defined in include/teeny/math.h:1531
 template<class G, class B> tensor< T, E, L, O > & zip_with_(G g, const B & b)
 ```
 
-Defined in include/teeny/math.h:1533
+Defined in include/teeny/math.h:1537
 
 ---
 
@@ -9809,7 +9809,7 @@ Defined in include/teeny/math.h:1533
 template<class Tb, class Eb, class Lb, storage Ob> tensor< T, E, L, O > & cross_(const tensor< Tb, Eb, Lb, Ob > & b)
 ```
 
-Defined in include/teeny/math.h:2332
+Defined in include/teeny/math.h:2369
 
 ---
 
@@ -9819,7 +9819,7 @@ Defined in include/teeny/math.h:2332
 template<long... Axes, enable_if_t< _md::_nrm_kept_api< E, Axes... >::value, int >> tensor< T, E, L, O > & normalize_()
 ```
 
-Defined in include/teeny/math.h:2355
+Defined in include/teeny/math.h:2392
 
 ---
 
@@ -9831,7 +9831,7 @@ Defined in include/teeny/math.h:2355
 template<class B> u_abs u_log u_cos u_tanh u_ceil u_trunc auto minimum(const B & b) const
 ```
 
-Defined in include/teeny/math.h:2590
+Defined in include/teeny/math.h:2627
 
 ### Public Static Attributes
 

@@ -1,4 +1,5 @@
-// The `into(dest)` EXACT-SHAPE guard, now one helper (#363).
+// The `into(dest)` EXACT-SHAPE guard, now one helper (#363) — and, since #434, its
+// fourth caller: the axis-scoped `normalize<Axes...>(a, into(y))`.
 //
 // A SINGLE-SOURCE producer -- a scalar-rhs op (`a.mul(2.0, into(y))`), a unary op
 // (`exp(a, into(y))`), and `scan(t, init, f, into(y))` -- takes its loop BOUNDS
@@ -45,7 +46,11 @@
 //     three consolidated call sites, not just at two of them) -- including the
 //     broadcastable source-extent-1 pair, which is the only one of these that
 //     actually FAILS if `scan`'s call to the helper is removed;
-//   - and that the large-extent mismatch aborts too.
+//   - and that the large-extent mismatch aborts too;
+//   - and (#434) that the axis-scoped `normalize<Axes...>(a, into(y))` holds the
+//     SAME exact-shape rule as the whole-tensor form, on every spelling: correct
+//     shapes unaffected, a dynamic mismatch aborts, a static one no longer
+//     compiles (the repros are spelled out below `main`).
 // The aborts are only expected when _TNY_CHECK is live (host, non-NDEBUG).
 #include <teeny/teeny.h>
 #include <cstdio>
@@ -120,6 +125,32 @@ int main() {
     n32.zero_();
     scan<0>(ds, 0.0, sum_op{}, into(n32));
     for (long i = 0; i < 4; ++i) if (n32(i) != pre[i]) return 9;
+
+    // ---- the FOURTH caller: axis-scoped normalize (#434) --------------------
+    // `normalize<Axes...>(a, into(y))` divides by a keepdim TENSOR, so it forwards
+    // to the BROADCASTING engine -- whose dest gate (`bc_static_ok_dest`, #361)
+    // asks "each operand axis equals the dest's extent OR IS 1", strictly weaker
+    // than what this producer promises (its result IS `a`'s shape, since only the
+    // divisor is reduced). So it states the exact rule itself, at the public
+    // function, by calling the same shared helper. Correct shapes are unaffected:
+    // rows of `nrm` are (3,4) and (6,8) -> each unit row is (0.6,0.8).
+    auto nrm = local<double, shape<2,2>>();
+    nrm(0,0)=3; nrm(0,1)=4; nrm(1,0)=6; nrm(1,1)=8;
+    auto nout = local<double, shape<2,2>>();
+    auto & nref = normalize<1>(nrm, into(nout));                    // static shapes
+    if (nout(0,0) < 0.59 || nout(0,0) > 0.61) return 30;
+    if (nout(1,1) < 0.79 || nout(1,1) > 0.81) return 31;
+    if (&nref != &nout)                       return 32;
+    auto dnrm = zeros<double>(shape<-1,-1>{2,2});                   // dynamic shapes
+    dnrm(0,0)=3; dnrm(0,1)=4; dnrm(1,0)=6; dnrm(1,1)=8;
+    auto dnout = zeros<double>(shape<-1,-1>{2,2});
+    normalize(dnrm, axis<1>{}, into(dnout));                        // the value spelling too
+    if (dnout(0,0) < 0.59 || dnout(0,0) > 0.61) return 33;
+    if (dnout(1,1) < 0.79 || dnout(1,1) > 0.81) return 34;
+    // ...and a dest of a DIFFERENT element type still works (the guard is shape-only)
+    auto fnout = local<float, shape<2,2>>();
+    nrm.normalize(axis<1>{}, into(fnout));
+    if (fnout(0,0) < 0.59f || fnout(0,0) > 0.61f) return 35;
 
 #ifndef NDEBUG
     // ================= a MIS-SHAPED dest aborts, at all three sites ==========
@@ -199,6 +230,62 @@ int main() {
         if (waitpid(p, &st, 0) < 0) return 22 + 2*code;
         if (!(WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT)) return 23 + 2*code;
     }
+
+    // ---- axis-scoped normalize: the same two mis-shaped dests abort (#434) ---
+    // Both pairs used to be accepted SILENTLY -- not "caught only under a debug
+    // build", but not caught at all: the broadcasting engine's runtime check is
+    // broadcast-aware too, so a source extent of 1 legally stretched to the dest's
+    // extent and the normalised row was replicated into a `y` of a shape the
+    // caller's `a` never had. Dynamic shapes here for the same reason as above (a
+    // fully static mismatch is now a compile error -- see the repros below main).
+    //   code 0: source extent 1, dest extent 4 -- the broadcastable pair
+    //   code 1: source 8x8, dest 2x2           -- the plain shorter-dest pair
+    for (int code = 0; code < 2; ++code) {
+        pid_t p = fork();
+        if (p == 0) {
+            if (!freopen("/dev/null", "w", stderr)) _exit(2);
+            if (code == 0) {
+                auto a = zeros<double>(shape<-1,-1>{1,3});      // ONE row...
+                auto y = zeros<double>(shape<-1,-1>{4,3});      // ...into four
+                normalize<1>(a, into(y));
+            } else {
+                auto a = zeros<double>(shape<-1,-1>{8,8});
+                auto y = zeros<double>(shape<-1,-1>{2,2});
+                normalize(a, axis<1>{}, into(y));               // the value spelling routes here too
+            }
+            _exit(0);                                           // must NOT reach here
+        }
+        int st = 0;
+        if (waitpid(p, &st, 0) < 0) return 36 + 2*code;
+        if (!(WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT)) return 37 + 2*code;
+    }
 #endif
     return 0;
 }
+
+// ---- the STATIC half of #434, as compile-fail repros ------------------------
+// A statically-known mis-shaped dest is now a COMPILE error for the axis form,
+// matching the whole-tensor `normalize(a, into(y))` (which reaches the same helper
+// through `scalo_`, since its divisor is a scalar). Enabling any line below fails
+// to compile -- the same commented-out convention as test_into.cpp's #357/#361
+// repros, since a compile error cannot live in a running test. Verified by hand on
+// both clang++ and g++:
+//
+//   auto a43 = zeros<double>(shape<4,3>{});
+//   auto y42 = zeros<double>(shape<4,2>{});
+//   normalize<1>(a43, into(y42));      // extent mismatch -- was ALREADY a compile
+//                                      //   error via bzip_'s #361 dest gate; the
+//                                      //   message is now the into(dest) one.
+//   auto a13 = zeros<double>(shape<1,3>{});
+//   auto y53 = zeros<double>(shape<5,3>{});
+//   normalize<1>(a13, into(y53));      // source extent 1 vs dest 5: was ACCEPTED
+//                                      //   (statically and at run time) and silently
+//                                      //   replicated the row. Now: compile error.
+//   auto y213 = zeros<double>(shape<2,1,3>{});
+//   normalize<1>(a13, into(y213));     // dest rank 3 vs source rank 2: was ACCEPTED
+//                                      //   (bzip_ only needs operand rank <= dest
+//                                      //   rank). Now: compile error on the rank
+//                                      //   static_assert.
+//   a13.normalize(axis<1>{}, into(y53));   // ...and every spelling forwards to the
+//   a13.normalize<1>(into(y53));           //    one guarded overload, so all four
+//   normalize(a13, axis<1>{}, into(y53));  //    fail identically.
