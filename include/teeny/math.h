@@ -2290,15 +2290,62 @@ _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::normalize_() {
 }
 
 /** @brief True if every element satisfies `|a-b| <= atol + rtol*|b|` (numpy
- *         `allclose`; broadcasts, computes in the compute type). */
-template <class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
+ *         `allclose`; broadcasts, computes in the compute type of the promoted
+ *         element type). `allclose<Acc>(a, b)` forces that comparison to be
+ *         carried out in `Acc` instead (the `dot`/`sqdist` accumulator
+ *         convention — the answer is a `bool` either way). */
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob>
 _TNY_API bool allclose(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b,
-                       double rtol = 1e-5, double atol = 1e-8) {
+                       double rtol = _allclose_rtol(), double atol = _allclose_atol()) {
     constexpr cs::size_t Rk = _md::bc_rank(Ea::rank(), Eb::rank());   // broadcast (left-pad)
     static_assert(_md::bc_static_ok_r<Ea, Eb, Rk>(cs::make_index_sequence<Rk>{}), "allclose: incompatible static extents");
-    using R = compute_type_t<promote_t<Ta,Tb>>;
+    using R = _reduce_result_t<Acc, compute_type_t<promote_t<Ta,Tb>>>;   // explicit Acc wins
     return _md::allclose_<R>(a, b, static_cast<R>(rtol), static_cast<R>(atol),
                             cs::make_index_sequence<Rk>{});
+}
+
+/** @brief Generic trailing keyword bag for `allclose` — `dot`/`sqdist`/`dist`'s
+ *  binary (no axis concept) shape, with numpy's OPTIONAL `rtol`/`atol`
+ *  positionals kept ahead of the bag: `allclose(a, b, dtype<double>{})`,
+ *  `allclose(a, b, into(cell))`, `allclose(a, b, rtol, into(cell))`,
+ *  `allclose(a, b, rtol, atol, dtype<double>{}, into(cell))`. `dtype<Acc>{}` picks
+ *  the comparison's compute type (== `allclose<Acc>`); `into(dest)` writes the
+ *  answer into a RANK-0 destination (cast to its element type — a `bool` cell
+ *  keeps it exactly) and returns `dest&`, allocating nothing.
+ *
+ *  Not an invocation of `_TNY_RED_BINARY_TAGGED`: that macro's wrappers forward
+ *  `(a, b)` only, and `allclose` has the two tolerance positionals in between,
+ *  which C++17 cannot default ahead of a trailing pack. Hence one bag overload
+ *  per tolerance arity (0/1/2 given), the shorter two delegating. `Tag0` is
+ *  constrained to a keyword, so a tolerance can never be swallowed as a tag nor
+ *  a tag be read as a tolerance, and the plain form above is never in
+ *  competition. */
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
+          class Tag0, class... Tags, cs::enable_if_t<_kw::is_keyword<Tag0>::value, int> = 0>
+_TNY_API decltype(auto) allclose(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b,
+                                 double rtol, double atol, Tag0 tag0, Tags... tags) {
+    _TNY_KW_CHECK("allclose()", "dtype<Acc>{} or into(dest)", (_is_dtype, _is_into_tag), Tag0, Tags...);
+    using RAcc = dtype_arg_t<Acc, void, Tag0, Tags...>;
+    auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
+    if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) {
+        static_assert(cs::remove_reference_t<decltype(out.dest)>::rank() == 0, "allclose into(dest): dest must be rank-0 (a scalar cell)");
+        out.dest.fill_(static_cast<typename cs::remove_reference_t<decltype(out.dest)>::element_type>(allclose<RAcc>(a, b, rtol, atol)));
+        return out.dest;
+    } else return allclose<RAcc>(a, b, rtol, atol);
+}
+/** @brief `allclose(a, b, tags...)` — the keyword bag with both tolerances defaulted. */
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
+          class Tag0, class... Tags, cs::enable_if_t<_kw::is_keyword<Tag0>::value, int> = 0>
+_TNY_API decltype(auto) allclose(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b,
+                                 Tag0 tag0, Tags... tags) {
+    return allclose<Acc>(a, b, _allclose_rtol(), _allclose_atol(), tag0, tags...);
+}
+/** @brief `allclose(a, b, rtol, tags...)` — the keyword bag with `atol` defaulted. */
+template <class Acc = void, class Ta,class Ea,class La,storage Oa, class Tb,class Eb,class Lb,storage Ob,
+          class Tag0, class... Tags, cs::enable_if_t<_kw::is_keyword<Tag0>::value, int> = 0>
+_TNY_API decltype(auto) allclose(const tensor<Ta,Ea,La,Oa> & a, const tensor<Tb,Eb,Lb,Ob> & b,
+                                 double rtol, Tag0 tag0, Tags... tags) {
+    return allclose<Acc>(a, b, rtol, _allclose_atol(), tag0, tags...);
 }
 
 /* --- out-of-place unary free functions ---------------------------- */
@@ -2423,6 +2470,25 @@ template <class T,class E,class L,storage O> template <class Acc, class Tb,class
 _TNY_API auto tensor<T,E,L,O>::dist(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::dist<Acc>(*this, b); }
 template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags>
 _TNY_API decltype(auto) tensor<T,E,L,O>::dist(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const { return tny::dist<Acc>(*this, b, tag0, tags...); }
+// allclose: dot's binary shape + numpy's optional rtol/atol positionals ahead of the
+// keyword bag (one method per tolerance arity, mirroring the free forms one-for-one).
+// The `_kw::is_keyword` key is restated WITHOUT its `= 0` default (out-of-line
+// definitions may not repeat a default template argument), as for the reductions above.
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob>
+_TNY_API bool tensor<T,E,L,O>::allclose(const tensor<Tb,Eb,Lb,Ob> & b, double rtol, double atol) const
+{ return tny::allclose<Acc>(*this, b, rtol, atol); }
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags,
+          cs::enable_if_t<_kw::is_keyword<Tag0>::value, int>>
+_TNY_API decltype(auto) tensor<T,E,L,O>::allclose(const tensor<Tb,Eb,Lb,Ob> & b, Tag0 tag0, Tags... tags) const
+{ return tny::allclose<Acc>(*this, b, tag0, tags...); }
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags,
+          cs::enable_if_t<_kw::is_keyword<Tag0>::value, int>>
+_TNY_API decltype(auto) tensor<T,E,L,O>::allclose(const tensor<Tb,Eb,Lb,Ob> & b, double rtol, Tag0 tag0, Tags... tags) const
+{ return tny::allclose<Acc>(*this, b, rtol, tag0, tags...); }
+template <class T,class E,class L,storage O> template <class Acc, class Tb,class Eb,class Lb,storage Ob, class Tag0, class... Tags,
+          cs::enable_if_t<_kw::is_keyword<Tag0>::value, int>>
+_TNY_API decltype(auto) tensor<T,E,L,O>::allclose(const tensor<Tb,Eb,Lb,Ob> & b, double rtol, double atol, Tag0 tag0, Tags... tags) const
+{ return tny::allclose<Acc>(*this, b, rtol, atol, tag0, tags...); }
 
 /* ------------------------------------------------------------------ *
  *     Out-of-place producers AS METHODS (parity with a.add(b))       *

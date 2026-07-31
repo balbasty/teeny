@@ -284,6 +284,7 @@ result into `dest`:
 ```cpp
 sum(a, into(cell));           // cell : local<double, shape<>>{} — a rank-0 scalar
 dot(a, b, into(cell));        // full reductions: sum/prod/max/min/mean/sqnorm/norm/dot/sqdist/dist
+allclose(a, b, into(flag));   // ...and allclose, whose answer lands in a rank-0 bool cell
 sum<0>(m, into(colbuf));      // axis reduction -> a lower-rank dest
 mean(m, axis<1>{}, into(rowbuf));  // value form takes into as well
 ```
@@ -537,3 +538,35 @@ if ((a > 0).any())  ...  // some element positive
 
 `sum()` preserves dtype, so `sum(mask)` is a saturating `bool`, not a count — use
 `.all()`/`.any()`, or cast the mask, to reduce a comparison.
+
+### Approximate equality: `allclose`
+
+`allclose(a, b)` answers numpy's question — is `|a-b| <= atol + rtol*|b|` for
+*every* element? — in one pass, with no mask tensor in between. The operands
+broadcast, and the two tolerances are optional positionals with numpy's defaults
+(`rtol=1e-5`, `atol=1e-8`):
+
+```cpp
+allclose(a, b);                 // true if every element is within the default tolerances
+allclose(a, b, 1e-3);           // looser relative tolerance
+allclose(a, b, 0.0, 1e-6);      // absolute tolerance only
+a.allclose(b);  a.allclose(b, 1e-3);   // also a method, like a.dot(b)
+```
+
+It is the binary sibling of `dot`/`sqdist`/`dist`, and takes the same trailing
+keywords — in any subset, in any order, after the tolerances:
+
+```cpp
+allclose(a, b, dtype<float>{});          // carry the comparison out in float
+allclose<float>(a, b);                   // == the same, as an explicit template argument
+allclose(a, b, into(flag));              // flag : local<bool, shape<>>{} — a rank-0 cell
+allclose(a, b, 1e-3, into(flag));        // a tolerance prefix, then the keywords
+a.allclose(b, 1e-3, 1e-6, dtype<double>{}, into(flag));
+```
+
+`dtype<Acc>{}` picks the type the difference and the tolerance test are computed
+in (the operands' compute type by default), which matters when a narrow type
+rounds two values together — `1e10` and `1e10+1` are one `double` apart but the
+same `float`. `into(dest)` writes the answer into a rank-0 destination and
+returns it by reference, allocating nothing: a `bool` cell keeps the answer
+exactly, any other element type takes the `0`/`1` cast.

@@ -507,7 +507,15 @@ sum(a, into(cell)); dot(a,b,into(cell)); dot(a,b,dtype<float>{},into(cell));  //
                       //   reduction writes its scalar into a RANK-0 dest (local<T,shape<>>{}, or
                       //   wrap(&x,shape<>{}) over an address; non-rank-0 dest = static_assert);
                       //   dtype casts, returns dest&.
-allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts)
+allclose(a, b, rtol=1e-5, atol=1e-8);  // |a-b| <= atol+rtol*|b| everywhere (broadcasts) -> bool
+a.allclose(b); a.allclose(b, rtol, atol);  // ALSO a method (parity with a.dot(b))
+allclose(a,b,dtype<float>{}); allclose(a,b,rtol,atol,into(cell));  // dot/sqdist/dist's trailing bag:
+                      //   dtype<Acc>{} == allclose<Acc>(a,b) picks the COMPARISON's compute type;
+                      //   into(dest) writes the answer into a RANK-0 cell (a bool cell keeps it,
+                      //   another dtype takes the 0/1 cast) and returns dest&. NOT a
+                      //   _TNY_RED_BINARY_TAGGED invocation: the tolerances are POSITIONAL ahead of
+                      //   the bag (C++17 can't default them before a trailing pack), so there is one
+                      //   bag overload per tolerance arity — pass any prefix of (rtol, atol).
 // --- vector algebra & geometry (contained exact math; NO solves/inversion/optimisation) ---
 sqnorm(a);  norm(a);                   // Σaᵢ² / √Σaᵢ² over ALL axes. sqnorm==dot(a,a); norm floating
                       //   (int->double, mean rule). sqnorm<Acc>/norm<Acc> = leading TYPE = acc+result.

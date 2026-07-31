@@ -60,5 +60,56 @@ int main() {
     auto one1  = local<double, shape<1>>(); one1(0)=1.0;
     if (!allclose(ones3, one1)) return 17;
 
+    // ---- allclose: method form + dtype/into composition (#350) --------
+    // the method mirrors the free function one-for-one, at every tolerance arity
+    if (!u.allclose(w))                return 18;
+    if ( u.allclose(pt3))              return 19;
+    if (!u.allclose(pt3, /*rtol*/0.1)) return 20;
+    if (!u.allclose(pt3, 0.0, 0.2))    return 21;   // rtol 0, atol loose enough
+    if ( u.allclose(pt3, 0.0, 0.05))   return 22;
+
+    // dtype<Acc>{} / <Acc> pick the COMPARISON's compute type. 1e10 and 1e10+1 are
+    // one double apart but the SAME float, so a tolerance below 1 splits the two.
+    auto big  = local<double, shape<1>>(); big(0)  = 1e10;
+    auto big1 = local<double, shape<1>>(); big1(0) = 1e10 + 1.0;
+    if ( allclose(big, big1, 0.0, 0.5))                    return 23;   // double: |diff| = 1 > 0.5
+    if (!allclose(big, big1, 0.0, 0.5, dtype<float>{}))    return 24;   // float: both round equal
+    if (!allclose<float>(big, big1, 0.0, 0.5))             return 25;   // == the <Acc> template form
+    if (!big.allclose(big1, 0.0, 0.5, dtype<float>{}))     return 26;   // ... as a method
+    if (!big.allclose<float>(big1, 0.0, 0.5))              return 27;
+    static_assert(cs::is_same<decltype(allclose(u, w, dtype<float>{})), bool>::value,
+                  "allclose(dtype) still answers bool");
+
+    // into(dest): the answer lands in a rank-0 cell, no allocation, dest& returned
+    auto cell = local<bool, shape<>>{};
+    auto & ret = allclose(u, w, into(cell));
+    if (!cell.item())                  return 28;
+    if (&ret != &cell)                 return 29;
+    allclose(u, pt3, into(cell));
+    if (cell.item())                   return 30;
+    allclose(u, pt3, /*rtol*/0.1, into(cell));           // one tolerance + a keyword
+    if (!cell.item())                  return 31;
+    allclose(u, pt3, 0.0, 0.05, into(cell));             // both tolerances + a keyword
+    if (cell.item())                   return 32;
+    // a non-bool cell takes the cast (numpy's 0/1)
+    auto icell = local<int, shape<>>{};
+    allclose(u, w, into(icell));
+    if (icell.item() != 1)             return 33;
+    // dtype and into compose, in EITHER order, at any tolerance arity
+    allclose(big, big1, 0.0, 0.5, dtype<float>{}, into(cell));
+    if (!cell.item())                  return 34;
+    allclose(big, big1, 0.0, 0.5, into(cell), dtype<double>{});
+    if (cell.item())                   return 35;
+    allclose(u, w, into(cell), dtype<float>{});
+    if (!cell.item())                  return 36;
+    // ... and the same through the method
+    cell.fill_(false);
+    u.allclose(w, into(cell));
+    if (!cell.item())                  return 37;
+    big.allclose(big1, 0.0, 0.5, dtype<float>{}, into(cell));
+    if (!cell.item())                  return 38;
+    big.allclose(big1, 0.1, into(icell), dtype<double>{});   // 1 <= 0.1*1e10 -> close
+    if (icell.item() != 1)             return 39;
+
     return 0;
 }
