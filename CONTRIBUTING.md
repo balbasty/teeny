@@ -123,6 +123,34 @@ required, blocking signal — like Linux and macOS.
 
 ---
 
+## Docs
+
+The site is [Zensical](https://zensical.org) (`zensical.toml` + `docs/`), built
+and deployed to GitHub Pages by `.github/workflows/docs.yaml`. To preview it
+locally:
+
+```sh
+pip install -r docs/requirements.txt
+bash docs/gen-api.sh    # generates docs/api/index.md — see below
+zensical serve          # or `zensical build` -> site/
+```
+
+**The Autodoc page is generated, not committed.** `docs/gen-api.sh` extracts it
+from the header doc-comments (doxygen -> moxygen) into `docs/api/index.md`, which
+is gitignored; the docs workflow runs the script fresh right before
+`zensical build`, so the deployed page always matches the headers and there is no
+committed copy to drift ([#452](https://github.com/balbasty/teeny/issues/452)).
+Never commit `docs/api/` (or `site/`). Skipping `gen-api.sh` locally is fine if
+you're only working on the hand-written pages — the build still succeeds,
+zensical just warns `page does not exist` and drops the Autodoc nav entry.
+
+Everything else under `docs/` **is** hand-written and does have to be updated in
+the same PR as the code it describes (see `CLAUDE.md`'s add-a-feature checklist,
+item 6). `.github/workflows/docs-lint.yaml` runs `markdownlint-cli2` over
+`docs/**/*.md` and the top-level `*.md`.
+
+---
+
 ## Coding style
 
 **Device-safety by construction.** No virtuals, exceptions, RTTI, or host-only

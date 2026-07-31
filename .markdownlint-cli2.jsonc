@@ -27,7 +27,8 @@
     // header comments, not hand-written prose. Its Doxygen-derived structure
     // (many same-named H3s for function overloads, deep members) doesn't fit
     // hand-written-docs lint rules, and any violation would just reappear
-    // on the next regeneration.
+    // on the next regeneration. It is gitignored and never committed (#452), so
+    // this only bites a local run after `bash docs/gen-api.sh` — keep it.
     "docs/api/**"
   ]
 }

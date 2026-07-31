@@ -1252,7 +1252,11 @@ what it adds is order-freedom, `t.index_select(idx, into(dest), axis<0>{})`.
    `docs/*.md` page that describes the touched API (`cheatsheet.md`, `reference.md`,
    `structure.md`, `indexing.md`, … — grep the docs for the affected names) AND the
    `CLAUDE.md` cheat-sheet. Updating only `CLAUDE.md` is not enough — the docs site
-   is separate and drifts silently.
+   is separate and drifts silently. The **autodoc page itself needs no action**:
+   `docs/api/index.md` is generated from the header doc-comments by
+   `docs/gen-api.sh` and is **gitignored, never committed** — the docs workflow
+   regenerates it fresh right before `zensical build`, so it cannot drift (#452).
+   Don't `git add` it; just fix the doc-comment.
 7. Commit with a focused message.
 
 ## Naming policy
