@@ -27,18 +27,25 @@ __global__ void axpy_kernel(V y, V x, float a) {
 // device-usable at all, its `_TNY_API` annotation notwithstanding.
 template <class V>
 __global__ void strided_kernel(V v) {
-    // NB the rank comes from the EXTENTS (`V::extents_type::rank()`), not from
-    // `v.rank()`. teeny's `tensor::rank()` is a constexpr HOST function: calling it
-    // from a `__host__ __device__` function is merely nvcc warning #20013-D, but
-    // calling it from a `__global__` function -- as this kernel would -- is a hard
+    // #401: `v.rank()` called directly from a `__global__` function. Before #401,
+    // `tensor::rank()` was a plain constexpr HOST function -- calling it from a
+    // `__host__ __device__` function was merely nvcc warning #20013-D, but calling
+    // it from a `__global__` function -- exactly what this line does -- was a hard
     // error ("calling a constexpr __host__ function from a __global__ function is
-    // not allowed"). CCCL annotates `extents::rank()` __host__ __device__, so this
-    // spelling is device-legal. Same value, no `--expt-relaxed-constexpr` needed.
-    long r = (long) threadIdx.x % (long) V::extents_type::rank();
+    // not allowed"), and the call had to be routed through `V::extents_type::rank()`
+    // (CCCL's own, already __host__ __device__) instead. Now that `rank()` carries
+    // `_TNY_API`, this is device-legal directly -- keep it spelled this way so a
+    // regression (a missing `_TNY_API` re-creeping in) fails the device compile.
+    long r = (long) threadIdx.x % (long) v.rank();
     if (v.extent(0) > 0 && v.extent(1) > 0) {
         v(0, 0) += (float) v.stride((int) r);   // runtime-rank stride() + strided access
         auto row = v.slice_along(axis<0>{}, 0);  // gather a NEW strides<...> view on device
         row(0) += 1.f;
+        // #401 sibling: `shape()`'s array-like view (`_geom_view`) has its own
+        // `rank()` (used by its range-for `end()`), same bug, same fix.
+        long n = 0;
+        for (auto e : v.shape()) n += (e > 0 ? 1 : 0);
+        if (n > 0) v(0, 0) += 0.f;
     }
 }
 
