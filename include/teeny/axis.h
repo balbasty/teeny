@@ -79,17 +79,50 @@ _TNY_API auto perm_md(const MD & v, cs::index_sequence<P...>) {
     const Idx rstr[sizeof...(P) ? sizeof...(P) : 1] = { static_cast<Idx>(v.stride(P))... };
     return cs::mdspan<El, PE, SF>(v.data_handle(), fold_mapping<SF>(pe, rstr));
 }
+// Does `E` have a STATIC zero extent (-> provably empty, whatever the dynamic
+// dims are)? And, conversely, are ALL its extents static and non-zero (-> provably
+// non-empty)? Between them they let the empty-tensor guard in `flip_offset` fold
+// away entirely on a static shape. A rank-0 shape is one element: the empty fold
+// gives `false`/`true` respectively, which is exactly right.
+template <class E, cs::size_t... D>
+_TNY_API constexpr bool _any_static_zero(cs::index_sequence<D...>)
+{ return ((_shape_static_extent<E>(D) == 0) || ...); }
+template <class E, cs::size_t... D>
+_TNY_API constexpr bool _all_static_positive(cs::index_sequence<D...>)
+{ return ((_shape_static_extent<E>(D) != cs::dynamic_extent && _shape_static_extent<E>(D) != 0) && ...); }
+
 // The handle shift for a multi-axis flip: each reversed axis moves the origin to
 // its own last element, and the shifts simply add up (they live on independent
-// strides). An EMPTY axis contributes nothing (there is no last element).
+// strides).
+//
+// An EMPTY tensor (ANY axis of extent 0, not just a flipped one) has no last
+// element to point at, so the origin stays put — offset 0. Guarding per axis is
+// not enough: a tensor emptied by ONE axis but flipped on OTHERS would still shift
+// the base pointer past what may be a zero-length allocation, and forming such a
+// pointer is UB in C++ even when nothing dereferences it (#436). With the whole-
+// tensor guard the per-axis `extent > 0` test is redundant — past it every extent
+// is >= 1 — so the accumulation stays a plain sum.
+//
+// The guard costs nothing when the answer is already known: a statically empty
+// shape returns 0 with no code at all, and a statically non-empty one skips the
+// runtime scan (`if constexpr`), so the fully-static hot path is byte-identical to
+// before. Only a shape with dynamic extents pays the (rank-length) scan.
 template <class MD, cs::size_t... AX>
 _TNY_API auto flip_offset(const MD & v, cs::index_sequence<AX...>) {
     using Idx = typename MD::index_type;
-    Idx off = Idx(0); (void)v;
-    ((off += (static_cast<Idx>(v.extent(AX)) > Idx(0)
-                ? (static_cast<Idx>(v.extent(AX)) - Idx(1)) * static_cast<Idx>(v.stride(AX))
-                : Idx(0))), ...);
-    return off;
+    using E   = typename MD::extents_type;
+    constexpr cs::size_t R = _shape_rank<E>();
+    if constexpr (_any_static_zero<E>(cs::make_index_sequence<R>{})) {
+        (void)v; return Idx(0);
+    } else {
+        if constexpr (!_all_static_positive<E>(cs::make_index_sequence<R>{})) {
+            for (cs::size_t r = 0; r < R; ++r)
+                if (static_cast<Idx>(v.extent(r)) == Idx(0)) return Idx(0);
+        }
+        Idx off = Idx(0); (void)v;
+        ((off += (static_cast<Idx>(v.extent(AX)) - Idx(1)) * static_cast<Idx>(v.stride(AX))), ...);
+        return off;
+    }
 }
 // reverse every axis in AX...: negate those axes' strides, shift the handle to the
 // last element along each (so index 0 maps to the old last). Folds (a negated
