@@ -136,5 +136,36 @@ int main() {
     if (!tny_test::dependent_index_select(verts, idx,  sel))  return 27;   // static  -> _TNY_API arm
     if (!tny_test::dependent_index_select(verts, idxd, seld)) return 28;   // dynamic -> _TNY_HOST arm
 
+    // #366 regression guard: every receiver above is `local<double, shape<5,3>>`,
+    // i.e. `ccontiguous` -- so the whole suite never instantiated index_select on
+    // a `strides<...>`-layout receiver (the layout every slice/permute/flip/peel
+    // result carries), which is exactly the combination #366 identified as
+    // untested and where #315's private-inheritance misattribution (a raw
+    // `Ei::rank()`/`Ei::static_extent(0)`/`DstE::static_extent(A)` inside
+    // `tensor`'s body, instead of routing through `_shape_rank`/
+    // `_shape_static_extent`) would fire on MSVC. `verts(slice(1,4), all)` is a
+    // view of rows 1..3 with a folded `strides<...>` layout.
+    auto vsub = verts(slice(1,4), all);
+    static_assert(_is_strides<decltype(vsub)::layout_type>::value,
+                  "#366: slice must produce a strides<...> layout to exercise the guard");
+    auto idxs = local<long, shape<3>>(); idxs(0)=2; idxs(1)=0; idxs(2)=1;
+    auto sels = vsub.index_select<0>(idxs);           // static idx -> _TNY_API/stack arm
+    static_assert(decltype(sels)::ownership == storage::stack, "#366: static idx -> stack result");
+    for (long j=0;j<3;++j) {
+        if (sels(0,j) != vsub(2,j)) return 29;
+        if (sels(1,j) != vsub(0,j)) return 30;
+        if (sels(2,j) != vsub(1,j)) return 31;
+    }
+    auto destsub = local<double, shape<3,3>>();
+    vsub.index_select<0>(idxs, into(destsub));        // the into(dest) form, same strides<...> receiver
+    for (long j=0;j<3;++j) if (destsub(0,j) != vsub(2,j) || destsub(1,j) != vsub(0,j) || destsub(2,j) != vsub(1,j))
+        return 32;
+    auto idxsd = owned<long, shape<-1>>(shape<-1>{2}); idxsd(0)=1; idxsd(1)=0;
+    auto selsd = vsub.index_select<0>(idxsd);         // dynamic idx -> _TNY_HOST/heap arm
+    static_assert(decltype(selsd)::ownership == storage::heap, "#366: dynamic idx -> heap result");
+    for (long j=0;j<3;++j) { if (selsd(0,j) != vsub(1,j)) return 33; if (selsd(1,j) != vsub(0,j)) return 34; }
+    auto selsv = vsub.index_select(idxs, axis<0>{});  // value form on the strides<...> receiver
+    for (long j=0;j<3;++j) if (selsv(0,j) != vsub(2,j)) return 35;
+
     return 0;
 }
