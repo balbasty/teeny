@@ -127,14 +127,14 @@ void smoke() {
     auto isel_src = wrap(hp, shape<-1,3>{5, 3});
     auto isel = isel_src.index_select(isel_idx, axis<0>{});    // -> _TNY_HOST arm
     (void) isel;
-    auto scanned = scan(isel_src, axis<1>{}, 0.f, scan_sum{}); // -> _TNY_HOST arm
+    auto scanned = scan(isel_src, 0.f, scan_sum{}, axis<1>{}); // -> _TNY_HOST arm
     (void) scanned;
     // ...and the static-shaped spellings, which must stay on the _TNY_API arm.
     auto isel_sidx = local<long, shape<2>>{};
     auto isel_ssrc = local<float, shape<5,3>>{};
     auto isel_s = isel_ssrc.index_select(isel_sidx, axis<0>{});    // -> _TNY_API arm
     (void) isel_s;
-    auto scanned_s = scan(isel_ssrc, axis<1>{}, 0.f, scan_sum{});  // -> _TNY_API arm
+    auto scanned_s = scan(isel_ssrc, 0.f, scan_sum{}, axis<1>{});  // -> _TNY_API arm
     (void) scanned_s;
 
     // int32 offset dispatch (#115): the narrowed (shape32) view must stay a POD,

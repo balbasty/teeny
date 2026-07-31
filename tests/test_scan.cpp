@@ -24,7 +24,7 @@ namespace tny_test {
 // genuinely dependent.
 template <class Tn, class F>
 bool dependent_scan(const Tn & t, F f) {
-    auto got = scan(t, axis<0>{}, 0.0, f);   // value form, deduced -- no `.template`
+    auto got = scan(t, 0.0, f, axis<0>{});   // value form, deduced -- no `.template`
     auto exp = scan<0>(t, 0.0, f);           // the <Axis> twin (a free fn: no `.template` either)
     static_assert(cs::is_same<decltype(got), decltype(exp)>::value,
                   "#375: value form and <Axis> form must agree on the result type");
@@ -60,10 +60,11 @@ int main() {
     scan_<-1>(m3, 0.0, sum_op{});
     for (long i=0;i<2;++i) { double c[4]={1,3,6,10}; for (long j=0;j<4;++j) if (m3(i,j) != c[j]) return 4; }
 
-    // value form: scan_(t, axis<Axis>{}, init, f) == scan_<Axis>(t, init, f)
+    // value form: scan_(t, init, f, axis<Axis>{}) == scan_<Axis>(t, init, f)
+    // (#348: the axis keyword is TRAILING, like index_select's / the reductions')
     auto m4 = local<double, shape<3,4>>();
     for (long i=0;i<3;++i) for (long j=0;j<4;++j) m4(i,j) = static_cast<double>(j+1);
-    scan_(m4, axis<1>{}, 0.0, sum_op{});
+    scan_(m4, 0.0, sum_op{}, axis<1>{});
     for (long i=0;i<3;++i) for (long j=0;j<4;++j) if (m4(i,j) != m(i,j)) return 5;
 
     // reverse sweep composes with flip: scan the reversed view DIRECTLY --
@@ -104,7 +105,7 @@ int main() {
     for (long i=0;i<4;++i) { if (so(i) != sref[i]) return 8; if (s(i) != static_cast<double>(i+1)) return 9; }
 
     // out-of-place value form
-    auto so2 = scan(s, axis<0>{}, 0.0, sum_op{});
+    auto so2 = scan(s, 0.0, sum_op{}, axis<0>{});
     for (long i=0;i<4;++i) if (so2(i) != sref[i]) return 10;
 
     // into(dest): no allocation, writes into a preallocated buffer
@@ -119,10 +120,10 @@ int main() {
     auto dyno = scan<0>(dyn, 0.0, sum_op{});
     for (long i=0;i<4;++i) if (dyno(i) != sref[i]) return 13;
 
-    // rvalue + value form together: scan_(rvalue_view, axis<Axis>{}, init, f)
+    // rvalue + value form together: scan_(rvalue_view, init, f, axis<Axis>{})
     auto r3 = local<double, shape<5>>();
     for (long i=0;i<5;++i) r3(i) = static_cast<double>(i+1);
-    scan_(r3.flip<0>(), axis<0>{}, 0.0, sum_op{});
+    scan_(r3.flip<0>(), 0.0, sum_op{}, axis<0>{});
     for (long i=0;i<5;++i) if (r3(i) != rref[i]) return 15;
 
     // into(dest) with a DIFFERENT element type: copy_ casts FIRST, then scan_
@@ -143,7 +144,7 @@ int main() {
     static_assert(cs::is_same<decltype(so2), decltype(scan<0>(s, 0.0, sum_op{}))>::value,
                   "#375: static value form must yield the <Axis> form's exact type");
     // (b) dynamic shape -> _TNY_HOST arm -> heap result (== scan<0>(dyn, ...)).
-    auto dynv = scan(dyn, axis<0>{}, 0.0, sum_op{});
+    auto dynv = scan(dyn, 0.0, sum_op{}, axis<0>{});
     static_assert(decltype(dynv)::ownership == storage::heap, "#375: dynamic value form -> heap (_TNY_HOST arm)");
     static_assert(cs::is_same<decltype(dynv), decltype(scan<0>(dyn, 0.0, sum_op{}))>::value,
                   "#375: dynamic value form must yield the <Axis> form's exact type");
@@ -154,6 +155,21 @@ int main() {
     // receiver -- exercised for real inside a template, once per arm.
     if (!tny_test::dependent_scan(s,   sum_op{})) return 20;   // static  -> _TNY_API arm
     if (!tny_test::dependent_scan(dyn, sum_op{})) return 21;   // dynamic -> _TNY_HOST arm
+
+    // #348: the trailing keywords ride the generic `_kw` bag, so `axis<A>{}` and
+    // `into(dest)` compose in EITHER order and either subset -- same call.
+    auto kdest = local<double, shape<4>>(); kdest.zero_();
+    auto & kref = scan(s, 0.0, sum_op{}, axis<0>{}, into(kdest));
+    for (long i=0;i<4;++i) if (kdest(i) != sref[i]) return 22;
+    if (&kref != &kdest) return 23;
+    auto krev = local<double, shape<4>>(); krev.zero_();
+    scan(s, 0.0, sum_op{}, into(krev), axis<0>{});          // keywords swapped
+    for (long i=0;i<4;++i) if (krev(i) != sref[i]) return 24;
+    // ...and an into(dest) call never allocates, so it stays on the _TNY_API arm
+    // even for a DYNAMIC source (the _TNY_HOST arm is only for the clone()).
+    auto kdyn = make_heap<double>(shape<-1>{4}); kdyn.zero_();
+    scan(dyn, 0.0, sum_op{}, axis<0>{}, into(kdyn));
+    for (long i=0;i<4;++i) if (kdyn(i) != sref[i]) return 25;
 
     return 0;
 }
