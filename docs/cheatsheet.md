@@ -36,7 +36,9 @@ wrap(ptr, shape);  wrap<Layout>(ptr, shape);  // a view (C-order / chosen layout
 wrap(ptr, shape, fcontiguous{});               // value-tag layout (deduced, no .template)
 wrap(ptr, shape, {s0, s1, ...});              // view with RUNTIME strides (dynamic_strides)
 wrap(ptr, shape, strides<S...>{});           // view with COMPILE-TIME strides (fold into type)
-as_tensor(any_mdspan);  wrap(any_mdspan);      // wrap an mdspan/submdspan result (same thing)
+as_tensor(any_mdspan);  wrap(any_mdspan);      // wrap an mdspan/submdspan result — same view, both
+                                               //   public on purpose: wrap = the one factory name,
+                                               //   as_tensor = the mdspan-adapting primitive (interop)
 wrap(ptr, shape, storage_v<storage::gpu>);   // memory-space tag — on EVERY wrap form, mdspan included
 wrap(any_mdspan, storage_v<storage::gpu>);   //   pass the plain backend; it folds to the view kind
                                              //   (gpu -> gpu_view) — you never spell the _view kinds
