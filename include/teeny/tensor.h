@@ -141,6 +141,44 @@ template <class E, long A0, long... Rest> struct _red_dyn<E, axis<A0, Rest...>> 
     static constexpr auto value = _red_dyn_value<E, A0, Rest...>();
 };
 
+/* --- the ONE axis a single-axis op walks, unwrapped from a trailing `axis<A>{}`
+ * keyword found in a generic `_kw` bag. `ok` is false for anything else -- no
+ * axis keyword at all (`_kw::unset`) or a multi-axis list (`axis<0,1>`) -- so a
+ * tagged entry point can turn that into ONE named `static_assert` instead of an
+ * incomplete-type error, and still substitute a dummy axis so the rest of the
+ * body doesn't cascade. Shared by `index_select` (below) and `scan_`/`scan`
+ * (iterate.h), the two single-axis ops on the generic bag. ------------------ */
+template <class AxisTag> struct _one_axis { static constexpr long value = 0; static constexpr bool ok = false; };
+template <long A>        struct _one_axis<axis<A>> { static constexpr long value = A; static constexpr bool ok = true; };
+
+/* --- `index_select`'s trailing-keyword-bag (#451) host/device split ---------- *
+ * The allocating form is stack-owned (host+device) exactly when its result shape
+ * is fully static, and heap-owned (host only) otherwise — the same key the
+ * explicit-`<Axis>` pair SFINAEs on, but computed from whichever `axis<A>{}` TAG
+ * turns up in the bag. An `into(dest)` call allocates NOTHING at all, so it is
+ * `_TNY_API` regardless of shape (hence the `Tags...` scan for `into`). A bag
+ * with no usable axis tag picks the `_TNY_API` arm arbitrarily — the body's own
+ * `static_assert` names the real mistake there, and only one arm may be viable
+ * or the call is ambiguous.
+ *
+ * Named traits, one per HALF (like `_nrm_kept_api`/`_nrm_kept_host`, math.h):
+ * `/permissive-` MSVC cannot tell two parameter lists apart when they differ
+ * only by an inline pack-dependent condition and merges them. */
+template <class E, class Ei, class AxisTag>
+_TNY_API constexpr bool _idxsel_static() {
+    if constexpr (_one_axis<AxisTag>::ok)
+        return index_select_extents<E, _norm_axis(_one_axis<AxisTag>::value, E::rank()),
+                                    _shape_static_extent<Ei>(0)>::rank_dynamic() == 0;
+    else
+        return true;
+}
+template <class E, class Ei, class AxisTag, class... Tags> struct _idxsel_api {
+    static constexpr bool value =   _kw::has<_is_into_tag, Tags...>() || _idxsel_static<E, Ei, AxisTag>();
+};
+template <class E, class Ei, class AxisTag, class... Tags> struct _idxsel_host {
+    static constexpr bool value = !(_kw::has<_is_into_tag, Tags...>() || _idxsel_static<E, Ei, AxisTag>());
+};
+
 /* --- axis-scoped `normalize`'s host/device split (#435) --------------------- *
  * `normalize<Axes...>` divides by `norm<Axes...>(a)`, and that reduced norm is a
  * TENSOR: `norm`'s own static(stack,_TNY_API)/dynamic(heap,_TNY_HOST) split
@@ -1173,23 +1211,49 @@ public:
         index_select<Axis>(idx, into(out));
         return out;
     }
-    /** @brief Value form: `t.index_select(idx, axis<Axis>{})` == `t.index_select<Axis>(idx)`.
-     *         Deduces `Axis` from the tag, so no `.template` disambiguator is needed
-     *         on a type-dependent receiver (the primary reason this form exists —
-     *         the mesh-distance kernels this feature targets call it from templates).
-     *         SPLIT IN TWO on the same key as the `<Axis>` pair it forwards to (#375):
-     *         a static result is stack-owned (host+device) so the forwarder is
-     *         `_TNY_API`; a dynamic result is heap-owned (host only) so it is
-     *         `_TNY_HOST` — else nvcc's device pass would see a `_TNY_API` forwarder
-     *         call a `__host__` allocator. */
-    template <class Ti,class Ei,class Li,storage Oi, long Axis,
-              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), _shape_static_extent<Ei>(0)>::rank_dynamic() == 0, int> = 0>
-    _TNY_API auto index_select(const tensor<Ti,Ei,Li,Oi> & idx, axis<Axis>) const { return index_select<Axis>(idx); }
-    template <class Ti,class Ei,class Li,storage Oi, long Axis,
-              cs::enable_if_t<_md::index_select_extents<Shape, _norm_axis(Axis, rank()), _shape_static_extent<Ei>(0)>::rank_dynamic() != 0, int> = 0>
-    _TNY_HOST auto index_select(const tensor<Ti,Ei,Li,Oi> & idx, axis<Axis>) const { return index_select<Axis>(idx); }
-    template <class Ti,class Ei,class Li,storage Oi, long Axis, class D>
-    _TNY_API auto & index_select(const tensor<Ti,Ei,Li,Oi> & idx, axis<Axis>, into_t<D> out) const { return index_select<Axis>(idx, out); }
+    /** @brief Value form + trailing keyword bag: `t.index_select(idx, axis<Axis>{})`
+     *         == `t.index_select<Axis>(idx)`, and
+     *         `t.index_select(idx, axis<Axis>{}, into(dest))` ==
+     *         `t.index_select<Axis>(idx, into(dest))`. Deduces `Axis` from the tag, so
+     *         no `.template` disambiguator is needed on a type-dependent receiver (the
+     *         primary reason this form exists — the mesh-distance kernels this feature
+     *         targets call it from templates).
+     *
+     *         Both keywords ride the generic `_kw` bag (`kwargs.h`) rather than one
+     *         hand-written overload per arrangement (#451), so they compose in ANY
+     *         subset and ANY order — `t.index_select(idx, into(dest), axis<0>{})` is
+     *         the same call — exactly like `scan`'s pair and the reduction family's
+     *         `dtype`/`axis`/`keepdims`/`into` bag. An unrecognised or duplicated
+     *         keyword is one named `static_assert` (`_TNY_KW_CHECK`), not a wall of
+     *         overload-resolution noise.
+     *
+     *         SPLIT IN TWO on the same key as the `<Axis>` overloads it forwards to
+     *         (#375): a call that allocates its result (dynamic result shape, no
+     *         `into`) is heap-owned and `_TNY_HOST`; a static result (stack-owned) or
+     *         ANY `into(dest)` call (no allocation at all) stays `_TNY_API` — else
+     *         nvcc's device pass would see a `_TNY_API` forwarder call a `__host__`
+     *         allocator. */
+    template <class Ti,class Ei,class Li,storage Oi, class Tag0, class... Tags,
+              class AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>,
+              cs::enable_if_t<_md::_idxsel_api<Shape, Ei, AxisTag, Tag0, Tags...>::value, int> = 0>
+    _TNY_API decltype(auto) index_select(const tensor<Ti,Ei,Li,Oi> & idx, Tag0 tag0, Tags... tags) const {
+        _TNY_KW_CHECK("index_select", "axis<A>{} or into(dest)", (_is_axis_tag, _is_into_tag), Tag0, Tags...);
+        static_assert(_md::_one_axis<AxisTag>::ok,
+                      "index_select: needs exactly ONE axis -- t.index_select(idx, axis<A>{})");
+        constexpr long A = _md::_one_axis<AxisTag>::value;
+        auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
+        if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) return index_select<A>(idx, out);
+        else                                                          return index_select<A>(idx);
+    }
+    template <class Ti,class Ei,class Li,storage Oi, class Tag0, class... Tags,
+              class AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>,
+              cs::enable_if_t<_md::_idxsel_host<Shape, Ei, AxisTag, Tag0, Tags...>::value, int> = 0>
+    _TNY_HOST decltype(auto) index_select(const tensor<Ti,Ei,Li,Oi> & idx, Tag0, Tags...) const {
+        _TNY_KW_CHECK("index_select", "axis<A>{} or into(dest)", (_is_axis_tag, _is_into_tag), Tag0, Tags...);
+        static_assert(_md::_one_axis<AxisTag>::ok,
+                      "index_select: needs exactly ONE axis -- t.index_select(idx, axis<A>{})");
+        return index_select<_md::_one_axis<AxisTag>::value>(idx);
+    }
 
     /** @brief `into(dest)` form: writes the gather straight into `dest` — one pass,
      *         no allocation, `_TNY_API` (device-safe). Returns `dest&`. `dest`'s

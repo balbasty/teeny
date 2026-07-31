@@ -178,7 +178,10 @@ x.index_select<Axis>(idx);       // gather along Axis by a rank-1 integer index 
                     //   into(dest)) (no alloc, device-safe; dest's axis-Axis extent must
                     //   match idx's, checked; dest must not alias x). Value form takes a
                     //   TRAILING axis<...>{} (no .template on a dependent receiver -- unlike
-                    //   slice_along/subsample's LEADING tag): x.index_select(idx, axis<Axis>{})
+                    //   slice_along/subsample's LEADING tag): x.index_select(idx, axis<Axis>{}).
+                    //   axis<...>{} and into(dest) are trailing KEYWORDS (the generic bag, like
+                    //   sum's/scan's), so they compose in any subset/order:
+                    //   x.index_select(idx, into(dest), axis<Axis>{}) is the same call.
 x.uget(i, j, k);  x.uget(0, slice(1,4));  x.uget(1, ellipsis);  x.uat(i...);
                     // uget = unchecked twin of operator() (element/slice/ellipsis,
                     // one entry point); uat = unchecked at. Skip the negative-index

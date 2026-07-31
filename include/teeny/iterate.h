@@ -720,13 +720,10 @@ _TNY_API constexpr cs::array<long, Rank - 1> scan_complement() {
 template <cs::size_t Rank, cs::size_t Axis> struct scan_complement_t
 { static constexpr cs::array<long, Rank - 1> value = scan_complement<Rank, Axis>(); };
 
-/* The ONE axis a scan walks, unwrapped from the trailing `axis<A>{}` keyword.
- * `ok` is false for anything else -- no axis keyword at all (`_kw::unset`) or a
- * multi-axis list (`axis<0,1>`) -- so the tagged entry points below can turn
- * that into ONE named `static_assert` instead of an incomplete-type error, and
- * still substitute a dummy axis so the rest of the body doesn't cascade. */
-template <class AxisTag> struct scan_axis { static constexpr long value = 0; static constexpr bool ok = false; };
-template <long A>        struct scan_axis<axis<A>> { static constexpr long value = A; static constexpr bool ok = true; };
+/* The ONE axis a scan walks, unwrapped from the trailing `axis<A>{}` keyword,
+ * is `_md::_one_axis` (tensor.h) -- the same unwrapper `index_select`'s own
+ * trailing bag uses (#451), so the "no axis keyword / a multi-axis list is a
+ * NAMED static_assert, not an incomplete-type error" rule exists once. */
 
 // Walk every peeled line (one per batch cell), threading `carry` through
 // `f` in increasing order along the kept axis: `carry = f(carry, line(i))`,
@@ -801,9 +798,9 @@ _TNY_API void scan_(tensor<T,E,L,O> & t, Carry init, F f, Tag0, Tags...) {
     _TNY_SCAN_POSITIONAL_CHECK("scan_");
     _TNY_KW_CHECK("scan_", "axis<A>{}", (_is_axis_tag), Tag0, Tags...);
     using AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>;
-    static_assert(_md::scan_axis<AxisTag>::ok,
+    static_assert(_md::_one_axis<AxisTag>::ok,
                   "scan_: needs exactly ONE axis -- scan_(t, init, f, axis<A>{})");
-    scan_<_md::scan_axis<AxisTag>::value>(t, init, f);
+    scan_<_md::_one_axis<AxisTag>::value>(t, init, f);
 }
 template <class T, class E, class L, storage O, class Carry, class F, class Tag0, class... Tags>
 _TNY_API void scan_(tensor<T,E,L,O> && t, Carry init, F f, Tag0 tag0, Tags... tags)
@@ -886,9 +883,9 @@ _TNY_API decltype(auto) scan(const tensor<T,E,L,O> & t, Carry init, F f, Tag0 ta
     _TNY_SCAN_POSITIONAL_CHECK("scan");
     _TNY_KW_CHECK("scan", "axis<A>{} or into(dest)", (_is_axis_tag, _is_into_tag), Tag0, Tags...);
     using AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>;
-    static_assert(_md::scan_axis<AxisTag>::ok,
+    static_assert(_md::_one_axis<AxisTag>::ok,
                   "scan: needs exactly ONE axis -- scan(t, init, f, axis<A>{})");
-    constexpr long A = _md::scan_axis<AxisTag>::value;
+    constexpr long A = _md::_one_axis<AxisTag>::value;
     auto out = _kw::get<_is_into_tag>(_kw::unset{}, tag0, tags...);
     if constexpr (!cs::is_same<decltype(out), _kw::unset>::value) return scan<A>(t, init, f, out);
     else                                                          return scan<A>(t, init, f);
@@ -899,10 +896,10 @@ _TNY_HOST decltype(auto) scan(const tensor<T,E,L,O> & t, Carry init, F f, Tag0 t
     _TNY_SCAN_POSITIONAL_CHECK("scan");
     _TNY_KW_CHECK("scan", "axis<A>{} or into(dest)", (_is_axis_tag, _is_into_tag), Tag0, Tags...);
     using AxisTag = _kw::find_t<_is_axis_tag, _kw::unset, Tag0, Tags...>;
-    static_assert(_md::scan_axis<AxisTag>::ok,
+    static_assert(_md::_one_axis<AxisTag>::ok,
                   "scan: needs exactly ONE axis -- scan(t, init, f, axis<A>{})");
     (void) tag0;
-    return scan<_md::scan_axis<AxisTag>::value>(t, init, f);
+    return scan<_md::_one_axis<AxisTag>::value>(t, init, f);
 }
 #undef _TNY_SCAN_POSITIONAL_CHECK
 

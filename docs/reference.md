@@ -154,7 +154,7 @@ Negative integer indices wrap (count from the back).
 | `t.unfold(Int<Axis>(), size, step=1)` | → view | value form — single-axis `Int<k>()` selector (like `flip`/`squeeze`), no `.template` on a dependent receiver |
 | `t.index_select<Axis>(idx)` | → new tensor (static idx shape → stack, else heap) | gather along `Axis` by a rank-1 integer index TENSOR (runtime data, unlike `slice_along`); `idx` values wrap negative; static result → stack (host+device, works on a `gpu`/`gpu_view` source, like `clone()`), dynamic result → heap (host only: source must be host-accessible) |
 | `t.index_select<Axis>(idx, into(dest))` | `dest&` | no-allocation, device-safe form; `dest`'s axis-`Axis` extent must equal `idx`'s (checked) and must not alias `t` |
-| `t.index_select(idx, axis<Axis>{})` `t.index_select(idx, axis<Axis>{}, into(dest))` | same as above | value form — no `.template` on a dependent receiver |
+| `t.index_select(idx, axis<Axis>{})` `t.index_select(idx, axis<Axis>{}, into(dest))` | same as above | value form — no `.template` on a dependent receiver. `axis<Axis>{}` and `into(dest)` are **trailing keywords on the generic bag** (like `sum`'s and `scan`'s), so they compose in any subset and any order — `t.index_select(idx, into(dest), axis<Axis>{})` is the same call |
 
 Slice specifiers:
 

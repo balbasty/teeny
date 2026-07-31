@@ -167,6 +167,15 @@ void smoke() {
     auto isel_dest = wrap(hp, shape<-1,3>{5, 3});
     auto & scanned_into = scan(isel_src, 0.f, scan_sum{}, axis<1>{}, into(isel_dest)); // -> _TNY_API arm
     (void) scanned_into;
+    // #451: index_select's own axis/into pair now rides the same generic `_kw` bag,
+    // so its tagged forwarder gained the identical allocation-keyed split -- and the
+    // identical exposure. A dynamic-shaped source through `into(dest)` must stay on
+    // the _TNY_API arm (nothing is allocated), and the keywords compose in EITHER
+    // order, so pin the SWAPPED spelling here: only nvcc's device pass can see a
+    // split that wrongly sent it through the heap-allocating _TNY_HOST forwarder.
+    auto isel_into_dest = wrap(hp, shape<-1,3>{2, 3});
+    auto & isel_into = isel_src.index_select(isel_idx, into(isel_into_dest), axis<0>{}); // -> _TNY_API arm
+    (void) isel_into;
     // ...and the static-shaped spellings, which must stay on the _TNY_API arm.
     auto isel_sidx = local<long, shape<2>>{};
     auto isel_ssrc = local<float, shape<5,3>>{};
