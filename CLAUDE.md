@@ -613,6 +613,12 @@ scan_<0>(t, 0.0, sum_op{});           // carry=init, then carry=f(carry,x); x=ca
                       //   Value form: scan_(t, axis<0>{}, init, f) — single-axis tag right
                       //   after t (matches the issue's own free-function sketch), not trailing
                       //   like peel_zip's (scan_'s only other args, init/f, are fixed-arity).
+                      //   This LEADING placement is a known, still-open deviation from the
+                      //   trailing-bag rule (see "Keyword arguments" below), tracked as an
+                      //   open question in #348 -- NOT changed here. The axis<...> vs Int<k>()
+                      //   VOCABULARY choice is unaffected and settled (see "Static vs runtime
+                      //   values" above): a singleton axis<...> tag is correct here because
+                      //   init is itself an arbitrary Carry value it must stay distinct from.
 auto y = scan<0>(x, 0.0, sum_op{});   // out-of-place: fresh dense copy, scanned (static->stack,
                       //   dynamic->heap host-only, built on clone()); x itself untouched.
 scan<0>(x, 0.0, sum_op{}, into(dest)); // into(dest): no fresh allocation beyond the copy; dest&.
@@ -720,10 +726,26 @@ disambiguator (a deduced call needs no `.template`; the explicit `<...>` form
 does). Three selector vocabularies:
 
 - **`axis<...>`** — the numpy-like axis selector (`axis: int | list[int]`), a
-  value tag sibling to `shape<...>` (in `alias.h`). For the axis-LIST ops:
-  `peel(t, axis<0,1>{})` == `peel<0,1>(t)`, `peel_at(t, i, axis<0,1>{})`,
-  `t.slice_along(axis<0,2>{}, i, slice(1,4))` == `t.slice_along<0,2>(...)`,
-  `t.squeeze(axis<0,2>{})` == `t.squeeze<0,2>()`, likewise `unsqueeze`/`flip`/`permute`.
+  value tag sibling to `shape<...>` (in `alias.h`). **The rule (restated by
+  #348): `axis<...>` marks any named-axis argument — a LIST or a SINGLETON —
+  in a call that also carries another value-form argument**, so the selector
+  stays visually and typewise distinct from a positional integer or an
+  arbitrary value it sits next to. List example: `peel(t, axis<0,1>{})` ==
+  `peel<0,1>(t)`, `peel_at(t, i, axis<0,1>{})`, `t.slice_along(axis<0,2>{}, i,
+  slice(1,4))` == `t.slice_along<0,2>(...)`, `t.squeeze(axis<0,2>{})` ==
+  `t.squeeze<0,2>()`, likewise `unsqueeze`/`flip`/`permute`. SINGLETON example:
+  `t.index_select(idx, axis<Axis>{})` and `scan_(t, axis<0>{}, init, f)` each
+  name exactly one axis, but still reach for `axis<...>`, not `Int<k>()` —
+  `idx`/`init` are themselves arbitrary values (an index tensor, an
+  application-defined `Carry`) that a bare `Int<k>()` (which converts
+  implicitly to a runtime integer) could be mistaken for; `axis<Axis>{}` is a
+  distinct, non-converting type, so misuse is a compile error naming the
+  mistake instead of silently swapped arguments. The reductions follow the
+  same rule for their singleton form: `sum(a, axis<0>{})` == `sum<0>(a)`. (An
+  earlier draft of this section scoped `axis<...>` to list ops only — that was
+  never quite right, since the reductions' own singleton usage predates this
+  wording; `index_select`/`scan_` were consistent with the rule above all
+  along, so no code changed here, only this paragraph.)
   Being a single distinct-typed arg it also disambiguates `slice_along`'s two packs.
   An EMPTY list `axis<>{}` names no axis, so every axis-list op treats it as the
   IDENTITY (numpy's `axis=()`): `squeeze`/`unsqueeze`/`flip` return the same shape as a
@@ -748,10 +770,17 @@ does). Three selector vocabularies:
   with `axis<...>`/`keepdims`/`into(dest)` in any subset/order (the generic
   trailing keyword bag, `tny::_kw` in `kwargs.h` — see `_TNY_RED_TAGGED` in
   math.h): `sum(a, dtype<double>{}, axis<0>{}, keepdims, into(buf))`.
-- **`Int<k>()` / `shape<...>{}` / a layout tag** — the single-selector ops (or a
-  variadic `Int<>`-per-axis pack, for `permute`): `t.squeeze(Int<1>())` (one axis),
-  `t.permute(Int<2>(),Int<0>(),Int<1>())`, `t.reshape(Int<6>(),Int<-1>())`,
-  `t.recast(shape<3,3>{})`, `t.is_contiguous(ccontiguous{})`.
+- **`Int<k>()` / `shape<...>{}` / a layout tag** — for PURE single-selector ops,
+  where the selector is the ONLY value-form argument in the call (nothing else
+  it could be confused with) — or a variadic `Int<>`-per-axis pack, for
+  `permute`: `t.squeeze(Int<1>())` (one axis), `t.permute(Int<2>(),Int<0>(),Int<1>())`,
+  `t.reshape(Int<6>(),Int<-1>())`, `t.recast(shape<3,3>{})`,
+  `t.is_contiguous(ccontiguous{})`. `t.unfold(Int<Axis>(), size, step)` fits
+  here too even though `size`/`step` follow it: those are plain integer-like
+  arguments of the very same kind as the selector, not an arbitrary/keyword
+  value it needs to stay distinct from — the distinguishing question is "is
+  there another *value-form* argument this could be mistaken for," not "is
+  this the only argument at all."
 
 The **reductions** `sum`/`mean`/`max`/`min`/`prod` also take the `axis<...>` value
 form — `sum(a, axis<0,2>{})` == `sum<0,2>(a)`, and `sum<double>(a, axis<0>{})`
@@ -790,6 +819,16 @@ generic context, or the `<Acc, Axes...>` reduction split — C++17 has no
 universal template parameter to unify "leading type = accumulator" with
 "leading int = axis"), that split stays; it is the keyword BAG past it that
 is generic.
+
+This trailing-placement rule is orthogonal to the `axis<...>` vs `Int<k>()`
+vocabulary choice described above — one governs WHERE a tag goes, the other
+WHICH tag to use. `scan_`/`scan` are the one shipped exception to the
+placement rule: `scan_(t, axis<0>{}, init, f)` puts its `axis<...>` tag
+LEADING, not trailing, even though `init`/`f` are fixed-arity like
+`index_select`'s `idx`. That placement question is still open, tracked in
+`#348` — it is a breaking argument-order change to a shipped API and needs a
+maintainer decision, unlike the vocabulary question above (already settled by
+this paragraph's restated rule, no code change required).
 
 ## How the hard parts work (so you don't re-derive them)
 
