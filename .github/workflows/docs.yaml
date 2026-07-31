@@ -48,8 +48,10 @@ jobs:
       - name: Install Zensical
         run: pip install -r docs/requirements.txt
 
-      # Regenerate the Autodoc page (docs/api/index.md) from the header comments:
-      # doxygen -> XML -> moxygen -> Markdown. Keeps the committed page in sync.
+      # Generate the Autodoc page (docs/api/index.md) from the header comments:
+      # doxygen -> XML -> moxygen -> Markdown. The page is NOT committed (#452);
+      # it only ever exists as a build product of this job, so it cannot drift
+      # from the headers. This step must run before `zensical build` below.
       - name: Set up Node
         uses: actions/setup-node@v5
         with:

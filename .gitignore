@@ -4,6 +4,16 @@
 # (which are extensionless ELF files, not caught by *.out/*.exe) never leak in.
 build*/
 
+# Generated docs — never committed, so they cannot drift from the source (#452).
+# The Autodoc page is produced from the header doc-comments by `bash
+# docs/gen-api.sh` (doxygen -> moxygen), and .github/workflows/docs.yaml
+# regenerates it fresh right before `zensical build`, so the deployed site is
+# always current. Run gen-api.sh once before a local `zensical build`/`serve`
+# if you want the page in your preview.
+docs/api/
+# Zensical's rendered site (`zensical build` -> site/).
+site/
+
 # Prerequisites
 *.d
 

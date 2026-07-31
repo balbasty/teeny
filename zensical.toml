@@ -1,7 +1,13 @@
 # teeny documentation — Zensical config (squidfunk's successor to Material for
-# MkDocs). Build with `pip install zensical` then `zensical build` (-> site/) or
-# `zensical serve` for a live preview. Zensical reads this file natively; it also
-# understands mkdocs.yml, but this repo uses the native TOML config.
+# MkDocs). Build with `pip install -r docs/requirements.txt` then
+# `zensical build` (-> site/) or `zensical serve` for a live preview. Zensical
+# reads this file natively; it also understands mkdocs.yml, but this repo uses
+# the native TOML config.
+#
+# One nav entry — "Autodoc" (api/index.md) — is GENERATED and not committed
+# (#452). Run `bash docs/gen-api.sh` once first to get it in a local preview;
+# without it the build still succeeds, zensical just warns "page does not
+# exist" and leaves the entry (and the links to it) out.
 
 [project]
 

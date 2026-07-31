@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # Generate the Autodoc page (docs/api/index.md) from the header comments:
 #   doxygen  -> XML (build/doxyxml)   ->   moxygen -> Markdown (docs/api/index.md)
-# Requires `doxygen` and `npx` (Node) on PATH. Run from the repo root; the CI
-# docs job runs this before `zensical build`. Safe to run locally to preview.
+# Requires `doxygen` and `npx` (Node) on PATH. Run from the repo root.
+#
+# The output is GENERATED, NOT COMMITTED (docs/api/ is gitignored, #452): the
+# docs workflow (.github/workflows/docs.yaml) runs this script fresh right
+# before `zensical build`, so the deployed page can never drift from the
+# headers. Locally, run it once before `zensical build`/`serve` if you want the
+# Autodoc page in your preview — without it the site still builds fine, the nav
+# entry and the links to it are just missing.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
