@@ -288,6 +288,8 @@ t(m); t.at(m); t.uget(m); t.uat(m);  // TUPLE-UNPACK: ONE tuple-like arg (cs::ar
                       //   may be anything the variadic call takes (int/Int<>/all/slice/none/one
                       //   ellipsis); it unpacks and re-dispatches, so the result TYPE is identical.
                       //   Single-arg ONLY (never mixed with other positional args); C++23 t[m] too.
+                      //   It must be cuda::std's array/tuple — a std::array/std::tuple, or a pack
+                      //   mixed with other positional args, is a COMPILE ERROR (#448), not an `all`.
                       //   Closes the loop with peel(...).enumerate(), whose m IS a cs::array:
                       //   for (auto [m, cell] : peel(a, axis<0,1,2>{}).enumerate()) b(m) = f(cell);
 t(1, ellipsis, 2);    // ellipsis (numpy ...) = (rank - #other args, excl. none) copies of `all`; max one.
@@ -1108,6 +1110,14 @@ what it adds is order-freedom, `t.index_select(idx, into(dest), axis<0>{})`.
   So slicing a static tensor keeps folded strides, and every op works on ANY
   source layout — including a `strides<...>` tensor. `permute`/`flip`/`unsqueeze`/
   `squeeze` (`axis.h`) likewise build views by hand.
+  The per-axis dispatch (`_sl_axis`) is **CLOSED**: its last branch `static_assert`s
+  the argument really is `cs::full_extent_t` (#448). It used to be a bare `else`
+  meaning "anything unmatched", so an unrecognised type — a `std::array`/`std::tuple`
+  where the index pack wants `cs::array`/`cs::tuple` — silently became a KEPT FULL
+  AXIS instead of erroring. The only types that legitimately reach it are exactly
+  `cs::full_extent_t`: the caller's `all`, `slice_along`'s filler for an unnamed axis
+  (`_sa_raw`), `squeeze()`'s keep-this-axis filler (`_sq_arg`), and the ellipsis
+  expansion (`_ellip_arg`). Keep it closed if you add an argument kind.
 - **layout_static_stride** (`layout.h`): the one thing mdspan lacks — strides
   baked into the type. It is now the OUTPUT layout of every slice/peel (folded),
   and a fully sliceable source. CCCL's `cs::submdspan` doesn't accept it, but

@@ -153,6 +153,8 @@ x(m);  x.at(m);  x.uget(m);  x.uat(m);    // TUPLE-UNPACK: ONE tuple-like arg (c
                     //   Elements may be anything the variadic call takes (ints/Int<>/all/slice/
                     //   none/one ellipsis), and the result type is identical. Single-arg only
                     //   (never mixed with other positional args); C++23 x[m] forwards too.
+                    //   It must be cuda::std's array/tuple: a std::array/std::tuple, or a pack
+                    //   mixed with other positional args, is a COMPILE ERROR, not a silent `all`.
                     //   Closes the loop with peel(...).enumerate(), whose m IS a cs::array:
                     //   for (auto [m, cell] : peel(a, axis<0,1,2>{}).enumerate()) b(m) = f(cell);
 x.slice_along<Axes...>(args...);  // bind named axes (negatives wrap), keep the rest -> a VIEW

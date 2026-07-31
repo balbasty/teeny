@@ -93,6 +93,9 @@ t(all, slice(none, 8, 2));      // every other element up to 8
 t(all, slice(none, none, -1));  // reverse an axis (numpy a[:, ::-1])
 ```
 
+That table is the **complete** vocabulary: an argument that is none of those is a
+compile error naming the mistake, never a silently kept full axis.
+
 `none` is python's `None`: `slice(none, k)` starts at 0, `slice(m, none)` runs to
 the end, and `slice(none, none)` keeps the whole axis (it *is* `all`, and folds
 to a static extent). Negative bounds wrap.
@@ -204,6 +207,15 @@ t(cs::make_tuple(none, ellipsis));     // == t(none, ellipsis)
 This is packing sugar only: the tuple **is** the whole index list, so it is
 always the single argument (never mixed with other positional ones), and too
 few or too many elements is the same compile error as writing them out.
+
+!!! warning "It must be a `cuda::std` tuple, and it must be alone"
+
+    The carrier is CCCL's `cuda::std::array` / `cuda::std::tuple` (`cs::array` /
+    `cs::tuple`) — **not** `std::array` / `std::tuple`, which are unrelated
+    types. Anything in an index position that teeny does not recognise — the
+    wrong tuple, or a pack mixed in with other positional arguments (`t(m, 2)`)
+    — is a **compile error** naming the mistake, rather than a silently kept
+    full axis handing back the whole view instead of the element it looks like.
 
 Where it earns its keep is with a multi-index you already have in hand — most
 of all the one a [peel range's `enumerate()`](structure.md#nd-peel-iterate-a-subset-of-axes) hands you, which is
