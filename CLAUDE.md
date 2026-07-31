@@ -1227,6 +1227,42 @@ this paragraph's restated rule, no code change required).
    is separate and drifts silently.
 7. Commit with a focused message.
 
+## Naming policy
+
+teeny mixes torch-alike and numpy-alike vocabulary on purpose, not by
+accident — but that mix needs a rule so it reads as *deliberate* rather than
+inconsistent (#337, following on from the `take_along` → `slice_along` rename
+in #423, itself resolving F1-h in `docs/api-ux-review.md`):
+
+1. **Op names prefer the closest pytorch name when a direct analog exists.**
+   `clamp` is the precedent: it matches `torch.clamp`, not numpy's `clip`,
+   because pytorch is teeny's nearer neighbor (tensor-shaped, kernel-facing
+   API) even where the two libraries disagree (`minimum`/`maximum`/`allclose`
+   happen to match both, so they don't test the rule either way). When
+   pytorch and numpy agree, or only one of them has the op at all, there is no
+   conflict to resolve, and the shared/only name is simply used.
+2. **Keyword vocabulary stays numpy-style regardless of the op it decorates**
+   — `axis=`, `dtype=`, `keepdims=` (`tny::_kw`'s `axis<...>`/`dtype<T>`/
+   `keepdims` tags) read as numpy's spelling even on an otherwise
+   pytorch-named op (`sum(a, axis<0>{})`, not a `dim=` tag). Keyword naming
+   and op naming are independent choices — don't let one drag the other along.
+3. **An invented name is allowed only when no prior art exists, and it must
+   not collide with an existing numpy/pytorch name that means something
+   different.** `sqnorm`/`sqdist` are the kept examples: neither numpy nor
+   pytorch spells "squared norm"/"squared distance" as a single name, so
+   there is nothing to diverge from or collide with (F1-d, `docs/api-ux-review.md`
+   — resolved by this policy, no rename needed). Contrast the old
+   `take_along`: it looked invented but actually collided with numpy's
+   `take_along_axis`/pytorch's `take_along_dim`, which name a *different*,
+   data-dependent index-tensor gather (that operation is teeny's
+   `index_select`, already modeled on `torch.index_select`) — teeny's op was
+   an affine axis-binding view, so it was renamed to `slice_along` (#423)
+   rather than kept under the collision.
+
+Applying this rule to an existing name is not, by itself, a reason to rename
+it — a rename is its own scoped issue/PR (as `slice_along` was), never a
+drive-by edit bundled with an unrelated change.
+
 ## Documentation style
 
 Docs are for **humans who are not necessarily C++ template-metaprogramming

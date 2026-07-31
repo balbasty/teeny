@@ -364,7 +364,7 @@ one — see [Mixing widths](shapes-strides.md#mixing-widths-in-a-broadcast).
 | `2.0 * a`, `2.0 - a`, `1.0 / a`, `-a` | scalar–tensor / unary minus |
 | `a.pow(b)` | element-wise power |
 | `neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign(a)` | unary free functions — **also methods** (`a.exp()`, …) |
-| `minimum(a,b)` `maximum(a,s)` `clamp(a,lo,hi)` | elementwise min/max/clamp — **also methods** (`a.minimum(b)`, …) |
+| `minimum(a,b)` `maximum(a,s)` `clamp(a,lo,hi)` | elementwise min/max/clamp — **also methods** (`a.minimum(b)`, …). `clamp` follows pytorch's name over numpy's `clip` — see `CLAUDE.md`'s "Naming policy" |
 | `normalize(a)` `cross(a,b)` | unit vector / 3D cross — **also methods** (`a.normalize()`, `a.cross(b)`) |
 | `normalize<Axes...>(a)` / `normalize(a, axis<...>{})` | unit vectors over the named axes — **also methods** (`a.normalize<1>()`, `a.normalize(axis<1>{})`) |
 | `a.add(b, alpha)` `a.sub(b, alpha)` | fused out-of-place axpy: `a ± alpha*b` (b broadcasts); the in-place twin is `add_(b, alpha)` |
@@ -509,7 +509,7 @@ optimisation — those stay out of teeny).
 
 | Call | Returns | Notes |
 |---|---|---|
-| `sqnorm(a)` | `T` (accumulated wide) | Σ aᵢ² over all axes; == `dot(a, a)`. `sqnorm<Acc>` forces accumulator+result |
+| `sqnorm(a)` | `T` (accumulated wide) | Σ aᵢ² over all axes; == `dot(a, a)`. `sqnorm<Acc>` forces accumulator+result. `sqnorm`/`sqdist` are deliberately invented names — no numpy/pytorch precedent to diverge from (`CLAUDE.md`'s "Naming policy") |
 | `sqnorm<Axes...>(a)` / `sqnorm(a, axis<...>{})` | lower-rank tensor | Σ aᵢ² over the named axes (reduction API, like `sum`); `sqnorm<Acc,Axes...>` |
 | `norm(a)` | floating (`T` for float `T`, **`double`** for integer `T`) | √Σ aᵢ² (L2 / Frobenius over all axes); `norm<Acc>` forces accumulator+result |
 | `norm<Axes...>(a)` / `norm(a, axis<...>{})` | lower-rank tensor (floating) | √Σ aᵢ² over the named axes; `norm<Acc,Axes...>` |
