@@ -283,6 +283,13 @@ t(none, all, all); t(all, none); t(ellipsis, none);  // a BARE `none` arg = nump
                       //   (`newaxis` is a named alias of `none` for this spelling):
                       //   inserts a size-1 axis (static extent 1, stride 0) -> rank+1 view,
                       //   == unsqueeze at that position (composes with int/range/ellipsis).
+t(m); t.at(m); t.uget(m); t.uat(m);  // TUPLE-UNPACK: ONE tuple-like arg (cs::array / cs::tuple)
+                      //   carrying the WHOLE index list — numpy's x[(a,b,c)] == x[a,b,c]. Its elements
+                      //   may be anything the variadic call takes (int/Int<>/all/slice/none/one
+                      //   ellipsis); it unpacks and re-dispatches, so the result TYPE is identical.
+                      //   Single-arg ONLY (never mixed with other positional args); C++23 t[m] too.
+                      //   Closes the loop with peel(...).enumerate(), whose m IS a cs::array:
+                      //   for (auto [m, cell] : peel(a, axis<0,1,2>{}).enumerate()) b(m) = f(cell);
 t(1, ellipsis, 2);    // ellipsis (numpy ...) = (rank - #other args, excl. none) copies of `all`; max one.
 t(1, etc, 2);         // `etc` and `ellipsis` are ONE marker under two names (ellipsis_t == etc_t):
                       //   `etc` is the anyshape<etc,...> spelling; both names work in both contexts.
