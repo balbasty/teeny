@@ -371,6 +371,12 @@ scan_<0>(t.flip<0>(), 0.0, sum_op{});   // a temporary flip() view binds fine (s
 Value form leads with `axis<Axis>{}` (single-axis selector, right after the
 tensor argument, matching the shape of the free-function sketch this issue was
 filed with): `scan_(t, axis<0>{}, 0.0, sum_op{})` == `scan_<0>(t, 0.0, sum_op{})`.
+Using `axis<...>` rather than `Int<k>()` here is correct and settled — `init`
+is itself an arbitrary `Carry` value the selector must stay visually/typewise
+distinct from (see [CLAUDE.md](../CLAUDE.md)'s restated selector-vocabulary
+rule, #348). The LEADING placement itself (as opposed to trailing, like
+`index_select`'s) is a separate, still-open question tracked in #348 pending a
+maintainer decision — not changed here.
 
 Out-of-place `scan<Axis>` is a fresh dense copy, scanned (static shape -> stack,
 dynamic -> heap, host-only, like `clone()` — which it's built on); `into(dest)`
