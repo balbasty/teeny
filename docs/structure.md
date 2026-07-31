@@ -378,12 +378,11 @@ The value form puts `axis<Axis>{}` **last**, after every positional argument:
 `scan_(t, 0.0, sum_op{}, axis<0>{})` == `scan_<0>(t, 0.0, sum_op{})`. That is the
 library-wide keyword rule — keywords trail, and are order-free among themselves —
 and it matches `index_select(idx, axis<A>{})` and the reduction family.
-(Until #348 `scan_`'s tag led instead, right after the tensor; that spelling
-has been removed outright, with no deprecated alias, so a leading tag is now a
-compile error naming the new order.) Using `axis<...>` rather than `Int<k>()` here is
-correct and settled — `init` is itself an arbitrary `Carry` value the selector
-must stay visually and typewise distinct from (see [CLAUDE.md](../CLAUDE.md)'s
-restated selector-vocabulary rule, also #348).
+A *leading* tag — `scan_(t, axis<0>{}, 0.0, sum_op{})` — is a compile error naming
+the right order; there is no alias for it. The selector is `axis<...>` rather than
+`Int<k>()` because `init` is itself an arbitrary `Carry` value that the selector has
+to stay visually and typewise distinct from (see [CLAUDE.md](../CLAUDE.md)'s
+selector-vocabulary rule).
 
 Out-of-place `scan<Axis>` is a fresh dense copy, scanned (static shape -> stack,
 dynamic -> heap, host-only, like `clone()` — which it's built on); `into(dest)`
