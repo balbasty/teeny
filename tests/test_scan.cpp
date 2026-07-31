@@ -171,5 +171,24 @@ int main() {
     scan(dyn, 0.0, sum_op{}, axis<0>{}, into(kdyn));
     for (long i=0;i<4;++i) if (kdyn(i) != sref[i]) return 25;
 
+    // #450: the OLD leading-form call (`axis<A>{}` before `init`/`f`, removed by
+    // this PR with no deprecated alias) must fail with `_TNY_SCAN_POSITIONAL_CHECK`'s
+    // NAMED static_assert, not a wall of overload-resolution noise. Left commented
+    // out because a static_assert failure cannot be exercised by the runtime suite
+    // (same convention as test_into.cpp's #357/#361 repros and test_to.cpp's device-
+    // guard repro); verified by hand -- enabling either line is a compile error whose
+    // message is exactly the one below, not a generic "no matching function":
+    //   scan_(s, axis<0>{}, 0.0, sum_op{});
+    //     // error: static assertion failed: scan_: keyword tags are TRAILING --
+    //     // scan_(t, init, f, axis<A>{}). The leading form scan_(t, axis<A>{}, init, f)
+    //     // was REMOVED in #348 (no deprecated alias)
+    //   scan(s, axis<0>{}, 0.0, sum_op{});
+    //     // error: static assertion failed: scan: keyword tags are TRAILING --
+    //     // scan(t, init, f, axis<A>{}). The leading form scan(t, axis<A>{}, init, f)
+    //     // was REMOVED in #348 (no deprecated alias)
+    // If someone later deletes `_TNY_SCAN_POSITIONAL_CHECK`, both lines above start
+    // failing with an unnamed overload-resolution error instead -- this comment is
+    // the only thing pinning that the NAMED diagnostic still fires.
+
     return 0;
 }

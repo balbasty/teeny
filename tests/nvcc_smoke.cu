@@ -129,6 +129,18 @@ void smoke() {
     (void) isel;
     auto scanned = scan(isel_src, 0.f, scan_sum{}, axis<1>{}); // -> _TNY_HOST arm
     (void) scanned;
+    // #450: the SAME dynamic-shaped source through an `into(dest)` call stays on
+    // scan's _TNY_API arm instead -- the refined host/device split this PR adds
+    // keys on ALLOCATION (dynamic shape AND no `into`), not on shape alone, so a
+    // dynamic source with a preallocated dest never clone()s. A wrong split that
+    // still routed a dynamic-source `into(dest)` call through the _TNY_HOST
+    // clone()-based forwarder would make this specific call fail nvcc's device
+    // pass (a __host__ __device__ function calling a __host__-only allocator) --
+    // exactly the failure mode #389/#399 above exist to catch for the plain
+    // axis<> value form.
+    auto isel_dest = wrap(hp, shape<-1,3>{5, 3});
+    auto & scanned_into = scan(isel_src, 0.f, scan_sum{}, axis<1>{}, into(isel_dest)); // -> _TNY_API arm
+    (void) scanned_into;
     // ...and the static-shaped spellings, which must stay on the _TNY_API arm.
     auto isel_sidx = local<long, shape<2>>{};
     auto isel_ssrc = local<float, shape<5,3>>{};
