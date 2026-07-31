@@ -77,7 +77,7 @@ t.stride(Int<1>());  // a compile-time constant for a strides<> layout, a
 ```
 
 A `strides<...>` tensor is **fully sliceable**. Every view op — `operator()`
-slicing, `take_along`, `permute`, `flip`, `squeeze`/`unsqueeze`, `peel` — works on
+slicing, `slice_along`, `permute`, `flip`, `squeeze`/`unsqueeze`, `peel` — works on
 any source layout including `strides<...>`, and folds the output strides the same
 way. Slicing a contiguous static tensor keeps folded compile-time strides. (If you
 know mdspan, the [mdspan vs teeny](mdspan-vs-teeny.md) page explains how `strides<>`
@@ -128,13 +128,24 @@ when the element span provably fits. See [Performance](performance.md).
 ### Mixing widths in a broadcast
 
 When two operands of **different** index widths meet in a broadcast (`a + b`,
-`a < b`, …), the result takes the **wider** of the two — an `int32`-indexed view
-plus an `int64`-indexed one yields an `int64`-indexed result, in either order. This
-is lossless (the broadcast engine already runs its offset math in the result's index
-type) and avoids silently truncating the wide operand's strides to the narrow width.
-Two equal-width operands are unchanged; note that broadening cannot rescue two `int32`
-operands whose broadcast *span* overflows `int32` (an outer-product stretch) — that
-stays the caller's concern, guarded by `index_fits`/`dispatch_index` at the boundary.
+`a < b`, …), the result takes an index type that can represent **every** extent and
+stride value either operand can name. With both operands signed — as every teeny
+shape (`shape`, `shape32`, `rank`) is — that is simply the **wider** of the two: an
+`int32`-indexed view plus an `int64`-indexed one yields an `int64`-indexed result,
+in either order. This is lossless (the broadcast engine already runs its offset math
+in the result's index type) and avoids silently truncating the wide operand's strides
+to the narrow width. Two equal-width operands are unchanged; note that broadening
+cannot rescue two `int32` operands whose broadcast *span* overflows `int32` (an
+outer-product stretch) — that stays the caller's concern, guarded by
+`index_fits`/`dispatch_index` at the boundary.
+
+If the two operands disagree in **signedness** (only reachable by spelling an
+unsigned `shape_as<unsigned, …>` yourself), width alone cannot answer that question,
+so the result steps up to a **signed** type wide enough for both ranges: `int16` +
+`uint32` yields an `int64`-indexed result, and so does `int32` + `uint32`, where
+neither operand's own type covers the other's. Keeping the result signed also keeps
+it a first-class teeny tensor — `flip()` and a negative-step slice both require a
+signed index type.
 
 The two-operand reductions `dot(a, b)` and `sqdist(a, b)`/`dist(a, b)` follow the
 same rule: they produce a scalar rather than a tensor, but their offset math also

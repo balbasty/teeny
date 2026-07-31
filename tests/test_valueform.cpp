@@ -75,16 +75,16 @@ int main() {
     static_assert(cs::is_same<decltype(ps1), decltype(ps2)>::value, "peel single-axis value form");
     if (ps1.size() != ps2.size()) return 11;
 
-    // member take_along<Axes...>(args...) vs take_along(axis<Axes...>{}, args...) — the
+    // member slice_along<Axes...>(args...) vs slice_along(axis<Axes...>{}, args...) — the
     // genuine `.template` gap on a dependent receiver; axis<...> also disambiguates it.
-    auto ta1 = t.take_along<0,2>(1, 2);
-    auto ta2 = t.take_along(axis<0,2>{}, 1, 2);
-    static_assert(cs::is_same<decltype(ta1), decltype(ta2)>::value, "take_along value form == template form");
+    auto ta1 = t.slice_along<0,2>(1, 2);
+    auto ta2 = t.slice_along(axis<0,2>{}, 1, 2);
+    static_assert(cs::is_same<decltype(ta1), decltype(ta2)>::value, "slice_along value form == template form");
     for (long k = 0; k < (long)ta1.extent(0); ++k) if (ta1(k) != ta2(k) || ta1(k) != t(1,k,2)) return 12;
 
     // both forms coexist: the explicit-template form still selects correctly
-    static_assert(cs::is_same<decltype(t.take_along<1>(2)), decltype(t.take_along(axis<1>{}, 2))>::value,
-                  "take_along explicit-template and value forms agree");
+    static_assert(cs::is_same<decltype(t.slice_along<1>(2)), decltype(t.slice_along(axis<1>{}, 2))>::value,
+                  "slice_along explicit-template and value forms agree");
 
     return 0;
 }

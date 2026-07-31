@@ -67,7 +67,7 @@ as `shape_type`/`extents_type`), with per-dimension static/dynamic shape and str
 | in-place / reduce math | `t.add_(x)/mul_(x)/…` (broadcasts), `sum/dot/min/max`. Contiguous out-of-place and in-place scalar/unary ops **auto-vectorize** (see `efficient-kernels.md`) |
 | **peel arbitrary batch** | `peel_front<-Sr>()` on an `anyrank` (keep the trailing `Sr` dims static, peel the runtime batch) → `dextents<_,Sr>` cells; `peel_front_at<-Sr>(i)` for a grid-stride index; `size_front<-Sr>()` = cell count. On a static-rank tensor with a *known* batch count, positive `peel_front<Nbatch>(t)` |
 | recover static inner dims | `cell.recast(shape<-1, C, C>{})` — fold the known trailing dims of a peeled cell (no copy, preserves strides) |
-| peel named axes | `peel(t, axis<0,1>{})`, `take_along(axis<0,2>{}, …)`, `permute(Int<...>()…)`, `flip(Int<d>())` |
+| peel named axes | `peel(t, axis<0,1>{})`, `slice_along(axis<0,2>{}, …)`, `permute(Int<...>()…)`, `flip(Int<d>())` |
 | add/drop size-1 axis | `unsqueeze(Int<Ax>())`, `squeeze(Int<Ax>())` |
 | **runtime→static dispatch** | `dispatch_value<1,2,3>(D, f)` (spatial rank / order / bound); `dispatch_rank(as_anyrank(...), f)` (total rank — prefer `peel_front<-Sr>` per §3) |
 | **narrow device offsets (int32)** | `dispatch_index(v, f)` at the launch site → int32 arm when `v.index_fits<int32_t>()`, else int64. Halves a dynamic view's register footprint + 32-bit address math (a GPU occupancy win). `reindex<int32_t>()` is the raw retype |

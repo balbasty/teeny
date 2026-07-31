@@ -20,12 +20,17 @@ namespace cs = cuda::std;
 
 namespace _detail {
 
-// flip: negate axis AX's static source stride (a dynamic stride stays dynamic —
-// `-dynamic_stride` is not the sentinel).
-template <cs::size_t D, cs::size_t AX, class L, class E>
+// Is output axis D one of the flipped axes AX...? A SET test, so the axis list's
+// order is irrelevant (an empty list matches nothing -> flip is then a no-op).
+template <cs::size_t D, cs::size_t... AX>
+_TNY_API constexpr bool _in_axes() noexcept { return ((D == AX) || ...); }
+
+// flip: negate the static source stride of every axis named in AX... (a dynamic
+// stride stays dynamic — `-dynamic_stride` is not the sentinel).
+template <cs::size_t D, class L, class E, cs::size_t... AX>
 _TNY_API constexpr cs::int64_t _flip_sstride() {
     constexpr cs::int64_t s = _src_sstride<D, L, E>();
-    return (D == AX) ? ((s == dynamic_stride) ? dynamic_stride : -s) : s;
+    return _in_axes<D, AX...>() ? ((s == dynamic_stride) ? dynamic_stride : -s) : s;
 }
 
 // Build a folded `strides<Sf...>::mapping<OE>` from output extents `oe` and the
@@ -74,20 +79,34 @@ _TNY_API auto perm_md(const MD & v, cs::index_sequence<P...>) {
     const Idx rstr[sizeof...(P) ? sizeof...(P) : 1] = { static_cast<Idx>(v.stride(P))... };
     return cs::mdspan<El, PE, SF>(v.data_handle(), fold_mapping<SF>(pe, rstr));
 }
-// reverse axis AX: negate that axis' stride, shift the handle to the last element
-// (so index 0 maps to the old last). Folds (the negated static stride is static).
-template <cs::size_t AX, class MD, cs::size_t... D>
-_TNY_API auto flip_md(const MD & v, cs::index_sequence<D...>) {
+// The handle shift for a multi-axis flip: each reversed axis moves the origin to
+// its own last element, and the shifts simply add up (they live on independent
+// strides). An EMPTY axis contributes nothing (there is no last element).
+template <class MD, cs::size_t... AX>
+_TNY_API auto flip_offset(const MD & v, cs::index_sequence<AX...>) {
+    using Idx = typename MD::index_type;
+    Idx off = Idx(0); (void)v;
+    ((off += (static_cast<Idx>(v.extent(AX)) > Idx(0)
+                ? (static_cast<Idx>(v.extent(AX)) - Idx(1)) * static_cast<Idx>(v.stride(AX))
+                : Idx(0))), ...);
+    return off;
+}
+// reverse every axis in AX...: negate those axes' strides, shift the handle to the
+// last element along each (so index 0 maps to the old last). Folds (a negated
+// static stride is static). One pass — several axes cost one mdspan, not a chain
+// of them — and the axis list is a SET, so listing the axes in any order gives the
+// very same view type and offsets (flips commute; distinctness is the caller's
+// `static_assert`).
+template <class MD, cs::size_t... AX, cs::size_t... D>
+_TNY_API auto flip_md(const MD & v, cs::index_sequence<AX...> ax, cs::index_sequence<D...>) {
     using El  = typename MD::element_type; using Idx = typename MD::index_type;
     using E   = typename MD::extents_type; using L   = typename MD::layout_type;
     static_assert(cs::is_signed<Idx>::value, "flip needs a signed index type (e.g. shape<...>)");
-    using SF  = strides< _flip_sstride<D, AX, L, E>()... >;
+    using SF  = strides< _flip_sstride<D, L, E, AX...>()... >;
     E e = v.extents();
     const Idx rstr[sizeof...(D) ? sizeof...(D) : 1] =
-        { static_cast<Idx>(D == AX ? -static_cast<Idx>(v.stride(D)) : static_cast<Idx>(v.stride(D)))... };
-    const Idx n = static_cast<Idx>(v.extent(AX));
-    const Idx off = n > Idx(0) ? (n - 1) * static_cast<Idx>(v.stride(AX)) : Idx(0);   // empty axis: no shift
-    return cs::mdspan<El, E, SF>(v.data_handle() + off, fold_mapping<SF>(e, rstr));
+        { static_cast<Idx>(_in_axes<D, AX...>() ? -static_cast<Idx>(v.stride(D)) : static_cast<Idx>(v.stride(D)))... };
+    return cs::mdspan<El, E, SF>(v.data_handle() + flip_offset(v, ax), fold_mapping<SF>(e, rstr));
 }
 // insert a size-1 axis at position AX (output rank = N+1). The new axis gets a
 // static stride 1 (its index is always 0, so the value is irrelevant to offsets).

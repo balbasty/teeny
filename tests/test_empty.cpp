@@ -27,9 +27,16 @@ int main()
     h.iota_(0.0, 1.0); if (h(1,2) != 5.0) return 2;
 
     // ---- explicit backend via template arg (overrides the deduction) ---------
-    auto eh = empty<int, storage::heap>(shape<2,2>{});             // heap even though static
+    // NB `tny::` qualified on purpose: the shape argument makes ADL add
+    // `cuda::std::empty(const T (&)[N])` to the candidate set, and EXACTLY TWO
+    // explicit arguments match its arity, so `/permissive-` MSVC (#316) tries to
+    // bind the scoped enum `storage::heap` to its `size_t N` and hard-errors
+    // (C3411) where the standard asks for a discarded candidate. Qualifying the
+    // call drops ADL (as does `empty<int>(shape, storage_c<...>{})`, the keyword
+    // spelling) -- see docs/cuda-compat.md. The overloads themselves are fine.
+    auto eh = tny::empty<int, storage::heap>(shape<2,2>{});        // heap even though static
     static_assert(decltype(eh)::ownership == storage::heap, "empty<T,storage::heap> forces heap");
-    auto es = empty<int, storage::stack>(shape<5>{});
+    auto es = tny::empty<int, storage::stack>(shape<5>{});
     static_assert(decltype(es)::ownership == storage::stack, "empty<T,storage::stack> -> stack");
 
     // ---- explicit backend via value-tag: empty<T>(shape, storage_c<...>{}) -------

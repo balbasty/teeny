@@ -25,6 +25,31 @@ template <> struct is_keyword<tag_b> : cs::true_type {};
 template <> struct is_keyword<tag_c> : cs::true_type {};
 } }
 
+// ---- a payload-carrying keyword (the `dtype<T>` shape) + its unwrap step, to
+//      exercise `_kw::resolve` -- the ONE copy of the precedence rule the real
+//      per-keyword readers (dtype_arg_t / storage_arg / layout_arg_t) alias over.
+template <class T> struct tag_t {};
+template <class> struct is_tag_t : cs::false_type {};
+template <class T> struct is_tag_t<tag_t<T>> : cs::true_type {};
+template <class X, class D> struct unwrap_tag_t            { using type = D; };
+template <class T, class D> struct unwrap_tag_t<tag_t<T>, D> { using type = T; };
+
+// explicit template arg > matching value tag > library default (payload tag)
+static_assert(cs::is_same<tny::_kw::resolve_t<unwrap_tag_t, void, void, is_tag_t, float>,
+                          float>::value,  "resolve: no explicit, no tag -> default");
+static_assert(cs::is_same<tny::_kw::resolve_t<unwrap_tag_t, double, void, is_tag_t, float>,
+                          double>::value, "resolve: explicit wins over default");
+static_assert(cs::is_same<tny::_kw::resolve_t<unwrap_tag_t, void, void, is_tag_t, float, tag_a, tag_t<int>>,
+                          int>::value,    "resolve: tag wins over default, found among other tags");
+static_assert(cs::is_same<tny::_kw::resolve_t<unwrap_tag_t, double, void, is_tag_t, float, tag_a>,
+                          double>::value, "resolve: explicit wins, unrelated tags present");
+// ...and the `keep_tag` unwrap, for a keyword whose tag IS the answer (layout,
+// and storage through its storage_c<O> carrier)
+static_assert(cs::is_same<tny::_kw::resolve_t<tny::_kw::keep_tag, void, void, is_tag_a, tag_b>,
+                          tag_b>::value,  "resolve/keep_tag: no tag -> default");
+static_assert(cs::is_same<tny::_kw::resolve_t<tny::_kw::keep_tag, void, void, is_tag_a, tag_b, tag_c, tag_a>,
+                          tag_a>::value,  "resolve/keep_tag: the tag found IS the answer");
+
 int main()
 {
     using namespace tny::_kw;
@@ -59,6 +84,18 @@ int main()
     // known() alone does not catch a duplicate of an otherwise-recognised tag --
     // that is unique()'s job, and a real call site must run both.
     static_assert(ok::known<tag_a, tag_a>(), "known() alone doesn't reject a duplicate");
+
+    // ---- check(): known() AND unique() in one question, for a caller that
+    //      wants a single boolean (the two are still reported separately by
+    //      the _TNY_KW_CHECK macro, which is what real call sites use) -------
+    static_assert(ok::check<tag_a, tag_b>(),  "check: recognised and unique");
+    static_assert(ok::check<>(),              "check: an empty pack passes");
+    static_assert(!ok::check<tag_a, tag_a>(), "check: a duplicate fails it");
+    static_assert(!ok::check<not_a_tag>(),    "check: an unrecognised tag fails it");
+
+    // ---- the guard macro every call site opens with (it must accept a
+    //      parenthesised predicate list and a pack, and compile in a body) ---
+    _TNY_KW_CHECK("test_kwargs", "tag_a{} or tag_b{}", (is_tag_a, is_tag_b), tag_a, tag_b);
 
     // ---- is_keyword: open, diagnostics-only registry -------------------------
     static_assert(is_keyword<tag_a>::value,      "tag_a is registered as a keyword");
