@@ -399,7 +399,7 @@ a & b; a | b; a ^ b; ~a; a &= b; a |= 1;       // bitwise (INTEGER element types
 // --- assignment / scatter / generic (kernel prologue/epilogue) ---
 a.fill_(0.0); a.zero_(); a.copy_(b);          // b broadcasts into a
 a.iota_(start, step);                         // 0,1,2,... (row-major)
-a.map_(f); a.zip_with_(g, b); auto c = a.map(f);  // user functor (device-safe struct)
+a.map_(f); a.zip_with_(g, b); auto c = a.map(f); a.map(f, into(y));  // user functor (device-safe struct)
 a.at(i, j).atomic_add_(v);                    // scatter-accumulate: a(i,j) += v,
                                               //   ATOMIC on host and device (push/splat write)
 auto z = zeros<T>(shape); ones<T>(sh); full(sh,v); arange<T>(n);  // creation. zeros/ones
@@ -437,7 +437,8 @@ auto c = a.pow(b);                    // element-wise power
 auto e = exp(a); auto e = sqrt(a);    // unary free (neg/abs/exp/log/sin/cos/sqrt/tanh/floor/ceil/round/trunc/sign)
 auto c = minimum(a,b); maximum(a,2.0); clamp(a,lo,hi);   // elementwise binary min/max, clamp
 // Every out-of-place producer is ALSO a method (parity with a.add(b)), each taking into():
-//   a.exp(); a.sqrt(); a.minimum(b); a.clamp(lo,hi); a.normalize(); a.cross(b);  a.exp(into(y)); ...
+//   a.exp(); a.sqrt(); a.minimum(b); a.clamp(lo,hi); a.normalize(); a.normalize(axis<1>{});
+//   a.cross(b); a.map(f);  a.exp(into(y)); ...
 auto c = a.add(b,alpha); a.sub(b,alpha);  // FUSED out-of-place axpy: a +/- alpha*b (twin of add_(b,alpha))
 // --- into(dest): write a producer's result into a preallocated buffer -> dest& ---
 //   one fused pass, NO alloc; `into(y)` LAST arg. A distinct type (never conflated with
@@ -454,7 +455,8 @@ auto c = a.add(b,alpha); a.sub(b,alpha);  // FUSED out-of-place axpy: a +/- alph
 //   scalo_/unaryo_, so a.mul(2.0,into(y))/exp(a,into(y)) were silently wrong).
 a.add(b, into(y)); a.mul(2.0, into(y)); a.add(b, alpha, into(y));  // elementwise / scalar / fused
 exp(a, into(y)); sqrt(a, into(y)); minimum(a,b,into(y)); clamp(a,lo,hi,into(y));
-normalize(a, into(y)); cross(a, b, into(N(i, all)));  // cross into row i of a matrix (the "crossto")
+normalize(a, into(y)); normalize(a, axis<1>{}, into(y)); a.map(f, into(y));
+cross(a, b, into(N(i, all)));                          // cross into row i of a matrix (the "crossto")
 // y may be a TEMPORARY VIEW (#380): every view-producing op (slicing/at/permute/slice_along/
 //   peel_at) returns its view BY VALUE, and into() binds an RVALUE view, so "a slot of a
 //   bigger output" needs no named intermediate -- cross(a,b,into(N(i,all))),
@@ -507,6 +509,8 @@ sqdist(a,b);  dist(a,b);               // Σ(aᵢ-bᵢ)² / √Σ(aᵢ-bᵢ)² -
 a.normalize_();  auto u = normalize(a);// in place a/=norm(a) (floating) / out-of-place unit vector.
                       //   normalize static->stack, dynamic->heap; zero vector -> NaN (no epsilon)
 a.normalize_<1>(); normalize<-1>(a);   // ...over NAMED AXES (keepdim broadcast); axes distinct, ANY order
+a.normalize(axis<1>{}); a.normalize<1>();  // ...as a METHOD too (either spelling), and every
+                      //   spelling takes into(y): normalize(a,axis<1>{},into(y)); a.normalize<1>(into(y))
 auto c = cross(a,b);  a.cross_(b);     // 3D cross product (rank-1, length 3): new / in place (a=a×b).
                       //   Into a separate slot: cross(a,b,into(slot)) -- the slot may be a slice
                       //   of a bigger array, cross(a,b,into(N(i,all))). (no crossto_ spelling.)

@@ -8,6 +8,10 @@ namespace cs = cuda::std;
 
 static bool close(double a, double b) { return std::fabs(a - b) < 1e-9; }
 
+// user functor for `map` / `map(f, into(dest))` (a struct, not a lambda — the
+// engines must instantiate under nvcc without --extended-lambda)
+struct _sq { _TNY_API double operator()(double x) const { return x * x; } };
+
 // The cast a reduction's `into(dest)` must perform, spelled out by hand (#406):
 // a 16-bit float converts only TO `float` and only FROM an arithmetic type, so
 // `half` -> `bfloat16` has to stop there on the way. This is the reference the
@@ -631,6 +635,82 @@ int main() {
     for (long i = 0; i < 2; ++i) if (!(rowb(i) == rowb_twin(i))) return 135;
     norm(hm, axis<1>{}, into(rowb));  rowb_twin.copy_(norm<1>(hm));
     for (long i = 0; i < 2; ++i) if (!(rowb(i) == rowb_twin(i))) return 136;
+
+    // ============ parity gaps closed by #381 ===========================
+    // AXIS normalize: the method twins of the free `normalize<Axes...>(a)` /
+    // `normalize(a, axis<Axes...>{})`, plus `into(dest)` on all four spellings.
+    // Rows of `an` are (3,4) and (6,8) -> each unit row is (0.6,0.8).
+    auto an = local<double, shape<2,2>>();
+    an(0,0)=3; an(0,1)=4; an(1,0)=6; an(1,1)=8;
+
+    auto ar = normalize<1>(an);                                   // the free reference
+    if (!close(ar(0,0),0.6) || !close(ar(0,1),0.8)) return 137;
+    if (!close(ar(1,0),0.6) || !close(ar(1,1),0.8)) return 138;
+
+    auto am1 = an.normalize<1>();                                 // a.normalize<Axes...>()
+    if (!close(am1(0,0),0.6) || !close(am1(1,1),0.8)) return 139;
+    auto am2 = an.normalize(axis<1>{});                           // a.normalize(axis<...>{})
+    if (!close(am2(0,0),0.6) || !close(am2(1,1),0.8)) return 140;
+    static_assert(decltype(am1)::is_static, "axis normalize of a static tensor -> stack");
+
+    auto ny = local<double, shape<2,2>>();
+    auto & nr = normalize<1>(an, into(ny));                       // free, explicit axes
+    if (!close(ny(0,0),0.6) || !close(ny(1,1),0.8)) return 141;
+    if (&nr != &ny)                                 return 142;   // returns the dest by reference
+    ny.zero_();
+    normalize(an, axis<1>{}, into(ny));                           // free, value form
+    if (!close(ny(0,1),0.8) || !close(ny(1,0),0.6)) return 143;
+    ny.zero_();
+    an.normalize<1>(into(ny));                                    // method, explicit axes
+    if (!close(ny(0,0),0.6) || !close(ny(1,1),0.8)) return 144;
+    ny.zero_();
+    an.normalize(axis<1>{}, into(ny));                            // method, value form
+    if (!close(ny(0,0),0.6) || !close(ny(1,1),0.8)) return 145;
+    if (an(0,0)!=3 || an(1,1)!=8)                   return 146;   // source untouched
+
+    // the OTHER axis, to confirm the axis is really honoured (columns (3,6),(4,8))
+    auto ny0 = local<double, shape<2,2>>();
+    an.normalize(axis<0>{}, into(ny0));
+    if (!close(ny0(0,0), 3.0/std::sqrt(45.0)))      return 147;
+    if (!close(ny0(1,1), 8.0/std::sqrt(80.0)))      return 148;
+
+    // ...and the full-tensor forms still resolve (the empty pack is SFINAE'd out)
+    auto vfull = local<double, shape<3>>(); vfull(0)=3; vfull(1)=0; vfull(2)=4;
+    if (!close(vfull.normalize()(2), 0.8))          return 149;
+    auto ufull = local<double, shape<3>>(); vfull.normalize(into(ufull));
+    if (!close(ufull(0), 0.6))                      return 150;
+
+    // dynamic (heap) source: same four spellings, allocating path
+    auto dn = owned<double, shape<-1,-1>>(shape<-1,-1>{2,2});
+    dn(0,0)=3; dn(0,1)=4; dn(1,0)=6; dn(1,1)=8;
+    auto dr = dn.normalize(axis<1>{});
+    if (!close(dr(0,0),0.6) || !close(dr(1,1),0.8)) return 151;
+    auto dy = owned<double, shape<-1,-1>>(shape<-1,-1>{2,2});
+    dn.normalize<1>(into(dy));
+    if (!close(dy(0,0),0.6) || !close(dy(1,1),0.8)) return 152;
+
+    // `into(dest)` may have a DIFFERENT element type (result cast on store)
+    auto nf = local<float, shape<2,2>>();
+    an.normalize(axis<1>{}, into(nf));
+    if (std::fabs(double(nf(0,0)) - 0.6) > 1e-6)    return 153;
+
+    // ---- map(f, into(dest)) : the out-of-place user-functor destination ----
+    auto ms = local<double, shape<3>>(); ms(0)=2; ms(1)=3; ms(2)=4;
+    auto mout = local<double, shape<3>>();
+    auto & mr = ms.map(_sq{}, into(mout));
+    if (!close(mout(0),4.0) || !close(mout(2),16.0)) return 154;
+    if (&mr != &mout)                                return 155;   // returns the dest by reference
+    if (ms(0)!=2)                                    return 156;   // source untouched
+    // identical to the allocating twin, element for element
+    auto mtwin = ms.map(_sq{});
+    for (long i = 0; i < 3; ++i) if (!close(mout(i), mtwin(i))) return 157;
+    // a narrower dest is cast on store, like every other producer's into form
+    auto mi = local<int, shape<3>>();
+    ms.map(_sq{}, into(mi));
+    if (mi(0)!=4 || mi(1)!=9 || mi(2)!=16)           return 158;
+    // aliasing the source is fine for a unary map (one read, one write per element)
+    ms.map(_sq{}, into(ms));
+    if (!close(ms(0),4.0) || !close(ms(2),16.0))     return 159;
 
     return 0;
 }

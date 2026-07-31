@@ -1520,6 +1520,11 @@ template <class T,class E,class L,storage O> template <class G, class B>
 _TNY_API tensor<T,E,L,O> & tensor<T,E,L,O>::zip_with_(G g, const B & b) { _md::bzip(*this, *this, b, g); return *this; }
 template <class T,class E,class L,storage O> template <class F>
 _TNY_API auto tensor<T,E,L,O>::map(F f) const { return _md::uop_out(*this, f); }
+// `into(dest)` twin: one fused pass into a caller buffer, NO allocation — the same
+// engine every other unary producer's `into` form uses (`exp(a, into(y))`), so a
+// narrower/wider `dest` is cast on store and its extents are checked against `*this`.
+template <class T,class E,class L,storage O> template <class F, class D>
+_TNY_API auto & tensor<T,E,L,O>::map(F f, into_t<D> out) const { _md::uop_to(out.dest, *this, f); return out.dest; }
 
 /* ------------------------------------------------------------------ *
  *     Reductions                                                      *
@@ -2166,6 +2171,23 @@ template <long... Axes, class T, class E, class L, storage O,
           cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
 _TNY_API auto normalize(const tensor<T,E,L,O> & a, axis<Axes...>) { return normalize<Axes...>(a); }
 
+/** @brief `normalize<Axes...>(a, into(y))` — the axis-scoped unit vectors into a
+ *         caller buffer `y` (same shape as `a`, since only the DIVISOR is reduced).
+ *         Same one-line forward to `.div(..., out)` as the full-tensor form; the
+ *         reduced norm itself is still materialised (it is a tensor, not a scalar).
+ *         Axes distinct, in any order — same rule as the allocating form (`_keepdims`
+ *         asserts distinctness and sorts). */
+template <long... Axes, class T, class E, class L, storage O, class D,
+          cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+_TNY_API auto & normalize(const tensor<T,E,L,O> & a, into_t<D> out) {
+    auto n = norm<Axes...>(a);                                               // reduced norm (floating tensor)
+    return a.div(_keepdims<_norm_axis(Axes, (long)E::rank())...>(n), out);   // .div's into overload writes out & returns out.dest
+}
+// value form: normalize(a, axis<Axes...>{}, into(y)) == normalize<Axes...>(a, into(y))
+template <long... Axes, class T, class E, class L, storage O, class D,
+          cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+_TNY_API auto & normalize(const tensor<T,E,L,O> & a, axis<Axes...>, into_t<D> out) { return normalize<Axes...>(a, out); }
+
 // internal: 3D cross product a × b into `out` (all rank-1, length 3). Computes the
 // three components into temporaries FIRST, so `out` may alias `a` or `b` (this is
 // what makes both `cross` and the in-place `cross_` — where out IS a — safe). Runs
@@ -2427,6 +2449,17 @@ template <class T,class E,class L,storage O>
 _TNY_API auto tensor<T,E,L,O>::normalize() const { return tny::normalize(*this); }
 template <class T,class E,class L,storage O> template <class D>
 _TNY_API auto & tensor<T,E,L,O>::normalize(into_t<D> out) const { return tny::normalize(*this, out); }
+// axis forms (both spellings x with/without into) — thin forwarders to the free
+// `normalize<Axes...>`. The enable_if key repeats the declaration's WITHOUT the
+// `= 0` default (an out-of-line definition may not restate a default template arg).
+template <class T,class E,class L,storage O> template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0), int>>
+_TNY_API auto tensor<T,E,L,O>::normalize() const { return tny::normalize<Axes...>(*this); }
+template <class T,class E,class L,storage O> template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0), int>>
+_TNY_API auto tensor<T,E,L,O>::normalize(axis<Axes...>) const { return tny::normalize<Axes...>(*this); }
+template <class T,class E,class L,storage O> template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0), int>>
+_TNY_API auto & tensor<T,E,L,O>::normalize(into_t<D> out) const { return tny::normalize<Axes...>(*this, out); }
+template <class T,class E,class L,storage O> template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0), int>>
+_TNY_API auto & tensor<T,E,L,O>::normalize(axis<Axes...>, into_t<D> out) const { return tny::normalize<Axes...>(*this, out); }
 template <class T,class E,class L,storage O> template <class Tb,class Eb,class Lb,storage Ob>
 _TNY_API auto tensor<T,E,L,O>::cross(const tensor<Tb,Eb,Lb,Ob> & b) const { return tny::cross(*this, b); }
 template <class T,class E,class L,storage O> template <class Tb,class Eb,class Lb,storage Ob, class D>

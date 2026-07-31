@@ -289,7 +289,7 @@ a.neg_(); a.abs_(); a.exp_(); a.log_(); a.sin_(); a.cos_(); a.sqrt_(); a.tanh_()
 a.floor_(); a.ceil_(); a.round_(); a.trunc_(); a.sign_(); a.pow_(e); a.clamp_(lo, hi);
 a & b; a | b; a ^ b; ~a; a &= b; a |= s;  // bitwise (INTEGER element types only)
 a.fill_(v); a.zero_(); a.copy_(b); a.iota_(start, step);
-a.map_(f); a.zip_with_(g, b);  auto c = a.map(f);  // user functor (device-safe)
+a.map_(f); a.zip_with_(g, b);  auto c = a.map(f);  a.map(f, into(y));  // user functor (device-safe)
 a.at(i...).atomic_add_(v);                         // scatter-accumulate (atomic, host and device)
 
 // out-of-place -> new tensor (promotes types; static->stack, dyn->heap)
@@ -309,7 +309,8 @@ auto c = a.add(b, alpha);  a.sub(b, alpha);  // fused out-of-place axpy: a +/- a
 //   half/bfloat16 operands too: into(y) rounds through the twin's own promote_t first).
 a.add(b, into(y));  a.mul(b, into(y));  a.add(2.0, into(y));  a.add(b, alpha, into(y));
 exp(a, into(y)); sqrt(a, into(y)); minimum(a, b, into(y)); clamp(a, lo, hi, into(y));
-normalize(a, into(y));  cross(a, b, into(N(i, all)));  // cross into row i of a matrix ("crossto")
+normalize(a, into(y));  normalize(a, axis<1>{}, into(y));  a.map(f, into(y));
+cross(a, b, into(N(i, all)));                          // cross into row i of a matrix ("crossto")
                       //   The dest may be a TEMPORARY VIEW: every view-producing op (slicing,
                       //   at, permute, slice_along, ...) returns by value, and into() takes one
                       //   directly -- no named intermediate for "a slot of a bigger output".
@@ -355,6 +356,9 @@ sqdist(a,b); dist(a,b);// Σ(aᵢ-bᵢ)² / √Σ(aᵢ-bᵢ)² (one fused pass, 
                       //   only (no axis form, like dot); sqdist<Acc>/dist<Acc>, dtype<Acc>{}/into
 a.normalize_();       // in place a /= norm(a) (floating types); zero vector -> NaN
 auto u = normalize(a);// out-of-place unit vector -> new tensor (static->stack, dyn->heap)
+a.normalize_<1>();  normalize<-1>(a);  a.normalize(axis<1>{});   // OVER NAMED AXES (keepdim
+                      //   broadcast) — free or method, either spelling, each taking into(y):
+                      //   normalize(a, axis<1>{}, into(y));  a.normalize<1>(into(y));
 auto c = cross(a, b);  a.cross_(b);          // 3D cross (rank-1 length-3): new / in place (a = a×b)
                                              //   into a slot: cross(a, b, into(N(i, all)))
 ```

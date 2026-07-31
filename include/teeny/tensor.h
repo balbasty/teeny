@@ -1727,6 +1727,18 @@ public:
     template <class D> _TNY_API auto & clamp(T lo, T hi, into_t<D> out) const;
     _TNY_API auto normalize() const;                                                      // unit vector (a.normalize_() is in place)
     template <class D> _TNY_API auto & normalize(into_t<D> out) const;
+    // ...over NAMED AXES (keepdim broadcast), both spellings — parity with the free
+    // `normalize<Axes...>(a)` / `normalize(a, axis<Axes...>{})` and with the in-place
+    // `normalize_<Axes...>()`. The empty pack is SFINAE'd out, so `a.normalize()` and
+    // `a.normalize(into(y))` still resolve to the full-tensor forms just above.
+    template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+    _TNY_API auto normalize() const;                                                      // a.normalize<0>()
+    template <long... Axes, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+    _TNY_API auto normalize(axis<Axes...>) const;                                         // a.normalize(axis<0>{})
+    template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+    _TNY_API auto & normalize(into_t<D> out) const;                                       // a.normalize<0>(into(y))
+    template <long... Axes, class D, cs::enable_if_t<(sizeof...(Axes) > 0), int> = 0>
+    _TNY_API auto & normalize(axis<Axes...>, into_t<D> out) const;                        // a.normalize(axis<0>{}, into(y))
     template <class Tb,class Eb,class Lb,storage Ob> _TNY_API auto cross(const tensor<Tb,Eb,Lb,Ob> & b) const;   // 3D (a.cross_(b) is in place)
     template <class Tb,class Eb,class Lb,storage Ob, class D> _TNY_API auto & cross(const tensor<Tb,Eb,Lb,Ob> & b, into_t<D> out) const;
 
@@ -1737,6 +1749,7 @@ public:
     template <class F> _TNY_API tensor & map_(F f);                    // *this = f(*this)
     template <class G, class B> _TNY_API tensor & zip_with_(G g, const B & b);  // *this = g(*this, b) (broadcasts)
     template <class F> _TNY_API auto map(F f) const;                   // -> new tensor = f(*this)
+    template <class F, class D> _TNY_API auto & map(F f, into_t<D> out) const;  // ...into a caller buffer -> out.dest&
 
     /* --- boolean reductions (numpy-style; `all` is the slice keyword, so
      *     these are members, and chain after a comparison: (a<b).all()) ---- */
