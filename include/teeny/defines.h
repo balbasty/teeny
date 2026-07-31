@@ -136,7 +136,7 @@
 //     `-fbracket-depth`), so e.g. `dot` on two `shape<16,17>` operands failed to
 //     compile outright.
 //   * g++: compiles, but superlinearly — a `shape<64,64>` (4096) reduction took
-//     ~1 minute, a `shape<128,128>` (16384) one did not finish in 8 minutes.
+//     ~1 minute, and a `shape<128,128>` (16384) one was not attempted.
 // 256 is therefore the ceiling, not a tuning knob to raise: it is exactly clang's
 // limit, and it already leaves ~2 orders of magnitude of headroom over the shapes
 // the unroll targets. Lower it (`-DTNY_MAX_STATIC_UNROLL=64`) to trade the unroll
