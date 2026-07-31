@@ -104,7 +104,7 @@ the practical minimums:
 | **g++** | 7 (first C++17) | tested on 11–14 |
 | **clang++** | 9 | tested on 18 |
 | **AppleClang** (macOS) | 9 | tested on `macos-latest` |
-| **MSVC** (Windows) | 2019 (v19.20) | tested on `windows-latest`, currently failing — [#296](https://github.com/balbasty/teeny/issues/296) |
+| **MSVC** (Windows) | 2019 (v19.20) | tested and passing on `windows-latest` |
 
 For a **CUDA device build**, the host compiler must also be one your `nvcc`
 supports — each CUDA release caps the host g++/clang/MSVC version (e.g. CUDA 12.6
@@ -120,8 +120,8 @@ independent MSVC-only defects that #268 had been masking: empty-base-optimizatio
 not applying to a mapping with 2+ private empty bases ([#295](https://github.com/balbasty/teeny/issues/295),
 fixed — needed `__declspec(empty_bases)`, see the EBO note below) and some
 axis-reduction overloads failing to resolve ([#296](https://github.com/balbasty/teeny/issues/296),
-open). The Windows CI job stays `continue-on-error` until #296 is fixed too, so
-only Linux and macOS are proven-portable today.
+fixed). The Windows CI job is a required, blocking signal like Linux and macOS —
+all three are proven-portable today.
 
 **A permanent, documented MSVC limitation from #295's investigation:** teeny's
 `sizeof`-exact guarantee (a fully-static view/stack tensor is exactly the size
