@@ -2042,7 +2042,7 @@ template<class T, class E, class L, storage O> into_t< tensor< T, E, L, O > > in
 
 `into(y)` — the output-destination tag: pass it as the last argument to an out-of-place math producer (`a.add(b, into(y))`, `cross(a,b,into(y))`, `exp(a, into(y))`, …) to write the result into `y` (one fused pass, no allocation) and get `y&` back, instead of a freshly allocated result.
 
-`y`'s dtype need not match: the arithmetic runs in the OPERANDS' own precision (a scalar rhs and the fused `alpha` included) and only the RESULT is cast to `y`, so `a.op(b, into(y))` gives exactly the numbers `y.copy_(a.op(b))` would (#379) — including for a `half`/`bfloat16` operand, where `into(y)` rounds through the twin's own `promote_t` (a 16-bit float there) before casting to `y`, not straight from the float compute value. `scan(t, init, f, into(y))` is the one deliberate exception — see its own doc-comment in [iterate.h](#iterateh).
+`y`'s SHAPE follows the producer's own rule: a tensor-rhs (broadcasting) producer checks each OPERAND against the `y` you pass (equal extent or 1), so `y` may deliberately be LARGER or higher-rank than the operands' own broadcast result — `a.add(b, into(y))` is "`y` = `a + b`" minus the allocation and the copy, and the operands stretch to fill `y` (#444) — while a unary or scalar-rhs producer requires `y` to match the source EXACTLY (it has nothing to stretch). Only the operands ever broadcast, never `y`: a `y` smaller in any axis is an error (compile-time when the extents are static, a debug-time check otherwise). `y`'s dtype need not match: the arithmetic runs in the OPERANDS' own precision (a scalar rhs and the fused `alpha` included) and only the RESULT is cast to `y`, so `a.op(b, into(y))` gives exactly the numbers `y.copy_(a.op(b))` would (#379) — including for a `half`/`bfloat16` operand, where `into(y)` rounds through the twin's own `promote_t` (a 16-bit float there) before casting to `y`, not straight from the float compute value. `scan(t, init, f, into(y))` is the one deliberate exception — see its own doc-comment in [iterate.h](#iterateh).
 
 ---
 
@@ -9656,7 +9656,7 @@ Defined in include/teeny/tensor.h:2038
 template<bool Atomic, class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & add_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1335
+Defined in include/teeny/math.h:1342
 
 ---
 
@@ -9666,7 +9666,7 @@ Defined in include/teeny/math.h:1335
 template<bool Atomic, class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & sub_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1341
+Defined in include/teeny/math.h:1348
 
 ---
 
@@ -9676,7 +9676,7 @@ Defined in include/teeny/math.h:1341
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & mul_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1347
+Defined in include/teeny/math.h:1354
 
 ---
 
@@ -9686,7 +9686,7 @@ Defined in include/teeny/math.h:1347
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & div_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1349
+Defined in include/teeny/math.h:1356
 
 ---
 
@@ -9696,7 +9696,7 @@ Defined in include/teeny/math.h:1349
 template<bool Atomic> tensor< T, E, L, O > & add_(T s)
 ```
 
-Defined in include/teeny/math.h:1351
+Defined in include/teeny/math.h:1358
 
 ---
 
@@ -9706,7 +9706,7 @@ Defined in include/teeny/math.h:1351
 template<bool Atomic> tensor< T, E, L, O > & sub_(T s)
 ```
 
-Defined in include/teeny/math.h:1357
+Defined in include/teeny/math.h:1364
 
 ---
 
@@ -9716,7 +9716,7 @@ Defined in include/teeny/math.h:1357
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & minimum_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1366
+Defined in include/teeny/math.h:1373
 
 ---
 
@@ -9726,7 +9726,7 @@ Defined in include/teeny/math.h:1366
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & maximum_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1368
+Defined in include/teeny/math.h:1375
 
 ---
 
@@ -9736,7 +9736,7 @@ Defined in include/teeny/math.h:1368
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & add_(const B & b, T alpha)
 ```
 
-Defined in include/teeny/math.h:1373
+Defined in include/teeny/math.h:1380
 
 ---
 
@@ -9746,7 +9746,7 @@ Defined in include/teeny/math.h:1373
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & sub_(const B & b, T alpha)
 ```
 
-Defined in include/teeny/math.h:1375
+Defined in include/teeny/math.h:1382
 
 ---
 
@@ -9756,7 +9756,7 @@ Defined in include/teeny/math.h:1375
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & atomic_add_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1379
+Defined in include/teeny/math.h:1386
 
 ---
 
@@ -9766,7 +9766,7 @@ Defined in include/teeny/math.h:1379
 template<class B, enable_if_t<!is_arithmetic< B >::value, int >> tensor< T, E, L, O > & atomic_sub_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1381
+Defined in include/teeny/math.h:1388
 
 ---
 
@@ -9776,7 +9776,7 @@ Defined in include/teeny/math.h:1381
 template<class B> tensor< T, E, L, O > & copy_(const B & b)
 ```
 
-Defined in include/teeny/math.h:1385
+Defined in include/teeny/math.h:1392
 
 ---
 
@@ -9786,7 +9786,7 @@ Defined in include/teeny/math.h:1385
 template<class F> tensor< T, E, L, O > & map_(F f)
 ```
 
-Defined in include/teeny/math.h:1535
+Defined in include/teeny/math.h:1542
 
 ---
 
@@ -9796,7 +9796,7 @@ Defined in include/teeny/math.h:1535
 template<class G, class B> tensor< T, E, L, O > & zip_with_(G g, const B & b)
 ```
 
-Defined in include/teeny/math.h:1537
+Defined in include/teeny/math.h:1544
 
 ---
 
@@ -9806,7 +9806,7 @@ Defined in include/teeny/math.h:1537
 template<class Tb, class Eb, class Lb, storage Ob> tensor< T, E, L, O > & cross_(const tensor< Tb, Eb, Lb, Ob > & b)
 ```
 
-Defined in include/teeny/math.h:2369
+Defined in include/teeny/math.h:2376
 
 ---
 
@@ -9816,7 +9816,7 @@ Defined in include/teeny/math.h:2369
 template<long... Axes, enable_if_t< _md::_nrm_kept_api< E, Axes... >::value, int >> tensor< T, E, L, O > & normalize_()
 ```
 
-Defined in include/teeny/math.h:2392
+Defined in include/teeny/math.h:2399
 
 ---
 
@@ -9828,7 +9828,7 @@ Defined in include/teeny/math.h:2392
 template<class B> u_abs u_log u_cos u_tanh u_ceil u_trunc auto minimum(const B & b) const
 ```
 
-Defined in include/teeny/math.h:2627
+Defined in include/teeny/math.h:2634
 
 ### Public Static Attributes
 

@@ -30,8 +30,14 @@ int main() {
     auto acc = local<double, shape<4>>(); acc.zero_();
     acc.at(2).add_<true>(1.5);
     acc.at(2).add_<true>(2.5);          // accumulates
-    acc.at(-1).add_<true>(9.0);         // negative index wraps -> index 3
-    if (acc(2) != 4.0 || acc(3) != 9.0 || acc(0) != 0.0) return 5;
+    double at3 = 0.0;
+    // the negative index wraps -> index 3, but only when the build wraps at all:
+    // -DTNY_NO_NEGATIVE_INDEX drops the wrap, so a negative RUNTIME index is UB.
+#ifndef TNY_NO_NEGATIVE_INDEX
+    acc.at(-1).add_<true>(9.0);
+    at3 = 9.0;
+#endif
+    if (acc(2) != 4.0 || acc(3) != at3 || acc(0) != 0.0) return 5;
 
     // ---- dispatch_value: runtime value -> static ----------------------
     int seen = -1;

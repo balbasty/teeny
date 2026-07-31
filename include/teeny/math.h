@@ -910,15 +910,22 @@ _TNY_HOST auto uop_out(const A & a, Uop f) {
 
 /* ---- into(dest): run a producer's engine into a CALLER-provided dest ------ *
  * One fused pass, NO allocation. `Restrict=false` because a user dest may alias
- * an operand; the engine validates dest's extents against the result the producer
- * would have allocated and casts to dest's element type. The producer hands
- * `into_t::dest` back.
+ * an operand; the engine validates dest's extents (per the rules below) and
+ * casts to dest's element type. The producer hands `into_t::dest` back.
  *
  * The dest is the ONLY shape here the caller picks freely, so it is the only one
- * that can disagree: `oop_to`'s `bzip_` checks it against the BROADCAST result
- * (an operand extent of 1 stretches, the dest's does not), while `oops_to`/
+ * that can disagree: `oop_to`'s `bzip_` checks each OPERAND against it (equal
+ * extent or 1 — an operand stretches, the dest does not), while `oops_to`/
  * `uop_to`'s `scalo_`/`unaryo_` require EXACT equality with the source — a
  * scalar-rhs or unary op has no stretch semantics at all (#357).
+ *
+ * Operand-against-dest DELIBERATELY admits a dest bigger (or of higher rank)
+ * than the two operands' own broadcast result: `a.add(b, into(y))` is
+ * `y(etc) = a + b` minus the allocation and the copy, so `y` is the result
+ * shape the CALLER picks and the operands broadcast into it, replicating a
+ * smaller natural result to fill it — exactly what `y.copy_(a + b)` would
+ * store. That is the decided contract (#444), not a missing guard; do not
+ * "tighten" it to exact equality.
  *
  * All three gate it at compile time when the extents in play are static and fall
  * back to a per-axis `_TNY_CHECK` otherwise — `ext_static_eq` for the exact-match

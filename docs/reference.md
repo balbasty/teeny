@@ -398,16 +398,19 @@ end of the statement). A temporary *owning* tensor is rejected at compile time
 (`into(zeros<double>(shape<3>{}))`) — its storage would die with the statement, so
 the result would be discarded.
 
-**`y`'s shape is checked.** It must match the result the producer would have
-allocated — the source's own shape for a unary or scalar-rhs op, the broadcast
-shape for a tensor-rhs one. There is no stretching on the way *out*: only the
-operands broadcast, never the destination, so a `y` smaller in any axis is
-rejected, not written repeatedly. Every producer catches it the same way: a
-**compile error** whenever the extents in play are static, and a debug-time check
-(`assert`, off under `-DNDEBUG`) when any of them is dynamic. A **unary or
-scalar-rhs** producer wants **exact** equality (it has nothing to stretch); a
-**tensor-rhs** one applies its broadcast rule to the *operands* only — each operand
-axis must equal `y`'s or be 1.
+**`y`'s shape is checked.** A **unary or scalar-rhs** producer wants **exact**
+equality with the source (it has nothing to stretch); a **tensor-rhs** one applies
+its broadcast rule against the `y` you pass — each operand axis must equal `y`'s
+or be 1. There is no stretching on the way *out*: only the operands broadcast,
+never the destination, so a `y` smaller in any axis is rejected, not written
+repeatedly. And because the tensor-rhs check pins the operands against `y` — not
+`y` against their natural result — `y` may deliberately be **larger, or of higher
+rank**, than the op alone would return: `a.add(b, into(y))` is "`y` = `a + b`"
+with the allocation and copy saved, so the operands stretch to fill whatever
+broadcast-compatible `y` you supply, exactly as `y.copy_(a + b)` would. Every
+producer catches a mismatch the same way: a **compile error** whenever the extents
+in play are static, and a debug-time check (`assert`, off under `-DNDEBUG`) when
+any of them is dynamic.
 
 ```cpp
 auto a = zeros(shape<8,8>{});
@@ -420,6 +423,11 @@ auto row = zeros(shape<1,3>{});
 auto out = zeros(shape<2,3>{});
 out.add(row, into(out));   // fine: the (1,3) OPERAND stretches over (2,3)
 out.add(out, into(row));   // compile error: a (1,3) DEST does not stretch
+
+auto big = zeros(shape<5,3>{});
+row.add(row, into(big));   // fine, deliberate: row + row alone is (1,3), but big is
+                           //   the result shape YOU chose — the operands stretch and
+                           //   fill all five rows (== big.copy_(row + row))
 ```
 
 **`y` must not self-overlap** either — no `extent > 1` axis with stride 0 (only a

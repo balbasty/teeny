@@ -13,9 +13,12 @@ int main() {
     static_assert(decltype(a)::rank() == 3, "one axis dropped");
     if (a(1,3,4) != t(1,2,3,4)) return 1;
 
-    // negative index wraps
+    // negative index wraps (only meaningful when the build wraps at all —
+    // -DTNY_NO_NEGATIVE_INDEX drops the wrap, making a negative RUNTIME index UB)
+#ifndef TNY_NO_NEGATIVE_INDEX
     auto b = t.slice_along<0>(-1);                      // axis0=1 -> (3,4,5)
     if (b(2,3,4) != t(1,2,3,4)) return 2;
+#endif
 
     // multiple axes at once (a pack of dimensions)
     auto c = t.slice_along<1,3>(2, 4);                  // axis1=2, axis3=4 -> (2,4)

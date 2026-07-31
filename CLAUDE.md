@@ -472,6 +472,10 @@ auto c = a.add(b,alpha); a.sub(b,alpha);  // FUSED out-of-place axpy: a +/- alph
 //   unary: compile error when both shapes are static, debug-time _TNY_CHECK otherwise
 //   (#357); tensor rhs: a compile error too when static (#361's bc_static_ok_dest gate),
 //   but in the BROADCAST sense — each OPERAND axis == y's or 1 — else the _TNY_CHECK.
+//   A tensor-rhs y may thus be LARGER/higher-rank than the operands' own broadcast result:
+//   INTENTIONAL (#444, owner-decided), not a hole — a.add(b,into(y)) is "y(etc) = a+b"
+//   minus the alloc+copy; y is the result shape the CALLER picks, and the operands stretch
+//   to fill it (== y.copy_(a+b)). Do NOT "tighten" this to exact equality.
 //   normalize(a,into(y)) wants EXACT equality on BOTH forms: the axis form's result is `a`
 //   element-for-element, and its reduced keepdim divisor is not an operand the caller picks,
 //   so it states that rule itself (check_into_same_shape) instead of inheriting the
