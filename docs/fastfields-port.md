@@ -193,7 +193,10 @@ axis and sweep the last. A full transform runs the sweep once per axis (permute
 so the target axis is innermost, or peel a different axis each pass).
 
 - **L1** (`examples/distance_transform.cpp` already implements this): forward
-  `tmp=min(tmp+w, f[i])` then backward. Two passes, in place.
+  `tmp=min(tmp+w, f[i])` then backward. Two passes, in place — write them as the
+  [forward + backward sweep](structure.md#the-forward-backward-sweep-two-pass-line-recurrences),
+  `scan_(t, inf, minplus{w}, ax); scan_(t.flip(ax), inf, minplus{w}, ax);`, which
+  batches over every other axis itself: no peel loop, no batch-axis list.
 - **Euclidean (squared):** lower-envelope-of-parabolas (Felzenszwalb–Huttenlocher).
   Needs 3 scratch buffers of length `n` per worker (`local<double, shape<N>>`
   if N static, else `owned`). Vertices `v`, breakpoints `z`, copy `d`; intersection
@@ -224,7 +227,10 @@ Poles per order (order≤1 none; 2: √8-3; 3: √3-2; 4/5: two; 6/7: three), ga
 `Π(1-p)(1-1/p)`. Per pole: scale by gain, causal init + `f[i]+=p·f[i-1]`,
 anticausal init + `f[i]=p·(f[i+1]-f[i])`. Only the causal/anticausal boundary
 *initialisation* depends on the boundary mode (DCT1/DCT2/DFT implemented in
-jitfields). Same `peel_front` + innermost-axis sweep structure.
+jitfields). The causal + anticausal pair is the same
+[forward + backward sweep](structure.md#the-forward-backward-sweep-two-pass-line-recurrences)
+the L1 transform uses — one `scan_` per direction, one functor per pole, with the
+boundary initialiser supplying each pass's `init`.
 
 ### 4.5 others (resize/restrict, regularisers)
 

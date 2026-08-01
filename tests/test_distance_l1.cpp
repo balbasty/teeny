@@ -3,6 +3,7 @@
 // leading axes and each slice is a 1-D line along the last axis -- no fillfrom,
 // no prod<nbatch>, no index2offset.
 #include <teeny/teeny.h>
+#include <limits>
 
 using namespace tny;
 namespace cs = cuda::std;
@@ -26,6 +27,25 @@ static void algo(Line line, scalar_t w) {
 template <class Tensor>
 static void run_md(Tensor & t, scalar_t w) {
     for (auto line : peel<0,1>(t)) algo(line, w);          // rank-3: batch = axes 0,1
+}
+
+/* The SAME transform written as the documented forward+backward `scan_` sweep
+ * (docs/structure.md, "The forward + backward sweep"): one call per direction,
+ * the backward one through a flipped view, and no batch-axis list at all --
+ * `scan_` peels every other axis itself. `init = +inf` is the min-plus identity
+ * (`min(inf + w, x) == x`), so each pass leaves its own first element alone,
+ * exactly like `algo`'s `tmp = line(0)` seed. Must be bit-identical to `algo`. */
+struct minplus {
+    scalar_t w;
+    scalar_t operator()(scalar_t carry, scalar_t x) const { return vmin(carry + w, x); }
+};
+
+template <class Tensor>
+static void run_scan(Tensor & t, scalar_t w) {
+    constexpr scalar_t inf = std::numeric_limits<scalar_t>::infinity();
+    constexpr auto ax = axis<-1>{};                        // the swept axis, named once
+    scan_(t,          inf, minplus{w}, ax);                // forward
+    scan_(t.flip(ax), inf, minplus{w}, ax);                // backward
 }
 
 /* --- faithful jitfields reference (same as test_tensor_distance_l1) --- */
@@ -75,6 +95,25 @@ int main()
         run_md(t, 1.5);
     }
     for (offset_t i = 0; i < total; ++i) if (a[i] != b[i]) return 2;
+
+    // (3) the documented forward+backward `scan_` sweep — same result, dynamic extents
+    fill(a,total); fill(b,total);
+    before::run<3>(a, 1.5, size, stride);
+    {
+        using E = extents<offset_t, cs::dynamic_extent, cs::dynamic_extent, cs::dynamic_extent>;
+        auto t = wrap<cs::layout_left>(b, E{4,5,6});
+        run_scan(t, 1.5);
+    }
+    for (offset_t i = 0; i < total; ++i) if (a[i] != b[i]) return 3;
+
+    // (4) ...and with static extents (the sweep folds; same two calls)
+    fill(a,total); fill(b,total);
+    before::run<3>(a, 1.5, size, stride);
+    {
+        auto t = wrap<cs::layout_left>(b, extents<offset_t,4,5,6>{});
+        run_scan(t, 1.5);
+    }
+    for (offset_t i = 0; i < total; ++i) if (a[i] != b[i]) return 4;
 
     return 0;
 }

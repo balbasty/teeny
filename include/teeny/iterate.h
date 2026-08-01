@@ -755,7 +755,13 @@ _TNY_API void scan_lines(Tn & t, Carry init, F f, cs::index_sequence<I...>) {
  *         the existing negative-stride view, no separate "direction" flag:
  *         `scan_<Axis>(t.flip<Axis>(), init, f)` (an rvalue view binds fine --
  *         `scan_` has both lvalue and rvalue overloads, unlike `peel` this
- *         doesn't need a named temporary first).
+ *         doesn't need a named temporary first). The two calls TOGETHER --
+ *         `scan_(t, init, f, ax); scan_(t.flip(ax), init, f, ax);` -- are the
+ *         blessed "forward + backward sweep" idiom for a two-pass line
+ *         recurrence (an L1 min-plus distance transform; the causal +
+ *         anticausal passes of an IIR spline prefilter). There is deliberately
+ *         no `scan2_`: the pair already reuses everything a fused engine would
+ *         (docs/structure.md has the worked example; #464).
  *         `scan_<Axis>(t, init, f)` == `scan_(t, init, f, axis<Axis>{})` -- the
  *         axis keyword is TRAILING, like `index_select`'s and the reductions'
  *         (#348). It used to LEAD (`scan_(t, axis<Axis>{}, init, f)`); that

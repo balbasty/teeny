@@ -316,6 +316,7 @@ free **`to<Space>(t)`** (`cuda.h`) above, which is device-aware.
 | `scan<Axis>(t, init, f)` | → new tensor | out-of-place: fresh dense copy, scanned (static→stack, dynamic→heap host-only, built on `clone()`); `t` itself untouched |
 | `scan<Axis>(t, init, f, into(dest))` | `dest&` | no fresh allocation beyond the copy into `dest`; `dest`'s shape must match `t`'s EXACTLY (checked — `static_assert` when both are static, `_TNY_CHECK` otherwise), unlike `copy_`'s own broadcast rule, since `scan_` then walks `dest`'s own axis numbering |
 | `scan(t, init, f, axis<Axis>{}[, into(dest)])` | → new tensor / `dest&` | value form — `scan`'s two trailing keywords ride the generic keyword bag, so `axis<...>{}` and `into(dest)` compose in **any subset, any order** (`scan(t, init, f, into(dest), axis<0>{})` is the same call) |
+| `scan_(t, init, f, ax); scan_(t.flip(ax), init, f, ax);` | `void` (in-place) | **the forward + backward sweep** — the idiom for a two-pass line recurrence (an L1 min-plus distance transform; the causal + anticausal passes of an IIR spline prefilter). Two calls, no direction flag, no hand-written loop; neither mentions the batch rank. Worked example: [Views & structure](structure.md#the-forward-backward-sweep-two-pass-line-recurrences) |
 
 **Input → output type — peel cell.** Each yielded cell is a **view**
 (`storage_view_of(O)` — `gpu`/`gpu_view` source → `gpu_view`), element type `T`
