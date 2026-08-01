@@ -709,6 +709,21 @@ dispatch_layout(v, f);                        // LAYOUT sibling: runtime-classif
                                               //   strides fold); opt-in (triples instantiations), don't default it.
 auto v3 = at.fixed<3>();                      // or force a known rank
 dispatch_value<1,2,3>(D, [&](auto d){ kern<d.value>(v); });  // runtime value -> static
+dispatch_values([&](auto d, auto o, auto b){ kern<d.value,o.value,b.value>(v); },
+                candidates<1,2,3>(D), candidates<0,1,2,3>(order), candidates<0,1,2,3,4,5,6,7>(bnd));
+                                              // PRODUCT form (#463): one candidate list per parameter,
+                                              //   f gets one integral_constant each (list order). IS the
+                                              //   nested dispatch_value pyramid — one comparison per
+                                              //   parameter, f instantiated once per COMBINATION; the
+                                              //   candidate lists ARE the instantiation budget, now
+                                              //   visible in one place. Same failure contract per
+                                              //   parameter (out-of-list = doesn't fire, no assert):
+                                              //   f not called, returns false; true == every value
+                                              //   matched and f ran. The runtime value may be an ENUM
+                                              //   (candidates(v) casts it — no hand static_cast on a
+                                              //   bound_t/order enum). NB f comes FIRST, the one place
+                                              //   teeny puts the callable ahead of its args (the lists
+                                              //   are variadic).
 // BATCH idiom (one kernel per Sr, not per total rank): peel the runtime batch
 // dims, keep the trailing Sr "interesting" dims static. NB the arg is NEGATIVE
 // (keep the last |N|), like the tensor's peel_front — anyrank asserts N<0.

@@ -738,6 +738,83 @@ _TNY_HOST bool dispatch_value(int v, F && f) {
     return matched;
 }
 
+/** @brief One parameter's candidate list for `dispatch_values` — the runtime value
+ *         paired with the compile-time values it is allowed to be. You never spell
+ *         this type; `candidates<Vs...>(v)` builds it. */
+template <int... Vs> struct candidates_t { int value; };
+
+/**
+ * @brief `candidates<1,2,3>(d)` — one `dispatch_values` parameter: the compile-time
+ *        candidates as template arguments, the runtime value as the argument.
+ *
+ * `v` may be any integer **or enum** type — a `bound`/`order` enum dispatches without a
+ * hand-written `static_cast` at the call site (the candidates are plain `int`s, and so
+ * is the `integral_constant` `f` receives, exactly as with `dispatch_value`).
+ */
+template <int... Vs, class V>
+_TNY_API constexpr candidates_t<Vs...> candidates(V v) noexcept {
+    static_assert(cs::is_integral<V>::value || cs::is_enum<V>::value,
+                  "candidates(v): the runtime value must be an integer or an enum type");
+    return { static_cast<int>(v) };
+}
+
+/** @brief `_is_candidates<X>::value` is true iff `X` is a `candidates<...>(v)` list —
+ *         the guard `dispatch_values` puts on every argument after `f`. */
+template <class> struct _is_candidates : cs::false_type {};
+template <int... Vs> struct _is_candidates<candidates_t<Vs...>> : cs::true_type {};
+
+namespace _detail {
+// One nesting level of `dispatch_values`, lambda-free (no raw lambda in the engine, so
+// it instantiates under nvcc without --extended-lambda). `values_step<F, Bound...>` holds
+// a reference to the caller's `f` plus the constants matched SO FAR — as types only, an
+// `integral_constant` being empty — and `run(...)` consumes the next candidate list with
+// the very same fold `dispatch_value` uses. So this IS the hand-written nesting: one
+// match test per parameter (not per combination), and `f` instantiated once per
+// combination of candidates — the caller's candidate lists remain the whole budget.
+template <class F, class... Bound>
+struct values_step {
+    F & f;
+    _TNY_HOST bool run() const { f(Bound{}...); return true; }        // no lists left -> fire
+    template <int... Vs, class... Rest>
+    _TNY_HOST bool run(candidates_t<Vs...> c, Rest... rest) const {
+        bool matched = false;
+        ( (c.value == Vs
+              ? (matched = values_step<F, Bound..., cs::integral_constant<int, Vs>>{f}.run(rest...))
+              : false), ... );
+        return matched;
+    }
+};
+} // namespace _detail
+
+/**
+ * @brief The product form of `dispatch_value`: turn SEVERAL runtime values into
+ *        compile-time ones in one call, one candidate list per parameter.
+ *
+ * `f` is called with one `integral_constant` per list, in list order, when every value
+ * matched one of its own candidates; the return value says whether it ran. Pure sugar
+ * over the nesting — same per-parameter match test, same instantiation count (once per
+ * combination of candidates), and the same failure contract per parameter: a value
+ * outside its list simply doesn't fire (no assert, no abort), so `f` is not called and
+ * the call returns false.
+ *
+ *     dispatch_values([&](auto D, auto O, auto B){ kernel<D.value, O.value, B.value>(v); },
+ *                     candidates<1,2,3>(spatial_ndim),      // spatial rank
+ *                     candidates<0,1,2,3>(order),           // interpolation order
+ *                     candidates<0,1,2,3,4,5,6,7>(bnd));    // boundary condition (an enum)
+ *
+ * instead of the three-deep `dispatch_value` pyramid. The candidate lists sit next to
+ * each other, so the instantiation budget (3 × 4 × 8 here) is visible in one place.
+ * `f` comes FIRST because the candidate lists are variadic — the one place teeny puts
+ * the callable ahead of its arguments.
+ */
+template <class F, class... Ls>
+_TNY_HOST bool dispatch_values(F && f, Ls... lists) {
+    static_assert((_is_candidates<Ls>::value && ...),
+                  "dispatch_values(f, candidates<...>(v), ...): every argument after `f` "
+                  "must be a `candidates<...>(v)` list");
+    return _detail::values_step<cs::remove_reference_t<F>>{ f }.run(lists...);
+}
+
 _TNY_NAMESPACE_END(tny)
 
 #endif // TNY_DYNAMIC_H

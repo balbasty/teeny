@@ -72,6 +72,7 @@ TESTS = \
 	$(BUILDDIR)/test_reindex \
 	$(BUILDDIR)/test_dispatch_index \
 	$(BUILDDIR)/test_dispatch_layout \
+	$(BUILDDIR)/test_dispatch_values \
 	$(BUILDDIR)/test_reshape_view \
 	$(BUILDDIR)/test_reshape \
 	$(BUILDDIR)/test_subperm \
