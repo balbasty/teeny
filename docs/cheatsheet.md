@@ -283,6 +283,12 @@ scan_<Axis>(x, init, f);            // sequential fold along Axis, batched (peel
                                     //   index_select's and the reductions'.
                                     //   Reverse sweep: scan_<Axis>(x.flip<Axis>(), init, f) -- a
                                     //   temporary view binds fine (lvalue + rvalue overloads).
+scan_(x, init, f, ax);              // THE FORWARD + BACKWARD SWEEP: the idiom for a two-pass line
+scan_(x.flip(ax), init, f, ax);     //   recurrence -- an L1 (min-plus) distance transform, or the
+                                    //   causal + anticausal passes of an IIR spline prefilter.
+                                    //   Two calls, no direction flag, no hand-written loop; `ax`
+                                    //   is the axis<...> tag, named once. Worked example: see
+                                    //   "The forward + backward sweep" in structure.md.
 auto y = scan<Axis>(x, init, f);    // out-of-place: fresh dense copy, scanned (static->stack,
                                     //   dynamic->heap host-only, built on clone()); x untouched.
 scan<Axis>(x, init, f, into(dest)); // no fresh allocation beyond the copy into dest; returns dest&.

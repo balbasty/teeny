@@ -405,3 +405,84 @@ scan(t, 0.0, sum_op{}, axis<0>{});                // == scan<0>(t, 0.0, sum_op{}
 scan(t, 0.0, sum_op{}, axis<0>{}, into(dest));    // == scan<0>(t, 0.0, sum_op{}, into(dest))
 scan(t, 0.0, sum_op{}, into(dest), axis<0>{});    // ...and the keywords may be swapped
 ```
+
+#### The forward + backward sweep — two-pass line recurrences
+
+A whole family of separable kernels runs the *same* line recurrence twice, once
+in each direction: an L1 (min-plus) distance transform, and the causal +
+anticausal passes of an IIR spline-coefficient prefilter (`splinc`). Written
+with `scan_`, that is two calls — the second one on a flipped view (`ax` below is
+the `axis<...>{}` tag naming the swept axis):
+
+```cpp
+scan_(t,          init, f, ax);   // forward  pass (increasing along ax)
+scan_(t.flip(ax), init, f, ax);   // backward pass (decreasing along ax)
+```
+
+**That pair is the idiom** — there is no `scan2_`, no direction flag, and no
+reason to write the loop by hand. The second call sees the same storage through
+a negative-stride view, so it mutates `t` in place just like the first, and both
+calls batch over every other axis themselves: nothing in the pair mentions the
+batch rank, so the same two lines work on a `(H,W)` image and on a
+`(*batch,H,W,C)` volume.
+
+Worked example — a separable **L1 distance transform** along the last axis,
+`carry = min(carry + w, x)` in both directions (the `examples/distance_transform.cpp`
+kernel, whose hand-written twin this reproduces element for element):
+
+=== "value form"
+
+    ```cpp
+    #include <teeny/teeny.h>
+    #include <limits>
+    using namespace tny;
+
+    struct minplus {                          // device-safe functor, like map_'s
+        double w;
+        double operator()(double carry, double x) const {
+            const double c = carry + w;
+            return c < x ? c : x;
+        }
+    };
+
+    template <class Tensor>
+    void distance_l1(Tensor & t, double w) {
+        constexpr double inf = std::numeric_limits<double>::infinity();
+        constexpr auto ax = axis<-1>{};                  // the swept axis, named once
+        scan_(t,          inf, minplus{w}, ax);          // forward
+        scan_(t.flip(ax), inf, minplus{w}, ax);          // backward
+    }
+    ```
+
+=== "template form"
+
+    ```cpp
+    template <class Tensor>
+    void distance_l1(Tensor & t, double w) {
+        constexpr double inf = std::numeric_limits<double>::infinity();
+        scan_<-1>(t,                     inf, minplus{w});   // forward
+        scan_<-1>(t.template flip<-1>(), inf, minplus{w});   // backward
+    }
+    ```
+
+    `Tensor` is a template parameter here, so `flip<-1>()` needs the
+    `.template` disambiguator — which is the reason to prefer the value form
+    above inside a kernel template.
+
+`init = +inf` is what makes each pass leave its own first element alone
+(`min(inf + w, x) == x`), which is exactly how a hand-written sweep seeds its
+carry from element 0. Pick the identity of your own recurrence the same way: it
+is the carry value for which `f(init, x) == x`.
+
+A **causal + anticausal IIR pass** has the same shape — one pole `p` forward
+(`carry = x + p*carry`), one backward — with the boundary initialiser supplying
+`init` instead of an identity.
+
+Running it over more than one axis is the same pair per axis; nothing else
+changes, because each `scan_` re-derives its own batching:
+
+```cpp
+auto swapped = t.permute<0,2,1>();   // a named view whose last axis is t's axis 1
+distance_l1(t, w);                   // sweep along the last axis
+distance_l1(swapped, w);             // ...then along the one before it
+```

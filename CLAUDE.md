@@ -642,6 +642,10 @@ scan_<0>(t, 0.0, sum_op{});           // carry=init, then carry=f(carry,x); x=ca
                       //   scan_<0>(t.flip<0>(), init, f); (scan_ has both lvalue and rvalue
                       //   overloads, so a temporary flip() view binds fine -- it mutates the
                       //   same underlying storage as a named view would).
+scan_(t, init, f, ax); scan_(t.flip(ax), init, f, ax);  // the FORWARD + BACKWARD SWEEP: the blessed
+                      //   idiom for a two-pass line recurrence (L1 min-plus distance transform,
+                      //   causal + anticausal IIR spline prefilter). Deliberately NO scan2_ (#464);
+                      //   worked example in docs/structure.md, tested in tests/test_distance_l1.cpp.
 scan_(t, 0.0, sum_op{}, axis<0>{});   // value form: == scan_<0>(t, 0.0, sum_op{}). The axis tag is
                       //   TRAILING, like index_select's and the reduction family's (#348 — it used
                       //   to LEAD, scan_(t, axis<0>{}, init, f); that spelling is GONE, no alias).
