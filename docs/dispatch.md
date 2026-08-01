@@ -20,6 +20,58 @@ dispatch_value<1,2,3>(spatial_ndim, [&](auto D) {
 Use it for any small runtime value you want static: a spatial rank, an
 interpolation order, a matrix size `C`. Replaces a hand-written `switch`.
 
+## `dispatch_values` — several values at once
+
+Kernel libraries usually have more than one runtime knob to make static — a spatial
+rank *and* an interpolation order *and* a boundary condition. Nesting `dispatch_value`
+works, but buries the kernel three lambdas deep. `dispatch_values` takes one
+**candidate list** per parameter and hands `f` one `integral_constant` per list:
+
+```cpp
+dispatch_values([&](auto D, auto O, auto B) {
+                    kernel<D.value, O.value, B.value>(view);
+                },
+                candidates<1,2,3>(spatial_ndim),      // spatial rank
+                candidates<0,1,2,3>(order),           // interpolation order
+                candidates<0,1,2,3,4,5,6,7>(bnd));    // boundary condition
+```
+
+instead of
+
+```cpp
+dispatch_value<1,2,3>(spatial_ndim, [&](auto D) {
+  dispatch_value<0,1,2,3>(order, [&](auto O) {
+    dispatch_value<0,1,2,3,4,5,6,7>(bnd, [&](auto B) {
+      kernel<D.value, O.value, B.value>(view); });});});
+```
+
+It is exactly that nesting, written once: the same one comparison per parameter at run
+time, and `f` instantiated once per **combination** of candidates. You still own the
+instantiation budget — it is the product of the list lengths (`3 × 4 × 8 = 96` above) —
+and putting the lists next to each other is the point: the budget is readable in one
+place instead of spread down a pyramid.
+
+`f` comes **first** here (the one place teeny puts the callable ahead of its arguments)
+because the candidate lists are variadic.
+
+**A value outside its list simply doesn't fire**, per parameter, exactly as with
+`dispatch_value`: no assert and no abort — `f` is not called and the call returns
+`false`. It returns `true` only when every value matched and `f` ran.
+
+```cpp
+bool ran = dispatch_values(f, candidates<1,2,3>(7), candidates<0,1>(0));   // 7 ∉ {1,2,3}
+// ran == false, f never called
+```
+
+**Enums dispatch directly.** The runtime value may be any integer *or enum* type, so a
+`bound`/`order` enum needs no `static_cast` at the call site (the candidates stay plain
+`int`s, and so does the `integral_constant` `f` receives):
+
+```cpp
+enum class bound { zero, replicate, dct1, dct2, dst1, dst2, dft, nocheck };
+dispatch_values(f, candidates<0,1,2,3,4,5,6,7>(bnd));   // bnd is a `bound`
+```
+
 ## `anyrank` — the rank-erased carrier
 
 A rank-erased carrier for the host boundary: a pointer, 1-D shape/stride tensors,

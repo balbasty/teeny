@@ -425,6 +425,14 @@ See [Half precision](half.md).
 
 ```cpp
 dispatch_value<Vs...>(v, f);            // runtime value -> integral_constant
+dispatch_values(f, candidates<1,2,3>(d), candidates<0,1,2,3>(o), candidates<0,…,7>(b));
+                                        // SEVERAL values at once: one candidate list per parameter,
+                                        //   f(D,O,B) gets one integral_constant each. == the nested
+                                        //   dispatch_value pyramid (same per-parameter match test; f
+                                        //   instantiated once per COMBINATION). A value outside its
+                                        //   list doesn't fire -> f not called, returns false. `v` may
+                                        //   be an ENUM (no hand static_cast). NB f comes FIRST (the
+                                        //   candidate lists are variadic).
 as_anyrank(data, shape, stride, ndim);        // -> anyrank WRAPPING the arrays, NO copy
                                               //   (default; host only, arrays must outlive it)
 as_anyrank(data, shape, stride, ndim, copy_meta);  // -> anyrank COPYING into an inline

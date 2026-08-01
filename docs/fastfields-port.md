@@ -69,7 +69,7 @@ as `shape_type`/`extents_type`), with per-dimension static/dynamic shape and str
 | recover static inner dims | `cell.recast(shape<-1, C, C>{})` — fold the known trailing dims of a peeled cell (no copy, preserves strides) |
 | peel named axes | `peel(t, axis<0,1>{})`, `slice_along(axis<0,2>{}, …)`, `permute(Int<...>()…)`, `flip(Int<d>())` |
 | add/drop size-1 axis | `unsqueeze(Int<Ax>())`, `squeeze(Int<Ax>())` |
-| **runtime→static dispatch** | `dispatch_value<1,2,3>(D, f)` (spatial rank / order / bound); `dispatch_rank(as_anyrank(...), f)` (total rank — prefer `peel_front<-Sr>` per §3) |
+| **runtime→static dispatch** | `dispatch_value<1,2,3>(D, f)` (one knob); `dispatch_values(f, candidates<1,2,3>(D), candidates<0,…,7>(order), candidates<0,…,7>(bnd))` (several at once — same nesting, one call, enums need no cast); `dispatch_rank(as_anyrank(...), f)` (total rank — prefer `peel_front<-Sr>` per §3) |
 | **narrow device offsets (int32)** | `dispatch_index(v, f)` at the launch site → int32 arm when `v.index_fits<int32_t>()`, else int64. Halves a dynamic view's register footprint + 32-bit address math (a GPU occupancy win). `reindex<int32_t>()` is the raw retype |
 | host ndarray boundary | `as_anyrank(data, shape, stride, ndim)` → `anyrank`; `.fixed<R>()`. **Device data:** `as_anyrank<storage::gpu_view>(dptr, …)` so cells are device-tagged; DLPack: `from_dlpack<T[,Space]>` / `dispatch_dlpack<Space>` set+check the space from the capsule |
 | **DLPack dtype dispatch (batch idiom)** | `dispatch_dlpack_dtype<Space>(m, f)` — dtype-dispatch that hands `f` the **typed `anyrank`** (rank preserved), so `f` drives `peel_front<-Sr>` (kernel per `Sr`, not per total rank). `dispatch_dlpack<Space>(m, f)` is the rank-collapsing sibling. `f` must be generic over its element type |
@@ -96,16 +96,23 @@ host ndarray (numpy/cupy/torch/dlpack)  ──as_anyrank(data,shape,stride,ndim)
    │  strides are in ELEMENTS (dlpack); numpy's __array_interface__ gives BYTES — /itemsize first
    │  device data: as_anyrank<storage::gpu_view>(dptr,…)  (or from_dlpack<T,storage::gpu_view>)
    ▼
-dispatch_value<1,2,3>(spatial_ndim, [&](auto D){       // spatial rank -> static D
-  dispatch_value<0,1,2,3,…>(order, [&](auto O){         // interp order -> static (optional)
+dispatch_values([&](auto D, auto O, auto B){             // spatial rank / order / bound -> static
     constexpr long Sr = D.value + 1;                     // spatial + channel dims to keep static
     for (auto cell : at.peel_front<-Sr>()) {             // NEGATIVE front: peel the runtime batch
         auto v = cell.recast(shape<-1, …static inner…>{});   // fold known inner dims (e.g. C)
-        kernel<D.value, O.value>(v, grid_cell, …);       // parallelise this loop
+        kernel<D.value, O.value, B.value>(v, grid_cell, …);  // parallelise this loop
     }
-  });
-});
+  },
+  candidates<1,2,3>(spatial_ndim),          // spatial rank
+  candidates<0,1,2,3,4,5,6,7>(order),       // interpolation order  (optional)
+  candidates<0,1,2,3,4,5,6,7>(bnd));        // boundary condition — an enum, no cast
 ```
+
+One `dispatch_values` call replaces the `dispatch_value` nesting pyramid (it *is* that
+nesting: one comparison per parameter, `f` instantiated once per combination), and it
+puts the whole instantiation budget — the product of the candidate lists — in one
+readable place. Reach for the single-parameter `dispatch_value` when there is only one
+knob.
 
 - Note the **negative** `peel_front<-Sr>()` on `anyrank`: it keeps the last `Sr` dims
   static and folds *however many* batch dims there are into each cell's data pointer.
