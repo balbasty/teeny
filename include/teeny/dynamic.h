@@ -2,6 +2,7 @@
 #define TNY_DYNAMIC_H
 #include <cuda/std/mdspan>
 #include <cuda/std/array>
+#include <cuda/std/limits>
 #include <teeny/defines.h>
 #include <teeny/alias.h>
 #include <teeny/tensor.h>
@@ -229,6 +230,11 @@ constexpr copy_meta_t copy_meta{};
  *                               a positive front-count would leave a runtime
  *                               rank, which can't be a static view (asserted).
  *
+ * Before any of those, the carrier itself can be narrowed to 32-bit offsets:
+ * `index_fits<Idx2>()` asks whether every reachable offset fits, `reindex<Idx2>()`
+ * returns the same carrier with an `Idx2` meta store — so a GPU boundary narrows
+ * ONCE, host-side, and every cell it later hands out is `Idx2`-indexed.
+ *
  * Deliberately no `add_`/`mul_`/etc.: a runtime-rank arithmetic path would loop
  * over `ndim` (killing folding) or dispatch to every rank (the bloat
  * `peel_front<-Sr>` avoids). Do host-side math on a `fixed<R>()`/`peel_front<-Sr>()`
@@ -413,6 +419,78 @@ struct anyrank {
         offset_t n = 1;
         for (int d = 0; d < ndim - static_cast<int>(-N); ++d) n *= shape(d);
         return n;
+    }
+
+    // --- whole-carrier offset-width narrowing (#467) -------------------------
+    // The fixed-rank sibling of these two lives on `tensor` (`index_fits`/`reindex`);
+    // this is the same pair on the CARRIER, so a boundary can narrow ONCE, host-side,
+    // before a launch and keep the batch idiom (`peel_front<-Sr>`) — cells peeled from
+    // an `Idx2` carrier are already `Idx2`-indexed, since `offset_t` is a parameter.
+    // (`dispatch_index(v, f)` is `_TNY_HOST` and per-cell, so it cannot be the device
+    // mechanism; `dispatch_rank` would collapse the rank the batch idiom keeps runtime.)
+
+    /** @brief The carrier type `reindex<Idx2>()` produces: same `T`/`Space` and the same
+     *         static `Head`/`Tail` geometry, with the offset width — and the meta store —
+     *         narrowed to `Idx2`. Always an INLINE (`copy_meta`) store: narrowing has to
+     *         copy, there is nothing to narrow a wrapped array into. */
+    template <class Idx2, cs::size_t MaxRank = max_rank>
+    using reindexed = anyrank<T, Idx2, _meta_store<Idx2, MaxRank>, Space,
+                              _reindex_extents_t<Idx2, Tail>, TailS,
+                              _reindex_extents_t<Idx2, Head>, HeadS>;
+
+    /** @brief Does every element offset reachable through this carrier fit the index
+     *         type `Idx2`? The whole-carrier twin of the view's `index_fits<Idx2>()`,
+     *         with the same SIGNED reach contract (teeny has negative-stride views):
+     *         `max = Σ_{s>0}(e−1)·s`, `min = Σ_{s<0}(e−1)·s`; fits ⟺ `min..max` ⊆ `Idx2`.
+     *         Accumulates in a wide type; a broadcast (stride-0) axis adds 0. The
+     *         precondition `reindex<Idx2>()` debug-checks. */
+    template <class Idx2>
+    _TNY_API bool index_fits() const noexcept {
+        using W = long long;
+        W maxo = 0, mino = 0;
+        for (int d = 0; d < ndim; ++d) {
+            const W e = static_cast<W>(shape(d));
+            if (e <= W(1)) continue;                              // size-1/0 axis: no reach
+            const W reach = (e - W(1)) * static_cast<W>(stride(d));
+            if (reach > 0) maxo += reach; else mino += reach;     // reach sign == stride sign (e>1)
+        }
+        return maxo <= static_cast<W>((cs::numeric_limits<Idx2>::max)())
+            && mino >= static_cast<W>((cs::numeric_limits<Idx2>::min)());
+    }
+
+    /** @brief Narrow the whole carrier's OFFSET INDEX WIDTH to `Idx2` — same data
+     *         pointer, same memory `Space`, same static `Head`/`Tail` geometry, with
+     *         `ndim` and the runtime shape/strides copied into an inline `Idx2` store.
+     *         Every cell peeled off the result is then `Idx2`-indexed for free, so a
+     *         GPU boundary narrows once, on the host, and still launches the batch
+     *         idiom (`peel_front<-Sr>`) — 32-bit offset math, fewer registers, and
+     *         half the meta store to pass by value into a `__global__`.
+     *
+     *         The static extents/strides baked into the type are PURE TYPE INFO and are
+     *         untouched (only their extents' index type follows `Idx2`). `MaxRank` sets
+     *         the inline capacity (default: this carrier's own `max_rank`).
+     *
+     *         Debug-checks `index_fits<Idx2>()`; UB if the caller lies — the same
+     *         contract as the view's `reindex`:
+     *
+     *             if (at.index_fits<int32_t>()) launch(at.reindex<int32_t>());
+     *             else                          launch(at);
+     *
+     *         which is exactly what `dispatch_index(at, f)` does for you. */
+    template <class Idx2, cs::size_t MaxRank = max_rank>
+    _TNY_API reindexed<Idx2, MaxRank> reindex() const {
+        _TNY_CHECK(index_fits<Idx2>(),
+                   "anyrank::reindex: element offsets don't fit the target index type (span exceeds its range)");
+        _TNY_CHECK(ndim <= static_cast<int>(MaxRank),
+                   "anyrank::reindex: ndim exceeds MaxRank (raise -DTNY_MAX_RANK)");
+        reindexed<Idx2, MaxRank> t;
+        t.data = data; t.ndim = ndim;
+        const int n = ndim < static_cast<int>(MaxRank) ? ndim : static_cast<int>(MaxRank);
+        for (int i = 0; i < n; ++i) {
+            t.shape(i)  = static_cast<Idx2>(shape(i));
+            t.stride(i) = static_cast<Idx2>(stride(i));
+        }
+        return t;
     }
 };
 
@@ -627,8 +705,9 @@ _TNY_HOST auto as_anyrank(T * data, const offset_t * shape, const offset_t * str
 }
 
 /**
- * @brief Narrow a fixed-rank view's OFFSET INDEX WIDTH to `Idx2` (default `int32_t`)
- *        when its element span fits, then call `f` — else call `f` with the view as-is.
+ * @brief Narrow a view's — or a whole `anyrank` carrier's — OFFSET INDEX WIDTH to
+ *        `Idx2` (default `int32_t`) when its element span fits, then call `f` — else
+ *        call `f` with the argument as-is.
  *
  * The kernel-boundary primitive behind the int32 fast path (#115): it instantiates
  * `f` for BOTH widths and picks at run time via `index_fits`/`reindex`, so a genuinely
@@ -638,6 +717,14 @@ _TNY_HOST auto as_anyrank(T * data, const offset_t * shape, const offset_t * str
  * via `dispatch_rank<narrow_index>` to fuse it with the rank dispatch.
  *
  *     for (auto cell : at.peel_front<-Sr>()) dispatch_index(cell, [&](auto c){ kernel<Sr>(c); });
+ *
+ * An `anyrank` carries the same `index_fits`/`reindex` pair (#467), so the very same
+ * call narrows the CARRIER before the rank is fixed — the GPU spelling, since narrowing
+ * has to happen host-side, before the launch, while the batch idiom keeps `ndim` runtime.
+ * `dispatch_index(at, f)` is then just the two arms written out:
+ *
+ *     if (at.index_fits<cs::int32_t>()) launch(at.reindex<cs::int32_t>());
+ *     else                              launch(at);
  */
 template <class Idx2 = cs::int32_t, class V, class F>
 _TNY_HOST void dispatch_index(V && v, F && f) {

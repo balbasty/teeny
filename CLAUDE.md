@@ -706,6 +706,18 @@ dispatch_rank<narrow_index>(at, f);           // ...+ int32 offsets when the spa
 dispatch_index<Idx2=int32_t>(v, f);           // the primitive: narrow ONE fixed view's offset width when
                                               //   index_fits, else keep it; f instantiated for both widths.
                                               //   Batch: for (cell : at.peel_front<-Sr>()) dispatch_index(cell, f);
+at.index_fits<int32_t>(); at.reindex<int32_t>();  // ...the same pair on the CARRIER (#467) — the GPU spelling,
+                                              //   since dispatch_index is _TNY_HOST/per-cell and the batch idiom
+                                              //   keeps ndim runtime. reindex keeps the data ptr / Space / static
+                                              //   anyshape Head+Tail (only their extents' index type follows Idx2)
+                                              //   and copies ndim+shape+stride into an INLINE Idx2 store (narrowing
+                                              //   must copy; MaxRank defaults to the source's — at.reindex<int32_t,8>()
+                                              //   overrides). offset_t is a carrier template param, so EVERY cell it
+                                              //   then hands out is int32-indexed, and the by-value store halves
+                                              //   (MaxRank*2*8B -> *4B). Debug-checked by index_fits (SIGNED reach
+                                              //   over all ndim dims); UB if the caller lies — the view's contract.
+                                              //   dispatch_index(at, f) accepts a carrier and picks the arm.
+                                              //   from_dlpack NEVER narrows on its own (keeps DLPack's int64).
 dispatch_layout(v, f);                        // LAYOUT sibling: runtime-classify a dyn view's strides as
                                               //   ccontiguous / fcontiguous / (else) dynamic_strides and hand f
                                               //   the RETYPED view — so recast<shape<-1,c,c>>() folds the inner

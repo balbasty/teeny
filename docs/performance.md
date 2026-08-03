@@ -126,6 +126,21 @@ both widths and picks the narrowed one when `v.index_fits<int32_t>()`.
 dispatch. Both are opt-in per launch site — narrowing doubles the instantiations, so
 teeny never does it behind your back.
 
+The rank-erased carrier carries the same pair, so a CUDA boundary can narrow **once,
+before the launch**, and still keep the batch idiom (`peel_front<-Sr>`, whose whole
+point is that `ndim` stays runtime):
+
+```cpp
+if (at.index_fits<int32_t>()) launch(at.reindex<int32_t>());
+else                          launch(at);
+```
+
+Every cell peeled off the narrowed carrier is `int32`-indexed, and the carrier's own
+inline shape/stride store halves (`MaxRank × 2 × 8 B` → `× 4 B`) — which matters when
+the carrier itself is a kernel parameter. See
+[Dispatch](dispatch.md#narrowing-the-whole-carrier-the-gpu-spelling). This is a device
+optimization: on the CPU it measures neutral, so it stays opt-in there too.
+
 Mixed-width operands **broaden** rather than narrow: `a + b` over an `int32`-indexed
 and an `int64`-indexed view takes the wider operand's index type (and, where the two
 also disagree in signedness, a signed type wide enough for both). That is lossless,

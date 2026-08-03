@@ -113,6 +113,11 @@ void smoke() {
     auto dev_carrier = as_anyrank(hp, sh, st, 3, copy_meta);
     peel_kernel<<<1, 1>>>(dev_carrier);
 
+    // #467: narrow the WHOLE carrier host-side, before the launch, then peel on the
+    // device. The narrowed carrier must stay a POD kernel parameter (with half the
+    // inline meta store) and its cells must be int32-indexed in the device pass.
+    peel_kernel<<<1, 1>>>(dev_carrier.reindex<cuda::std::int32_t>());
+
     // #389: slice on BOTH sides of the static/dynamic line and run each resulting
     // `strides<...>` view through a kernel. The dynamic source folds only its unit
     // inner stride (a MIXED pack -> `stride()` exercises both arms, including the

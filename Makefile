@@ -66,6 +66,7 @@ TESTS = \
 	$(BUILDDIR)/test_peel_recast \
 	$(BUILDDIR)/test_peel_shape \
 	$(BUILDDIR)/test_anyrank_tail \
+	$(BUILDDIR)/test_anyrank_reindex \
 	$(BUILDDIR)/test_recast_guard \
 	$(BUILDDIR)/test_overlap_guard \
 	$(BUILDDIR)/test_into_shape_guard \
