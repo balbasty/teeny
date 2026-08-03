@@ -446,16 +446,10 @@ struct anyrank {
      *         precondition `reindex<Idx2>()` debug-checks. */
     template <class Idx2>
     _TNY_API bool index_fits() const noexcept {
-        using W = long long;
-        W maxo = 0, mino = 0;
-        for (int d = 0; d < ndim; ++d) {
-            const W e = static_cast<W>(shape(d));
-            if (e <= W(1)) continue;                              // size-1/0 axis: no reach
-            const W reach = (e - W(1)) * static_cast<W>(stride(d));
-            if (reach > 0) maxo += reach; else mino += reach;     // reach sign == stride sign (e>1)
-        }
-        return maxo <= static_cast<W>((cs::numeric_limits<Idx2>::max)())
-            && mino >= static_cast<W>((cs::numeric_limits<Idx2>::min)());
+        // `shape`/`stride` are themselves callable (1-D tensor members), so they
+        // pass straight into the shared loop with no adapter (contrast tensor.h's
+        // `_extent_method_fn`/`_stride_method_fn`, which wrap METHOD accessors).
+        return _detail::_signed_reach_fits<Idx2>(ndim, shape, stride);
     }
 
     /** @brief Narrow the whole carrier's OFFSET INDEX WIDTH to `Idx2` — same data
@@ -493,6 +487,25 @@ struct anyrank {
         return t;
     }
 };
+
+/** @brief Free forms of `reindex`/`index_fits` for `anyrank` — the whole-carrier
+ *         twins of `tensor`'s free forms (tensor.h): deduce the carrier, so a
+ *         type-dependent receiver (e.g. inside a generic `dispatch_dlpack_dtype`-
+ *         style functor) can write `reindex<Idx2>(at)` / `index_fits<Idx2>(at)`
+ *         without the `.template` disambiguator. (`Idx2` is a TYPE, so there is
+ *         no value form.) `anyrank::reindex` is const-only (unlike `tensor`'s
+ *         mutable/const pair), so only one overload is needed here; `MaxRank`
+ *         keeps the member's own default (the carrier's `max_rank`) but stays
+ *         overridable, same as calling the member directly. */
+template <class Idx2, class T, class offset_t, class Meta, storage Space, class Tail, class TailS, class Head, class HeadS,
+          cs::size_t MaxRank = anyrank<T, offset_t, Meta, Space, Tail, TailS, Head, HeadS>::max_rank>
+_TNY_API auto reindex(const anyrank<T, offset_t, Meta, Space, Tail, TailS, Head, HeadS> & a) {
+    return a.template reindex<Idx2, MaxRank>();
+}
+template <class Idx2, class T, class offset_t, class Meta, storage Space, class Tail, class TailS, class Head, class HeadS>
+_TNY_API bool index_fits(const anyrank<T, offset_t, Meta, Space, Tail, TailS, Head, HeadS> & a) {
+    return a.template index_fits<Idx2>();
+}
 
 /** @brief A range of fixed-rank-`Sr` sub-views over an `anyrank`'s batch axes.
  *         Inherits the carrier's `Space`, so each cell is a host or `gpu_view`

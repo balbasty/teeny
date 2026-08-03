@@ -365,6 +365,47 @@ _TNY_API auto _unsqueeze_sorted(Tn && t, cs::index_sequence<I...>) noexcept
 template <class Sorted, cs::size_t... I, class Tn>
 _TNY_API auto _squeeze_sorted(Tn && t, cs::index_sequence<I...>) noexcept
 { return _squeeze_fold<Sorted::value[I]...>(t); }
+
+/* --- shared signed-reach test for `index_fits`/`reindex` (#469) -----------------
+ * `tensor::index_fits<Idx2>()` (this file) and `anyrank::index_fits<Idx2>()`
+ * (dynamic.h) both need "does every reachable offset fit `Idx2`?", but store
+ * their per-axis extents/strides differently (a `tensor` reads them off its
+ * mapping via `extent(r)`/`stride(r)` METHODS; an `anyrank` keeps them as
+ * runtime `shape`/`stride` MEMBERS that are already callable per axis). Rather
+ * than duplicate the accumulation formula, the loop lives here ONCE and each
+ * caller hands it a per-axis accessor — a lambda would need nvcc's
+ * `--extended-lambda` inside an `_TNY_API` function, so these are tiny functors. */
+
+// Adapts a per-axis METHOD (`obj->extent(i)` / `obj->stride(i)`) into a plain
+// callable `fn(i)`. `anyrank`'s `shape`/`stride` are already callable (1-D
+// tensor members) and pass straight through — no adapter needed there.
+template <class Obj> struct _extent_method_fn {
+    Obj const * obj;
+    template <class I> _TNY_API auto operator()(I i) const noexcept { return obj->extent(i); }
+};
+template <class Obj> struct _stride_method_fn {
+    Obj const * obj;
+    template <class I> _TNY_API auto operator()(I i) const noexcept { return obj->stride(i); }
+};
+
+/** @brief `max = Σ_{s>0}(e−1)·s`, `min = Σ_{s<0}(e−1)·s` across `n` axes
+ *         (`extent_at(r)`/`stride_at(r)` read axis `r`); fits ⟺ `min..max ⊆
+ *         Idx2`. Accumulates in a wide type; a size-1/0 axis has no reach and
+ *         adds nothing (so a broadcast/stride-0 axis is always safe). Shared
+ *         by `tensor::index_fits` and `anyrank::index_fits` — one formula. */
+template <class Idx2, class N, class ExtentAt, class StrideAt>
+_TNY_API bool _signed_reach_fits(N n, ExtentAt extent_at, StrideAt stride_at) noexcept {
+    using W = long long;
+    W maxo = 0, mino = 0;
+    for (N r = 0; r < n; ++r) {
+        const W e = static_cast<W>(extent_at(r));
+        if (e <= W(1)) continue;                              // size-1/0 axis: no reach
+        const W reach = (e - W(1)) * static_cast<W>(stride_at(r));
+        if (reach > 0) maxo += reach; else mino += reach;     // reach sign == stride sign (e>1)
+    }
+    return maxo <= static_cast<W>((cs::numeric_limits<Idx2>::max)())
+        && mino >= static_cast<W>((cs::numeric_limits<Idx2>::min)());
+}
 } // namespace _detail
 
 /**
@@ -1669,16 +1710,8 @@ public:
      *         The precondition `reindex<Idx2>()` debug-checks. */
     template <class Idx2>
     _TNY_API bool index_fits() const noexcept {
-        using W = long long;
-        W maxo = 0, mino = 0;
-        for (cs::size_t r = 0; r < rank(); ++r) {
-            const W e = static_cast<W>(extent(r));
-            if (e <= W(1)) continue;                              // size-1/0 axis: no reach
-            const W reach = (e - W(1)) * static_cast<W>(stride(r));
-            if (reach > 0) maxo += reach; else mino += reach;     // reach sign == stride sign (e>1)
-        }
-        return maxo <= static_cast<W>((cs::numeric_limits<Idx2>::max)())
-            && mino >= static_cast<W>((cs::numeric_limits<Idx2>::min)());
+        return _detail::_signed_reach_fits<Idx2>(rank(),
+            _detail::_extent_method_fn<tensor>{this}, _detail::_stride_method_fn<tensor>{this});
     }
 
     /** @brief No-copy, **layout-preserving** retype of the offset index width to

@@ -138,5 +138,21 @@ int main() {
     if (again.data != at.data || again.ndim != 3) return 24;
     for (int d = 0; d < 3; ++d) if (again.step(d) != at.step(d)) return 25;
 
+    // ---- (8) per-axis reach fits individually, but the ACCUMULATED sum overflows --
+    // two axes each with reach 1.5e9 / 1.0e9 (each well under INT32_MAX alone); their
+    // SUM (2.5e9) exceeds it, so the whole-carrier test must still reject narrowing
+    // (#469 — regression test; the accumulation already got this right at #468).
+    cs::int64_t sshp[2] = {2, 2};
+    cs::int64_t sstr[2] = {1500000000LL, 1000000000LL};
+    if (as_anyrank(buf, sshp, sstr, 2).index_fits<cs::int32_t>()) return 26;
+
+    // ---- (9) free forms (deduced, no `.template`) mirror the member calls ----
+    // symmetric with the tensor free forms in test_reindex.cpp (#469).
+    if (index_fits<cs::int32_t>(as_anyrank(buf, sshp, sstr, 2))) return 27;
+    if (!index_fits<cs::int32_t>(at)) return 28;
+    auto freeform32 = reindex<cs::int32_t>(at);
+    static_assert(cs::is_same<decltype(freeform32.size(0)), cs::int32_t>::value, "free reindex narrows");
+    if (freeform32.data != at32.data || freeform32.ndim != at32.ndim) return 29;
+
     return 0;
 }
