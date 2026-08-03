@@ -125,6 +125,10 @@ address math in 32-bit. Guard it with `t.index_fits<int32_t>()` — a signed-rea
 check that handles negative-stride (flipped) and broadcast views — and only narrow
 when the element span provably fits. See [Performance](performance.md).
 
+The rank-erased [`anyrank`](dispatch.md) carrier answers the same two calls
+(`at.index_fits<int32_t>()` / `at.reindex<int32_t>()`), so a device boundary can narrow
+the whole carrier once — before the launch — instead of view by view.
+
 ### Mixing widths in a broadcast
 
 When two operands of **different** index widths meet in a broadcast (`a + b`,

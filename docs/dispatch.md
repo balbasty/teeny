@@ -315,6 +315,48 @@ for (auto cell : at.peel_front<-Sr>()) dispatch_index(cell, [&](auto c) { kernel
 Opt in per launch site — narrowing everything would silently double instantiation
 counts. `dispatch_index<Idx2>` targets a width other than the `int32_t` default.
 
+### Narrowing the whole carrier (the GPU spelling)
+
+The two calls above narrow **one view at a time**, on the host. For a CUDA launch that
+keeps the batch idiom — where `ndim` stays runtime and only `Sr` is static — narrowing
+has to happen **once, before the launch, on the carrier itself**. `anyrank` carries the
+same pair:
+
+```cpp
+auto at = from_dlpack<float>(&dlt);
+if (at.index_fits<int32_t>()) launch(at.reindex<int32_t>());   // int32 carrier
+else                          launch(at);                      // int64 carrier
+```
+
+`at.index_fits<Idx2>()` is the signed-reach test over the **whole** carrier (every
+reachable offset must be representable in `Idx2`). `at.reindex<Idx2>()` returns the same
+carrier — same data pointer, same memory space, same static `anyshape` head/tail geometry
+— with `ndim` and the runtime shape/strides copied into an inline `Idx2` store. Since the
+carrier's offset width is part of its type, **every cell it later hands out is already
+`Idx2`-indexed**: nothing downstream changes.
+
+```cpp
+for (auto cell : at32.peel_front<-Sr>()) launch<Sr>(cell);   // cells are int32-indexed
+```
+
+That halves the meta store the carrier passes by value into a `__global__`
+(`MaxRank × 2 × 8 B` → `× 4 B`) and runs the cells' address math in 32-bit — the SM has
+no native 64-bit integer multiply-add, so each axis costs one `IMAD` instead of a
+sequence. `reindex` always produces an inline (`copy_meta`) store: narrowing has to copy,
+and there is nothing to narrow a *wrapped* array into. Capacity follows the source
+carrier; `at.reindex<int32_t, 8>()` picks another.
+
+It debug-checks `index_fits` and is UB if you lie — the same contract as the view's
+`reindex`. `dispatch_index` accepts a carrier too, so the two arms above are just:
+
+```cpp
+dispatch_index(at, [&](auto a) { launch(a); });      // f instantiated for both widths
+```
+
+Import width is never changed for you: `from_dlpack` keeps DLPack's own `int64_t`, and
+teeny applies no heuristic — narrowing is a per-boundary decision you make. On the CPU it
+measures neutral; the win is on the device.
+
 ### `dispatch_layout` — recover static contiguity
 
 The rank-erased boundary drops the producer's contiguity into `layout_stride`

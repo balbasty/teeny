@@ -457,6 +457,12 @@ at.size_front<-Sr>();                             // flattened batch count (no r
 dispatch_rank(at, f);                    // runtime rank -> fixed-rank view (per total rank)
 dispatch_rank<narrow_index>(at, f);      // ...+ int32 offsets when the span fits (rank outer, width inner)
 dispatch_index(v, f);                    // narrow one fixed view's offset width to int32 (else keep it)
+at.index_fits<int32_t>();                // ...or narrow the WHOLE CARRIER, once, host-side before a launch:
+at.reindex<int32_t>();                   //   same pointer/space/anyshape geometry, meta store copied into an
+                                         //   int32 one -> every cell it hands out is int32-indexed, and the
+                                         //   by-value store halves. Debug-checked by index_fits; UB if you lie.
+                                         //   dispatch_index(at, f) picks the arm for you. from_dlpack never
+                                         //   narrows on its own (it keeps DLPack's int64).
 at.fixed<R>();                           // force a known rank
 ```
 

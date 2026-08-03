@@ -115,6 +115,19 @@ run time; it halves a dynamic view's footprint and runs address math in 32-bit. 
 opt-in per launch site — see [Shapes & strides](shapes-strides.md#the-index-type-shape32-reindex)
 and [Dispatch](dispatch.md#dispatch_index-dispatch_ranknarrow_index-the-int32-fast-path).
 
+For a CUDA launch, narrow the **carrier** instead: `dispatch_index` is host-side and
+per-cell, so it can't run inside a kernel, and the batch idiom above deliberately keeps
+`ndim` runtime. The carrier answers the same two questions, once, before the launch:
+
+```cpp
+if (at.index_fits<int32_t>()) launch(at.reindex<int32_t>());
+else                          launch(at);
+```
+
+Cells peeled off the narrowed carrier are `int32`-indexed already, and the carrier's own
+by-value shape/stride store halves — see
+[Dispatch](dispatch.md#narrowing-the-whole-carrier-the-gpu-spelling).
+
 ## 5. Contiguous elementwise math auto-vectorizes
 
 Contiguous elementwise ops take a linear fast path (in place of the per-element decode)
