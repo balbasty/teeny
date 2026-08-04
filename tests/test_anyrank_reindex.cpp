@@ -179,5 +179,47 @@ int main() {
     cs::int64_t rqstr[1] = {-4000000000000000000LL};
     if (as_anyrank(buf, rqshp, rqstr, 1).index_fits<cs::int64_t>()) return 33;
 
+    // ---- (11) WIDE UNSIGNED targets (#484) -----------------------------------
+    // The positive and negative reach accumulate in separate 64-bit domains
+    // (unsigned / signed), so the carrier's test is exact for EVERY integral Idx2 up
+    // to 64 bits — uint64_t/size_t included, which used to be a compile error (#475).
+    // Mirrors the tensor-side section in test_reindex.cpp.
+    //   (a) a negative stride still can't fit an UNSIGNED target (min offset < 0).
+    if (as_anyrank(buf, bshp, bneg, 1).index_fits<cs::uint64_t>()) return 34;
+    //   (b) the false negative this fixes: a reach of 1.2e19 is in (2^63-1, 2^64-1],
+    //       so it genuinely FITS a uint64_t index — unreachable for any single
+    //       `long long` accumulator (the sum overflows it and the old code bailed).
+    if (!as_anyrank(buf, pshp, pstr, 2).index_fits<cs::uint64_t>()) return 35;
+    //       ...the same carrier still doesn't fit int64_t (1.2e19 > 2^63-1) — cases
+    //       (10a) above keep the int32 answer, so only the wrong answer moved.
+    if (as_anyrank(buf, pshp, pstr, 2).index_fits<cs::int64_t>()) return 36;
+    //   (c) exact upper boundary: reach == UINT64_MAX fits, one past it doesn't
+    //       (2*(2^63-1) + 1 == 2^64-1).
+    cs::int64_t eshp[3] = {2, 2, 2};
+    cs::int64_t efit[3] = {9223372036854775807LL, 9223372036854775807LL, 1LL};
+    cs::int64_t eover[3] = {9223372036854775807LL, 9223372036854775807LL, 2LL};
+    if (!as_anyrank(buf, eshp, efit,  3).index_fits<cs::uint64_t>()) return 37;
+    if ( as_anyrank(buf, eshp, eover, 3).index_fits<cs::uint64_t>()) return 38;
+    //   (d) the UNSIGNED accumulator's own overflow guards (unsigned overflow WRAPS
+    //       rather than trapping, so a wrapped value would answer wrongly — both the
+    //       product and the accumulation are checked before the fact).
+    cs::int64_t oshp[1] = {5};
+    cs::int64_t ostr[1] = {9000000000000000000LL};            // 4 * 9e18 = 3.6e19 > UINT64_MAX
+    if (as_anyrank(buf, oshp, ostr, 1).index_fits<cs::uint64_t>()) return 39;
+    cs::int64_t ashp[3] = {2, 2, 2};
+    cs::int64_t astr[3] = {9000000000000000000LL, 9000000000000000000LL, 9000000000000000000LL};
+    if (as_anyrank(buf, ashp, astr, 3).index_fits<cs::uint64_t>()) return 40;   // sum 2.7e19
+
+    // ---- (12) reindex<uint64_t>() on the carrier: an ordinary widening retype --
+    // compiles and addresses identically in a DEBUG build and under -DNDEBUG (where
+    // `_TNY_CHECK` compiles out) alike — #480's build-mode asymmetry is gone at the
+    // root, there being no static_assert left for the unevaluated form to skip.
+    auto atu = at.reindex<cs::uint64_t>();
+    static_assert(cs::is_same<decltype(atu.size(0)), cs::uint64_t>::value, "carrier retyped to uint64");
+    if (atu.data != at.data || atu.ndim != at.ndim) return 41;
+    for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j) for (long k = 0; k < 4; ++k)
+        if (atu.fixed<3>()(i,j,k) != v(i,j,k)) return 42;
+    if (!index_fits<cs::size_t>(at)) return 43;               // the LP64 spelling, equally ordinary
+
     return 0;
 }
