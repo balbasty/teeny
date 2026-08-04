@@ -378,8 +378,8 @@ struct anyrank {
      *         `Int<k>()` static integer (the single-selector spelling `t.squeeze(Int<1>())`
      *         uses) — deduced, so a type-dependent receiver needs no `.template`. The
      *         `lin` argument stays an ordinary runtime index; a static integer in the
-     *         SECOND position is always the selector, and a `shape<...>`/`anyshape<...>`
-     *         tag there is the fused-recast twin below — never confusable. */
+     *         SECOND position is always the selector, and a `shape<...>` tag there is
+     *         the fused-recast twin below — never confusable. */
     template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0>
     _TNY_API auto peel_front_at(offset_t lin, I) const { return peel_front_at<static_cast<long>(I::value)>(lin); }
 
