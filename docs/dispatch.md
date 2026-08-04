@@ -348,7 +348,10 @@ else                          launch(at);                      // int64 carrier
 ```
 
 `at.index_fits<Idx2>()` is the signed-reach test over the **whole** carrier (every
-reachable offset must be representable in `Idx2`). `at.reindex<Idx2>()` returns the same
+reachable offset must be representable in `Idx2`). The carrier's offset type is
+whatever `as_anyrank` deduced from your shape/stride arrays — `uint64_t`/`size_t`
+metadata off a C interop boundary included — and every value is measured in that
+type, so nothing is mis-read on the way in. `at.reindex<Idx2>()` returns the same
 carrier — same data pointer, same memory space, same static `anyshape` head/tail geometry
 — with `ndim` and the runtime shape/strides copied into an inline `Idx2` store. Since the
 carrier's offset width is part of its type, **every cell it later hands out is already

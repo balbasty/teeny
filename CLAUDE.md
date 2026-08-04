@@ -388,7 +388,13 @@ t.reindex<int32_t>();           // no-copy, layout-PRESERVING retype of the OFFS
                                 //   UB if the caller lies). shape32<...> == shape_as<int32_t,...> is the int32 shape.
                                 //   Idx2 = ANY integral type up to 64 bits, signed or unsigned (uint64_t/size_t
                                 //   included, #484): index_fits accumulates the POSITIVE reach in unsigned 64-bit
-                                //   and the NEGATIVE in signed 64-bit, so neither comparison can wrap.
+                                //   and the NEGATIVE in signed 64-bit, so neither comparison can wrap. The SOURCE's
+                                //   own index type may equally be unsigned 64-bit (shape_as<uint64_t,...>, or an
+                                //   as_anyrank carrier over uint64_t/size_t metadata arrays): each raw extent/stride
+                                //   is only converted into a domain it provably fits, never blind-cast to long long
+                                //   first (#486 — a wrapped-negative extent used to read as "no reach" -> false fit).
+                                //   NB index_fits measures reachable OFFSETS, not extent VALUES: a stride-0 axis of
+                                //   huge extent passes, and reindex then truncates that extent (#487, open).
 t.is_dense();                   // dense block in SOME order (C/F/permuted); is_dense<L>() = exact L
 t.is_contiguous();              // C-order (numpy/pytorch default); is_contiguous<fcontiguous>() = F. alias of is_dense<L>
 t.clone();                      // materialise a dense row-major copy. Copies on the HOST -> the dynamic-shape
@@ -720,6 +726,8 @@ at.index_fits<int32_t>(); at.reindex<int32_t>();  // ...the same pair on the CAR
                                               //   then hands out is int32-indexed, and the by-value store halves
                                               //   (MaxRank*2*8B -> *4B). Debug-checked by index_fits (SIGNED reach
                                               //   over all ndim dims); UB if the caller lies — the view's contract.
+                                              //   as_anyrank DEDUCES offset_t from the caller's arrays, so it may be
+                                              //   uint64_t/size_t; index_fits measures each value in that type (#486).
                                               //   dispatch_index(at, f) accepts a carrier and picks the arm.
                                               //   from_dlpack NEVER narrows on its own (keeps DLPack's int64).
 dispatch_layout(v, f);                        // LAYOUT sibling: runtime-classify a dyn view's strides as
