@@ -93,6 +93,11 @@ int main() {
     //   (c) the same two shapes, mirrored onto the negative-stride (`mino`) side.
     if (wrap(buf, shape<2,2>{}, {-6000000000000000000LL, -6000000000000000000LL})
             .index_fits<cs::int32_t>()) return 22;
+    //   (d) mirrored onto the NEGATIVE-stride PRODUCT guard specifically (#474): a
+    //       single axis whose (extent-1)*stride PRODUCT ALONE already overflows
+    //       `long long` on the negative side (3 * -4e18 = -1.2e19), as opposed to
+    //       (c)'s accumulation-only overflow — must be caught before the multiply.
+    if (wrap(buf, shape<4>{}, {-4000000000000000000LL}).index_fits<cs::int64_t>()) return 23;
 
     return 0;
 }

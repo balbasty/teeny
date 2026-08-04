@@ -171,6 +171,13 @@ int main() {
     //   (c) the same two shapes, mirrored onto the negative-stride (`mino`) side.
     cs::int64_t nstr[2] = {-6000000000000000000LL, -6000000000000000000LL};
     if (as_anyrank(buf, pshp, nstr, 2).index_fits<cs::int32_t>()) return 32;
+    //   (d) mirrored onto the NEGATIVE-stride PRODUCT guard specifically (#474): a
+    //       single axis whose (extent-1)*stride PRODUCT ALONE already overflows
+    //       `long long` on the negative side (3 * -4e18 = -1.2e19), as opposed to
+    //       (c)'s accumulation-only overflow — must be caught before the multiply.
+    cs::int64_t rqshp[1] = {4};
+    cs::int64_t rqstr[1] = {-4000000000000000000LL};
+    if (as_anyrank(buf, rqshp, rqstr, 1).index_fits<cs::int64_t>()) return 33;
 
     return 0;
 }
