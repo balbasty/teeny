@@ -407,11 +407,44 @@ template <class Obj> struct _stride_method_fn {
  *         An untrusted carrier (e.g. a corrupted/adversarial DLPack import)
  *         can hand this pathological strides that would overflow even `long
  *         long`; as soon as that's detected the reach clearly exceeds `Idx2`
- *         too (`Idx2` is never wider than `W`), so this returns `false`
- *         immediately rather than continuing into UB. */
+ *         too, so this returns `false` immediately rather than continuing
+ *         into UB.
+ *
+ *         PRECONDITION, ENFORCED (#475): the final `maxo <= Idx2::max() &&
+ *         mino >= Idx2::min()` check casts the accumulator (`W = long long`)
+ *         down to `Idx2`'s own limit type, which is only meaningful if
+ *         `Idx2`'s whole range is representable in `W` — i.e. `Idx2` is never
+ *         WIDER than `W`. That holds for every signed `Idx2` up to 64 bits
+ *         (int8_t..int64_t) and every unsigned `Idx2` up to 32 bits
+ *         (uint8_t..uint32_t), but NOT for a 64-bit unsigned `Idx2`
+ *         (uint64_t/unsigned long long): `W`'s positive range tops out at
+ *         2^63-1, so `uint64_t`'s max (2^64-1) does not fit — casting it to
+ *         `W` wraps to -1, and the fits-check below would then reject every
+ *         input, silently and unactionably. A `static_assert` below turns
+ *         that into a compile error instead. */
 template <class Idx2, class N, class ExtentAt, class StrideAt>
 _TNY_API bool _signed_reach_fits(N n, const ExtentAt & extent_at, const StrideAt & stride_at) noexcept {
     using W = long long;
+    // (#475) `Idx2` must fit within `W`'s range or the final cast back to
+    // `Idx2` (see below) is meaningless — this is what rules out a 64-bit
+    // unsigned `Idx2` (uint64_t/unsigned long long): its max exceeds `W`'s,
+    // so casting it to `W` wraps negative and `index_fits`/`reindex` would
+    // silently return `false` for every input, with no way for the caller to
+    // act on it. Every signed Idx2 up to 64 bits and every unsigned Idx2 up
+    // to 32 bits passes this trivially; an Idx2 this wide isn't a supported
+    // narrowing target for `reindex`/`index_fits` in the first place (the
+    // whole point is narrowing FROM a wide index, not matching its width).
+    static_assert(
+        cs::numeric_limits<Idx2>::is_signed
+            ? ((cs::numeric_limits<Idx2>::max)() <= (cs::numeric_limits<W>::max)()
+               && (cs::numeric_limits<Idx2>::min)() >= (cs::numeric_limits<W>::min)())
+            : (static_cast<unsigned long long>((cs::numeric_limits<Idx2>::max)())
+                   <= static_cast<unsigned long long>((cs::numeric_limits<W>::max)())),
+        "index_fits<Idx2>()/reindex<Idx2>(): Idx2's range must fit within `long long`'s "
+        "(the accumulator this reach test uses) — a 64-bit unsigned Idx2 such as uint64_t "
+        "or unsigned long long doesn't (its max exceeds LLONG_MAX), so it can never be "
+        "validated this way. Use a narrower unsigned type (up to uint32_t) or a signed "
+        "type (up to int64_t) instead.");
     constexpr W wmax = (cs::numeric_limits<W>::max)();
     constexpr W wmin = (cs::numeric_limits<W>::min)();
     W maxo = 0, mino = 0;
@@ -1739,7 +1772,12 @@ public:
      *         `Idx2`. Accumulates in a wide type, with the accumulation itself
      *         overflow-checked (#471 — safe even against adversarial/corrupted
      *         extents+strides, e.g. off a raw DLPack import); a broadcast
-     *         (stride-0) axis adds 0. The precondition `reindex<Idx2>()` debug-checks. */
+     *         (stride-0) axis adds 0. The precondition `reindex<Idx2>()` debug-checks.
+     *
+     *         `Idx2` must itself fit within the accumulator's range (signed up to
+     *         64 bits, unsigned up to 32 bits) — a `static_assert` in the shared
+     *         reach test rejects a 64-bit unsigned `Idx2` (uint64_t / unsigned long
+     *         long) at compile time rather than silently always returning `false` (#475). */
     template <class Idx2>
     _TNY_API bool index_fits() const noexcept {
         return _detail::_signed_reach_fits<Idx2>(rank(),
