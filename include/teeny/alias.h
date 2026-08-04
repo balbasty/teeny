@@ -11,6 +11,7 @@
 #include <cuda/std/type_traits>
 #include <cuda/std/cstdint>
 #include <cuda/std/cstddef>
+#include <cuda/std/limits>
 #include <teeny/defines.h>
 #include <teeny/kwargs.h>
 
@@ -132,9 +133,30 @@ template <auto... E>            using shape32  = shape_as<cs::int32_t, E...>;
 
 // Retype an extents' index_type to Idx2, keeping the same compile-time extent values
 // (the primitive behind `reindex` — swap offset width, preserve the shape).
+//
+// COMPILE-TIME TWIN of `index_fits`'s extent-value check (#489). `index_fits`
+// answers the same question for the RUNTIME extents; a STATIC one is known here,
+// so it is rejected here — with a diagnostic, rather than silently emitting an
+// `extents` whose own `extent(d)` reads a truncated (or negative) number:
+// `shape<300,2>` retyped to `int8_t` used to compile clean and then report
+// `extent(0) == 44`. mdspan itself mandates that every static extent be
+// representable in the index type; CCCL 2.8.2 does not enforce it, so the check
+// lives here. This is the one choke point every narrowing path routes through
+// (`tensor::reindex` and `anyrank::reindexed`'s static Head/Tail geometry), so
+// one `static_assert` covers them all. `dynamic_extent` is a placeholder, not a
+// size — it passes, and its runtime value is what `index_fits` then checks.
 template <class Idx2, class E, class Seq> struct _reindex_extents;
 template <class Idx2, class E, cs::size_t... D>
-struct _reindex_extents<Idx2, E, cs::index_sequence<D...>> { using type = cs::extents<Idx2, E::static_extent(D)...>; };
+struct _reindex_extents<Idx2, E, cs::index_sequence<D...>> {
+    // `max()` is never negative, so widening it to `size_t` (the domain
+    // `static_extent` reports in) is exact for every integral `Idx2`.
+    static_assert(((E::static_extent(D) == cs::dynamic_extent ||
+                    E::static_extent(D) <=
+                        static_cast<cs::size_t>((cs::numeric_limits<Idx2>::max)())) && ...),
+                  "reindex<Idx2>(): a static extent is too large to represent in the target "
+                  "index type (it would be truncated in the narrowed extents)");
+    using type = cs::extents<Idx2, E::static_extent(D)...>;
+};
 template <class Idx2, class E>
 using _reindex_extents_t = typename _reindex_extents<Idx2, E, cs::make_index_sequence<E::rank()>>::type;
 

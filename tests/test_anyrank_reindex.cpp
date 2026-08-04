@@ -243,12 +243,17 @@ int main() {
     if ( as_anyrank(buf, vshp, vstr, 1).index_fits<cs::int32_t>())  return 46;
     if ( as_anyrank(buf, vshp, vstr, 1).index_fits<cs::int64_t>())  return 47;   // > INT64_MAX
     if (!as_anyrank(buf, vshp, vstr, 1).index_fits<cs::uint64_t>()) return 48;   // ...fits uint64
-    //   (c) the int64 edge, exactly: reach == e-1, so e == 2^63 fits int64 (reach
-    //       INT64_MAX) and e == 2^63+1 does not — only an exact `e-1` separates them.
+    //   (c) an unsigned extent straddling the `long long` edge, with the answer
+    //       hinging on an EXACT `e-1`. At stride 2 the reach is `2*(e-1)`, so
+    //       e == 2^63 reaches 2^64-2 (fits uint64) while e == 2^63+1 reaches 2^64
+    //       (does not) — nothing but an exact `e-1` separates them. uint64 is also the
+    //       only target that can hold either extent VALUE; against int64 both are
+    //       rejected on the extent half of the predicate (#489, section (14) below).
     cs::uint64_t eshp1[1] = { 9223372036854775808ULL }, eshp2[1] = { 9223372036854775809ULL };
-    if (!as_anyrank(buf, eshp1, ustr, 1).index_fits<cs::int64_t>())  return 49;
-    if ( as_anyrank(buf, eshp2, ustr, 1).index_fits<cs::int64_t>())  return 50;
-    if (!as_anyrank(buf, eshp2, ustr, 1).index_fits<cs::uint64_t>()) return 51;
+    cs::uint64_t ustr2[1] = { 2ULL };
+    if (!as_anyrank(buf, eshp1, ustr2, 1).index_fits<cs::uint64_t>()) return 49;
+    if ( as_anyrank(buf, eshp2, ustr2, 1).index_fits<cs::uint64_t>()) return 50;
+    if ( as_anyrank(buf, eshp1, ustr,  1).index_fits<cs::int64_t>())  return 51;
     //   (d) an ordinary unsigned-metadata carrier is untouched — and narrows, peels
     //       and addresses exactly as its int64 twin does.
     cs::uint64_t ushp3[3] = {2,3,4}, ustr3[3] = {12,4,1};
@@ -257,10 +262,66 @@ int main() {
     auto un32 = un.reindex<cs::int32_t>();
     for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j) for (long k = 0; k < 4; ++k)
         if (un32.fixed<3>()(i,j,k) != v(i,j,k)) return 53;
-    //   (e) a stride-0 axis of huge extent still has no reach (unchanged — this test
-    //       is about reachable OFFSETS, not extent values; see #487).
+    //   (e) a stride-0 axis of huge extent has no REACH — but its extent value must
+    //       still survive the narrowing, so it is rejected on the extent half of the
+    //       predicate (section (14) below, #489) and accepted for a target that can
+    //       actually hold the extent.
     cs::uint64_t bshp2[1] = { 9223372036854775810ULL }, bstr2[1] = { 0ULL };
-    if (!as_anyrank(buf, bshp2, bstr2, 1).index_fits<cs::int32_t>()) return 54;
+    if ( as_anyrank(buf, bshp2, bstr2, 1).index_fits<cs::int32_t>())  return 54;
+    if (!as_anyrank(buf, bshp2, bstr2, 1).index_fits<cs::uint64_t>()) return 55;
+
+    // ---- (14) EXTENT VALUES, not just offsets (#489) --------------------------
+    // `index_fits<Idx2>()` gates `reindex<Idx2>()`, which narrows the carrier's SHAPE
+    // as well as its offsets — and that shape is the loop bound for every cell peeled
+    // off the narrowed carrier (`size_front`, the batch odometer, `numel()`, every
+    // kernel loop). A stride-0 broadcast axis has no reach at all, so the offset test
+    // alone waved a huge extent through and `reindex` truncated it silently. Both
+    // halves are now ONE predicate; mirrors the tensor-side section in test_reindex.cpp.
+    //   (a) plain truncation: shape 300 does not fit int8_t (it read back as 44).
+    cs::int64_t xshp[1] = {300}, xstr[1] = {0};
+    if (as_anyrank(buf, xshp, xstr, 1).index_fits<cs::int8_t>()) return 56;
+    //   (b) THE realistic case: a broadcast axis of extent 2^31+5 truncated to a large
+    //       NEGATIVE int32_t, so every batch loop over it ran ZERO iterations —
+    //       silently absent work at the GPU-narrowing boundary, with nothing out of
+    //       bounds for a sanitizer to catch.
+    cs::int64_t yshp[2] = {2147483653LL, 2}, ystr[2] = {0, 1};
+    if (as_anyrank(buf, yshp, ystr, 2).index_fits<cs::int32_t>()) return 57;
+    //   (c) the negative-stride exact-boundary window: extent `e` with `e-1 ==
+    //       |int8_t::min()|` reaches exactly -128 (which fits int8_t) while the extent
+    //       129 does not — only the extent half of the predicate can reject it.
+    cs::int64_t zshp[1] = {129}, zstr[1] = {-1};
+    if (as_anyrank(buf, zshp, zstr, 1).index_fits<cs::int8_t>()) return 58;
+    //   (d) POSITIVE CONTROLS — a broadcast axis whose extent DOES fit is not
+    //       over-rejected, and the boundary is exact and target-signedness-aware.
+    cs::int64_t c1[1] = {127}, c2[1] = {128};
+    if (!as_anyrank(buf, c1, xstr, 1).index_fits<cs::int8_t>())  return 59;
+    if ( as_anyrank(buf, c2, xstr, 1).index_fits<cs::int8_t>())  return 60;
+    if (!as_anyrank(buf, c2, xstr, 1).index_fits<cs::uint8_t>()) return 61;
+    //       ...and section (1)'s stride-0 extent-1000000 carrier still fits int32.
+    if (!as_anyrank(buf, hshp, hstr, 1).index_fits<cs::int32_t>()) return 62;
+    //   (e) a NEGATIVE extent (a corrupt/adversarial import — the carrier's own index
+    //       type is signed, so it can hold one) is representable in a signed target
+    //       and not in an unsigned one: the check answers at the target's signedness.
+    cs::int64_t negshp[1] = {-5}, unitstr[1] = {1};
+    if (!as_anyrank(buf, negshp, unitstr, 1).index_fits<cs::int32_t>())  return 63;
+    if ( as_anyrank(buf, negshp, unitstr, 1).index_fits<cs::uint32_t>()) return 64;
+    //   (f) `dispatch_index` inherits the widened gate for free — the extent-300
+    //       carrier takes the WIDE arm rather than narrowing into a truncated shape.
+    w = 0; dispatch_index<cs::int8_t>(as_anyrank(buf, xshp, xstr, 1), RecW{&w});
+    if (w != 8) return 65;
+    cs::int64_t fshp[1] = {4};
+    w = 0; dispatch_index<cs::int8_t>(as_anyrank(buf, fshp, xstr, 1), RecW{&w});
+    if (w != 1) return 66;                                   // ...a fitting one still narrows
+    //   (g) a STATIC `Head`/`Tail` extent too large for the target is caught at COMPILE
+    //       time instead: `anyshape<etc,300>` narrowed to int8_t is a static_assert
+    //       failure in `_reindex_extents` (alias.h), the same choke point the view's
+    //       `reindex` routes through. A static tail extent that DOES fit is untouched:
+    cs::int64_t tshp[2] = {2, 3}, tstr[2] = {3, 1};
+    auto tfit = as_anyrank(buf, tshp, tstr, 2, anyshape<etc, 3>{}).reindex<cs::int8_t>();
+    static_assert(decltype(tfit)::tail_type::static_extent(0) == 3, "static tail extent kept");
+    static_assert(cs::is_same<typename decltype(tfit)::tail_type::index_type, cs::int8_t>::value,
+                  "tail extents' index type narrowed");
+    if (tfit.fixed<2>()(1, 2) != buf[1*3 + 2]) return 67;
 
     return 0;
 }

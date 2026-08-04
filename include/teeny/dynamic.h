@@ -236,9 +236,10 @@ constexpr copy_meta_t copy_meta{};
  * so a carrier whose type is a template parameter needs no `.template` disambiguator.
  *
  * Before any of those, the carrier itself can be narrowed to 32-bit offsets:
- * `index_fits<Idx2>()` asks whether every reachable offset fits, `reindex<Idx2>()`
- * returns the same carrier with an `Idx2` meta store — so a GPU boundary narrows
- * ONCE, host-side, and every cell it later hands out is `Idx2`-indexed.
+ * `index_fits<Idx2>()` asks whether the whole carrier survives the narrowing (every
+ * reachable offset AND every extent value), `reindex<Idx2>()` returns the same
+ * carrier with an `Idx2` meta store — so a GPU boundary narrows ONCE, host-side, and
+ * every cell it later hands out is `Idx2`-indexed.
  *
  * Deliberately no `add_`/`mul_`/etc.: a runtime-rank arithmetic path would loop
  * over `ndim` (killing folding) or dispatch to every rank (the bloat
@@ -462,14 +463,21 @@ struct anyrank {
                               _reindex_extents_t<Idx2, Tail>, TailS,
                               _reindex_extents_t<Idx2, Head>, HeadS>;
 
-    /** @brief Does every element offset reachable through this carrier fit the index
-     *         type `Idx2`? The whole-carrier twin of the view's `index_fits<Idx2>()`,
-     *         with the same SIGNED reach contract (teeny has negative-stride views):
-     *         `max = Σ_{s>0}(e−1)·s`, `min = Σ_{s<0}(e−1)·s`; fits ⟺ `min..max` ⊆ `Idx2`.
-     *         Accumulates in a wide type, with the accumulation itself overflow-checked
-     *         (#471 — safe even against adversarial/corrupted shape/stride, e.g. off a
-     *         raw DLPack import); a broadcast (stride-0) axis adds 0. The precondition
-     *         `reindex<Idx2>()` debug-checks.
+    /** @brief Can this carrier be re-expressed with the index type `Idx2` — i.e. does
+     *         every reachable element OFFSET fit `Idx2`, **and** is every axis's
+     *         EXTENT VALUE representable in it? The whole-carrier twin of the view's
+     *         `index_fits<Idx2>()`, and the precondition `reindex<Idx2>()`
+     *         debug-checks. Both halves matter: narrowing rewrites the carrier's
+     *         shape as well as its offsets, and a truncated extent silently becomes
+     *         the wrong loop bound for every cell peeled off it (#489).
+     *
+     *         The offset half keeps the same SIGNED reach contract (teeny has
+     *         negative-stride views): `max = Σ_{s>0}(e−1)·s`, `min = Σ_{s<0}(e−1)·s`;
+     *         fits ⟺ `min..max` ⊆ `Idx2`. It accumulates in a wide type, with the
+     *         accumulation itself overflow-checked (#471 — safe even against
+     *         adversarial/corrupted shape/stride, e.g. off a raw DLPack import); a
+     *         broadcast (stride-0) axis adds 0 there, and is then held to the
+     *         extent-value half like any other axis.
      *
      *         `Idx2` may be ANY integral type up to 64 bits, signed or unsigned
      *         (`uint64_t`/`size_t` included): the positive and negative reach accumulate
@@ -480,9 +488,9 @@ struct anyrank {
      *         here with raw values above `long long`'s range; each is measured in the
      *         type it is stored in rather than blind-cast down first (#486).
      *
-     *         Like the view's, this is a question about reachable OFFSETS, not about
-     *         extent VALUES: a stride-0 axis passes however large its extent is, and
-     *         `reindex` narrows that extent along with everything else (#487). */
+     *         A STATIC extent (a `Head`/`Tail` geometry dim) that cannot be
+     *         represented in `Idx2` is a compile error from `reindex<Idx2>()`
+     *         itself, so this runtime query is about the carrier's dynamic ones. */
     template <class Idx2>
     _TNY_API bool index_fits() const noexcept {
         // `shape`/`stride` are themselves callable (1-D tensor members), so they
@@ -503,8 +511,10 @@ struct anyrank {
      *         untouched (only their extents' index type follows `Idx2`). `MaxRank` sets
      *         the inline capacity (default: this carrier's own `max_rank`).
      *
-     *         Debug-checks `index_fits<Idx2>()`; UB if the caller lies — the same
-     *         contract as the view's `reindex`:
+     *         Debug-checks `index_fits<Idx2>()` — every offset AND every dynamic
+     *         extent value — and is UB if the caller lies; the same contract as the
+     *         view's `reindex` (a STATIC `Head`/`Tail` extent too large for `Idx2`
+     *         is a compile error instead, #489):
      *
      *             if (at.index_fits<int32_t>()) launch(at.reindex<int32_t>());
      *             else                          launch(at);
@@ -513,7 +523,7 @@ struct anyrank {
     template <class Idx2, cs::size_t MaxRank = max_rank>
     _TNY_API reindexed<Idx2, MaxRank> reindex() const {
         _TNY_CHECK(index_fits<Idx2>(),
-                   "anyrank::reindex: element offsets don't fit the target index type (span exceeds its range)");
+                   "anyrank::reindex: element offsets or an extent value don't fit the target index type");
         _TNY_CHECK(ndim <= static_cast<int>(MaxRank),
                    "anyrank::reindex: ndim exceeds MaxRank (raise -DTNY_MAX_RANK)");
         reindexed<Idx2, MaxRank> t;
@@ -763,8 +773,8 @@ _TNY_HOST auto as_anyrank(T * data, const offset_t * shape, const offset_t * str
 
 /**
  * @brief Narrow a view's — or a whole `anyrank` carrier's — OFFSET INDEX WIDTH to
- *        `Idx2` (default `int32_t`) when its element span fits, then call `f` — else
- *        call `f` with the argument as-is.
+ *        `Idx2` (default `int32_t`) when the narrowing is lossless, then call `f` —
+ *        else call `f` with the argument as-is.
  *
  * The kernel-boundary primitive behind the int32 fast path (#115): it instantiates
  * `f` for BOTH widths and picks at run time via `index_fits`/`reindex`, so a genuinely

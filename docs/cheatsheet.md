@@ -92,7 +92,9 @@ constexpr int64_t dynamic_stride;                         // a runtime stride
 `t.reindex<int32_t>()` (free: `reindex<int32_t>(t)`) retypes the offset index width
 without a copy (layout preserved; extents/dynamic strides narrowed) — halves a
 dynamic view's footprint and runs offset math in 32-bit at the kernel boundary.
-`t.index_fits<int32_t>()` is the signed-reach guard. See [Performance](performance.md).
+`t.index_fits<int32_t>()` is the guard: every element offset **and** every axis size
+must be representable in the target width (the shape narrows too). See
+[Performance](performance.md).
 
 Static-integer aliases (each converts to a runtime integer and carries `::value`);
 pass them where a static index/size is wanted, e.g. `x.extent(Int<0>())`:
@@ -464,7 +466,9 @@ at.size_front(Int<-Sr>());                    //   Sr dims); 1 kernel per Sr. si
 dispatch_rank(at, f);                    // runtime rank -> fixed-rank view (per total rank)
 dispatch_rank<narrow_index>(at, f);      // ...+ int32 offsets when the span fits (rank outer, width inner)
 dispatch_index(v, f);                    // narrow one fixed view's offset width to int32 (else keep it)
-at.index_fits<int32_t>();                // ...or narrow the WHOLE CARRIER, once, host-side before a launch:
+at.index_fits<int32_t>();                // ...every offset AND every axis size fits int32? (the shape narrows
+                                         //   too, so both halves are checked). Narrow the WHOLE CARRIER, once,
+                                         //   host-side before a launch:
 at.reindex<int32_t>();                   //   same pointer/space/anyshape geometry, meta store copied into an
                                          //   int32 one -> every cell it hands out is int32-indexed, and the
                                          //   by-value store halves. Debug-checked by index_fits; UB if you lie.

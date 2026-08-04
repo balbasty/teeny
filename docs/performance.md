@@ -121,7 +121,10 @@ footprint (rank-2: 40 → 24 B) and runs its offset arithmetic in 32-bit — the
 single device win on this page.
 
 `dispatch_index(v, f)` is the launch-site spelling: it instantiates the kernel for
-both widths and picks the narrowed one when `v.index_fits<int32_t>()`.
+both widths and picks the narrowed one when `v.index_fits<int32_t>()` — which checks
+both halves of what narrowing touches: every element offset must fit the target
+width, and so must every axis's size (the shape narrows too, and it is what your
+loops count up to).
 `dispatch_rank<narrow_index>(at, f)` fuses that choice into the anyrank rank
 dispatch. Both are opt-in per launch site — narrowing doubles the instantiations, so
 teeny never does it behind your back.

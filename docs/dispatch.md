@@ -312,7 +312,7 @@ auto v3 = at.fixed<3>();                        // or force a known rank
 ### `dispatch_index` / `dispatch_rank<narrow_index>` — the int32 fast path
 
 At the kernel boundary you can narrow the **offset index width** to 32-bit when the
-element span provably fits (`index_fits`) — halving a dynamic view's by-value
+narrowing is provably lossless (`index_fits`) — halving a dynamic view's by-value
 footprint and running address math in 32-bit (a device register/occupancy win). It's
 the [`reindex`](shapes-strides.md#the-index-type-shape32-reindex) transition made a
 runtime dispatch: `f` is instantiated for **both** widths and the right one is picked
@@ -347,11 +347,14 @@ if (at.index_fits<int32_t>()) launch(at.reindex<int32_t>());   // int32 carrier
 else                          launch(at);                      // int64 carrier
 ```
 
-`at.index_fits<Idx2>()` is the signed-reach test over the **whole** carrier (every
-reachable offset must be representable in `Idx2`). The carrier's offset type is
-whatever `as_anyrank` deduced from your shape/stride arrays — `uint64_t`/`size_t`
-metadata off a C interop boundary included — and every value is measured in that
-type, so nothing is mis-read on the way in. `at.reindex<Idx2>()` returns the same
+`at.index_fits<Idx2>()` asks whether the **whole** carrier survives the narrowing:
+every reachable offset must be representable in `Idx2`, **and** so must every axis's
+size — narrowing rewrites the carrier's shape too, and that shape is the loop bound
+for every cell peeled off it. (A broadcast axis is where those two come apart: it
+reaches nothing whatever its size.) The carrier's offset type is whatever
+`as_anyrank` deduced from your shape/stride arrays — `uint64_t`/`size_t` metadata off
+a C interop boundary included — and every value is measured in that type, so nothing
+is mis-read on the way in. `at.reindex<Idx2>()` returns the same
 carrier — same data pointer, same memory space, same static `anyshape` head/tail geometry
 — with `ndim` and the runtime shape/strides copied into an inline `Idx2` store. Since the
 carrier's offset width is part of its type, **every cell it later hands out is already
@@ -369,7 +372,8 @@ and there is nothing to narrow a *wrapped* array into. Capacity follows the sour
 carrier; `at.reindex<int32_t, 8>()` picks another.
 
 It debug-checks `index_fits` and is UB if you lie — the same contract as the view's
-`reindex`. `dispatch_index` accepts a carrier too, so the two arms above are just:
+`reindex` (a *static* `anyshape` head/tail dim too big for `Idx2` is a compile error
+instead). `dispatch_index` accepts a carrier too, so the two arms above are just:
 
 ```cpp
 dispatch_index(at, [&](auto a) { launch(a); });      // f instantiated for both widths

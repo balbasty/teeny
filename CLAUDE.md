@@ -384,8 +384,17 @@ t.reindex<int32_t>();           // no-copy, layout-PRESERVING retype of the OFFS
                                 //   (recast staticizes EXTENTS; reindex swaps the index type — orthogonal,
                                 //   compose). Narrows extents+dynamic strides to Idx2 (strides<S> pack kept);
                                 //   halves a dynamic view's footprint + 32-bit device offset math. Free form:
-                                //   reindex<int32_t>(t). Debug-guarded by t.index_fits<int32_t>() (signed reach;
-                                //   UB if the caller lies). shape32<...> == shape_as<int32_t,...> is the int32 shape.
+                                //   reindex<int32_t>(t). Debug-guarded by t.index_fits<int32_t>(); UB if the caller
+                                //   lies. shape32<...> == shape_as<int32_t,...> is the int32 shape.
+                                //   index_fits<Idx2>() = "can this view be re-expressed in Idx2?" — BOTH halves,
+                                //   ONE predicate (#489): every element OFFSET fits (signed reach max=Σ_{s>0}(e−1)s,
+                                //   min=Σ_{s<0}(e−1)s) AND every EXTENT VALUE is representable in Idx2 (reindex
+                                //   narrows the SHAPE too, and the shape is every downstream loop bound — numel(),
+                                //   size_front, the peel odometer, the hardened checks). The two come apart on a
+                                //   stride-0 BROADCAST axis: no reach whatever its extent, so only the extent half
+                                //   catches it (2^31+5 used to truncate to a NEGATIVE int32 -> loops ran 0 times).
+                                //   A STATIC over-wide extent is a COMPILE error from reindex (_reindex_extents,
+                                //   alias.h) instead of a runtime answer. Same predicate on anyrank.
                                 //   Idx2 = ANY integral type up to 64 bits, signed or unsigned (uint64_t/size_t
                                 //   included, #484): index_fits accumulates the POSITIVE reach in unsigned 64-bit
                                 //   and the NEGATIVE in signed 64-bit, so neither comparison can wrap. The SOURCE's
@@ -393,8 +402,6 @@ t.reindex<int32_t>();           // no-copy, layout-PRESERVING retype of the OFFS
                                 //   as_anyrank carrier over uint64_t/size_t metadata arrays): each raw extent/stride
                                 //   is only converted into a domain it provably fits, never blind-cast to long long
                                 //   first (#486 — a wrapped-negative extent used to read as "no reach" -> false fit).
-                                //   NB index_fits measures reachable OFFSETS, not extent VALUES: a stride-0 axis of
-                                //   huge extent passes, and reindex then truncates that extent (#487, open).
 t.is_dense();                   // dense block in SOME order (C/F/permuted); is_dense<L>() = exact L
 t.is_contiguous();              // C-order (numpy/pytorch default); is_contiguous<fcontiguous>() = F. alias of is_dense<L>
 t.clone();                      // materialise a dense row-major copy. Copies on the HOST -> the dynamic-shape
@@ -724,8 +731,9 @@ at.index_fits<int32_t>(); at.reindex<int32_t>();  // ...the same pair on the CAR
                                               //   must copy; MaxRank defaults to the source's — at.reindex<int32_t,8>()
                                               //   overrides). offset_t is a carrier template param, so EVERY cell it
                                               //   then hands out is int32-indexed, and the by-value store halves
-                                              //   (MaxRank*2*8B -> *4B). Debug-checked by index_fits (SIGNED reach
-                                              //   over all ndim dims); UB if the caller lies — the view's contract.
+                                              //   (MaxRank*2*8B -> *4B). Debug-checked by index_fits (offsets AND
+                                              //   extent values, over all ndim dims); UB if the caller lies — the
+                                              //   view's contract. A static Head/Tail dim too wide for Idx2 = compile error.
                                               //   as_anyrank DEDUCES offset_t from the caller's arrays, so it may be
                                               //   uint64_t/size_t; index_fits measures each value in that type (#486).
                                               //   dispatch_index(at, f) accepts a carrier and picks the arm.
