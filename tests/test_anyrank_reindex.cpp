@@ -154,5 +154,23 @@ int main() {
     static_assert(cs::is_same<decltype(freeform32.size(0)), cs::int32_t>::value, "free reindex narrows");
     if (freeform32.data != at32.data || freeform32.ndim != at32.ndim) return 29;
 
+    // ---- (10) PATHOLOGICAL strides near ~1e18 (#471 regression) --------------
+    // the internal `long long` accumulator must never overflow (UB) while deciding
+    // this — it must bail out (return false) cleanly instead. Verified UB-free
+    // under -fsanitize=undefined; mirrors the tensor-side case in test_reindex.cpp.
+    //   (a) two positive-stride axes: each axis's reach (6e18) alone fits `long long`,
+    //       but their SUM (1.2e19) would overflow it during accumulation.
+    cs::int64_t pshp[2] = {2, 2};
+    cs::int64_t pstr[2] = {6000000000000000000LL, 6000000000000000000LL};
+    if (as_anyrank(buf, pshp, pstr, 2).index_fits<cs::int32_t>()) return 30;
+    //   (b) a single axis whose (extent-1)*stride PRODUCT alone already overflows
+    //       `long long` (3 * 4e18 = 1.2e19) — must be caught before the multiply.
+    cs::int64_t qshp[1] = {4};
+    cs::int64_t qstr[1] = {4000000000000000000LL};
+    if (as_anyrank(buf, qshp, qstr, 1).index_fits<cs::int64_t>()) return 31;
+    //   (c) the same two shapes, mirrored onto the negative-stride (`mino`) side.
+    cs::int64_t nstr[2] = {-6000000000000000000LL, -6000000000000000000LL};
+    if (as_anyrank(buf, pshp, nstr, 2).index_fits<cs::int32_t>()) return 32;
+
     return 0;
 }
