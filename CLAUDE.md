@@ -744,27 +744,34 @@ dispatch_values([&](auto d, auto o, auto b){ kern<d.value,o.value,b.value>(v); }
 // BATCH idiom (one kernel per Sr, not per total rank): peel the runtime batch
 // dims, keep the trailing Sr "interesting" dims static. NB the arg is NEGATIVE
 // (keep the last |N|), like the tensor's peel_front — anyrank asserts N<0.
-for (auto cell : at.peel_front<-Sr>()) kernel<Sr>(cell);  // Sr=2 -> peel_front<-2>; cell is rank-Sr.
+for (auto cell : at.peel_front(Int<-Sr>())) kernel<Sr>(cell);  // Sr=2 -> Int<-2>(); cell is rank-Sr.
                                               //   The range-for is INCREMENTAL (advances the pointer +
                                               //   reuses the cell mapping, O(1)/batch-cell, not an
                                               //   O(#batch) decode). For a CPU thread / device block that
-                                              //   owns a chunk: for (cell : at.peel_front<-Sr>().subrange(lo,hi)).
+                                              //   owns a chunk: for (cell : at.peel_front(Int<-Sr>()).subrange(lo,hi)).
+                                              //   The keep-count also has an explicit-template spelling
+                                              //   (at.peel_front<-Sr>(), same call) — prefer the Int<> VALUE
+                                              //   form: deduced, so a carrier whose type is a template
+                                              //   parameter needs no `.template` (#473). Same for
+                                              //   peel_front_at / size_front below.
 for (auto [m, cell] : at.peel_front<-Sr>().enumerate()) f(m[0], cell);  // ALSO yield the BATCH multi-index
                                               //   m (m[d] = coord of batch axis d, m.rank() runtime, m.linear()
                                               //   the flat batch idx) — for a per-batch-axis table param[d][m[d]].
                                               //   OPT-IN (bare cell stays lean); m is a VIEW of the live odometer
                                               //   (don't store past the body). Or it.index(d)/nbatch()/linear()
                                               //   on the raw iterator. Composes with .subrange(lo,hi).
-auto cell = at.peel_front_at<-Sr>(i);         // i-th — random access (grid-stride i += nthreads, whose
+auto cell = at.peel_front_at(i, Int<-Sr>());  // i-th — random access (grid-stride i += nthreads, whose
                                               //   stride the odometer can't express — keep this path)
 auto cell = at.peel_front_at(i, shape<-1,c,c>{});  // FUSED peel+recast: cell has the target trailing shape
                                               //   DIRECTLY (static inner EXTENTS fold, -1 stays dynamic), no
                                               //   separate recast. == peel_front_at<-Sr>(i).recast<shape<-1,c,c>>()
-                                              //   with Sr=NewE::rank(). value-form -> no `.template`. STRIDES:
-                                              //   keeps runtime (layout_stride) by default — an anyrank has no
-                                              //   static stride info; add a layout (,ccontiguous{}) to fold them
-                                              //   (debug-checked promise) or dispatch_layout for a proven fold.
-auto nb = at.size_front<-Sr>();               // flattened batch count (no range built), same NEGATIVE arg
+                                              //   with Sr=NewE::rank(). A shape tag in that 2nd position is the
+                                              //   recast, an Int<> the keep-count — distinct types, never
+                                              //   confusable. STRIDES: keeps runtime (layout_stride) by default —
+                                              //   an anyrank has no static stride info; add a layout
+                                              //   (,ccontiguous{}) to fold them (debug-checked promise) or
+                                              //   dispatch_layout for a proven fold.
+auto nb = at.size_front(Int<-Sr>());          // flattened batch count (no range built), same NEGATIVE keep-count
 ```
 
 ### Static vs runtime values (important idiom)
@@ -846,12 +853,19 @@ does). Three selector vocabularies:
   value it needs to stay distinct from — the distinguishing question is "is
   there another *value-form* argument this could be mistaken for," not "is
   this the only argument at all."
+  `anyrank`'s batch idiom is the same shape (#473): `at.peel_front(Int<-Sr>())`,
+  `at.peel_front_at(lin, Int<-Sr>())`, `at.size_front(Int<-Sr>())` — the
+  keep-count is the only value-form argument (`lin` is a plain runtime index),
+  and a `shape<...>{}` in `peel_front_at`'s second position is the fused-recast
+  twin, a distinct type, so the two never collide.
 
 The **reductions** `sum`/`mean`/`max`/`min`/`prod` also take the `axis<...>` value
 form — `sum(a, axis<0,2>{})` == `sum<0,2>(a)`, and `sum<double>(a, axis<0>{})`
 keeps the leading TYPE as the accumulator (the value axis arg and the type arg
-never collide). `peel_front<N>` / `size_front<N>` (a COUNT, not an axis list) stay
-template-only.
+never collide). The TENSOR-side `peel_front<N>(t)` / `peel_front_at<N>(t,i)` /
+`size_front<N>(t)` take a COUNT, not an axis list, so they get no `axis<...>` tag —
+and being FREE functions they never need `.template` anyway. Their `anyrank`
+MEMBER siblings do, so those carry the `Int<N>()` value form above.
 
 ### Keyword arguments (the trailing-bag design rule)
 

@@ -290,8 +290,12 @@ and, being a deduced argument, needs no `.template` on a type-dependent receiver
     auto s = peel_at<0,1>(t, i);
     ```
 
-(`peel_front<N>` / `size_front<N>` take a **count**, not an axis list, so they stay
-template-only.) `peel_front<N>` handles **arbitrary batch rank**: for a `(*batch, *spatial, C)`
+(`peel_front<N>` / `size_front<N>` take a **count**, not an axis list, so there is no
+`axis<...>` tag for them — and being free functions they need no `.template` either
+way. Their `anyrank` counterparts are *members*, so those do take the count as a
+value: `at.peel_front(Int<-Sr>())`, see
+[dispatch](dispatch.md#peel_front-sr--the-batch-pattern-preferred).)
+`peel_front<N>` handles **arbitrary batch rank**: for a `(*batch, *spatial, C)`
 tensor, `peel_front<Nbatch>` yields `(*spatial, C)` sub-views to parallelise
 over — one per CPU thread or CUDA thread. Each sub-view already has the batch
 offset baked into its pointer, so the inner kernel sees only spatial strides.

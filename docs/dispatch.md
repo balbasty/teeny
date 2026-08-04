@@ -144,17 +144,34 @@ For `(*batch, *spatial, C)` data, peel the runtime number of leading batch dims
 and keep the trailing `Sr` "interesting" dims static. The kernel instantiates
 **once per `Sr`**, not once per total rank.
 
-The template argument is **negative** — you pass `-Sr` (`peel_front<-2>()` keeps
-the last two dims), the same "negative = keep the last `|N|`" sign rule as the
-tensor's [`peel_front`](structure.md#nd-peel--iterate-a-subset-of-axes). On
-`anyrank` it must be negative: a
-positive front-count would leave a *runtime* rank, which can't be a static view
-(it's a `static_assert`).
+The keep-count is **negative** — you pass `-Sr` (`-2` keeps the last two dims), the
+same "negative = keep the last `|N|`" sign rule as the tensor's
+[`peel_front`](structure.md#nd-peel--iterate-a-subset-of-axes). On `anyrank` it must
+be negative: a positive front-count would leave a *runtime* rank, which can't be a
+static view (it's a `static_assert`).
 
-```cpp
-for (auto cell : at.peel_front<-Sr>()) kernel<Sr>(cell);  // Sr=2 -> peel_front<-2>; cell is rank-Sr
-auto cell = at.peel_front_at<-Sr>(i);                     // i-th (grid-stride)
-```
+Write it as a static integer value, `Int<-Sr>()`:
+
+=== "value form"
+
+    ```cpp
+    for (auto cell : at.peel_front(Int<-Sr>())) kernel<Sr>(cell);  // Sr=2 -> Int<-2>(); cell is rank-Sr
+    auto cell = at.peel_front_at(i, Int<-Sr>());                   // i-th (grid-stride)
+    auto nb   = at.size_front(Int<-Sr>());                         // flattened batch count
+    ```
+
+=== "template form"
+
+    ```cpp
+    for (auto cell : at.peel_front<-Sr>()) kernel<Sr>(cell);
+    auto cell = at.peel_front_at<-Sr>(i);
+    auto nb   = at.size_front<-Sr>();
+    ```
+
+Both spellings are the same call. Reach for the value form first: because the
+keep-count is *deduced* from the argument, it works unchanged when the carrier's
+type is a template parameter — `at.peel_front<-Sr>()` there needs the
+`at.template peel_front<-Sr>()` disambiguator, and the value form needs nothing.
 
 Each `cell` is a `dextents<_,Sr>` view (inner extents dynamic). Recover the static
 inner dims by peeling **directly** to the target shape — one call, no separate
@@ -171,7 +188,9 @@ is the number of KEPT trailing dims; a static extent folds, a `-1` stays dynamic
 by default (an `anyrank` has no compile-time stride info); pass `,ccontiguous{}` to fold
 them (a debug-checked promise) or run [`dispatch_layout`](#dispatch_layout--recover-static-contiguity)
 on the result for a runtime-proven fold. Fusing also drops the hand-kept
-`Sr ≡ recast-shape rank` invariant.
+`Sr ≡ recast-shape rank` invariant. The two value forms never collide: a `shape<…>{}`
+in that second position asks for the fused recast, an `Int<-Sr>()` just names the
+keep-count.
 
 ### Static trailing shape — carry the static inner dims in the carrier's type
 
@@ -254,11 +273,11 @@ than an O(#batch) index decode. Two ways to parallelize:
 
 ```cpp
 // device grid-stride: random access, each thread strides by nthreads
-for (offset_t i = tid; i < at.size_front<-Sr>(); i += nthreads)
-    kernel<Sr>(at.peel_front_at<-Sr>(i));
+for (offset_t i = tid; i < at.size_front(Int<-Sr>()); i += nthreads)
+    kernel<Sr>(at.peel_front_at(i, Int<-Sr>()));
 
 // CPU thread / device BLOCK owning a contiguous chunk: incremental sweep of [lo,hi)
-for (auto cell : at.peel_front<-Sr>().subrange(lo, hi)) kernel<Sr>(cell);
+for (auto cell : at.peel_front(Int<-Sr>()).subrange(lo, hi)) kernel<Sr>(cell);
 ```
 
 Use `peel_front_at` (random access) for grid-stride — the odometer can't express a

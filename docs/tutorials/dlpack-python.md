@@ -87,7 +87,7 @@ _TNY_API void invert_cell(const In & in, Out & out, long i) {
     batch dims — `O(#batch dims)` integer ops **per call**. That's the right tool for
     a **grid-stride** loop (`i += nthreads`), where consecutive `i` for one worker are
     a stride apart. When a worker instead sweeps a **contiguous** block, prefer the
-    range-for `for (auto cell : in.peel_front<-2>())`, which is *incremental* — it
+    range-for `for (auto cell : in.peel_front(Int<-2>()))`, which is *incremental* — it
     advances the pointer and reuses the cell mapping (O(1) per cell, no re-decode) — and
     `.subrange(lo, hi)` for one worker's chunk. Next to a `C×C` inversion the decode is
     noise, but for a light per-cell body it's a 2–3× swing. See
@@ -97,9 +97,12 @@ _TNY_API void invert_cell(const In & in, Out & out, long i) {
 
 ## 3. The two drivers (CPU threads and CUDA), one line apart
 
-`size_front<-2>()` is the **batch count** — the product of every axis but the last
-two — read straight from the shape, without building a peel range. Both drivers
+`size_front(Int<-2>())` is the **batch count** — the product of every axis but the
+last two — read straight from the shape, without building a peel range. Both drivers
 index a single flat `[0, n)` loop no matter how many batch axes the caller passed.
+The keep-count goes in as a *value* (`Int<-2>()`), which keeps these helpers readable
+even though `In`/`Out` are template parameters: the equivalent `<-2>` spelling would
+need the `in.template size_front<-2>()` disambiguator there.
 
 ```cpp
 #include <thread>
@@ -108,7 +111,7 @@ index a single flat `[0, n)` loop no matter how many batch axes the caller passe
 // CPU: split the batch across threads (grid-stride so any n / nthreads works).
 template <long c, class In, class Out>
 void invert_cpu(const In & in, Out & out) {
-    const long n = in.template size_front<-2>();                       // product of all batch axes
+    const long n = in.size_front(Int<-2>());                       // product of all batch axes
     unsigned nthreads = std::max(1u, std::thread::hardware_concurrency());   // never 0
     std::vector<std::thread> pool;
     for (unsigned t = 0; t < nthreads; ++t)
@@ -123,14 +126,14 @@ void invert_cpu(const In & in, Out & out) {
 #ifdef __CUDACC__
 template <long c, class In, class Out>
 __global__ void invert_kernel(In in, Out out) {
-    const long n = in.template size_front<-2>();
+    const long n = in.size_front(Int<-2>());
     for (long i = blockIdx.x * blockDim.x + threadIdx.x; i < n;
              i += gridDim.x * blockDim.x)
         invert_cell<c>(in, out, i);
 }
 template <long c, class In, class Out>
 void invert_cuda(const In & in, Out & out) {
-    const long n = in.template size_front<-2>();
+    const long n = in.size_front(Int<-2>());
     if (n == 0) return;                                   // a 0-block launch is a CUDA error
     const int block = 256, grid = (int)((n + block - 1) / block);
     invert_kernel<c><<<grid, block>>>(in, out);
@@ -144,7 +147,7 @@ void invert_cuda(const In & in, Out & out) {
     a stride apart — it needs the random-access `peel_front_at(i)`, used here for *both*
     `in` and `out` at the same index. If a worker instead owns a **contiguous** block of
     the batch, a single-tensor sweep can use the incremental range-for and
-    `for (auto cell : t.peel_front<-2>().subrange(lo, hi))` — seed once, then O(1) per
+    `for (auto cell : t.peel_front(Int<-2>()).subrange(lo, hi))` — seed once, then O(1) per
     cell (a 2–3× swing for a light body; see
     [Efficient kernels §3](../efficient-kernels.md#3-the-batch-batch-idiom)). For a two-input
     kernel like this one, either keep the shared index (as above) or advance one range

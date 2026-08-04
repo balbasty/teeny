@@ -5,6 +5,27 @@
 using namespace tny;
 namespace cs = cuda::std;
 
+// ---- #473: the anyrank batch idiom called on a TYPE-DEPENDENT receiver ------
+// `At` is a template parameter, so `at.peel_front<-2>()` (etc.) would need the
+// `.template` disambiguator. These helpers deliberately spell the VALUE form and
+// must compile with NO `.template` anywhere — that is the whole point of the twins.
+template <class At> long dep_size_front(const At & at) {
+    return static_cast<long>(at.size_front(Int<-2>()));
+}
+template <class At> long dep_peel_front(const At & at) {
+    long acc = 0;
+    for (auto cell : at.peel_front(Int<-2>())) acc += static_cast<long>(sum(cell));
+    return acc;
+}
+template <class At> auto dep_peel_front_at(const At & at, long lin) {
+    return at.peel_front_at(lin, Int<-2>());
+}
+// ...and the fused-recast twin still resolves on the same receiver (a shape tag in
+// the second position is the recast form, a static integer the keep-count).
+template <class At> auto dep_peel_front_recast(const At & at, long lin) {
+    return at.peel_front_at(lin, shape<-1,4>{});
+}
+
 int main() {
     auto t = local<double, shape<2,3,4>>(); t.iota_(0.0, 1.0);
 
@@ -85,6 +106,55 @@ int main() {
     // both forms coexist: the explicit-template form still selects correctly
     static_assert(cs::is_same<decltype(t.slice_along<1>(2)), decltype(t.slice_along(axis<1>{}, 2))>::value,
                   "slice_along explicit-template and value forms agree");
+
+    // ---- #473: anyrank peel_front / peel_front_at / size_front value forms ----
+    // The keep-count is the single compile-time selector, so it takes `Int<-Sr>()`
+    // (the `t.squeeze(Int<1>())` spelling) — same result, no `.template` needed.
+    double dbuf[24]; for (long i = 0; i < 24; ++i) dbuf[i] = double(i);
+    long dshape[3] = {2,3,4}, dstride[3] = {12,4,1};
+    auto at = as_anyrank(dbuf, dshape, dstride, 3);
+
+    // size_front: same type AND same value as the template form
+    static_assert(cs::is_same<decltype(at.size_front<-2>()), decltype(at.size_front(Int<-2>()))>::value,
+                  "size_front value form == template form");
+    if (at.size_front(Int<-2>()) != at.size_front<-2>()) return 13;
+    if (at.size_front(Int<-1>()) != at.size_front<-1>()) return 14;
+
+    // peel_front: same range type, same cells
+    static_assert(cs::is_same<decltype(at.peel_front<-2>()), decltype(at.peel_front(Int<-2>()))>::value,
+                  "peel_front value form == template form");
+    if (at.peel_front(Int<-2>()).size() != at.peel_front<-2>().size()) return 15;
+    {
+        long n = 0, vacc = 0, tacc = 0;
+        for (auto cell : at.peel_front(Int<-2>())) { vacc += (long)sum(cell); ++n; }
+        for (auto cell : at.peel_front<-2>())      { tacc += (long)sum(cell); }
+        if (n != 2 || vacc != tacc) return 16;
+    }
+
+    // peel_front_at: same cell type, same base pointer and elements
+    static_assert(cs::is_same<decltype(at.peel_front_at<-2>(0)), decltype(at.peel_front_at(0, Int<-2>()))>::value,
+                  "peel_front_at value form == template form");
+    for (long b = 0; b < 2; ++b) {
+        auto cv = at.peel_front_at(b, Int<-2>());
+        auto ct = at.peel_front_at<-2>(b);
+        if (cv.data() != ct.data()) return 17;
+        if (cv(2,3) != dbuf[b*12 + 2*4 + 3]) return 18;
+    }
+
+    // the value form does NOT collide with the fused-recast twin `peel_front_at(lin, NewE{})`:
+    // a `shape<...>` tag in the same position still selects the recast overload.
+    auto rc = at.peel_front_at(1, shape<-1,4>{});
+    static_assert(decltype(rc.extent(Int<1>()))::value == 4, "recast twin still folds its static extent");
+    if (rc(2,3) != dbuf[12 + 2*4 + 3]) return 19;
+
+    // ...and all of it works through a TYPE-DEPENDENT receiver with no `.template`.
+    if (dep_size_front(at) != at.size_front<-2>()) return 20;
+    {
+        long tacc = 0; for (auto cell : at.peel_front<-2>()) tacc += (long)sum(cell);
+        if (dep_peel_front(at) != tacc) return 21;
+    }
+    if (dep_peel_front_at(at, 1).data() != at.peel_front_at<-2>(1).data()) return 22;
+    if (dep_peel_front_recast(at, 1)(2,3) != dbuf[12 + 2*4 + 3]) return 23;
 
     return 0;
 }
