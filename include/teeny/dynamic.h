@@ -469,7 +469,12 @@ struct anyrank {
      *         Accumulates in a wide type, with the accumulation itself overflow-checked
      *         (#471 — safe even against adversarial/corrupted shape/stride, e.g. off a
      *         raw DLPack import); a broadcast (stride-0) axis adds 0. The precondition
-     *         `reindex<Idx2>()` debug-checks. */
+     *         `reindex<Idx2>()` debug-checks.
+     *
+     *         `Idx2` must itself fit within the accumulator's range (signed up to 64
+     *         bits, unsigned up to 32 bits) — a `static_assert` in the shared reach test
+     *         rejects a 64-bit unsigned `Idx2` (uint64_t / unsigned long long) at compile
+     *         time rather than silently always returning `false` (#475). */
     template <class Idx2>
     _TNY_API bool index_fits() const noexcept {
         // `shape`/`stride` are themselves callable (1-D tensor members), so they
