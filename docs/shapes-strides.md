@@ -125,6 +125,14 @@ address math in 32-bit. Guard it with `t.index_fits<int32_t>()` — a signed-rea
 check that handles negative-stride (flipped) and broadcast views — and only narrow
 when the element span provably fits. See [Performance](performance.md).
 
+`index_fits` reads each extent and stride in the view's **own** index type, so a
+shape you spelled as `shape_as<uint64_t, …>` is measured exactly, whatever its
+values: nothing is quietly reinterpreted as a signed number on the way in. It is a
+question about reachable **offsets** only, though — an axis that reaches nothing
+(stride 0) passes however large its extent is, and `reindex` would then narrow that
+extent along with everything else, so check the extents yourself if a broadcast axis
+can be bigger than the target index type.
+
 The rank-erased [`anyrank`](dispatch.md) carrier answers the same two calls
 (`at.index_fits<int32_t>()` / `at.reindex<int32_t>()`, free form: `index_fits<int32_t>(at)`
 / `reindex<int32_t>(at)`), so a device boundary can narrow the whole carrier once —

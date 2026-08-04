@@ -221,5 +221,46 @@ int main() {
         if (atu.fixed<3>()(i,j,k) != v(i,j,k)) return 42;
     if (!index_fits<cs::size_t>(at)) return 43;               // the LP64 spelling, equally ordinary
 
+    // ---- (13) UNSIGNED carrier metadata (#486) -------------------------------
+    // `as_anyrank(data, shape, stride, ndim)` deduces the carrier's offset type from
+    // the CALLER's arrays, so a routine C-interop boundary that already holds its
+    // metadata as `uint64_t`/`size_t` builds a carrier whose raw extents/strides can
+    // exceed `LLONG_MAX`. The reach test used to `static_cast` each one to `long long`
+    // first, wrapping it NEGATIVE: a wrapped extent read as "size <= 1, no reach", so
+    // an axis with an enormous true reach contributed nothing and the carrier looked
+    // narrowable — a false positive feeding `reindex`'s UB contract. This is the
+    // reachability path for that bug; the tensor-side twin is in test_reindex.cpp.
+    //   (a) THE repro: extent 2^63+2, stride 1 -> a true reach of 2^63+1.
+    cs::uint64_t ushp[1] = { 9223372036854775810ULL }, ustr[1] = { 1ULL };
+    if (as_anyrank(buf, ushp, ustr, 1).index_fits<cs::int32_t>()) return 44;
+    //       ...and that same reach does fit a uint64_t index — now computed exactly,
+    //       rather than reached via an extent that wrapped to "no reach at all".
+    if (!as_anyrank(buf, ushp, ustr, 1).index_fits<cs::uint64_t>()) return 45;
+    //   (b) the same hazard on a STRIDE: 2^63+2 is a large POSITIVE stride in an
+    //       unsigned index type; the old cast read it as negative and accumulated it
+    //       on the wrong (min) side.
+    cs::uint64_t vshp[1] = { 2ULL }, vstr[1] = { 9223372036854775810ULL };
+    if ( as_anyrank(buf, vshp, vstr, 1).index_fits<cs::int32_t>())  return 46;
+    if ( as_anyrank(buf, vshp, vstr, 1).index_fits<cs::int64_t>())  return 47;   // > INT64_MAX
+    if (!as_anyrank(buf, vshp, vstr, 1).index_fits<cs::uint64_t>()) return 48;   // ...fits uint64
+    //   (c) the int64 edge, exactly: reach == e-1, so e == 2^63 fits int64 (reach
+    //       INT64_MAX) and e == 2^63+1 does not — only an exact `e-1` separates them.
+    cs::uint64_t eshp1[1] = { 9223372036854775808ULL }, eshp2[1] = { 9223372036854775809ULL };
+    if (!as_anyrank(buf, eshp1, ustr, 1).index_fits<cs::int64_t>())  return 49;
+    if ( as_anyrank(buf, eshp2, ustr, 1).index_fits<cs::int64_t>())  return 50;
+    if (!as_anyrank(buf, eshp2, ustr, 1).index_fits<cs::uint64_t>()) return 51;
+    //   (d) an ordinary unsigned-metadata carrier is untouched — and narrows, peels
+    //       and addresses exactly as its int64 twin does.
+    cs::uint64_t ushp3[3] = {2,3,4}, ustr3[3] = {12,4,1};
+    auto un = as_anyrank(buf, ushp3, ustr3, 3);
+    if (!un.index_fits<cs::int32_t>()) return 52;
+    auto un32 = un.reindex<cs::int32_t>();
+    for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j) for (long k = 0; k < 4; ++k)
+        if (un32.fixed<3>()(i,j,k) != v(i,j,k)) return 53;
+    //   (e) a stride-0 axis of huge extent still has no reach (unchanged — this test
+    //       is about reachable OFFSETS, not extent values; see #487).
+    cs::uint64_t bshp2[1] = { 9223372036854775810ULL }, bstr2[1] = { 0ULL };
+    if (!as_anyrank(buf, bshp2, bstr2, 1).index_fits<cs::int32_t>()) return 54;
+
     return 0;
 }

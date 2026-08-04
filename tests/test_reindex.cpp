@@ -143,5 +143,42 @@ int main() {
         if (u64(i,j,k) != t(i,j,k)) return 31;
     if (!t.index_fits<cs::size_t>()) return 32;               // the LP64 spelling, equally ordinary
 
+    // (11) RAW EXTENTS/STRIDES ABOVE `long long` (#486). A view's own index type may
+    // be UNSIGNED 64-bit (`shape_as<uint64_t, ...>`), so a raw extent or stride can
+    // exceed `LLONG_MAX`. The reach test used to `static_cast` each one to
+    // `long long` first, wrapping it NEGATIVE — an extent then read as "size <= 1,
+    // no reach" and the whole view looked narrowable. Each value is now only
+    // converted into a domain it is provably representable in.
+    //   (a) THE false positive: extent 2^63+2, stride 1 -> a true reach of 2^63+1,
+    //       which obviously does not fit int32 (it used to answer `true`).
+    using UE = shape_as<cs::uint64_t, -1>;
+    auto ubig = wrap(buf, UE{9223372036854775810ULL}, {cs::uint64_t(1)});
+    if (ubig.index_fits<cs::int32_t>()) return 33;
+    //       ...and the SAME reach genuinely fits a uint64_t index — now computed
+    //       exactly (the positive reach accumulates in an unsigned 64-bit domain),
+    //       not arrived at via an extent that wrapped to "no reach at all".
+    if (!ubig.index_fits<cs::uint64_t>()) return 34;
+    //   (b) the same hazard on a STRIDE: 2^63+2 is a large POSITIVE stride in an
+    //       unsigned index type; the old cast read it as a negative one and
+    //       accumulated it on the wrong (min) side.
+    auto usbig = wrap(buf, UE{2}, {cs::uint64_t(9223372036854775810ULL)});
+    if (usbig.index_fits<cs::int32_t>())   return 35;
+    if (usbig.index_fits<cs::int64_t>())   return 36;   // 2^63+2 > INT64_MAX
+    if (!usbig.index_fits<cs::uint64_t>()) return 37;   // ...but does fit uint64
+    //   (c) ordinary geometries in an unsigned index type are untouched.
+    auto usmall = wrap(buf, shape_as<cs::uint64_t, -1, -1>{2, 3}, {cs::uint64_t(3), cs::uint64_t(1)});
+    if (!usmall.index_fits<cs::int32_t>()) return 38;
+    if (!usmall.index_fits<cs::uint8_t>()) return 39;   // reach 4
+    //   (d) an unsigned extent straddling the `long long` edge, with a unit stride —
+    //       the reach is `e-1`, so the int64 answer must flip exactly at e == 2^63:
+    //       e == 2^63 reaches INT64_MAX (fits), e == 2^63+1 reaches 2^63 (does not).
+    //       Both still fit uint64, and only an exact e-1 can tell them apart.
+    if (!wrap(buf, UE{9223372036854775808ULL}, {cs::uint64_t(1)}).index_fits<cs::int64_t>())  return 40;
+    if ( wrap(buf, UE{9223372036854775809ULL}, {cs::uint64_t(1)}).index_fits<cs::int64_t>())  return 41;
+    if (!wrap(buf, UE{9223372036854775809ULL}, {cs::uint64_t(1)}).index_fits<cs::uint64_t>()) return 42;
+    //   (e) a stride-0 axis of huge extent still has no reach (unchanged — and the
+    //       reason this test is about OFFSETS, not extent values; see #487).
+    if (!wrap(buf, UE{9223372036854775810ULL}, {cs::uint64_t(0)}).index_fits<cs::int32_t>()) return 43;
+
     return 0;
 }

@@ -394,11 +394,28 @@ template <class Obj> struct _stride_method_fn {
     template <class I> _TNY_API auto operator()(I i) const noexcept { return obj->stride(i); }
 };
 
+// Is a raw extent/stride NEGATIVE? Asked of the carrier's OWN index type, which may
+// be signed or unsigned — an unsigned one simply has no negative values, and saying
+// so with `if constexpr` also keeps compilers from warning about the tautological
+// `v < 0`. Comparing across signedness instead (e.g. a `uint64_t` value against a
+// signed `0`) is the usual-arithmetic-conversions trap that #478's assert had to
+// dodge as well: the signed operand converts, and the comparison answers wrongly.
+template <class V> _TNY_API constexpr bool _raw_negative(V v) noexcept {
+    if constexpr (cs::numeric_limits<V>::is_signed) return v < V(0);
+    else                                            { (void)v; return false; }
+}
+
 /** @brief `max = Σ_{s>0}(e−1)·s`, `min = Σ_{s<0}(e−1)·s` across `n` axes
  *         (`extent_at(r)`/`stride_at(r)` read axis `r`); fits ⟺ `min..max ⊆
  *         Idx2`. A size-1/0 axis has no reach and adds nothing (so a
  *         broadcast/stride-0 axis is always safe). Shared by
  *         `tensor::index_fits` and `anyrank::index_fits` — one formula.
+ *
+ *         OFFSETS, NOT EXTENT VALUES: this answers "does every reachable element
+ *         OFFSET fit `Idx2`?" — it does NOT check that each extent's own VALUE is
+ *         representable in `Idx2`. The two only come apart for an axis with no
+ *         reach (a stride-0 broadcast axis of huge extent), where `reindex<Idx2>()`
+ *         would then truncate that extent while narrowing the metadata (#487).
  *
  *         SPLIT ACCUMULATORS (#484): the positive and the negative reach never
  *         interact, so each is accumulated — and compared against `Idx2`'s own
@@ -420,7 +437,26 @@ template <class Obj> struct _stride_method_fn {
  *         carrier (e.g. a corrupted/adversarial DLPack import) can hand this
  *         pathological strides whose reach exceeds even 64 bits; as soon as
  *         that's detected the reach clearly exceeds `Idx2` too, so this returns
- *         `false` immediately rather than continuing into UB. */
+ *         `false` immediately rather than continuing into UB.
+ *
+ *         NO LOSSY CAST OF THE RAW INPUT (#486): the per-axis extent/stride
+ *         arrive in the CARRIER's own index type — which `as_anyrank(data,
+ *         shape, stride, ndim)` deduces from the caller's arrays, so an ordinary
+ *         C-interop boundary with `uint64_t`/`size_t` metadata can hand over
+ *         values above `long long`'s range. Each is therefore only ever
+ *         converted into a domain it is provably representable in: `e−1` into
+ *         `UW` (exact for EVERY extent, either signedness) and a positive stride
+ *         likewise, so the positive side stays exact over the whole unsigned
+ *         range; the one case a 64-bit accumulator cannot hold — `e−1` beyond
+ *         `long long` on an axis with a NEGATIVE stride, whose reach is then at
+ *         or below `LLONG_MIN` — is rejected outright. (Both callers read their
+ *         extents and strides out of ONE index type, so that combination needs a
+ *         type that is unsigned for the extent and signed for the stride and is
+ *         unreachable through them; the guard is what makes the cast provably
+ *         exact, not a case to tune.) A blind `static_cast<long long>` used to
+ *         wrap such an extent to a negative number, which then read as
+ *         "size ≤ 1, no reach" and made a view with an enormous true reach look
+ *         narrowable. */
 template <class Idx2, class N, class ExtentAt, class StrideAt>
 _TNY_API bool _signed_reach_fits(N n, const ExtentAt & extent_at, const StrideAt & stride_at) noexcept {
     using W  = long long;             // negative side: reaches every Idx2::min()
@@ -430,35 +466,54 @@ _TNY_API bool _signed_reach_fits(N n, const ExtentAt & extent_at, const StrideAt
     // (`__int128`, sizeof 16), which teeny has no index vocabulary for anyway.
     static_assert(cs::numeric_limits<Idx2>::is_integer && sizeof(Idx2) <= 8,
                   "index_fits<Idx2>(): Idx2 must be an integral type no wider than 64 bits");
+    // The raw per-axis types, kept as they come (`offset_t` / `index_type`): every
+    // comparison below is made at the value's OWN signedness, and each conversion
+    // is guarded by the range check that makes it exact. Same 64-bit ceiling as
+    // `Idx2`: a wider carrier index would have values no accumulator here can hold.
+    using E = cs::decay_t<decltype(extent_at(N(0)))>;
+    using S = cs::decay_t<decltype(stride_at(N(0)))>;
+    static_assert(cs::numeric_limits<E>::is_integer && sizeof(E) <= 8 &&
+                  cs::numeric_limits<S>::is_integer && sizeof(S) <= 8,
+                  "index_fits<Idx2>(): the extents/strides must be integral types no wider than 64 bits");
     constexpr UW umax = (cs::numeric_limits<UW>::max)();
+    constexpr UW wmax = static_cast<UW>((cs::numeric_limits<W>::max)());
     constexpr W  wmin = (cs::numeric_limits<W>::min)();
     UW maxo = 0;
     W  mino = 0;
     for (N r = 0; r < n; ++r) {
-        const W e = static_cast<W>(extent_at(r));
-        if (e <= W(1)) continue;                              // size-1/0 axis: no reach
-        const W em1 = e - W(1);                               // >= 1
-        const W s = static_cast<W>(stride_at(r));
-        if (s > W(0)) {
-            // Both operands are positive `W` values, so the widening to `UW` is
-            // exact. The guards are the unsigned analogues of the signed ones
-            // below: `umax / us` is the largest multiplier that keeps the
-            // product representable (floor division, `us >= 1` so never a
-            // divide by zero), and `umax - reach` the largest sum that keeps
-            // the accumulation representable. Unsigned overflow is defined to
-            // WRAP rather than to be UB, which makes it silent — a wrapped
-            // value would answer this query wrongly, so it is still checked
-            // before the fact, never after.
-            const UW us = static_cast<UW>(s), ue = static_cast<UW>(em1);
-            if (ue > umax / us) return false;                 // (e-1)*s alone would overflow UW
-            const UW reach = ue * us;
-            if (maxo > umax - reach) return false;             // accumulating it would overflow UW
-            maxo += reach;
-        } else if (s < W(0)) {
-            if (s < wmin / em1) return false;                  // (e-1)*s alone would overflow W
-            const W reach = em1 * s;
+        const E e = extent_at(r);
+        if (e <= E(1)) continue;                              // size-1/0 axis: no reach
+        // `e > 1`, so widening it to `UW` is exact whether `E` is signed or not —
+        // and `UW` holds every 64-bit extent, so `e-1` never needs a range check.
+        const UW uem1 = static_cast<UW>(e) - UW(1);           // >= 1
+        const S s = stride_at(r);
+        if (_raw_negative(s)) {
+            // The negative side accumulates in `W`, so `e-1` has to land there too.
+            // It cannot when the raw extent exceeds `long long`: the axis's reach is
+            // then `-(e-1)·|s| <= -2^63`, i.e. at or past `W`'s (and every `Idx2`'s)
+            // floor, so the only value it could ever represent is exactly `LLONG_MIN`
+            // — reject rather than special-case that one degenerate combination.
+            if (uem1 > wmax) return false;
+            const W em1 = static_cast<W>(uem1);
+            const W sw  = static_cast<W>(s);                   // s < 0 => S is signed => exact
+            if (sw < wmin / em1) return false;                 // (e-1)*s alone would overflow W
+            const W reach = em1 * sw;
             if (mino < wmin - reach) return false;             // accumulating it would overflow W
             mino += reach;
+        } else if (s != S(0)) {
+            // A positive stride widens to `UW` exactly from either signedness, as
+            // `e-1` already did. The guards are the unsigned analogues of the signed
+            // ones above: `umax / us` is the largest multiplier that keeps the
+            // product representable (floor division, `us >= 1` so never a divide by
+            // zero), and `umax - reach` the largest sum that keeps the accumulation
+            // representable. Unsigned overflow is defined to WRAP rather than to be
+            // UB, which makes it silent — a wrapped value would answer this query
+            // wrongly, so it is still checked before the fact, never after.
+            const UW us = static_cast<UW>(s);
+            if (uem1 > umax / us) return false;                // (e-1)*s alone would overflow UW
+            const UW reach = uem1 * us;
+            if (maxo > umax - reach) return false;             // accumulating it would overflow UW
+            maxo += reach;
         }
         // s == 0: no reach, nothing to accumulate (a broadcast axis stays safe)
     }
@@ -1775,7 +1830,14 @@ public:
      *         `Idx2` may be ANY integral type up to 64 bits, signed or unsigned
      *         (`uint64_t`/`size_t` included): the positive and negative reach
      *         accumulate in separate unsigned/signed 64-bit domains, so neither
-     *         comparison can wrap (#484). */
+     *         comparison can wrap (#484). The VIEW's own index type may equally be
+     *         unsigned 64-bit (`shape_as<uint64_t, ...>`): each raw extent/stride is
+     *         measured in the type it is stored in, never blind-cast down to a signed
+     *         one first (#486).
+     *
+     *         It answers a question about reachable OFFSETS, not about extent VALUES:
+     *         an axis with no reach (stride 0) passes however large its extent is, and
+     *         `reindex` narrows that extent along with everything else (#487). */
     template <class Idx2>
     _TNY_API bool index_fits() const noexcept {
         return _detail::_signed_reach_fits<Idx2>(rank(),

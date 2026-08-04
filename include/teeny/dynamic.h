@@ -474,7 +474,15 @@ struct anyrank {
      *         `Idx2` may be ANY integral type up to 64 bits, signed or unsigned
      *         (`uint64_t`/`size_t` included): the positive and negative reach accumulate
      *         in separate unsigned/signed 64-bit domains, so neither comparison can
-     *         wrap (#484). */
+     *         wrap (#484). The CARRIER's own `offset_t` may equally be unsigned 64-bit —
+     *         `as_anyrank(data, shape, stride, ndim)` deduces it from the caller's
+     *         arrays, so a C-interop boundary holding `uint64_t`/`size_t` metadata lands
+     *         here with raw values above `long long`'s range; each is measured in the
+     *         type it is stored in rather than blind-cast down first (#486).
+     *
+     *         Like the view's, this is a question about reachable OFFSETS, not about
+     *         extent VALUES: a stride-0 axis passes however large its extent is, and
+     *         `reindex` narrows that extent along with everything else (#487). */
     template <class Idx2>
     _TNY_API bool index_fits() const noexcept {
         // `shape`/`stride` are themselves callable (1-D tensor members), so they
