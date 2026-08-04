@@ -379,6 +379,12 @@ _TNY_API auto _squeeze_sorted(Tn && t, cs::index_sequence<I...>) noexcept
 // Adapts a per-axis METHOD (`obj->extent(i)` / `obj->stride(i)`) into a plain
 // callable `fn(i)`. `anyrank`'s `shape`/`stride` are already callable (1-D
 // tensor members) and pass straight through — no adapter needed there.
+// This indirection isn't just accessor-vs-member bookkeeping: a "simpler"
+// direct `shape()[i]`/`strides()[i]` call doesn't compile for a rank-0
+// tensor (CCCL's `layout_right::mapping::stride` is unguarded/ill-formed
+// below rank 1), so routing through `tensor::stride(d)` specifically
+// preserves that method's own `if constexpr (rank()==0)` guard — don't
+// simplify this back to a direct member call, it would silently break rank-0.
 template <class Obj> struct _extent_method_fn {
     Obj const * obj;
     template <class I> _TNY_API auto operator()(I i) const noexcept { return obj->extent(i); }
@@ -394,7 +400,7 @@ template <class Obj> struct _stride_method_fn {
  *         adds nothing (so a broadcast/stride-0 axis is always safe). Shared
  *         by `tensor::index_fits` and `anyrank::index_fits` — one formula. */
 template <class Idx2, class N, class ExtentAt, class StrideAt>
-_TNY_API bool _signed_reach_fits(N n, ExtentAt extent_at, StrideAt stride_at) noexcept {
+_TNY_API bool _signed_reach_fits(N n, const ExtentAt & extent_at, const StrideAt & stride_at) noexcept {
     using W = long long;
     W maxo = 0, mino = 0;
     for (N r = 0; r < n; ++r) {

@@ -707,6 +707,7 @@ dispatch_index<Idx2=int32_t>(v, f);           // the primitive: narrow ONE fixed
                                               //   index_fits, else keep it; f instantiated for both widths.
                                               //   Batch: for (cell : at.peel_front<-Sr>()) dispatch_index(cell, f);
 at.index_fits<int32_t>(); at.reindex<int32_t>();  // ...the same pair on the CARRIER (#467) — the GPU spelling,
+                                              //   free form: index_fits<int32_t>(at); reindex<int32_t>(at).
                                               //   since dispatch_index is _TNY_HOST/per-cell and the batch idiom
                                               //   keeps ndim runtime. reindex keeps the data ptr / Space / static
                                               //   anyshape Head+Tail (only their extents' index type follows Idx2)

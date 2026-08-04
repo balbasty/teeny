@@ -494,13 +494,15 @@ struct anyrank {
  *         style functor) can write `reindex<Idx2>(at)` / `index_fits<Idx2>(at)`
  *         without the `.template` disambiguator. (`Idx2` is a TYPE, so there is
  *         no value form.) `anyrank::reindex` is const-only (unlike `tensor`'s
- *         mutable/const pair), so only one overload is needed here; `MaxRank`
- *         keeps the member's own default (the carrier's `max_rank`) but stays
- *         overridable, same as calling the member directly. */
-template <class Idx2, class T, class offset_t, class Meta, storage Space, class Tail, class TailS, class Head, class HeadS,
-          cs::size_t MaxRank = anyrank<T, offset_t, Meta, Space, Tail, TailS, Head, HeadS>::max_rank>
+ *         mutable/const pair), so only one overload is needed here. No `MaxRank`
+ *         parameter: it would sit 10th in the deduced list, so a caller could not
+ *         practically override it without spelling out every preceding deduced
+ *         parameter by hand; this free form always takes the member's own default
+ *         (the carrier's `max_rank`) — call the member directly (`at.reindex<Idx2,
+ *         8>()`) when a custom capacity is needed. */
+template <class Idx2, class T, class offset_t, class Meta, storage Space, class Tail, class TailS, class Head, class HeadS>
 _TNY_API auto reindex(const anyrank<T, offset_t, Meta, Space, Tail, TailS, Head, HeadS> & a) {
-    return a.template reindex<Idx2, MaxRank>();
+    return a.template reindex<Idx2>();
 }
 template <class Idx2, class T, class offset_t, class Meta, storage Space, class Tail, class TailS, class Head, class HeadS>
 _TNY_API bool index_fits(const anyrank<T, offset_t, Meta, Space, Tail, TailS, Head, HeadS> & a) {
