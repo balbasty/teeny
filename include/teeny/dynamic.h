@@ -442,8 +442,10 @@ struct anyrank {
      *         type `Idx2`? The whole-carrier twin of the view's `index_fits<Idx2>()`,
      *         with the same SIGNED reach contract (teeny has negative-stride views):
      *         `max = Σ_{s>0}(e−1)·s`, `min = Σ_{s<0}(e−1)·s`; fits ⟺ `min..max` ⊆ `Idx2`.
-     *         Accumulates in a wide type; a broadcast (stride-0) axis adds 0. The
-     *         precondition `reindex<Idx2>()` debug-checks. */
+     *         Accumulates in a wide type, with the accumulation itself overflow-checked
+     *         (#471 — safe even against adversarial/corrupted shape/stride, e.g. off a
+     *         raw DLPack import); a broadcast (stride-0) axis adds 0. The precondition
+     *         `reindex<Idx2>()` debug-checks. */
     template <class Idx2>
     _TNY_API bool index_fits() const noexcept {
         // `shape`/`stride` are themselves callable (1-D tensor members), so they

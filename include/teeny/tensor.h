@@ -398,16 +398,40 @@ template <class Obj> struct _stride_method_fn {
  *         (`extent_at(r)`/`stride_at(r)` read axis `r`); fits ⟺ `min..max ⊆
  *         Idx2`. Accumulates in a wide type; a size-1/0 axis has no reach and
  *         adds nothing (so a broadcast/stride-0 axis is always safe). Shared
- *         by `tensor::index_fits` and `anyrank::index_fits` — one formula. */
+ *         by `tensor::index_fits` and `anyrank::index_fits` — one formula.
+ *
+ *         OVERFLOW-SAFE (#471): both the per-axis `(e−1)·s` product and the
+ *         running `maxo`/`mino` accumulation are checked before they happen
+ *         (division-based checks against `W`'s own limits — no UB-prone
+ *         speculative add/multiply, no compiler-specific overflow builtins).
+ *         An untrusted carrier (e.g. a corrupted/adversarial DLPack import)
+ *         can hand this pathological strides that would overflow even `long
+ *         long`; as soon as that's detected the reach clearly exceeds `Idx2`
+ *         too (`Idx2` is never wider than `W`), so this returns `false`
+ *         immediately rather than continuing into UB. */
 template <class Idx2, class N, class ExtentAt, class StrideAt>
 _TNY_API bool _signed_reach_fits(N n, const ExtentAt & extent_at, const StrideAt & stride_at) noexcept {
     using W = long long;
+    constexpr W wmax = (cs::numeric_limits<W>::max)();
+    constexpr W wmin = (cs::numeric_limits<W>::min)();
     W maxo = 0, mino = 0;
     for (N r = 0; r < n; ++r) {
         const W e = static_cast<W>(extent_at(r));
         if (e <= W(1)) continue;                              // size-1/0 axis: no reach
-        const W reach = (e - W(1)) * static_cast<W>(stride_at(r));
-        if (reach > 0) maxo += reach; else mino += reach;     // reach sign == stride sign (e>1)
+        const W em1 = e - W(1);                               // >= 1
+        const W s = static_cast<W>(stride_at(r));
+        if (s > W(0)) {
+            if (em1 > wmax / s) return false;                 // (e-1)*s alone would overflow W
+            const W reach = em1 * s;
+            if (maxo > wmax - reach) return false;             // accumulating it would overflow W
+            maxo += reach;
+        } else if (s < W(0)) {
+            if (s < wmin / em1) return false;                  // (e-1)*s alone would overflow W
+            const W reach = em1 * s;
+            if (mino < wmin - reach) return false;             // accumulating it would overflow W
+            mino += reach;
+        }
+        // s == 0: no reach, nothing to accumulate (a broadcast axis stays safe)
     }
     return maxo <= static_cast<W>((cs::numeric_limits<Idx2>::max)())
         && mino >= static_cast<W>((cs::numeric_limits<Idx2>::min)());
@@ -1712,8 +1736,10 @@ public:
      *         Computes the SIGNED reach directly (teeny has negative-stride views, so
      *         `required_span_size`'s non-negative assumption doesn't apply):
      *         `max = Σ_{s>0}(e−1)·s`, `min = Σ_{s<0}(e−1)·s`; fits ⟺ `min..max` ⊆
-     *         `Idx2`. Accumulates in a wide type; a broadcast (stride-0) axis adds 0.
-     *         The precondition `reindex<Idx2>()` debug-checks. */
+     *         `Idx2`. Accumulates in a wide type, with the accumulation itself
+     *         overflow-checked (#471 — safe even against adversarial/corrupted
+     *         extents+strides, e.g. off a raw DLPack import); a broadcast
+     *         (stride-0) axis adds 0. The precondition `reindex<Idx2>()` debug-checks. */
     template <class Idx2>
     _TNY_API bool index_fits() const noexcept {
         return _detail::_signed_reach_fits<Idx2>(rank(),

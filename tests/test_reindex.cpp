@@ -80,5 +80,19 @@ int main() {
     // this right, mirrors the equivalent anyrank case in test_anyrank_reindex.cpp).
     if (wrap(buf, shape<2,2>{}, {1500000000LL, 1000000000LL}).index_fits<cs::int32_t>()) return 19;
 
+    // (8) PATHOLOGICAL strides near ~1e18 (#471 regression): the internal `long long`
+    // accumulator must never overflow (UB) while deciding this — it must bail out
+    // (return false) cleanly instead. Verified UB-free under -fsanitize=undefined.
+    //   (a) two positive-stride axes: each axis's reach (6e18) alone fits `long long`,
+    //       but their SUM (1.2e19) would overflow it during accumulation.
+    if (wrap(buf, shape<2,2>{}, {6000000000000000000LL, 6000000000000000000LL})
+            .index_fits<cs::int32_t>()) return 20;
+    //   (b) a single axis whose (extent-1)*stride PRODUCT alone already overflows
+    //       `long long` (3 * 4e18 = 1.2e19) — must be caught before the multiply.
+    if (wrap(buf, shape<4>{}, {4000000000000000000LL}).index_fits<cs::int64_t>()) return 21;
+    //   (c) the same two shapes, mirrored onto the negative-stride (`mino`) side.
+    if (wrap(buf, shape<2,2>{}, {-6000000000000000000LL, -6000000000000000000LL})
+            .index_fits<cs::int32_t>()) return 22;
+
     return 0;
 }
