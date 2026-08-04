@@ -65,7 +65,7 @@ as `shape_type`/`extents_type`), with per-dimension static/dynamic shape and str
 | **scatter (push)** | `t.at(i...).atomic_add_(v)` — **atomic on host and device** |
 | assign / init | `t.copy_(src)` (broadcasts), `t.fill_(v)`, `t.zero_()`, `t.iota_(a,b)` |
 | in-place / reduce math | `t.add_(x)/mul_(x)/…` (broadcasts), `sum/dot/min/max`. Contiguous out-of-place and in-place scalar/unary ops **auto-vectorize** (see `efficient-kernels.md`) |
-| **peel arbitrary batch** | `peel_front<-Sr>()` on an `anyrank` (keep the trailing `Sr` dims static, peel the runtime batch) → `dextents<_,Sr>` cells; `peel_front_at<-Sr>(i)` for a grid-stride index; `size_front<-Sr>()` = cell count. On a static-rank tensor with a *known* batch count, positive `peel_front<Nbatch>(t)` |
+| **peel arbitrary batch** | `peel_front(Int<-Sr>())` on an `anyrank` (keep the trailing `Sr` dims static, peel the runtime batch) → `dextents<_,Sr>` cells; `peel_front_at(i, Int<-Sr>())` for a grid-stride index; `size_front(Int<-Sr>())` = cell count. (Each also has the explicit-template spelling `peel_front<-Sr>()` etc.; the `Int<>` value form is deduced, so an impl-layer helper taking the carrier as a template parameter needs no `.template`.) On a static-rank tensor with a *known* batch count, positive `peel_front<Nbatch>(t)` |
 | recover static inner dims | `cell.recast(shape<-1, C, C>{})` — fold the known trailing dims of a peeled cell (no copy, preserves strides) |
 | peel named axes | `peel(t, axis<0,1>{})`, `slice_along(axis<0,2>{}, …)`, `permute(Int<...>()…)`, `flip(Int<d>())` |
 | add/drop size-1 axis | `unsqueeze(Int<Ax>())`, `squeeze(Int<Ax>())` |

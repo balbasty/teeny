@@ -251,7 +251,9 @@ source strides are static), on any source layout. See [Views & structure](struct
 peel<Axes...>(x);       peel_at<Axes...>(x, i);  // peel named axes. range-for is INCREMENTAL (O(1)/cell,
                                                  //   no per-cell decode); peel_at = random access (grid-stride)
 peel(x, axis<Axes...>{}); peel_at(x, i, axis<Axes...>{});  // value form (numpy-like axis selector)
-peel_front<N>(x);       peel_front_at<N>(x, i);  // peel the first N axes (COUNT -> template-only)
+peel_front<N>(x);       peel_front_at<N>(x, i);  // peel the first N axes (a COUNT, not an axis list, so no
+                                                 //   axis<> tag; free fns -> no `.template` either way. The
+                                                 //   anyrank MEMBERS take the count as Int<-Sr>(), see below)
 peel<Axes...>(x).subrange(lo, hi);               // a [lo,hi) chunk for a CPU thread / device block
                                                  //   (seed once, then O(1)/step); peel_front<N>(x) too
 for (auto [m, cell] : peel<Axes...>(x).enumerate()) ...;  // ALSO yield the peeled multi-index m
@@ -452,8 +454,13 @@ as_anyrank(data, shape, stride, ndim, anyshape<etc,-1,-1,3>{}, ccontiguous{});  
                                               //   STRIDES too (checked vs runtime strides here). Fully-static tail ->
                                               //   EBO cell. Subsumes dispatch_layout for the "input contiguous"
                                               //   precondition. from_dlpack passes it by value: (m, ccontiguous{}).
-at.peel_front<-Sr>();  at.peel_front_at<-Sr>(i);  // batch idiom (arg NEGATIVE: keep last Sr); 1 kernel per Sr
-at.size_front<-Sr>();                             // flattened batch count (no range built)
+at.peel_front(Int<-Sr>());  at.peel_front_at(i, Int<-Sr>());  // batch idiom (keep-count NEGATIVE: keep the last
+at.size_front(Int<-Sr>());                    //   Sr dims); 1 kernel per Sr. size_front = flattened batch count
+                                              //   (no range built). VALUE form -> no `.template` on a dependent
+                                              //   receiver; == at.peel_front<-Sr>() / at.peel_front_at<-Sr>(i) /
+                                              //   at.size_front<-Sr>() (the explicit-template spelling).
+                                              //   A shape tag in that 2nd position is the fused recast instead:
+                                              //   at.peel_front_at(i, shape<-1,c,c>{}) — never confusable.
 dispatch_rank(at, f);                    // runtime rank -> fixed-rank view (per total rank)
 dispatch_rank<narrow_index>(at, f);      // ...+ int32 offsets when the span fits (rank outer, width inner)
 dispatch_index(v, f);                    // narrow one fixed view's offset width to int32 (else keep it)

@@ -230,6 +230,11 @@ constexpr copy_meta_t copy_meta{};
  *                               a positive front-count would leave a runtime
  *                               rank, which can't be a static view (asserted).
  *
+ * `peel_front` / `peel_front_at` / `size_front` each also take the keep-count as a
+ * static integer VALUE — `at.peel_front(Int<-Sr>())`, `at.peel_front_at(lin, Int<-Sr>())`,
+ * `at.size_front(Int<-Sr>())` — identical to the `<-Sr>` template spelling but deduced,
+ * so a carrier whose type is a template parameter needs no `.template` disambiguator.
+ *
  * Before any of those, the carrier itself can be narrowed to 32-bit offsets:
  * `index_fits<Idx2>()` asks whether every reachable offset fits, `reindex<Idx2>()`
  * returns the same carrier with an `Idx2` meta store — so a GPU boundary narrows
@@ -368,6 +373,15 @@ struct anyrank {
         static_assert(N < 0, "anyrank::peel_front_at needs a NEGATIVE index (keep the last |N| dims)");
         return _keep_last<static_cast<cs::size_t>(-N)>(lin);
     }
+    /** @brief Value form: `at.peel_front_at(lin, Int<-Sr>())` == `at.peel_front_at<-Sr>(lin)`.
+     *         The keep-count is the only compile-time selector here, so it takes the plain
+     *         `Int<k>()` static integer (the single-selector spelling `t.squeeze(Int<1>())`
+     *         uses) — deduced, so a type-dependent receiver needs no `.template`. The
+     *         `lin` argument stays an ordinary runtime index; a static integer in the
+     *         SECOND position is always the selector, and a `shape<...>`/`anyshape<...>`
+     *         tag there is the fused-recast twin below — never confusable. */
+    template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0>
+    _TNY_API auto peel_front_at(offset_t lin, I) const { return peel_front_at<static_cast<long>(I::value)>(lin); }
 
     /** @brief The `lin`-th cell peeled DIRECTLY to a target trailing shape — fuses
      *         `peel_front_at<-NewE::rank()>(lin).recast<NewE, NewL>()` into one call, so
@@ -407,6 +421,11 @@ struct anyrank {
         // range a HEAD-LESS carrier — same members, so the peel cell type is unchanged.
         return { anyrank<T, offset_t, Meta, Space, Tail, TailS>{ data, shape, stride, ndim } };
     }
+    /** @brief Value form: `at.peel_front(Int<-Sr>())` == `at.peel_front<-Sr>()` — the
+     *         keep-count as a static integer, deduced, so a type-dependent receiver
+     *         needs no `.template`. */
+    template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0>
+    _TNY_API auto peel_front(I) const { return peel_front<static_cast<long>(I::value)>(); }
 
     /** @brief The number of cells `peel_front<N>()` would yield — the product of
      *         the peeled leading (batch) extents — computed directly, without
@@ -420,6 +439,11 @@ struct anyrank {
         for (int d = 0; d < ndim - static_cast<int>(-N); ++d) n *= shape(d);
         return n;
     }
+    /** @brief Value form: `at.size_front(Int<-Sr>())` == `at.size_front<-Sr>()` — the
+     *         keep-count as a static integer, deduced, so a type-dependent receiver
+     *         needs no `.template`. */
+    template <class I, cs::enable_if_t<_is_ic<I>::value, int> = 0>
+    _TNY_API offset_t size_front(I) const noexcept { return size_front<static_cast<long>(I::value)>(); }
 
     // --- whole-carrier offset-width narrowing (#467) -------------------------
     // The fixed-rank sibling of these two lives on `tensor` (`index_fits`/`reindex`);

@@ -58,15 +58,20 @@ spelling you use depends on **whether the batch rank is known at compile time**.
 
 **Runtime batch rank — the general case** (a DLPack tensor of arbitrary rank). The input
 arrives rank-erased as an [`anyrank`](dispatch.md), so its rank is a *runtime* value. Peel
-with a **negative** front: `peel_front<-Sr>()` keeps the last `Sr` dims static and folds
-*however many* batch dims there are into the pointer. Each `cell` is a `dextents<_,Sr>`
-view (rank `Sr`, dynamic inner extents); `recast` folds the known inner dims:
+with a **negative** keep-count: `peel_front(Int<-Sr>())` keeps the last `Sr` dims static
+and folds *however many* batch dims there are into the pointer. Each `cell` is a
+`dextents<_,Sr>` view (rank `Sr`, dynamic inner extents); `recast` folds the known inner
+dims:
 
 ```cpp
 auto at = as_anyrank(data, shape, stride, ndim);   // rank-erased carrier (runtime rank, no copy)
-for (auto cell : at.peel_front<-2>())              // keep the trailing 2 dims; peel the rest
+for (auto cell : at.peel_front(Int<-2>()))         // keep the trailing 2 dims; peel the rest
     op(cell.recast(shape<C, C>{}));                // cell: dextents<_,2> view -> folded C×C
 ```
+
+(`at.peel_front<-2>()` is the same call spelled with an explicit template argument. Prefer
+the `Int<>` value: it is deduced, so the line survives being lifted into a helper where the
+carrier's type is a template parameter — no `.template` needed.)
 
 Combine with `dispatch_value<1,2,3>(spatial_ndim, …)` to also turn a runtime *spatial
 rank* into a static one — the full `(*batch, *spatial, C)` walk-through is in
