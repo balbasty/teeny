@@ -74,5 +74,11 @@ int main() {
     if (!fl.index_fits<cs::int32_t>())  return 17;
     if ( fl.index_fits<cs::uint32_t>()) return 18;
 
+    // (7) per-axis reach fits individually, but the ACCUMULATED sum overflows int32:
+    // two axes each with reach 1.5e9 / 1.0e9 (each well under INT32_MAX alone); their
+    // SUM (2.5e9) exceeds it (#469 — regression test; the accumulation already got
+    // this right, mirrors the equivalent anyrank case in test_anyrank_reindex.cpp).
+    if (wrap(buf, shape<2,2>{}, {1500000000LL, 1000000000LL}).index_fits<cs::int32_t>()) return 19;
+
     return 0;
 }

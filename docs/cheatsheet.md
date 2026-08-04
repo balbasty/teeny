@@ -462,7 +462,9 @@ at.reindex<int32_t>();                   //   same pointer/space/anyshape geomet
                                          //   int32 one -> every cell it hands out is int32-indexed, and the
                                          //   by-value store halves. Debug-checked by index_fits; UB if you lie.
                                          //   dispatch_index(at, f) picks the arm for you. from_dlpack never
-                                         //   narrows on its own (it keeps DLPack's int64).
+                                         //   narrows on its own (it keeps DLPack's int64). Free forms too (no
+                                         //   `.template` on a dependent receiver): reindex<int32_t>(at),
+                                         //   index_fits<int32_t>(at) — same as the view's free forms above.
 at.fixed<R>();                           // force a known rank
 ```
 

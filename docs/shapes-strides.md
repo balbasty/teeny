@@ -126,8 +126,9 @@ check that handles negative-stride (flipped) and broadcast views — and only na
 when the element span provably fits. See [Performance](performance.md).
 
 The rank-erased [`anyrank`](dispatch.md) carrier answers the same two calls
-(`at.index_fits<int32_t>()` / `at.reindex<int32_t>()`), so a device boundary can narrow
-the whole carrier once — before the launch — instead of view by view.
+(`at.index_fits<int32_t>()` / `at.reindex<int32_t>()`, free form: `index_fits<int32_t>(at)`
+/ `reindex<int32_t>(at)`), so a device boundary can narrow the whole carrier once —
+before the launch — instead of view by view.
 
 ### Mixing widths in a broadcast
 
