@@ -386,6 +386,9 @@ t.reindex<int32_t>();           // no-copy, layout-PRESERVING retype of the OFFS
                                 //   halves a dynamic view's footprint + 32-bit device offset math. Free form:
                                 //   reindex<int32_t>(t). Debug-guarded by t.index_fits<int32_t>() (signed reach;
                                 //   UB if the caller lies). shape32<...> == shape_as<int32_t,...> is the int32 shape.
+                                //   Idx2 = ANY integral type up to 64 bits, signed or unsigned (uint64_t/size_t
+                                //   included, #484): index_fits accumulates the POSITIVE reach in unsigned 64-bit
+                                //   and the NEGATIVE in signed 64-bit, so neither comparison can wrap.
 t.is_dense();                   // dense block in SOME order (C/F/permuted); is_dense<L>() = exact L
 t.is_contiguous();              // C-order (numpy/pytorch default); is_contiguous<fcontiguous>() = F. alias of is_dense<L>
 t.clone();                      // materialise a dense row-major copy. Copies on the HOST -> the dynamic-shape

@@ -471,10 +471,10 @@ struct anyrank {
      *         raw DLPack import); a broadcast (stride-0) axis adds 0. The precondition
      *         `reindex<Idx2>()` debug-checks.
      *
-     *         `Idx2` must itself fit within the accumulator's range (signed up to 64
-     *         bits, unsigned up to 32 bits) — a `static_assert` in the shared reach test
-     *         rejects a 64-bit unsigned `Idx2` (uint64_t / unsigned long long) at compile
-     *         time rather than silently always returning `false` (#475). */
+     *         `Idx2` may be ANY integral type up to 64 bits, signed or unsigned
+     *         (`uint64_t`/`size_t` included): the positive and negative reach accumulate
+     *         in separate unsigned/signed 64-bit domains, so neither comparison can
+     *         wrap (#484). */
     template <class Idx2>
     _TNY_API bool index_fits() const noexcept {
         // `shape`/`stride` are themselves callable (1-D tensor members), so they
@@ -511,6 +511,9 @@ struct anyrank {
         reindexed<Idx2, MaxRank> t;
         t.data = data; t.ndim = ndim;
         const int n = ndim < static_cast<int>(MaxRank) ? ndim : static_cast<int>(MaxRank);
+        // Sound for an UNSIGNED `Idx2` too: a `true` fit implies `mino == 0`, so no
+        // axis of extent > 1 carries a negative stride, and one on an extent<=1 axis
+        // is only ever multiplied by index 0 — its wrapped value is unobservable.
         for (int i = 0; i < n; ++i) {
             t.shape(i)  = static_cast<Idx2>(shape(i));
             t.stride(i) = static_cast<Idx2>(stride(i));

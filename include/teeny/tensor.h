@@ -396,80 +396,63 @@ template <class Obj> struct _stride_method_fn {
 
 /** @brief `max = Σ_{s>0}(e−1)·s`, `min = Σ_{s<0}(e−1)·s` across `n` axes
  *         (`extent_at(r)`/`stride_at(r)` read axis `r`); fits ⟺ `min..max ⊆
- *         Idx2`. Accumulates in a wide type; a size-1/0 axis has no reach and
- *         adds nothing (so a broadcast/stride-0 axis is always safe). Shared
- *         by `tensor::index_fits` and `anyrank::index_fits` — one formula.
+ *         Idx2`. A size-1/0 axis has no reach and adds nothing (so a
+ *         broadcast/stride-0 axis is always safe). Shared by
+ *         `tensor::index_fits` and `anyrank::index_fits` — one formula.
  *
- *         OVERFLOW-SAFE (#471): both the per-axis `(e−1)·s` product and the
- *         running `maxo`/`mino` accumulation are checked before they happen
- *         (division-based checks against `W`'s own limits — no UB-prone
- *         speculative add/multiply, no compiler-specific overflow builtins).
- *         An untrusted carrier (e.g. a corrupted/adversarial DLPack import)
- *         can hand this pathological strides that would overflow even `long
- *         long`; as soon as that's detected the reach clearly exceeds `Idx2`
- *         too, so this returns `false` immediately rather than continuing
- *         into UB.
+ *         SPLIT ACCUMULATORS (#484): the positive and the negative reach never
+ *         interact, so each is accumulated — and compared against `Idx2`'s own
+ *         limit — in ITS OWN 64-bit domain: `maxo` in `unsigned long long`
+ *         (whose range is exactly `uint64_t`'s, so it reaches every integral
+ *         `Idx2::max()`), `mino` in `long long` (which reaches every integral
+ *         `Idx2::min()`). Neither final comparison can wrap, for ANY integral
+ *         `Idx2` up to 64 bits — 64-bit UNSIGNED ones included. A single
+ *         signed accumulator could not do that: `uint64_t`'s max exceeds
+ *         `long long`'s, so a true reach in `(2^63−1, 2^64−1]` — which does
+ *         fit a `uint64_t` index — was reported as a (false) no-fit.
  *
- *         PRECONDITION, ENFORCED (#475): the final `maxo <= Idx2::max() &&
- *         mino >= Idx2::min()` check casts the accumulator (`W = long long`)
- *         down to `Idx2`'s own limit type, which is only meaningful if
- *         `Idx2`'s whole range is representable in `W` — i.e. `Idx2` is never
- *         WIDER than `W`. That holds for every signed `Idx2` up to 64 bits
- *         (int8_t..int64_t) and every unsigned `Idx2` up to 32 bits
- *         (uint8_t..uint32_t), but NOT for a 64-bit unsigned `Idx2`
- *         (uint64_t/unsigned long long): `W`'s positive range tops out at
- *         2^63-1, so `uint64_t`'s max (2^64-1) does not fit — casting it to
- *         `W` wraps to -1, and the fits-check below would then reject every
- *         input, silently and unactionably. A `static_assert` below turns
- *         that into a compile error instead.
- *
- *         SCOPE (#479): that `static_assert` only fires for a caller that
- *         actually instantiates this body: `index_fits<Idx2>()` always does
- *         (it's a normal evaluated call), but `reindex<Idx2>()`'s internal
- *         check goes through `_TNY_CHECK` (defines.h), which degrades to an
- *         unevaluated `sizeof` operand and does not force instantiation
- *         under `-DNDEBUG` or during a device-side compilation pass
- *         (`__CUDA_ARCH__` defined) — so a release (or device) build of
- *         `reindex<uint64_t>()` alone (without a preceding
- *         `index_fits<uint64_t>()` call) still compiles silently. Not a
- *         safety regression (a same-or-wider Idx2 is a harmless widening
- *         retype either way), just narrower enforcement than the message
- *         below might suggest. */
+ *         OVERFLOW-SAFE (#471, #484): both the per-axis `(e−1)·s` product and
+ *         the running accumulation are checked BEFORE they happen, each in the
+ *         domain it lands in (division-based checks against that accumulator's
+ *         own limits — no UB-prone speculative signed add/multiply, and no
+ *         silently WRAPPING unsigned one, which would answer wrong rather than
+ *         trap; no compiler-specific overflow builtins either). An untrusted
+ *         carrier (e.g. a corrupted/adversarial DLPack import) can hand this
+ *         pathological strides whose reach exceeds even 64 bits; as soon as
+ *         that's detected the reach clearly exceeds `Idx2` too, so this returns
+ *         `false` immediately rather than continuing into UB. */
 template <class Idx2, class N, class ExtentAt, class StrideAt>
 _TNY_API bool _signed_reach_fits(N n, const ExtentAt & extent_at, const StrideAt & stride_at) noexcept {
-    using W = long long;
-    // (#475) `Idx2` must fit within `W`'s range or the final cast back to
-    // `Idx2` (see below) is meaningless — this is what rules out a 64-bit
-    // unsigned `Idx2` (uint64_t/unsigned long long): its max exceeds `W`'s,
-    // so casting it to `W` wraps negative and `index_fits`/`reindex` would
-    // silently return `false` for every input, with no way for the caller to
-    // act on it. Every signed Idx2 up to 64 bits and every unsigned Idx2 up
-    // to 32 bits passes this trivially; an Idx2 this wide isn't a supported
-    // narrowing target for `reindex`/`index_fits` in the first place (the
-    // whole point is narrowing FROM a wide index, not matching its width).
-    static_assert(
-        cs::numeric_limits<Idx2>::is_signed
-            ? ((cs::numeric_limits<Idx2>::max)() <= (cs::numeric_limits<W>::max)()
-               && (cs::numeric_limits<Idx2>::min)() >= (cs::numeric_limits<W>::min)())
-            : (static_cast<unsigned long long>((cs::numeric_limits<Idx2>::max)())
-                   <= static_cast<unsigned long long>((cs::numeric_limits<W>::max)())),
-        "index_fits<Idx2>(): Idx2's range must fit within `long long`'s "
-        "(the accumulator this reach test uses) — a 64-bit unsigned Idx2 such as uint64_t "
-        "or unsigned long long doesn't (its max exceeds LLONG_MAX), so it can never be "
-        "validated this way. Use a narrower unsigned type (up to uint32_t) or a signed "
-        "type (up to int64_t) instead.");
-    constexpr W wmax = (cs::numeric_limits<W>::max)();
-    constexpr W wmin = (cs::numeric_limits<W>::min)();
-    W maxo = 0, mino = 0;
+    using W  = long long;             // negative side: reaches every Idx2::min()
+    using UW = unsigned long long;    // positive side: reaches every Idx2::max()
+    // Each side is compared in its own domain below, so the only target left to
+    // rule out is one WIDER than those accumulators — i.e. a 128-bit integer
+    // (`__int128`, sizeof 16), which teeny has no index vocabulary for anyway.
+    static_assert(cs::numeric_limits<Idx2>::is_integer && sizeof(Idx2) <= 8,
+                  "index_fits<Idx2>(): Idx2 must be an integral type no wider than 64 bits");
+    constexpr UW umax = (cs::numeric_limits<UW>::max)();
+    constexpr W  wmin = (cs::numeric_limits<W>::min)();
+    UW maxo = 0;
+    W  mino = 0;
     for (N r = 0; r < n; ++r) {
         const W e = static_cast<W>(extent_at(r));
         if (e <= W(1)) continue;                              // size-1/0 axis: no reach
         const W em1 = e - W(1);                               // >= 1
         const W s = static_cast<W>(stride_at(r));
         if (s > W(0)) {
-            if (em1 > wmax / s) return false;                 // (e-1)*s alone would overflow W
-            const W reach = em1 * s;
-            if (maxo > wmax - reach) return false;             // accumulating it would overflow W
+            // Both operands are positive `W` values, so the widening to `UW` is
+            // exact. The guards are the unsigned analogues of the signed ones
+            // below: `umax / us` is the largest multiplier that keeps the
+            // product representable (floor division, `us >= 1` so never a
+            // divide by zero), and `umax - reach` the largest sum that keeps
+            // the accumulation representable. Unsigned overflow is defined to
+            // WRAP rather than to be UB, which makes it silent — a wrapped
+            // value would answer this query wrongly, so it is still checked
+            // before the fact, never after.
+            const UW us = static_cast<UW>(s), ue = static_cast<UW>(em1);
+            if (ue > umax / us) return false;                 // (e-1)*s alone would overflow UW
+            const UW reach = ue * us;
+            if (maxo > umax - reach) return false;             // accumulating it would overflow UW
             maxo += reach;
         } else if (s < W(0)) {
             if (s < wmin / em1) return false;                  // (e-1)*s alone would overflow W
@@ -479,7 +462,9 @@ _TNY_API bool _signed_reach_fits(N n, const ExtentAt & extent_at, const StrideAt
         }
         // s == 0: no reach, nothing to accumulate (a broadcast axis stays safe)
     }
-    return maxo <= static_cast<W>((cs::numeric_limits<Idx2>::max)())
+    // Exact for every integral `Idx2` up to 64 bits: `max()` is never negative,
+    // so it converts to `UW` unchanged, and `min()` is never below `W`'s own.
+    return maxo <= static_cast<UW>((cs::numeric_limits<Idx2>::max)())
         && mino >= static_cast<W>((cs::numeric_limits<Idx2>::min)());
 }
 } // namespace _detail
@@ -1787,10 +1772,10 @@ public:
      *         extents+strides, e.g. off a raw DLPack import); a broadcast
      *         (stride-0) axis adds 0. The precondition `reindex<Idx2>()` debug-checks.
      *
-     *         `Idx2` must itself fit within the accumulator's range (signed up to
-     *         64 bits, unsigned up to 32 bits) — a `static_assert` in the shared
-     *         reach test rejects a 64-bit unsigned `Idx2` (uint64_t / unsigned long
-     *         long) at compile time rather than silently always returning `false` (#475). */
+     *         `Idx2` may be ANY integral type up to 64 bits, signed or unsigned
+     *         (`uint64_t`/`size_t` included): the positive and negative reach
+     *         accumulate in separate unsigned/signed 64-bit domains, so neither
+     *         comparison can wrap (#484). */
     template <class Idx2>
     _TNY_API bool index_fits() const noexcept {
         return _detail::_signed_reach_fits<Idx2>(rank(),
@@ -1804,6 +1789,10 @@ public:
      *         footprint and runs offset math in 32-bit (big device win). Orthogonal to
      *         `recast` (which staticizes the extent VALUES) — they compose. Debug-checks
      *         `index_fits<Idx2>()`; UB if the caller lies (same contract as `u*`). */
+    // The dynamic strides narrow to `Idx2` inside the retyped mapping. Sound for an
+    // UNSIGNED `Idx2` too: a `true` fit implies `mino == 0`, so no axis of extent > 1
+    // carries a negative stride, and one on an extent<=1 axis is only ever multiplied
+    // by index 0 — its wrapped value is unobservable.
     template <class Idx2>
     _TNY_API auto reindex() {
         _TNY_CHECK(index_fits<Idx2>(), "reindex: element offsets don't fit the target index type (span exceeds its range)");

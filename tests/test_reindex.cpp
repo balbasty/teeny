@@ -99,5 +99,49 @@ int main() {
     //       (c)'s accumulation-only overflow — must be caught before the multiply.
     if (wrap(buf, shape<4>{}, {-4000000000000000000LL}).index_fits<cs::int64_t>()) return 23;
 
+    // (9) WIDE UNSIGNED targets (#484). The two reach sides never interact, so each
+    // accumulates and compares in its OWN 64-bit domain (positive: unsigned long long,
+    // negative: long long). That makes the test exact for EVERY integral Idx2 up to 64
+    // bits — uint64_t/size_t included, which used to be a compile error (#475).
+    //   (a) a flipped (negative-stride) view still cannot fit an UNSIGNED target: its
+    //       min offset is below 0, i.e. outside [0, UINT64_MAX].
+    if (wrap(buf, shape<3,4>{}).flip<0>().index_fits<cs::uint64_t>()) return 24;
+    //   (b) THE false negative this split fixes: a non-negative-strided reach of 1.2e19
+    //       lies in (2^63-1, 2^64-1], so it genuinely FITS a uint64_t index — and no
+    //       single `long long` accumulator could ever say so (the sum overflows it, and
+    //       the old code bailed out with `false` right there). Only the unsigned
+    //       positive-side accumulator can answer this one.
+    if (!wrap(buf, shape<2,2>{}, {6000000000000000000LL, 6000000000000000000LL})
+             .index_fits<cs::uint64_t>()) return 25;
+    //       ...while the SAME view still doesn't fit int64_t (1.2e19 > 2^63-1), nor
+    //       int32_t (case (8a) above): the answer moved only where it was wrong.
+    if (wrap(buf, shape<2,2>{}, {6000000000000000000LL, 6000000000000000000LL})
+            .index_fits<cs::int64_t>()) return 26;
+    //   (c) the exact upper boundary: a reach of exactly UINT64_MAX fits, one past it
+    //       does not (2*(2^63-1) + 1 == 2^64-1) — pins the accumulation guard's edge.
+    if (!wrap(buf, shape<2,2,2>{}, {9223372036854775807LL, 9223372036854775807LL, 1LL})
+             .index_fits<cs::uint64_t>()) return 27;
+    if ( wrap(buf, shape<2,2,2>{}, {9223372036854775807LL, 9223372036854775807LL, 2LL})
+            .index_fits<cs::uint64_t>()) return 28;
+    //   (d) the UNSIGNED accumulator's own overflow guards — the #471 pair re-derived
+    //       for a domain where overflow WRAPS rather than being UB (a wrapped value
+    //       answers the query WRONGLY, so both are still checked before the fact).
+    //       PRODUCT: (5-1) * 9e18 = 3.6e19 > UINT64_MAX, caught before the multiply.
+    if (wrap(buf, shape<5>{}, {9000000000000000000LL}).index_fits<cs::uint64_t>()) return 29;
+    //       ACCUMULATION: three axes of reach 9e18 — each product fits, the sum
+    //       (2.7e19) does not, caught before the third add.
+    if (wrap(buf, shape<2,2,2>{}, {9000000000000000000LL, 9000000000000000000LL,
+                                   9000000000000000000LL}).index_fits<cs::uint64_t>()) return 30;
+
+    // (10) reindex<uint64_t>() is now an ordinary (widening) retype: it compiles and
+    // addresses identically in a DEBUG build and under -DNDEBUG/__CUDA_ARCH__ alike —
+    // #480's build-mode asymmetry is gone at the root, since there is no longer a
+    // static_assert for `_TNY_CHECK`'s unevaluated form to skip inconsistently.
+    auto u64 = t.reindex<cs::uint64_t>();
+    static_assert(cs::is_same<decltype(u64)::index_type, cs::uint64_t>::value, "reindex to uint64");
+    for (long i = 0; i < 2; ++i) for (long j = 0; j < 3; ++j) for (long k = 0; k < 4; ++k)
+        if (u64(i,j,k) != t(i,j,k)) return 31;
+    if (!t.index_fits<cs::size_t>()) return 32;               // the LP64 spelling, equally ordinary
+
     return 0;
 }
