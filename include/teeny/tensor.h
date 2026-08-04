@@ -421,16 +421,20 @@ template <class Obj> struct _stride_method_fn {
  *         2^63-1, so `uint64_t`'s max (2^64-1) does not fit — casting it to
  *         `W` wraps to -1, and the fits-check below would then reject every
  *         input, silently and unactionably. A `static_assert` below turns
- *         that into a compile error instead — but ONLY for a caller that
+ *         that into a compile error instead.
+ *
+ *         SCOPE (#479): that `static_assert` only fires for a caller that
  *         actually instantiates this body: `index_fits<Idx2>()` always does
  *         (it's a normal evaluated call), but `reindex<Idx2>()`'s internal
- *         check goes through `_TNY_CHECK` (defines.h), which under `-DNDEBUG`
- *         degrades to an unevaluated `sizeof` operand and does not force
- *         instantiation — so a release build of `reindex<uint64_t>()` alone
- *         (without a preceding `index_fits<uint64_t>()` call) still compiles
- *         silently (#479). Not a safety regression (a same-or-wider Idx2 is a
- *         harmless widening retype either way), just narrower enforcement
- *         than the message below might suggest. */
+ *         check goes through `_TNY_CHECK` (defines.h), which degrades to an
+ *         unevaluated `sizeof` operand and does not force instantiation
+ *         under `-DNDEBUG` or during a device-side compilation pass
+ *         (`__CUDA_ARCH__` defined) — so a release (or device) build of
+ *         `reindex<uint64_t>()` alone (without a preceding
+ *         `index_fits<uint64_t>()` call) still compiles silently. Not a
+ *         safety regression (a same-or-wider Idx2 is a harmless widening
+ *         retype either way), just narrower enforcement than the message
+ *         below might suggest. */
 template <class Idx2, class N, class ExtentAt, class StrideAt>
 _TNY_API bool _signed_reach_fits(N n, const ExtentAt & extent_at, const StrideAt & stride_at) noexcept {
     using W = long long;
