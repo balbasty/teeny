@@ -206,6 +206,11 @@ void smoke() {
     // device-passable view. dispatch_index instantiates the kernel for both widths;
     // launching from each arm exercises the int32-view device pass under nvcc.
     dispatch_index(y, [&](auto v){ axpy_kernel<<<1, 32>>>(v, v, 1.f); });
+    // ...and the compile-time gate (#491): a STATIC extent too large for the target
+    // drops the narrow arm at compile time, so only the wide one is instantiated here
+    // (before, `reindex<int8_t>()` on that shape failed the build from the dead arm).
+    dispatch_index<cuda::std::int8_t>(wrap(dx, shape<300>{}),
+                                      [&](auto v){ axpy_kernel<<<1, 32>>>(v, v, 1.f); });
 }
 
 int main() { smoke(); return 0; }

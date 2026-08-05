@@ -334,6 +334,18 @@ for (auto cell : at.peel_front<-Sr>()) dispatch_index(cell, [&](auto c) { kernel
 Opt in per launch site — narrowing everything would silently double instantiation
 counts. `dispatch_index<Idx2>` targets a width other than the `int32_t` default.
 
+You never have to check up front whether `Idx2` *could* hold the shape. If one of the
+view's compile-time sizes is already too large for `Idx2`, the narrow arm can never be
+taken, so it is dropped at compile time and only the wide one is instantiated:
+
+```cpp
+dispatch_index<int8_t>(wrap(p, shape<300,2>{}), f);   // compiles; f gets the int64 view
+```
+
+That is what lets generic code call `dispatch_index<Idx2>` on whatever shape a caller
+hands it. Writing `v.reindex<Idx2>()` on such a view is still a compile error — there
+the narrowing is the whole request, not one of two arms.
+
 ### Narrowing the whole carrier (the GPU spelling)
 
 The two calls above narrow **one view at a time**, on the host. For a CUDA launch that
@@ -378,6 +390,10 @@ instead). `dispatch_index` accepts a carrier too, so the two arms above are just
 ```cpp
 dispatch_index(at, [&](auto a) { launch(a); });      // f instantiated for both widths
 ```
+
+…and it applies the same compile-time gate here: an `anyshape` head/tail dim too big
+for `Idx2` makes `dispatch_index` compile to the wide arm alone, instead of failing to
+build on a narrowing it would never have performed.
 
 Import width is never changed for you: `from_dlpack` keeps DLPack's own `int64_t`, and
 teeny applies no heuristic — narrowing is a per-boundary decision you make. On the CPU it

@@ -138,7 +138,10 @@ Each extent and stride is read in the view's **own** index type, so a shape you
 spelled as `shape_as<uint64_t, …>` is measured exactly, whatever its values: nothing
 is quietly reinterpreted as a signed number on the way in. A **statically** sized
 axis too big for the target index type needs no runtime check at all — narrowing it
-is a compile error.
+is a compile error. That applies when you ask for the narrowing *directly*;
+`dispatch_index<Idx2>(v, f)`, which only *offers* it as one of two arms, drops the
+impossible arm at compile time and hands `f` the wide view instead — see
+[Dispatch](dispatch.md#dispatch_index-dispatch_ranknarrow_index-the-int32-fast-path).
 
 The rank-erased [`anyrank`](dispatch.md) carrier answers the same two calls
 (`at.index_fits<int32_t>()` / `at.reindex<int32_t>()`, free form: `index_fits<int32_t>(at)`
