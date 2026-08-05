@@ -323,5 +323,20 @@ int main() {
                   "tail extents' index type narrowed");
     if (tfit.fixed<2>()(1, 2) != buf[1*3 + 2]) return 67;
 
+    // ---- (15) POSITIVE EQUALITY-BOUNDARY CONTROL (#492) -----------------------
+    // Section (13)(c) above restored #486's `e-1`-exactness sensitivity after #490's
+    // widened contract flipped the original int64 case to `false` (extent 2^63 itself
+    // doesn't fit int64_t, even though its reach did) — but that re-expression didn't
+    // bring back an equivalent POSITIVE control: a case where the reach lands EXACTLY
+    // on Idx2::max() and the extent VALUE also fits, so the whole predicate answers
+    // `true`. Here the exact reach comes from the STRIDE (not `e-1`), so the extent
+    // (2) itself trivially fits int64_t: reach = (2-1)*INT64_MAX == INT64_MAX exactly.
+    cs::int64_t pcshp[1] = { 2 }, pcstr[1] = { 9223372036854775807LL };
+    if (!as_anyrank(buf, pcshp, pcstr, 1).index_fits<cs::int64_t>()) return 68;
+    //       ...one more axis's worth of reach (extent 2, stride 1) pushes the
+    //       ACCUMULATED reach to INT64_MAX+1 — one past the boundary, `false`.
+    cs::int64_t pcshp2[2] = { 2, 2 }, pcstr2[2] = { 9223372036854775807LL, 1LL };
+    if (as_anyrank(buf, pcshp2, pcstr2, 2).index_fits<cs::int64_t>()) return 69;
+
     return 0;
 }
