@@ -418,6 +418,9 @@ template <class V> _TNY_API constexpr bool _raw_negative(V v) noexcept {
 //     at all, so it cannot represent one — say so directly rather than comparing
 //     across signedness, which is the usual-arithmetic-conversions trap.
 // Relies on the caller's `sizeof <= 8` guard on the raw extent type for both casts.
+// Its compile-time twin is `_static_extents_fit` (alias.h) — the two predicates must
+// answer identically for any static extent value (verified across #495's full
+// type-boundary matrix); a future change to either one needs to preserve that agreement.
 template <class Idx2, class E> _TNY_API constexpr bool _extent_value_fits(E e) noexcept {
     if constexpr (cs::numeric_limits<Idx2>::is_signed) {
         if (_raw_negative(e))
@@ -446,7 +449,8 @@ template <class Idx2, class E> _TNY_API constexpr bool _extent_value_fits(E e) n
  *         iterations. No crash, no out-of-bounds access for a sanitizer to catch,
  *         just silently absent work — so the extent check is part of the SAME
  *         predicate rather than a separate one a caller could forget (#487).
- *         Its compile-time twin (for STATIC extents) is in `_reindex_extents`.
+ *         Its compile-time twin (for STATIC extents) is `_static_extents_fit`
+ *         (alias.h), factored out of `_reindex_extents`'s assert by #495.
  *
  *         SPLIT ACCUMULATORS (#484): the positive and the negative reach never
  *         interact, so each is accumulated — and compared against `Idx2`'s own
