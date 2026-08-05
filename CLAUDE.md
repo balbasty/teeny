@@ -722,6 +722,11 @@ dispatch_rank<narrow_index>(at, f);           // ...+ int32 offsets when the spa
 dispatch_index<Idx2=int32_t>(v, f);           // the primitive: narrow ONE fixed view's offset width when
                                               //   index_fits, else keep it; f instantiated for both widths.
                                               //   Batch: for (cell : at.peel_front<-Sr>()) dispatch_index(cell, f);
+                                              //   Idx2 need NOT fit v's STATIC extents (#491): one that can't be
+                                              //   represented there makes the narrow arm dead (index_fits would
+                                              //   say false anyway), so it's dropped by `if constexpr` and only
+                                              //   the wide arm is instantiated — generic code can pass any shape.
+                                              //   A direct v.reindex<Idx2>() on it stays a static_assert (#489).
 at.index_fits<int32_t>(); at.reindex<int32_t>();  // ...the same pair on the CARRIER (#467) — the GPU spelling,
                                               //   free form: index_fits<int32_t>(at); reindex<int32_t>(at).
                                               //   since dispatch_index is _TNY_HOST/per-cell and the batch idiom

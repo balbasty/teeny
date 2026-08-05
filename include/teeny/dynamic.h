@@ -771,6 +771,26 @@ _TNY_HOST auto as_anyrank(T * data, const offset_t * shape, const offset_t * str
     return t;
 }
 
+namespace _detail {
+// Can the TYPE of a dispatch_index argument even in principle be narrowed to `Idx2`,
+// i.e. is every extent that is baked into it representable there (#491)? Asked of the
+// static geometry only — a `tensor`'s `Shape`, an `anyrank`'s static `Head`/`Tail` —
+// since that is exactly the part `_reindex_extents` judges at compile time. The
+// DYNAMIC extents (and the whole offset reach) stay the runtime `index_fits` question.
+//
+// The primary template answers `true`: "nothing in the type rules the narrowing out",
+// which is the honest answer for any carrier with no compile-time extents at all, and
+// leaves dispatch_index's behaviour for it exactly as it was.
+template <class Idx2, class V> struct _static_narrowable : cs::true_type {};
+template <class Idx2, class T, class E, class L, storage O>
+struct _static_narrowable<Idx2, tensor<T, E, L, O>>
+    : cs::bool_constant<_static_extents_fit<Idx2, E>()> {};
+template <class Idx2, class T, class offset_t, class Meta, storage Space,
+          class Tail, class TailS, class Head, class HeadS>
+struct _static_narrowable<Idx2, anyrank<T, offset_t, Meta, Space, Tail, TailS, Head, HeadS>>
+    : cs::bool_constant<_static_extents_fit<Idx2, Tail>() && _static_extents_fit<Idx2, Head>()> {};
+} // namespace _detail
+
 /**
  * @brief Narrow a view's — or a whole `anyrank` carrier's — OFFSET INDEX WIDTH to
  *        `Idx2` (default `int32_t`) when the narrowing is lossless, then call `f` —
@@ -792,11 +812,24 @@ _TNY_HOST auto as_anyrank(T * data, const offset_t * shape, const offset_t * str
  *
  *     if (at.index_fits<cs::int32_t>()) launch(at.reindex<cs::int32_t>());
  *     else                              launch(at);
+ *
+ * `Idx2` NEED NOT fit the argument's STATIC extents (#491): if one of them is too
+ * large to be represented in `Idx2`, `index_fits<Idx2>()` would answer `false` at
+ * run time anyway, so the narrow arm is dead — it is dropped at COMPILE time (the
+ * `if constexpr` below) and only the wide arm is instantiated. So a generic caller
+ * may hand `dispatch_index<Idx2>` a shape it knows nothing about and still get the
+ * "let run time decide" behaviour it asked for. A direct `v.reindex<Idx2>()` on such
+ * a shape stays a compile error — there the narrowing is the whole request, not one
+ * of two arms.
  */
 template <class Idx2 = cs::int32_t, class V, class F>
 _TNY_HOST void dispatch_index(V && v, F && f) {
-    if (v.template index_fits<Idx2>()) f(v.template reindex<Idx2>());   // int32 arm
-    else                               f(v);                            // wide (int64) arm
+    if constexpr (_detail::_static_narrowable<Idx2, cs::decay_t<V>>::value) {
+        if (v.template index_fits<Idx2>()) f(v.template reindex<Idx2>());   // int32 arm
+        else                               f(v);                            // wide (int64) arm
+    } else {
+        f(v);   // a static extent can never fit Idx2: only the wide arm exists
+    }
 }
 
 /**

@@ -465,7 +465,10 @@ at.size_front(Int<-Sr>());                    //   Sr dims); 1 kernel per Sr. si
                                               //   at.peel_front_at(i, shape<-1,c,c>{}) — never confusable.
 dispatch_rank(at, f);                    // runtime rank -> fixed-rank view (per total rank)
 dispatch_rank<narrow_index>(at, f);      // ...+ int32 offsets when the span fits (rank outer, width inner)
-dispatch_index(v, f);                    // narrow one fixed view's offset width to int32 (else keep it)
+dispatch_index(v, f);                    // narrow one fixed view's offset width to int32 (else keep it).
+                                         //   dispatch_index<Idx2>(v, f) for another width — Idx2 need not fit
+                                         //   v's STATIC sizes: one too large drops the narrow arm at compile
+                                         //   time (wide arm only), so generic code can pass any shape.
 at.index_fits<int32_t>();                // ...every offset AND every axis size fits int32? (the shape narrows
                                          //   too, so both halves are checked). Narrow the WHOLE CARRIER, once,
                                          //   host-side before a launch:
