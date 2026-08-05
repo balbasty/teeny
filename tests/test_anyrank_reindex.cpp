@@ -338,5 +338,29 @@ int main() {
     cs::int64_t pcshp2[2] = { 2, 2 }, pcstr2[2] = { 9223372036854775807LL, 1LL };
     if (as_anyrank(buf, pcshp2, pcstr2, 2).index_fits<cs::int64_t>()) return 69;
 
+    // ---- (16) NEGATIVE EQUALITY-BOUNDARY CONTROL (#494) -----------------------
+    // The mirror of (15) on the `mino` side: a reach landing EXACTLY on `Idx2::min()`,
+    // with a fitting extent, also answers `true`. Section (1) above (check 5) already
+    // pins this equality boundary at int32_t width; what's new here is the extreme of the
+    // ACCUMULATOR's own domain (mino == LLONG_MIN) — an em1=1 case where a
+    // wrongly-strict overflow guard would show up and the int32-width case can't
+    // reach. Here the extent (2) trivially fits int64_t, so only the reach-equality
+    // half is in play: reach = (2-1)*INT64_MIN == INT64_MIN exactly. (`INT64_MIN` is
+    // spelled `-9223372036854775807LL - 1` — the positive magnitude
+    // 9223372036854775808 doesn't fit `long long`, so the direct literal would
+    // misparse; this form is exact.)
+    constexpr cs::int64_t neg_llmin = -9223372036854775807LL - 1;
+    cs::int64_t ncshp[1] = { 2 }, ncstr[1] = { neg_llmin };
+    if (!as_anyrank(buf, ncshp, ncstr, 1).index_fits<cs::int64_t>()) return 70;
+    //       ...one more axis's worth of negative reach (extent 2, stride -1) would
+    //       push the accumulator past `long long`'s floor; the ACCUMULATION GUARD
+    //       rejects it before the add ever happens (the add itself would be
+    //       signed-overflow UB) — so this pins the guard's exact boundary. The final
+    //       comparison can't be reached at this width: `W`'s floor already IS
+    //       int64_t's floor, unlike the positive side (15), where `UW` has headroom
+    //       above `Idx2::max()`.
+    cs::int64_t ncshp2[2] = { 2, 2 }, ncstr2[2] = { neg_llmin, -1LL };
+    if (as_anyrank(buf, ncshp2, ncstr2, 2).index_fits<cs::int64_t>()) return 71;
+
     return 0;
 }
