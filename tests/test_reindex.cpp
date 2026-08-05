@@ -253,5 +253,20 @@ int main() {
     //     reach to INT64_MAX+1 — one past the boundary, `false`.
     if (wrap(buf, shape<-1,-1>{2,2}, {9223372036854775807LL, 1LL}).index_fits<cs::int64_t>()) return 58;
 
+    // (14) NEGATIVE EQUALITY-BOUNDARY CONTROL (#494). The mirror of (13) on the `mino`
+    // side: a reach landing EXACTLY on `Idx2::min()`, with a fitting extent, also
+    // answers `true`. The nearest existing case ((12)(c) above) hits reach -128 but is
+    // rejected on the EXTENT half of the predicate (129 doesn't fit int8_t) — it never
+    // exercises the reach-equality half. Here the extent (2) trivially fits int64_t, so
+    // only the reach-equality half is in play: reach = (2-1)*INT64_MIN == INT64_MIN
+    // exactly. (`INT64_MIN` is spelled `-9223372036854775807LL - 1` — the positive
+    // magnitude 9223372036854775808 doesn't fit `long long`, so the direct literal
+    // would misparse; this form is exact and portable.)
+    constexpr cs::int64_t neg_llmin = -9223372036854775807LL - 1;
+    if (!wrap(buf, shape<-1>{2}, {neg_llmin}).index_fits<cs::int64_t>()) return 59;
+    //     ...one more axis's worth of negative reach (extent 2, stride -1) pushes the
+    //     ACCUMULATED reach to INT64_MIN-1 — one past the floor, `false`.
+    if (wrap(buf, shape<-1,-1>{2,2}, {neg_llmin, -1LL}).index_fits<cs::int64_t>()) return 60;
+
     return 0;
 }
