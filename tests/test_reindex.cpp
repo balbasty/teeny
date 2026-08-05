@@ -7,6 +7,11 @@
 using namespace tny;
 namespace cs = cuda::std;
 
+// records the dispatched offset width (bytes) of whatever `dispatch_index` handed over
+struct RecIdxW { int * width; template <class V> void operator()(const V & v) {
+    *width = static_cast<int>(sizeof(typename V::index_type));
+}};
+
 int main() {
     double buf[24]; for (int i = 0; i < 24; ++i) buf[i] = i;
 
@@ -169,16 +174,71 @@ int main() {
     auto usmall = wrap(buf, shape_as<cs::uint64_t, -1, -1>{2, 3}, {cs::uint64_t(3), cs::uint64_t(1)});
     if (!usmall.index_fits<cs::int32_t>()) return 38;
     if (!usmall.index_fits<cs::uint8_t>()) return 39;   // reach 4
-    //   (d) an unsigned extent straddling the `long long` edge, with a unit stride —
-    //       the reach is `e-1`, so the int64 answer must flip exactly at e == 2^63:
-    //       e == 2^63 reaches INT64_MAX (fits), e == 2^63+1 reaches 2^63 (does not).
-    //       Both still fit uint64, and only an exact e-1 can tell them apart.
-    if (!wrap(buf, UE{9223372036854775808ULL}, {cs::uint64_t(1)}).index_fits<cs::int64_t>())  return 40;
-    if ( wrap(buf, UE{9223372036854775809ULL}, {cs::uint64_t(1)}).index_fits<cs::int64_t>())  return 41;
-    if (!wrap(buf, UE{9223372036854775809ULL}, {cs::uint64_t(1)}).index_fits<cs::uint64_t>()) return 42;
-    //   (e) a stride-0 axis of huge extent still has no reach (unchanged — and the
-    //       reason this test is about OFFSETS, not extent values; see #487).
-    if (!wrap(buf, UE{9223372036854775810ULL}, {cs::uint64_t(0)}).index_fits<cs::int32_t>()) return 43;
+    //   (d) an unsigned extent straddling the `long long` edge, with the answer
+    //       hinging on an EXACT `e-1`. At stride 2 the reach is `2*(e-1)`, so
+    //       e == 2^63 reaches 2^64-2 (fits uint64) while e == 2^63+1 reaches 2^64
+    //       (does not) — nothing but an exact `e-1` separates them. uint64 is also
+    //       the only target that can hold either extent VALUE; against int64 both are
+    //       rejected on the extent half of the predicate (#489, section (12) below),
+    //       which is why the same pair at unit stride now answers `false` there.
+    if (!wrap(buf, UE{9223372036854775808ULL}, {cs::uint64_t(2)}).index_fits<cs::uint64_t>()) return 40;
+    if ( wrap(buf, UE{9223372036854775809ULL}, {cs::uint64_t(2)}).index_fits<cs::uint64_t>()) return 41;
+    if ( wrap(buf, UE{9223372036854775808ULL}, {cs::uint64_t(1)}).index_fits<cs::int64_t>())  return 42;
+    //   (e) a stride-0 axis of huge extent has no REACH — but its extent value must
+    //       still survive the narrowing, so this is rejected on the extent half of
+    //       the predicate (see (12) below, #489).
+    if (wrap(buf, UE{9223372036854775810ULL}, {cs::uint64_t(0)}).index_fits<cs::int32_t>()) return 43;
+    //       ...and is accepted for a target that CAN hold the extent (uint64).
+    if (!wrap(buf, UE{9223372036854775810ULL}, {cs::uint64_t(0)}).index_fits<cs::uint64_t>()) return 44;
+
+    // (12) EXTENT VALUES, not just offsets (#489). `index_fits<Idx2>()` is the gate on
+    // `reindex<Idx2>()`, which narrows the EXTENTS as well as the offsets — and a
+    // narrowed extent is the loop bound everywhere downstream (`numel()`, the peel
+    // odometer, every kernel loop, the hardened bounds checks). A stride-0 broadcast
+    // axis has no reach at all, so the offset test alone waved a huge extent through
+    // and `reindex` then truncated it silently. Both halves are now ONE predicate.
+    //   (a) plain truncation: extent 300 does not fit int8_t (it read back as 44).
+    if (wrap(buf, shape<-1,2>{300, 2}, {0, 1}).index_fits<cs::int8_t>()) return 45;
+    //   (b) THE realistic case: a broadcast axis of extent 2^31+5 truncated to a large
+    //       NEGATIVE int32_t (-2147483643), so every `for (i = 0; i < e; ++i)` ran ZERO
+    //       iterations and `numel()` went negative — silently absent work, no crash and
+    //       nothing out of bounds for a sanitizer to catch, at exactly the GPU-narrowing
+    //       boundary this family exists to protect.
+    if (wrap(buf, shape<-1,2>{2147483653LL, 2}, {0, 1}).index_fits<cs::int32_t>()) return 46;
+    //   (c) the negative-stride exact-boundary window: extent `e` with `e-1 ==
+    //       |int8_t::min()|` reaches exactly -128, which DOES fit int8_t, while the
+    //       extent 129 itself does not — only the extent half can reject this one.
+    if (wrap(buf, shape<-1>{129}, {-1}).index_fits<cs::int8_t>()) return 47;
+    //   (d) POSITIVE CONTROLS — a broadcast axis whose extent DOES fit is not
+    //       over-rejected; the predicate moved only where it was wrong. The boundary is
+    //       exact (127 fits int8_t, 128 doesn't) and target-signedness-aware.
+    if (!wrap(buf, shape<-1,2>{127, 2}, {0, 1}).index_fits<cs::int8_t>())  return 48;
+    if ( wrap(buf, shape<-1,2>{128, 2}, {0, 1}).index_fits<cs::int8_t>())  return 49;
+    if (!wrap(buf, shape<-1,2>{128, 2}, {0, 1}).index_fits<cs::uint8_t>()) return 50;
+    if (!wrap(buf, shape<-1>{127}, {-1}).index_fits<cs::int8_t>())         return 51;  // reach -126
+    //   (e) a NEGATIVE extent (only reachable off a corrupt/adversarial import, whose
+    //       index type is signed) is representable in a signed target and not in an
+    //       unsigned one — the extent check answers at the target's own signedness.
+    if (!wrap(buf, shape<-1>{-5}, {1}).index_fits<cs::int32_t>()) return 52;
+    if ( wrap(buf, shape<-1>{-5}, {1}).index_fits<cs::uint32_t>()) return 53;
+    //   (f) `dispatch_index` inherits the widened gate for free — the extent-300 case
+    //       takes the WIDE arm rather than narrowing into a truncated extent.
+    int w = 0;
+    dispatch_index<cs::int8_t>(wrap(buf, shape<-1,2>{300, 2}, {0, 1}), RecIdxW{&w});
+    if (w != 8) return 54;
+    w = 0;                              // ...while a fitting one still narrows
+    dispatch_index<cs::int8_t>(wrap(buf, shape<-1,2>{4, 2}, {0, 1}), RecIdxW{&w});
+    if (w != 1) return 55;
+    //   (g) a STATIC extent too large for the target is caught at COMPILE time instead
+    //       (`_reindex_extents`, alias.h): `wrap(buf, shape<300,2>{}, strides<0,1>{})
+    //       .reindex<cs::int8_t>()` is now a static_assert failure — it used to compile
+    //       clean and produce an `extents<int8_t, 300>` whose `extent(0)` read 44,
+    //       which mdspan's own static-extent mandate forbids. A static extent that DOES
+    //       fit is untouched:
+    auto sfit = wrap(buf, shape<3,2>{}, strides<0,1>{}).reindex<cs::int8_t>();
+    static_assert(cs::is_same<decltype(sfit)::index_type, cs::int8_t>::value, "static extent narrows");
+    static_assert(decltype(sfit)::extents_type::static_extent(0) == 3, "extent value kept");
+    if (sfit.extent(0) != 3) return 56;
 
     return 0;
 }

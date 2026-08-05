@@ -108,8 +108,9 @@ contiguous block of cells (it seeds once, then advances incrementally).
 ## 4. Narrow the offset width at the boundary (device)
 
 Public tensors index in `int64` (matching DLPack). On the **device**, a dynamic view's
-strides are carried by value, and 64-bit offset math costs registers. When the element
-span provably fits 32 bits, narrow it — no copy, just a retype:
+strides are carried by value, and 64-bit offset math costs registers. When the view
+provably survives 32-bit metadata — every offset *and* every axis size — narrow it:
+no copy, just a retype.
 
 ```cpp
 dispatch_index(v, [&](auto w) { kernel(w); });   // int32 arm when index_fits, else int64

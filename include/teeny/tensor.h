@@ -405,17 +405,48 @@ template <class V> _TNY_API constexpr bool _raw_negative(V v) noexcept {
     else                                            { (void)v; return false; }
 }
 
+// Is a raw extent's own VALUE representable in `Idx2` (#489)? A per-axis question,
+// independent of every other axis — nothing sums, so nothing can overflow — asked
+// in the same two 64-bit domains the reach comparisons use, and only ever after a
+// conversion that is provably exact there:
+//   * a NON-NEGATIVE extent widens exactly into `UW` (which holds every 64-bit
+//     extent of either signedness), and `Idx2::max()` is never negative, so it
+//     widens there too — the comparison is exact for every integral `Idx2`;
+//   * a NEGATIVE extent (only reachable when the CARRIER's index type is signed,
+//     i.e. off a corrupt/adversarial import) widens exactly into `W`, where every
+//     signed `Idx2::min()` also lives. An UNSIGNED `Idx2` has no negative values
+//     at all, so it cannot represent one — say so directly rather than comparing
+//     across signedness, which is the usual-arithmetic-conversions trap.
+// Relies on the caller's `sizeof <= 8` guard on the raw extent type for both casts.
+template <class Idx2, class E> _TNY_API constexpr bool _extent_value_fits(E e) noexcept {
+    if constexpr (cs::numeric_limits<Idx2>::is_signed) {
+        if (_raw_negative(e))
+            return static_cast<long long>(e) >= static_cast<long long>((cs::numeric_limits<Idx2>::min)());
+    } else {
+        if (_raw_negative(e)) return false;
+    }
+    return static_cast<unsigned long long>(e)
+        <= static_cast<unsigned long long>((cs::numeric_limits<Idx2>::max)());
+}
+
 /** @brief `max = Σ_{s>0}(e−1)·s`, `min = Σ_{s<0}(e−1)·s` across `n` axes
  *         (`extent_at(r)`/`stride_at(r)` read axis `r`); fits ⟺ `min..max ⊆
- *         Idx2`. A size-1/0 axis has no reach and adds nothing (so a
- *         broadcast/stride-0 axis is always safe). Shared by
+ *         Idx2` AND every extent's own value is representable in `Idx2`. A
+ *         size-1/0 axis has no reach and adds nothing to the offsets. Shared by
  *         `tensor::index_fits` and `anyrank::index_fits` — one formula.
  *
- *         OFFSETS, NOT EXTENT VALUES: this answers "does every reachable element
- *         OFFSET fit `Idx2`?" — it does NOT check that each extent's own VALUE is
- *         representable in `Idx2`. The two only come apart for an axis with no
- *         reach (a stride-0 broadcast axis of huge extent), where `reindex<Idx2>()`
- *         would then truncate that extent while narrowing the metadata (#487).
+ *         OFFSETS **AND** EXTENT VALUES (#489): the reach test alone is never
+ *         enough, because `reindex<Idx2>()` narrows the extents too, and a
+ *         narrowed carrier's extents are the loop bounds everywhere downstream
+ *         (`numel()`, `size_front`, the peel odometer, every kernel loop, the
+ *         `TNY_HARDENED` bounds checks). The two questions come apart exactly on
+ *         an axis with no reach — a stride-0 broadcast axis of huge extent — where
+ *         narrowing used to truncate the extent silently: `2^31+5` became a large
+ *         NEGATIVE `int32_t`, so every `for (i = 0; i < e; ++i)` then ran zero
+ *         iterations. No crash, no out-of-bounds access for a sanitizer to catch,
+ *         just silently absent work — so the extent check is part of the SAME
+ *         predicate rather than a separate one a caller could forget (#487).
+ *         Its compile-time twin (for STATIC extents) is in `_reindex_extents`.
  *
  *         SPLIT ACCUMULATORS (#484): the positive and the negative reach never
  *         interact, so each is accumulated — and compared against `Idx2`'s own
@@ -482,6 +513,11 @@ _TNY_API bool _signed_reach_fits(N n, const ExtentAt & extent_at, const StrideAt
     W  mino = 0;
     for (N r = 0; r < n; ++r) {
         const E e = extent_at(r);
+        // The extent's own VALUE has to survive the narrowing too (#489) — asked
+        // before the no-reach skip below, since that is exactly where the two
+        // questions come apart (a stride-0 axis of huge extent has no reach at
+        // all, yet `reindex` would still truncate its extent).
+        if (!_extent_value_fits<Idx2>(e)) return false;
         if (e <= E(1)) continue;                              // size-1/0 axis: no reach
         // `e > 1`, so widening it to `UW` is exact whether `E` is signed or not —
         // and `UW` holds every 64-bit extent, so `e-1` never needs a range check.
@@ -1818,14 +1854,21 @@ public:
     template <class NewShape, class NewLayout = keep_strides>
     _TNY_API auto recast() const { return _recast<const T, NewShape, NewLayout>(store_.data(), cs::make_index_sequence<rank()>{}); }
 
-    /** @brief Does every element offset of this view fit the index type `Idx2`?
-     *         Computes the SIGNED reach directly (teeny has negative-stride views, so
-     *         `required_span_size`'s non-negative assumption doesn't apply):
-     *         `max = Σ_{s>0}(e−1)·s`, `min = Σ_{s<0}(e−1)·s`; fits ⟺ `min..max` ⊆
-     *         `Idx2`. Accumulates in a wide type, with the accumulation itself
-     *         overflow-checked (#471 — safe even against adversarial/corrupted
-     *         extents+strides, e.g. off a raw DLPack import); a broadcast
-     *         (stride-0) axis adds 0. The precondition `reindex<Idx2>()` debug-checks.
+    /** @brief Can this view be re-expressed with the index type `Idx2` — i.e. does
+     *         every element OFFSET fit `Idx2`, **and** is every axis's EXTENT VALUE
+     *         representable in it? The precondition `reindex<Idx2>()` debug-checks,
+     *         and the whole of it: narrowing rewrites the extents as well as the
+     *         offsets, and a truncated extent is a wrong loop bound everywhere
+     *         downstream (#489).
+     *
+     *         The offset half computes the SIGNED reach directly (teeny has
+     *         negative-stride views, so `required_span_size`'s non-negative
+     *         assumption doesn't apply): `max = Σ_{s>0}(e−1)·s`,
+     *         `min = Σ_{s<0}(e−1)·s`; fits ⟺ `min..max` ⊆ `Idx2`. It accumulates in
+     *         a wide type, with the accumulation itself overflow-checked (#471 —
+     *         safe even against adversarial/corrupted extents+strides, e.g. off a
+     *         raw DLPack import); a broadcast (stride-0) axis adds 0 there, and is
+     *         then held to the extent-value half like any other axis.
      *
      *         `Idx2` may be ANY integral type up to 64 bits, signed or unsigned
      *         (`uint64_t`/`size_t` included): the positive and negative reach
@@ -1835,9 +1878,9 @@ public:
      *         measured in the type it is stored in, never blind-cast down to a signed
      *         one first (#486).
      *
-     *         It answers a question about reachable OFFSETS, not about extent VALUES:
-     *         an axis with no reach (stride 0) passes however large its extent is, and
-     *         `reindex` narrows that extent along with everything else (#487). */
+     *         A STATIC extent that cannot be represented in `Idx2` is a compile error
+     *         from `reindex<Idx2>()` itself, so this runtime query is about the
+     *         dynamic ones. */
     template <class Idx2>
     _TNY_API bool index_fits() const noexcept {
         return _detail::_signed_reach_fits<Idx2>(rank(),
@@ -1850,19 +1893,21 @@ public:
      *         unchanged). Narrowing the boundary view to `shape32` halves the by-value
      *         footprint and runs offset math in 32-bit (big device win). Orthogonal to
      *         `recast` (which staticizes the extent VALUES) — they compose. Debug-checks
-     *         `index_fits<Idx2>()`; UB if the caller lies (same contract as `u*`). */
+     *         `index_fits<Idx2>()` — every offset AND every dynamic extent value — and
+     *         is UB if the caller lies (same contract as `u*`). A STATIC extent too
+     *         large for `Idx2` is a compile error instead (#489). */
     // The dynamic strides narrow to `Idx2` inside the retyped mapping. Sound for an
     // UNSIGNED `Idx2` too: a `true` fit implies `mino == 0`, so no axis of extent > 1
     // carries a negative stride, and one on an extent<=1 axis is only ever multiplied
     // by index 0 — its wrapped value is unobservable.
     template <class Idx2>
     _TNY_API auto reindex() {
-        _TNY_CHECK(index_fits<Idx2>(), "reindex: element offsets don't fit the target index type (span exceeds its range)");
+        _TNY_CHECK(index_fits<Idx2>(), "reindex: element offsets or an extent value don't fit the target index type");
         return _recast<T, _reindex_extents_t<Idx2, Shape>, keep_strides>(store_.data(), cs::make_index_sequence<rank()>{});
     }
     template <class Idx2>
     _TNY_API auto reindex() const {
-        _TNY_CHECK(index_fits<Idx2>(), "reindex: element offsets don't fit the target index type (span exceeds its range)");
+        _TNY_CHECK(index_fits<Idx2>(), "reindex: element offsets or an extent value don't fit the target index type");
         return _recast<const T, _reindex_extents_t<Idx2, Shape>, keep_strides>(store_.data(), cs::make_index_sequence<rank()>{});
     }
 
