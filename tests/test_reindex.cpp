@@ -240,5 +240,18 @@ int main() {
     static_assert(decltype(sfit)::extents_type::static_extent(0) == 3, "extent value kept");
     if (sfit.extent(0) != 3) return 56;
 
+    // (13) POSITIVE EQUALITY-BOUNDARY CONTROL (#492). Section (11)(d) above restored
+    // #486's `e-1`-exactness sensitivity after #490 widened the contract and flipped
+    // the original int64 case to `false` (extent 2^63 itself doesn't fit int64_t, even
+    // though its reach did) — but that re-expression didn't bring back an equivalent
+    // POSITIVE control: a case where the reach lands EXACTLY on Idx2::max() and the
+    // extent VALUE also fits, so the whole predicate answers `true`. Here the exact
+    // reach comes from the STRIDE rather than from `e-1`, so the extent (2) itself
+    // trivially fits int64_t: reach = (2-1)*INT64_MAX == INT64_MAX exactly.
+    if (!wrap(buf, shape<-1>{2}, {9223372036854775807LL}).index_fits<cs::int64_t>()) return 57;
+    //     ...one more axis's worth of reach (extent 2, stride 1) pushes the ACCUMULATED
+    //     reach to INT64_MAX+1 — one past the boundary, `false`.
+    if (wrap(buf, shape<-1,-1>{2,2}, {9223372036854775807LL, 1LL}).index_fits<cs::int64_t>()) return 58;
+
     return 0;
 }
