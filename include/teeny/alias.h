@@ -142,6 +142,10 @@ template <auto... E>            using shape32  = shape_as<cs::int32_t, E...>;
 // arm at COMPILE time — there the narrowing is merely one of two offered arms, and
 // a statically-impossible one must fold away rather than fail the build. One
 // predicate keeps those two readings from drifting.
+//
+// Its runtime twin is `_extent_value_fits` (tensor.h) — the two predicates must
+// answer identically for any static extent value (verified across #495's full
+// type-boundary matrix); a future change to either one needs to preserve that agreement.
 template <class Idx2, class E, cs::size_t... D>
 _TNY_API constexpr bool _static_extents_fit_at(cs::index_sequence<D...>) noexcept {
     // `max()` is never negative, so widening it to `size_t` (the domain

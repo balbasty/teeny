@@ -121,5 +121,27 @@ int main() {
     w = 0; dispatch_rank<narrow_index>(tail300, Rec{&w});
     if (w != 4) return 17;
 
+    // ---- (13) exact-boundary pin (#497) ----------------------------------------
+    // #495's review manually verified the two dead-arm-selection predicates agree
+    // exactly at the `Idx2::max()` boundary (e.g. int8_t/shape<127> vs shape<128>),
+    // but that verification wasn't captured as a permanent test — pin it here.
+    // int8_t's max is 127 (INT8_MAX): a static extent of EXACTLY 127 fits, one past
+    // it (128 == INT8_MAX+1) does not. Checked BOTH directly against the compile-time
+    // predicate and via `dispatch_index`'s actual arm selection.
+    static_assert(_static_extents_fit<cs::int8_t, shape<127>>(),
+                  "int8_t: static extent 127 (== INT8_MAX) must fit");
+    static_assert(!_static_extents_fit<cs::int8_t, shape<128>>(),
+                  "int8_t: static extent 128 (== INT8_MAX+1) must not fit");
+
+    // shape<127>: fits statically (and its reach of 126 fits at run time too) -> narrow
+    // (int8, width 1) arm runs.
+    w = 0; dispatch_index<cs::int8_t>(wrap(bigbuf, shape<127>{}), Rec{&w});
+    if (w != 1) return 18;
+    // shape<128>: does NOT fit statically -> the compile-time gate drops the narrow
+    // arm (which would otherwise fail to compile), so the wide (int64, width 8) arm
+    // runs unconditionally.
+    w = 0; dispatch_index<cs::int8_t>(wrap(bigbuf, shape<128>{}), Rec{&w});
+    if (w != 8) return 19;
+
     return 0;
 }
